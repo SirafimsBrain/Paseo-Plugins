@@ -4,7 +4,7 @@ import { SessionManagerPanel } from "./client/session-manager-panel";
 export default function contribute(client: PluginClientContext) {
   client.addWorkspacePanel({
     id: "session-manager",
-    title: "Provider Sessions",
+    title: "Agent Sessions",
     icon: "Database",
     context: "workspace",
     locations: ["workspace", "explorer"],
@@ -12,7 +12,7 @@ export default function contribute(client: PluginClientContext) {
   });
   client.addCommandCenterItem({
     id: "open-session-manager",
-    title: "Open provider sessions",
+    title: "Open agent sessions",
     icon: "Database",
     context: "workspace",
     onSelect({ openPanel }) {

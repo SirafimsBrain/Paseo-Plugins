@@ -1,43 +1,94 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
-const acpxSessionSchema = z.object({
+/**
+ * A single persisted agent session discovered on the daemon machine.
+ *
+ * `provider` is the stable store id (cline, opencode, kilo, qwen-code, acpx),
+ * not the Paseo provider label, so the UI can group and filter reliably.
+ */
+export const agentSessionSchema = z.object({
+  provider: z.string(),
   id: z.string(),
-  name: z.string().nullable(),
-  cwd: z.string(),
-  agentCommand: z.string(),
-  closed: z.boolean(),
-  createdAt: z.string(),
-  lastUsedAt: z.string(),
-  streamExists: z.boolean(),
+  title: z.string().nullable(),
+  cwd: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  sizeBytes: z.number().nullable(),
+  /** True while the owning agent process is still running the session. */
+  running: z.boolean(),
+  /** Set when a Paseo agent record references this session. */
+  paseoAgent: z
+    .object({
+      id: z.string(),
+      title: z.string().nullable(),
+      archived: z.boolean(),
+    })
+    .nullable(),
 });
 
-export type AcpSession = z.infer<typeof acpxSessionSchema>;
+export type AgentSession = z.infer<typeof agentSessionSchema>;
+
+export const providerStatusSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  /** The store exists or the agent CLI was found on this machine. */
+  detected: z.boolean(),
+  /** Deletion is implemented and usable for this provider. */
+  deletable: z.boolean(),
+  /** Human readable source: session directory, database, or CLI path. */
+  detail: z.string(),
+  count: z.number(),
+  error: z.string().nullable(),
+});
+
+export type ProviderStatus = z.infer<typeof providerStatusSchema>;
+
+export const sessionTargetSchema = z.object({
+  provider: z.string(),
+  id: z.string(),
+});
+
+export type SessionTarget = z.infer<typeof sessionTargetSchema>;
 
 export const listSessions = defineRpc({
   name: "session-manager.list",
   input: z.object({}),
   output: z.object({
-    sessions: z.array(acpxSessionSchema),
+    sessions: z.array(agentSessionSchema),
+    providers: z.array(providerStatusSchema),
+    scannedAt: z.string(),
   }),
 });
 
 export const deleteSession = defineRpc({
   name: "session-manager.delete",
   input: z.object({
+    provider: z.string(),
     id: z.string(),
+    /** Delete even when the session is running or referenced by an open Paseo agent. */
+    force: z.boolean().optional(),
   }),
   output: z.object({
     deleted: z.boolean(),
+    error: z.string().nullable(),
   }),
 });
 
 export const deleteSessions = defineRpc({
   name: "session-manager.delete-batch",
   input: z.object({
-    ids: z.array(z.string()),
+    targets: z.array(sessionTargetSchema),
+    force: z.boolean().optional(),
   }),
   output: z.object({
     deleted: z.number(),
+    failures: z.array(
+      z.object({
+        provider: z.string(),
+        id: z.string(),
+        error: z.string(),
+      }),
+    ),
   }),
 });
