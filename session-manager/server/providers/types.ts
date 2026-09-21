@@ -24,6 +24,12 @@ export interface ProviderListResult {
   detail: string;
   /** Whether this adapter can delete sessions right now. */
   deletable: boolean;
+  /**
+   * Size of the whole store (database files, session directories, snapshots).
+   * Database-backed stores cannot attribute bytes to a single session, so the
+   * panel shows this number next to the provider instead of guessing per row.
+   */
+  storeBytes: number | null;
   error: string | null;
 }
 
@@ -32,10 +38,21 @@ export interface ProviderDeleteResult {
   failures: { id: string; error: string }[];
 }
 
+export type ProviderExportResult =
+  | { ok: true; bytes: number }
+  | { ok: false; error: string };
+
 export interface ProviderAdapter {
   /** Stable store id, matches the Paseo provider id where one exists. */
   id: string;
   label: string;
   list(): Promise<ProviderListResult>;
   delete(ids: string[]): Promise<ProviderDeleteResult>;
+  /**
+   * Writes a standalone copy of one session to `outPath` so the transcript
+   * survives a delete. Adapters that cannot dump a session omit this method.
+   */
+  exportSession?(input: { id: string; outPath: string }): Promise<ProviderExportResult>;
+  /** File name extension of the dump produced by `exportSession`. */
+  exportExtension?: string;
 }

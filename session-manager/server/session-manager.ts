@@ -1,7 +1,55 @@
 import type { AgentSession, ProviderStatus, SessionTarget } from "../shared/session-manager";
 import { readPaseoAgentLinks } from "./paseo-agents";
 import { providerById, providers } from "./providers/registry";
-import type { ProviderSession } from "./providers/types";
+import type { ProviderAdapter, ProviderListResult, ProviderSession } from "./providers/types";
+
+/** How long a provider listing stays warm inside the plugin process. */
+const STORE_TTL_MS = 30_000;
+
+interface CachedListing {
+  result: ProviderListResult;
+  storedAt: number;
+}
+
+/**
+ * Listings are cached per provider for a short TTL, because a delete request
+ * runs the same guard check that a list request already paid for, and a
+ * CLI-backed provider costs one process spawn per scan. Deleting invalidates the
+ * entry of the affected provider, and a client that wants fresh data asks for
+ * `refresh: true`.
+ */
+const listings = new Map<string, CachedListing>();
+
+/** Drops one provider entry, or the whole cache when called without an id. */
+export function invalidateListing(provider?: string): void {
+  if (provider) {
+    listings.delete(provider);
+  } else {
+    listings.clear();
+  }
+}
+
+function cachedListing(provider: string, refresh: boolean): ProviderListResult | null {
+  if (refresh) return null;
+  const entry = listings.get(provider);
+  if (!entry) return null;
+  if (Date.now() - entry.storedAt > STORE_TTL_MS) {
+    listings.delete(provider);
+    return null;
+  }
+  return entry.result;
+}
+
+async function readListing(
+  adapter: ProviderAdapter,
+  options: { refresh?: boolean } = {},
+): Promise<ProviderListResult> {
+  const cached = cachedListing(adapter.id, options.refresh === true);
+  if (cached) return cached;
+  const result = await adapter.list();
+  listings.set(adapter.id, { result, storedAt: Date.now() });
+  return result;
+}
 
 interface ProviderSnapshot {
   adapterId: string;
@@ -10,14 +58,15 @@ interface ProviderSnapshot {
   detected: boolean;
   detail: string;
   deletable: boolean;
+  storeBytes: number | null;
   error: string | null;
 }
 
-async function collect(): Promise<ProviderSnapshot[]> {
-  const snapshots = await Promise.all(
+async function collect(options: { refresh?: boolean } = {}): Promise<ProviderSnapshot[]> {
+  return await Promise.all(
     providers.map(async (adapter) => {
       try {
-        const result = await adapter.list();
+        const result = await readListing(adapter, options);
         return {
           adapterId: adapter.id,
           label: adapter.label,
@@ -25,6 +74,7 @@ async function collect(): Promise<ProviderSnapshot[]> {
           detected: result.detected,
           detail: result.detail,
           deletable: result.deletable,
+          storeBytes: result.storeBytes,
           error: result.error,
         };
       } catch (error) {
@@ -35,16 +85,16 @@ async function collect(): Promise<ProviderSnapshot[]> {
           detected: false,
           detail: adapter.id,
           deletable: false,
+          storeBytes: null,
           error: error instanceof Error ? error.message : String(error),
         };
       }
     }),
   );
-  return snapshots;
 }
 
-export async function listAgentSessions() {
-  const snapshots = await collect();
+export async function listAgentSessions(input: { refresh?: boolean } = {}) {
+  const snapshots = await collect({ refresh: input.refresh === true });
   const links = readPaseoAgentLinks();
 
   const sessions: AgentSession[] = [];
@@ -74,6 +124,7 @@ export async function listAgentSessions() {
       deletable: snapshot.deletable,
       detail: snapshot.detail,
       count: snapshot.sessions.length,
+      storeBytes: snapshot.storeBytes,
       error: snapshot.error,
     });
   }
@@ -89,50 +140,8 @@ function timestampOf(value: string | null): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-interface LoadedStore {
-  sessions: ProviderSession[];
-  deletable: boolean;
-  detail: string;
-}
-
-/**
- * Per-request cache of provider listings. Guards need the live list, and a
- * CLI-backed provider costs a process spawn per scan, so each provider is read
- * at most once per delete request.
- */
-type StoreCache = Map<string, LoadedStore>;
-
-async function loadStore(
-  cache: StoreCache,
-  provider: string,
-): Promise<{ store: LoadedStore } | { error: string }> {
-  const adapter = providerById(provider);
-  if (!adapter) return { error: `Unknown provider "${provider}"` };
-
-  const cached = cache.get(provider);
-  if (cached) return { store: cached };
-
-  try {
-    const result = await adapter.list();
-    const store: LoadedStore = {
-      sessions: result.sessions,
-      deletable: result.deletable,
-      detail: result.detail,
-    };
-    cache.set(provider, store);
-    return { store };
-  } catch (error) {
-    return {
-      error: `Could not read ${adapter.label} sessions: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-}
-
 /** Refuses to remove a session that is running or that Paseo still refers to. */
 async function checkTarget(
-  cache: StoreCache,
   target: SessionTarget,
   force: boolean,
   links: Map<string, { id: string; title: string | null; archived: boolean }>,
@@ -140,16 +149,26 @@ async function checkTarget(
   const adapter = providerById(target.provider);
   if (!adapter) return { ok: false, error: `Unknown provider "${target.provider}"` };
 
-  const loaded = await loadStore(cache, target.provider);
-  if ("error" in loaded) return { ok: false, error: loaded.error };
-  if (!loaded.store.deletable) {
+  let listing: ProviderListResult;
+  try {
+    listing = await readListing(adapter);
+  } catch (error) {
     return {
       ok: false,
-      error: `Deletion is unavailable for ${adapter.label}: ${loaded.store.detail}`,
+      error: `Could not read ${adapter.label} sessions: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     };
   }
 
-  const session = loaded.store.sessions.find((candidate) => candidate.id === target.id);
+  if (!listing.deletable) {
+    return {
+      ok: false,
+      error: `Deletion is unavailable for ${adapter.label}: ${listing.detail}`,
+    };
+  }
+
+  const session = listing.sessions.find((candidate) => candidate.id === target.id);
   if (!session) return { ok: false, error: "Session not found" };
   if (force) return { ok: true };
 
@@ -177,11 +196,10 @@ export async function deleteAgentSession(input: {
   id: string;
   force?: boolean;
 }) {
-  const cache: StoreCache = new Map();
   const links = readPaseoAgentLinks();
   const target = { provider: input.provider, id: input.id };
 
-  const allowed = await checkTarget(cache, target, input.force === true, links);
+  const allowed = await checkTarget(target, input.force === true, links);
   if (!allowed.ok) {
     return { deleted: false, error: allowed.error };
   }
@@ -190,6 +208,8 @@ export async function deleteAgentSession(input: {
   if (!adapter) return { deleted: false, error: `Unknown provider "${input.provider}"` };
 
   const result = await adapter.delete([input.id]);
+  // The store changed, so the next guard check has to read it again.
+  invalidateListing(adapter.id);
   if (result.deleted.includes(input.id)) {
     return { deleted: true, error: null };
   }
@@ -203,12 +223,11 @@ export async function deleteAgentSessionsBatch(input: {
 }) {
   const failures: { provider: string; id: string; error: string }[] = [];
   let deleted = 0;
-  const cache: StoreCache = new Map();
   const links = readPaseoAgentLinks();
   const queued = new Map<string, string[]>();
 
   for (const target of input.targets) {
-    const allowed = await checkTarget(cache, target, input.force === true, links);
+    const allowed = await checkTarget(target, input.force === true, links);
     if (!allowed.ok) {
       failures.push({ provider: target.provider, id: target.id, error: allowed.error });
       continue;
@@ -226,11 +245,13 @@ export async function deleteAgentSessionsBatch(input: {
     }
     try {
       const result = await adapter.delete(ids);
+      invalidateListing(adapter.id);
       deleted += result.deleted.length;
       for (const failure of result.failures) {
         failures.push({ provider: providerId, id: failure.id, error: failure.error });
       }
     } catch (error) {
+      invalidateListing(adapter.id);
       const message = error instanceof Error ? error.message : String(error);
       for (const id of ids) {
         failures.push({ provider: providerId, id, error: message });

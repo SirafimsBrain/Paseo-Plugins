@@ -39,6 +39,12 @@ export const providerStatusSchema = z.object({
   /** Human readable source: session directory, database, or CLI path. */
   detail: z.string(),
   count: z.number(),
+  /**
+   * Size of the whole store. Database-backed agents keep every transcript in one
+   * SQLite file, so per-session sizes are unknown and this is what the panel
+   * shows instead.
+   */
+  storeBytes: z.number().nullable(),
   error: z.string().nullable(),
 });
 
@@ -53,7 +59,10 @@ export type SessionTarget = z.infer<typeof sessionTargetSchema>;
 
 export const listSessions = defineRpc({
   name: "session-manager.list",
-  input: z.object({}),
+  input: z.object({
+    /** Ignore the short-lived listing cache and rescan every provider. */
+    refresh: z.boolean().optional(),
+  }),
   output: z.object({
     sessions: z.array(agentSessionSchema),
     providers: z.array(providerStatusSchema),
@@ -90,5 +99,20 @@ export const deleteSessions = defineRpc({
         error: z.string(),
       }),
     ),
+  }),
+});
+
+export const exportSession = defineRpc({
+  name: "session-manager.export",
+  input: z.object({
+    provider: z.string(),
+    id: z.string(),
+  }),
+  output: z.object({
+    exported: z.boolean(),
+    /** Absolute path of the written export, on the daemon host. */
+    path: z.string().nullable(),
+    bytes: z.number().nullable(),
+    error: z.string().nullable(),
   }),
 });

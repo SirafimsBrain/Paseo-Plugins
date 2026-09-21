@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   asRecord,
@@ -6,6 +7,7 @@ import {
   fileSize,
   homeDir,
   listFiles,
+  pathSize,
   readJson,
   removePath,
   toIso,
@@ -14,6 +16,7 @@ import {
 import type {
   ProviderAdapter,
   ProviderDeleteResult,
+  ProviderExportResult,
   ProviderListResult,
   ProviderSession,
 } from "./types";
@@ -128,8 +131,16 @@ function toSession(entry: IndexEntry): ProviderSession {
 
 async function list(): Promise<ProviderListResult> {
   const dir = acpxSessionsDir();
+  const storeBytes = pathSize(dir);
   if (!exists(dir)) {
-    return { sessions: [], detected: false, detail: dir, deletable: true, error: null };
+    return {
+      sessions: [],
+      detected: false,
+      detail: dir,
+      deletable: true,
+      storeBytes,
+      error: null,
+    };
   }
   const index = readIndex();
   const entries = index ? index.entries : scanRecords();
@@ -138,6 +149,7 @@ async function list(): Promise<ProviderListResult> {
     detected: true,
     detail: indexPath(),
     deletable: true,
+    storeBytes,
     error: null,
   };
 }
@@ -204,9 +216,43 @@ async function deleteMany(ids: string[]): Promise<ProviderDeleteResult> {
   return { deleted, failures };
 }
 
+/**
+ * acpx keeps the record as JSON and the transcript as NDJSON, so the export
+ * concatenates them: the record on the first line, then the raw stream.
+ */
+async function exportSession(input: {
+  id: string;
+  outPath: string;
+}): Promise<ProviderExportResult> {
+  const dir = acpxSessionsDir();
+  const entries = readIndex()?.entries ?? scanRecords();
+  const entry = entries.find((candidate) => candidate.acpxRecordId === input.id);
+  if (!entry) return { ok: false, error: "session record not found" };
+
+  const json = path.join(dir, entry.file);
+  const stream = path.join(dir, streamFileFor(entry.file));
+  const record = exists(json) ? fs.readFileSync(json, "utf-8").trim() : "";
+  const transcript = exists(stream) ? fs.readFileSync(stream, "utf-8").trim() : "";
+  if (record.length === 0 && transcript.length === 0) {
+    return { ok: false, error: "no session data on disk" };
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
+    const parts = [record, transcript].filter((part) => part.length > 0);
+    fs.writeFileSync(input.outPath, `${parts.join("\n")}\n`, "utf-8");
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  const bytes = fileSize(input.outPath);
+  return bytes === null ? { ok: false, error: "export file not written" } : { ok: true, bytes };
+}
+
 export const acpxProvider: ProviderAdapter = {
   id: "acpx",
   label: "acpx (ACP CLI)",
   list,
   delete: deleteMany,
+  exportSession,
+  exportExtension: "ndjson",
 };

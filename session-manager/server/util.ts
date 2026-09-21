@@ -110,6 +110,24 @@ export function fileSize(target: string): number | null {
   }
 }
 
+/** Size of a file or of a directory tree; null when the path does not exist at all. */
+export function pathSize(target: string): number | null {
+  if (isFile(target)) return fileSize(target);
+  if (isDirectory(target)) return directorySize(target);
+  return null;
+}
+
+/**
+ * SQLite spreads a store over `<db>`, `<db>-wal` and `<db>-shm`, so the size of
+ * a database-backed session store is the sum of the three. Returns null when the
+ * whole group is missing, which is how an installed-but-never-used CLI looks.
+ */
+export function sqliteSize(dbPath: string): number | null {
+  const parts = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].map((file) => fileSize(file) ?? 0);
+  const total = parts.reduce((sum, value) => sum + value, 0);
+  return total > 0 ? total : null;
+}
+
 export function modifiedAt(target: string): string | null {
   try {
     return fs.statSync(target).mtime.toISOString();
@@ -192,6 +210,12 @@ export function removePath(target: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Turns an arbitrary session id into a safe single-segment file name. */
+export function safeFileSegment(value: string): string {
+  const cleaned = value.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._-]+/, "");
+  return cleaned.length > 0 ? cleaned.slice(0, 120) : "session";
 }
 
 /** Writes JSON through a temp file + rename so readers never observe a partial index. */

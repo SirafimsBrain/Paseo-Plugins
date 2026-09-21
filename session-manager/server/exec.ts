@@ -113,8 +113,45 @@ export function runCli(
 }
 
 /**
+ * Returns the index of the bracket that closes the value starting at `start`,
+ * skipping brackets inside strings, or null when the value is unterminated.
+ */
+function matchEnd(text: string, start: number): number | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+    } else if (char === "}" || char === "]") {
+      if (stack.pop() !== char) return null;
+      if (stack.length === 0) return index;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Parses JSON from CLI stdout that may be wrapped in banners or log lines.
- * Returns null when no JSON payload can be recovered.
+ *
+ * Every `{` or `[` that starts a balanced value is tried in order, so a banner
+ * that itself contains braces (kilo prints a box drawing header, opencode prints
+ * an ASCII logo) does not hide the payload. Returns null when nothing parses.
  */
 export function parseJsonLoose(text: string): unknown {
   const trimmed = text.trim();
@@ -122,18 +159,20 @@ export function parseJsonLoose(text: string): unknown {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // Fall through to brace matching.
+    // Fall through to the balanced-value scan.
   }
-  const starts = [trimmed.indexOf("["), trimmed.indexOf("{")].filter((index) => index >= 0);
-  if (starts.length === 0) return null;
-  const start = Math.min(...starts);
-  const open = trimmed[start];
-  const close = open === "[" ? "]" : "}";
-  const end = trimmed.lastIndexOf(close);
-  if (end <= start) return null;
-  try {
-    return JSON.parse(trimmed.slice(start, end + 1));
-  } catch {
-    return null;
+
+  for (let start = 0; start < trimmed.length; start += 1) {
+    const open = trimmed[start];
+    if (open !== "{" && open !== "[") continue;
+    const end = matchEnd(trimmed, start);
+    if (end === null) continue;
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1));
+    } catch {
+      // Not JSON after all: keep scanning for the next candidate.
+    }
   }
+
+  return null;
 }

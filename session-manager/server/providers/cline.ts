@@ -8,6 +8,7 @@ import {
   isDirectory,
   isProcessAlive,
   listDirectories,
+  pathSize,
   readJson,
   toIso,
 } from "../util";
@@ -24,6 +25,11 @@ export function clineDataDir(): string {
 
 export function clineSessionsDir(): string {
   return path.join(clineDataDir(), "sessions");
+}
+
+/** Store size covers the session directories and the history databases. */
+export function clineStoreBytes(): number | null {
+  return pathSize(clineDataDir());
 }
 
 function titleFromPrompt(prompt: unknown, metadata: Record<string, unknown> | null): string | null {
@@ -87,6 +93,7 @@ async function listFromDisk(): Promise<ProviderListResult> {
     detected: isDirectory(root),
     detail: `${root} (CLI "cline" not found; deletion disabled)`,
     deletable: false,
+    storeBytes: clineStoreBytes(),
     error: null,
   };
 }
@@ -96,8 +103,15 @@ export const clineProvider = createCliProvider({
   label: "Cline",
   binary: "cline",
   storePath: clineSessionsDir,
+  storeBytes: clineStoreBytes,
   fallbackList: listFromDisk,
   listArgs: () => ["history", "--json", "--limit", "500"],
   parseRow: parseHistoryRow,
   deleteArgs: (id) => ["history", "delete", "--session-id", id],
+  // Cline writes the dump itself, as a standalone HTML transcript.
+  export: {
+    kind: "file",
+    extension: "html",
+    args: (id, outPath) => ["history", "export", id, "--output", outPath],
+  },
 });

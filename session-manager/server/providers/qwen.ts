@@ -3,6 +3,7 @@ import * as path from "node:path";
 import {
   asRecord,
   asString,
+  directorySize,
   fileSize,
   firstLine,
   homeDir,
@@ -12,6 +13,7 @@ import {
   listDirectories,
   listFiles,
   modifiedAt,
+  pathSize,
   readJson,
   readPrefix,
   toIso,
@@ -19,6 +21,7 @@ import {
 import type {
   ProviderAdapter,
   ProviderDeleteResult,
+  ProviderExportResult,
   ProviderListResult,
   ProviderSession,
 } from "./types";
@@ -36,6 +39,47 @@ export function qwenHome(): string {
 
 export function qwenProjectsDir(): string {
   return path.join(qwenHome(), "projects");
+}
+
+/**
+ * Files and directories Qwen names after the session id and that belong to that
+ * session only:
+ *
+ * - `plans/<id>.md` — the plan the agent wrote for the session.
+ * - `todos/<id>.json` — the todo list of the session.
+ * - `file-history/<id>/` — per-file snapshots used by the "restore file" flow.
+ *   The directory name is the session id (verified against `chats/<id>.jsonl`
+ *   on a live store), and Qwen itself cleans the tree up with
+ *   `~/.qwen/.file-history-cleanup`. This plugin leaves it alone only if the
+ *   directory is missing.
+ * - `sessions/<pid>.json` is a runtime registry entry, not session state, so it
+ *   is never deleted here.
+ */
+export function qwenSidecarPaths(id: string): string[] {
+  const home = qwenHome();
+  return [
+    path.join(home, "plans", `${id}.md`),
+    path.join(home, "todos", `${id}.json`),
+    path.join(home, "file-history", id),
+  ];
+}
+
+/** Transcript plus every sidecar, so the row size matches what delete frees. */
+function sizeOfSession(id: string, transcript: string): number {
+  let total = fileSize(transcript) ?? 0;
+  for (const sidecar of qwenSidecarPaths(id)) {
+    if (isDirectory(sidecar)) {
+      total += directorySize(sidecar);
+    } else {
+      total += fileSize(sidecar) ?? 0;
+    }
+  }
+  return total;
+}
+
+/** Total size of `~/.qwen`, the store this adapter reads and writes. */
+export function qwenStoreBytes(): number | null {
+  return pathSize(qwenHome());
 }
 
 /** Session ids whose owning process is still alive, from `~/.qwen/sessions`. */
@@ -96,30 +140,31 @@ async function list(): Promise<ProviderListResult> {
         cwd: asString(record?.["cwd"]),
         createdAt: toIso(record?.["timestamp"] ?? record?.["startTime"]),
         updatedAt: modifiedAt(file),
-        sizeBytes: fileSize(file),
+        sizeBytes: sizeOfSession(id, file),
         running: running.has(id),
       });
     }
   }
 
-  return { sessions, detected: isDirectory(root), detail: root, deletable: true, error: null };
+  return {
+    sessions,
+    detected: isDirectory(root),
+    detail: root,
+    deletable: true,
+    storeBytes: qwenStoreBytes(),
+    error: null,
+  };
 }
 
-/** Files Qwen keeps beside a transcript and that are named after the session id. */
-function sidecarPaths(id: string): string[] {
-  const home = qwenHome();
-  return [
-    path.join(home, "plans", `${id}.md`),
-    path.join(home, "todos", `${id}.json`),
-  ];
-}
-
+/** Deletes the transcript first: without it the session is gone for Qwen. */
 async function deleteMany(ids: string[]): Promise<ProviderDeleteResult> {
   const deleted: string[] = [];
   const failures: { id: string; error: string }[] = [];
   const root = qwenProjectsDir();
 
   for (const id of ids) {
+    // The registry entry of a live session would resurrect the transcript on the
+    // next write, so deleting it belongs to the guards, not to this adapter.
     const target = findTranscript(root, id);
     if (!target) {
       failures.push({ id, error: "transcript file not found" });
@@ -127,11 +172,11 @@ async function deleteMany(ids: string[]): Promise<ProviderDeleteResult> {
     }
     try {
       fs.rmSync(target, { force: true });
-      for (const sidecar of sidecarPaths(id)) {
+      for (const sidecar of qwenSidecarPaths(id)) {
         try {
-          fs.rmSync(sidecar, { force: true });
+          fs.rmSync(sidecar, { recursive: true, force: true });
         } catch {
-          // Sidecars are best effort.
+          // Sidecars are best effort: the transcript already decided the outcome.
         }
       }
       deleted.push(id);
@@ -141,6 +186,23 @@ async function deleteMany(ids: string[]): Promise<ProviderDeleteResult> {
   }
 
   return { deleted, failures };
+}
+
+/** Qwen has no export command, so the raw transcript is copied out as-is. */
+async function exportSession(input: {
+  id: string;
+  outPath: string;
+}): Promise<ProviderExportResult> {
+  const target = findTranscript(qwenProjectsDir(), input.id);
+  if (!target) return { ok: false, error: "transcript file not found" };
+  try {
+    fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
+    fs.copyFileSync(target, input.outPath);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  const bytes = fileSize(input.outPath);
+  return bytes === null ? { ok: false, error: "export file not written" } : { ok: true, bytes };
 }
 
 function findTranscript(root: string, id: string): string | null {
@@ -156,4 +218,6 @@ export const qwenProvider: ProviderAdapter = {
   label: "Qwen Code",
   list,
   delete: deleteMany,
+  exportSession,
+  exportExtension: "jsonl",
 };

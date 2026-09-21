@@ -1,5 +1,23 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileSize, pathSize } from "../util";
 import { parseJsonLoose, resolveBinary, runCli } from "../exec";
-import type { ProviderAdapter, ProviderDeleteResult, ProviderListResult, ProviderSession } from "./types";
+import type {
+  ProviderAdapter,
+  ProviderDeleteResult,
+  ProviderExportResult,
+  ProviderListResult,
+  ProviderSession,
+} from "./types";
+
+/**
+ * How an agent CLI dumps a session. `file` is for CLIs that write the export
+ * themselves (`cline history export --output`), `stdout` for the ones that
+ * print it (`opencode export`).
+ */
+export type CliExportConfig =
+  | { kind: "file"; extension: string; args: (id: string, outPath: string) => string[] }
+  | { kind: "stdout"; extension: string; args: (id: string) => string[] };
 
 export interface CliProviderConfig {
   id: string;
@@ -8,6 +26,8 @@ export interface CliProviderConfig {
   binary: string;
   /** Directory or database that holds the sessions, for status reporting. */
   storePath: () => string;
+  /** Total on-disk size of the store; defaults to the size of `storePath()`. */
+  storeBytes?: () => number | null;
   /** Skip CLI discovery entirely and read the store directly. */
   fallbackList?: () => Promise<ProviderListResult>;
   listArgs: (limit: number) => string[];
@@ -16,6 +36,8 @@ export interface CliProviderConfig {
   deleteArgs: (id: string) => string[];
   /** Optional post-processing, e.g. computing the on-disk size of a session. */
   enrich?: (session: ProviderSession) => Promise<ProviderSession> | ProviderSession;
+  /** Optional transcript dump used by the "export before delete" flow. */
+  export?: CliExportConfig;
   listLimit?: number;
   timeoutMs?: number;
 }
@@ -29,18 +51,22 @@ export interface CliProviderConfig {
 export function createCliProvider(config: CliProviderConfig): ProviderAdapter {
   const limit = config.listLimit ?? 500;
   const timeoutMs = config.timeoutMs ?? 45_000;
+  const storeBytes = config.storeBytes ?? (() => pathSize(config.storePath()));
 
   async function list(): Promise<ProviderListResult> {
     const binary = resolveBinary(config.binary);
     if (!binary) {
       if (config.fallbackList) {
-        return await config.fallbackList();
+        const fallback = await config.fallbackList();
+        // The disk fallback knows the store size even though deletion is off.
+        return { ...fallback, storeBytes: fallback.storeBytes ?? storeBytes() };
       }
       return {
         sessions: [],
         detected: false,
         detail: `${config.storePath()} (CLI "${config.binary}" not found)`,
         deletable: false,
+        storeBytes: storeBytes(),
         error: null,
       };
     }
@@ -48,13 +74,15 @@ export function createCliProvider(config: CliProviderConfig): ProviderAdapter {
     const result = await runCli(binary, config.listArgs(limit), { timeoutMs });
     if (!result.ok) {
       if (config.fallbackList) {
-        return await config.fallbackList();
+        const fallback = await config.fallbackList();
+        return { ...fallback, storeBytes: fallback.storeBytes ?? storeBytes() };
       }
       return {
         sessions: [],
         detected: true,
         detail: binary,
         deletable: false,
+        storeBytes: storeBytes(),
         error: `${config.binary} failed: ${result.error ?? "unknown error"}`,
       };
     }
@@ -66,6 +94,7 @@ export function createCliProvider(config: CliProviderConfig): ProviderAdapter {
         detected: true,
         detail: binary,
         deletable: true,
+        storeBytes: storeBytes(),
         error: `${config.binary} returned unexpected output`,
       };
     }
@@ -78,7 +107,14 @@ export function createCliProvider(config: CliProviderConfig): ProviderAdapter {
       sessions.push(config.enrich ? await config.enrich(session) : session);
     }
 
-    return { sessions, detected: true, detail: binary, deletable: true, error: null };
+    return {
+      sessions,
+      detected: true,
+      detail: binary,
+      deletable: true,
+      storeBytes: storeBytes(),
+      error: null,
+    };
   }
 
   async function deleteMany(ids: string[]): Promise<ProviderDeleteResult> {
@@ -106,5 +142,46 @@ export function createCliProvider(config: CliProviderConfig): ProviderAdapter {
     return { deleted, failures };
   }
 
-  return { id: config.id, label: config.label, list, delete: deleteMany };
+  async function exportSession(input: {
+    id: string;
+    outPath: string;
+  }): Promise<ProviderExportResult> {
+    const exportConfig = config.export;
+    if (!exportConfig) return { ok: false, error: `${config.binary} cannot export sessions` };
+
+    const binary = resolveBinary(config.binary);
+    if (!binary) {
+      return { ok: false, error: `CLI "${config.binary}" not found; cannot export` };
+    }
+
+    if (exportConfig.kind === "file") {
+      const result = await runCli(binary, exportConfig.args(input.id, input.outPath), { timeoutMs });
+      if (!result.ok) return { ok: false, error: result.error ?? "export failed" };
+      const bytes = fileSize(input.outPath);
+      if (bytes === null) {
+        return { ok: false, error: `${config.binary} did not write the export file` };
+      }
+      return { ok: true, bytes };
+    }
+
+    const result = await runCli(binary, exportConfig.args(input.id), { timeoutMs });
+    if (!result.ok) return { ok: false, error: result.error ?? "export failed" };
+    if (result.stdout.trim().length === 0) {
+      return { ok: false, error: `${config.binary} returned an empty export` };
+    }
+    try {
+      fs.mkdirSync(path.dirname(input.outPath), { recursive: true });
+      fs.writeFileSync(input.outPath, result.stdout, "utf-8");
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    return { ok: true, bytes: fileSize(input.outPath) ?? 0 };
+  }
+
+  const adapter: ProviderAdapter = { id: config.id, label: config.label, list, delete: deleteMany };
+  if (config.export) {
+    adapter.exportSession = exportSession;
+    adapter.exportExtension = config.export.extension;
+  }
+  return adapter;
 }
