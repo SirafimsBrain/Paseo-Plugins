@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import type { CommandDefinition } from "../shared/commands";
+import type { CommandDefinition, ProviderWithModels } from "../shared/commands";
+import { isFullModelRef } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
+import { ProviderModelPicker } from "./provider-model-picker";
 
 export interface CommandFormResult {
   name: string;
@@ -15,8 +17,10 @@ export interface CommandFormResult {
 
 interface Props {
   initial?: CommandDefinition | null;
-  /** Provider ids known to the daemon (e.g. cline, kilo, qwen-code). */
-  providers: { id: string; enabled: boolean }[];
+  /** Enabled providers with models, for the `provider/model` picker. */
+  providers: ProviderWithModels[];
+  modelsLoading: boolean;
+  multiHost: boolean;
   theme: PluginTheme;
   onCancel: () => void;
   onSubmit: (result: CommandFormResult) => void;
@@ -26,7 +30,7 @@ function fieldStyle(errors: string | null) {
   return errors ? [styles.input, styles.inputError] : styles.input;
 }
 
-export function CommandForm({ initial, providers, theme, onCancel, onSubmit }: Props) {
+export function CommandForm({ initial, providers, modelsLoading, multiHost, theme, onCancel, onSubmit }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState<"prompt" | "shell">(initial?.type ?? "prompt");
   const [template, setTemplate] = useState(initial?.template ?? "");
@@ -37,7 +41,14 @@ export function CommandForm({ initial, providers, theme, onCancel, onSubmit }: P
   const variables = useMemo(() => inputVariablesOf(template), [template]);
   const nameError = name.trim().length === 0 ? "Name is required." : null;
   const templateError = template.trim().length === 0 ? "Template is required." : null;
-  const providerError = type === "prompt" && provider.trim().length === 0 ? "Provider is required." : null;
+  const providerError =
+    type === "prompt"
+      ? provider.trim().length === 0
+        ? "Provider/model is required."
+        : !isFullModelRef(provider)
+          ? "Pick a full provider/model reference, e.g. cline/claude-opus-4-6."
+          : null
+      : null;
   const valid = !nameError && !templateError && !providerError;
 
   const { foreground, foregroundMuted } = theme.colors;
@@ -70,36 +81,19 @@ export function CommandForm({ initial, providers, theme, onCancel, onSubmit }: P
 
       {type === "prompt" ? (
         <>
-          <Text style={[styles.label, { color: foregroundMuted }]}>Provider (provider/model)</Text>
-          <TextInput
-            style={[fieldStyle(providerError), { color: foreground, borderColor: theme.colors.border }]}
-            value={provider}
-            onChangeText={setProvider}
-            placeholder="provider/model, e.g. cline"
-            placeholderTextColor={foregroundMuted}
-            autoCapitalize="none"
+          <Text style={[styles.label, { color: foregroundMuted }]}>Provider / model</Text>
+          <ProviderModelPicker
+            providers={providers}
+            value={isFullModelRef(provider) ? provider.trim() : ""}
+            loading={modelsLoading}
+            multiHost={multiHost}
+            theme={theme}
+            onChange={setProvider}
           />
-          {providers.length > 0 ? (
-            <View style={styles.row}>
-              {providers.slice(0, 10).map((option) => (
-                <Pressable
-                  key={option.id}
-                  style={[
-                    styles.chip,
-                    { borderColor: theme.colors.border },
-                    provider === option.id && styles.chipActive,
-                  ]}
-                  onPress={() => setProvider(option.id)}
-                >
-                  <Text
-                    style={[styles.chipText, { color: foreground }, !option.enabled && styles.chipTextDisabled]}
-                    numberOfLines={1}
-                  >
-                    {option.id}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+          {provider.trim().length > 0 && !isFullModelRef(provider) ? (
+            <Text style={[styles.hint, { color: foregroundMuted }]}>
+              Stored value “{provider.trim()}” is not a full reference — pick a model above to migrate it.
+            </Text>
           ) : null}
         </>
       ) : (

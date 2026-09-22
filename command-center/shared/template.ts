@@ -52,3 +52,18 @@ export function inputVariablesOf(template: string): { name: string; defaultValue
   }
   return found;
 }
+
+/**
+ * Branch name for worktree mode "branch-off", which requires an explicit
+ * branch name. Pure and client-safe so remote (multi-host) dispatch can reuse
+ * the exact same naming as the daemon-side executor.
+ */
+export function worktreeBranchFor(commandName: string, nowMs: number = Date.now()): string {
+  const slug =
+    commandName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24) || "command";
+  return `command-center/${slug}-${nowMs.toString(36)}`;
+}

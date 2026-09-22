@@ -1,9 +1,11 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
+  appendHistory,
   clearHistory,
   deleteCommand,
   listCommands,
   listHistory,
+  runBatch,
   runCommand,
   saveCommand,
   toggleFavorite,
@@ -11,8 +13,8 @@ import {
   type RunResult,
 } from "./shared/commands";
 import { commandSchema } from "./shared/commands";
-import { clearHistoryStore, loadCommands, loadHistory, saveCommands } from "./server/store";
-import { executeCommand } from "./server/executor";
+import { appendHistory as appendHistoryEntry, clearHistoryStore, loadCommands, loadHistory, saveCommands } from "./server/store";
+import { executeBatch, executeCommand } from "./server/executor";
 
 function parseCommand(raw: unknown): CommandDefinition | null {
   const result = commandSchema.safeParse(raw);
@@ -89,6 +91,7 @@ export default function contribute(server: PluginServerContext) {
         workspaceId: input.workspaceId,
         agentId: input.agentId,
         newWorktree: input.newWorktree ?? false,
+        provider: input.provider,
       },
       { paseo },
     );
@@ -101,6 +104,51 @@ export default function contribute(server: PluginServerContext) {
       }
     }
     return result;
+  });
+
+  server.handle(runBatch, async (input, { paseo }) => {
+    const command = loadCommands().find((candidate) => candidate.id === input.commandId);
+    if (!command) {
+      return {
+        results: input.targets.map(
+          (): RunResult => ({
+            ok: false,
+            kind: "new-agent",
+            workspaceId: null,
+            agentId: null,
+            terminalId: null,
+            title: null,
+            error: `Unknown command ${input.commandId}.`,
+          }),
+        ),
+      };
+    }
+    const results = await executeBatch(
+      command,
+      { values: input.values, targets: input.targets },
+      { paseo },
+    );
+    const succeeded = results.filter((result) => result.ok).length;
+    if (succeeded > 0) {
+      const commands = loadCommands();
+      const stored = commands.find((candidate) => candidate.id === command.id);
+      if (stored) {
+        stored.useCount += succeeded;
+        saveCommands(commands);
+      }
+    }
+    return { results };
+  });
+
+  server.handle(appendHistory, (input) => {
+    const now = new Date();
+    const entry = {
+      ...input.entry,
+      id: `h_${now.getTime()}_${Math.random().toString(36).slice(2, 8)}`,
+      at: now.toISOString(),
+    };
+    appendHistoryEntry(loadHistory(), entry);
+    return { ok: true, id: entry.id };
   });
 
   return () => {};

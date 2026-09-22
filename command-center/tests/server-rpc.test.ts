@@ -164,4 +164,75 @@ describe("command-center RPC handlers", () => {
     expect(result.agentId).toBe("ag_new");
     expect(created[0]).toMatchObject({ prompt: "Review #7" });
   });
+
+  it("run-batch fans out to several targets and counts every success", async () => {
+    call("command-center.save", { command: command() });
+    const created: Record<string, unknown>[] = [];
+    const paseo = {
+      workspaces: {
+        list: async () => ({
+          entries: [
+            { id: "ws_1", name: "dev", workspaceDirectory: "/disk/dev", projectRootPath: null },
+            { id: "ws_2", name: "prod", workspaceDirectory: "/disk/prod", projectRootPath: null },
+          ],
+        }),
+      },
+      agents: {
+        list: async () => ({ entries: [] }),
+        create: async (request: Record<string, unknown>) => {
+          created.push(request);
+          return { id: `ag_${created.length}` };
+        },
+      },
+    };
+    const result = (await call(
+      "command-center.run-batch",
+      {
+        commandId: "cmd_1",
+        values: { pr: "#9" },
+        targets: [{ workspaceId: "ws_1" }, { workspaceId: "ws_2", provider: "other/model" }],
+      },
+      paseo,
+    )) as { results: { ok: boolean; workspaceId: string | null }[] };
+    expect(result.results).toHaveLength(2);
+    expect(result.results.every((entry) => entry.ok)).toBe(true);
+    expect(result.results.map((entry) => entry.workspaceId)).toEqual(["ws_1", "ws_2"]);
+    expect(created[1]).toMatchObject({ config: { provider: "other/model" } });
+    const listed = call("command-center.list", {}) as { commands: CommandDefinition[] };
+    expect(listed.commands.find((entry) => entry.id === "cmd_1")?.useCount).toBe(5);
+    expect(loadHistory()).toHaveLength(2);
+  });
+
+  it("run-batch reports unknown commands per target", async () => {
+    const result = (await call(
+      "command-center.run-batch",
+      { commandId: "missing", values: {}, targets: [{}, {}] },
+      {},
+    )) as { results: { ok: boolean; error: string | null }[] };
+    expect(result.results).toHaveLength(2);
+    expect(result.results.every((entry) => !entry.ok)).toBe(true);
+  });
+
+  it("history-append stores a remote run with a stamped id", () => {
+    const result = call("command-center.history-append", {
+      entry: {
+        commandId: "cmd_1",
+        commandName: "Review",
+        rendered: "Review #remote",
+        targetWorkspaceId: "ws_remote",
+        targetAgentId: "ag_remote",
+        kind: "new-agent",
+        ok: true,
+        error: null,
+      },
+    }) as { ok: boolean; id: string | null };
+    expect(result.ok).toBe(true);
+    expect(result.id).toBeTruthy();
+    const listed = call("command-center.history", {}) as {
+      entries: { id: string; rendered: string; at: string }[];
+    };
+    expect(listed.entries).toHaveLength(1);
+    expect(listed.entries[0]).toMatchObject({ id: result.id, rendered: "Review #remote" });
+    expect(typeof listed.entries[0]!.at).toBe("string");
+  });
 });

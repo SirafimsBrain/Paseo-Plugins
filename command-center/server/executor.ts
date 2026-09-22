@@ -1,6 +1,7 @@
 import type { PaseoApi } from "@getpaseo/client";
-import type { CommandDefinition, HistoryEntry, RunResult } from "../shared/commands";
-import { renderTemplate } from "../shared/template";
+import type { CommandDefinition, HistoryEntry, RunResult, RunTarget } from "../shared/commands";
+import { isFullModelRef } from "../shared/commands";
+import { renderTemplate, worktreeBranchFor } from "../shared/template";
 import { appendHistory, loadHistory } from "./store";
 
 /** Workspace fields the executor and the template context rely on. */
@@ -64,13 +65,7 @@ function commandTitle(command: CommandDefinition): string {
 
 /** Worktree mode "branch-off" requires an explicit branch name. */
 function worktreeBranchName(command: CommandDefinition): string {
-  const slug =
-    command.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 24) || "command";
-  return `command-center/${slug}-${Date.now().toString(36)}`;
+  return worktreeBranchFor(command.name, Date.now());
 }
 
 /** True when the agent id exists and is not archived. */
@@ -102,11 +97,14 @@ export async function executeCommand(
     workspaceId?: string;
     agentId?: string;
     newWorktree: boolean;
+    /** Run-time provider/model override; falls back to the stored command provider. */
+    provider?: string;
   },
   deps: RunDeps,
 ): Promise<RunResult> {
   const { paseo } = deps;
   const now = deps.now ?? (() => new Date());
+  const provider = input.provider?.trim() || command.provider?.trim() || "";
 
   try {
     if (command.type === "shell") {
@@ -145,10 +143,12 @@ export async function executeCommand(
       };
     }
 
-    if (!command.provider) {
+    if (!isFullModelRef(provider)) {
       return failure(
         "new-agent",
-        "Command has no provider configured. Edit the command and set provider/model.",
+        provider
+          ? `Provider "${provider}" must be in 'provider/model' format — pick a model when running.`
+          : "Command has no provider configured. Edit the command or pick a provider/model when running.",
       );
     }
 
@@ -187,14 +187,14 @@ export async function executeCommand(
 
     const created = input.newWorktree && workspace
       ? await paseo.workspaces.ref(workspace.id).agents.create({
-          config: { provider: command.provider },
+          config: { provider },
           prompt: rendered,
           worktree: { mode: "branch-off", newBranch: worktreeBranchName(command) },
           title: commandTitle(command),
           labels: { source: "command-center" },
         })
       : await paseo.agents.create({
-          config: { provider: command.provider },
+          config: { provider },
           cwd: contextWorkspace?.workspaceDirectory ?? contextWorkspace?.projectRootPath ?? process.cwd(),
           prompt: rendered,
           title: commandTitle(command),
@@ -224,6 +224,38 @@ export async function executeCommand(
     const message = error instanceof Error ? error.message : String(error);
     return failure(command.type === "shell" ? "terminal" : "new-agent", message);
   }
+}
+
+/**
+ * Fan-out run: executes the same command against every target sequentially,
+ * recording one history entry per target. Targets are independent — a failure
+ * on one does not stop the rest.
+ */
+export async function executeBatch(
+  command: CommandDefinition,
+  input: {
+    values: Record<string, string>;
+    targets: RunTarget[];
+  },
+  deps: RunDeps,
+): Promise<RunResult[]> {
+  const results: RunResult[] = [];
+  for (const target of input.targets) {
+    results.push(
+      await executeCommand(
+        command,
+        {
+          values: input.values,
+          workspaceId: target.workspaceId,
+          agentId: target.agentId,
+          newWorktree: target.newWorktree ?? false,
+          provider: target.provider,
+        },
+        deps,
+      ),
+    );
+  }
+  return results;
 }
 
 function templateContext(

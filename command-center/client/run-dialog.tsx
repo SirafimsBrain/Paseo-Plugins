@@ -1,38 +1,72 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import type { CommandDefinition } from "../shared/commands";
+import type { CommandDefinition, ProviderWithModels, RunResult } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
+import { isFullModelRef } from "../shared/commands";
 import { renderPreview } from "./preview";
+import { ProviderModelPicker } from "./provider-model-picker";
 
-interface WorkspaceOption {
+export interface DialogWorkspaceOption {
   id: string;
   name: string;
+  serverId: string;
+  hostLabel: string;
+  directory: string | null;
 }
 
-interface AgentOption {
+export interface DialogAgentOption {
   id: string;
   title: string | null;
   status: string;
+  workspaceId: string | null;
+  serverId: string;
+  hostLabel: string;
+}
+
+export interface DialogProviderOption {
+  id: string;
+  enabled: boolean;
+  serverId: string;
+  hostLabel: string;
+}
+/** One fan-out target: a workspace on a host, plus per-run overrides. */
+export interface BatchTarget {
+  /** JSON key from `workspaceKey()`; null means "let the server pick". */
+  workspaceKey: string | null;
+  agentId?: string;
+  provider?: string;
+  newWorktree: boolean;
+}
+
+export interface BatchItemResult {
+  key: string;
+  workspaceName: string;
+  hostLabel: string;
+  ok: boolean;
+  kind: RunResult["kind"];
+  error: string | null;
 }
 
 interface Props {
   command: CommandDefinition;
-  workspaces: WorkspaceOption[];
-  agents: AgentOption[];
-  busy: boolean;
-  errorText: string | null;
+  workspaces: DialogWorkspaceOption[];
+  agents: DialogAgentOption[];
+  providers: ProviderWithModels[];
+  modelsLoading: boolean;
+  multiHost: boolean;
   theme: PluginTheme;
-  onRun: (input: {
-    values: Record<string, string>;
-    workspaceId: string | undefined;
-    agentId: string | undefined;
-    newWorktree: boolean;
-  }) => void;
+  onRun: (input: { values: Record<string, string>; targets: BatchTarget[] }) => Promise<BatchItemResult[]>;
   onCancel: () => void;
 }
 
-export function RunDialog({ command, workspaces, agents, busy, errorText, theme, onRun, onCancel }: Props) {
+function defaultProviderRef(command: CommandDefinition, providers: ProviderWithModels[]): string {
+  if (isFullModelRef(command.provider ?? "")) return (command.provider as string).trim();
+  const all = providers.flatMap((provider) => provider.models);
+  return (all.find((model) => model.isDefault) ?? all[0])?.id ?? "";
+}
+
+export function RunDialog({ command, workspaces, agents, providers, modelsLoading, multiHost, theme, onRun, onCancel }: Props) {
   const declared = command.variables;
   const discovered = useMemo(() => inputVariablesOf(command.template), [command.template]);
   const merged = useMemo(() => {
@@ -46,27 +80,122 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, theme,
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(merged.map((variable) => [variable.name, variable.defaultValue ?? ""])),
   );
-  const [workspaceId, setWorkspaceId] = useState<string>(
-    workspaces.length > 0 ? (workspaces[0] as WorkspaceOption).id : "",
+  const [selectedKeys, setSelectedKeys] = useState<string[]>(() =>
+    workspaces.length > 0 ? [JSON.stringify([workspaces[0]!.serverId, workspaces[0]!.id])] : [],
   );
+  const [provider, setProvider] = useState<string>(() => defaultProviderRef(command, providers));
   const [agentId, setAgentId] = useState<string>("");
   const [newWorktree, setNewWorktree] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<BatchItemResult[] | null>(null);
 
   const isShell = command.type === "shell";
-  const needsWorkspace = isShell || command.scope === "workspace" || newWorktree;
   const openAgents = agents.filter((agent) => agent.status !== "closed");
-  const preview = renderPreview(command.template, values, workspaceId, workspaces);
+
+  const selectedWorkspaces = useMemo(
+    () =>
+      selectedKeys
+        .map((key) => {
+          try {
+            const parsed: unknown = JSON.parse(key);
+            if (!Array.isArray(parsed)) return null;
+            return workspaces.find((option) => option.serverId === parsed[0] && option.id === parsed[1]) ?? null;
+          } catch {
+            return null;
+          }
+        })
+        .filter((option): option is DialogWorkspaceOption => option !== null),
+    [selectedKeys, workspaces],
+  );
+
+  const groupedWorkspaces = useMemo(() => {
+    const groups = new Map<string, { label: string; options: DialogWorkspaceOption[] }>();
+    for (const option of workspaces) {
+      const groupKey = option.serverId;
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = {
+          label: option.hostLabel.length > 0 ? option.hostLabel : "This host",
+          options: [],
+        };
+        groups.set(groupKey, group);
+      }
+      group.options.push(option);
+    }
+    return [...groups.values()];
+  }, [workspaces]);
+
+  // Existing-agent picker is only meaningful for a single target.
+  const singleTargetServer = selectedWorkspaces.length === 1 ? (selectedWorkspaces[0]?.serverId ?? null) : null;
+  const agentsForTarget = useMemo(() => {
+    if (selectedWorkspaces.length !== 1) return [];
+    if (singleTargetServer === null) return openAgents;
+    return openAgents.filter((agent) => agent.serverId === singleTargetServer);
+  }, [openAgents, selectedWorkspaces.length, singleTargetServer]);
+
+  const firstWorkspace = selectedWorkspaces[0] ?? null;
+  const preview = renderPreview(
+    command.template,
+    values,
+    firstWorkspace?.id,
+    workspaces.map((option) => ({ id: option.id, name: option.name })),
+  );
+
   const { foreground, foregroundMuted } = theme.colors;
+
+  const toggleWorkspace = (key: string) => {
+    setResults(null);
+    setSelectedKeys((previous) =>
+      previous.includes(key) ? previous.filter((candidate) => candidate !== key) : [...previous, key],
+    );
+  };
+
+  const targetCount = Math.max(selectedKeys.length, 1);
+  const providerValid = isShell || isFullModelRef(provider);
+  const canRun = !busy && providerValid;
+  const runLabel = busy ? "Running…" : isShell ? `Run in terminal on ${targetCount}` : targetCount > 1 ? `Run on ${targetCount} targets` : "Run";
+
+  const handleRun = () => {
+    if (!canRun) return;
+    const targets: BatchTarget[] =
+      selectedKeys.length === 0
+        ? [{ workspaceKey: null, agentId: agentId !== "" ? agentId : undefined, provider: provider || undefined, newWorktree }]
+        : selectedKeys.map((workspaceKey) => ({
+            workspaceKey,
+            agentId: selectedKeys.length === 1 && agentId !== "" ? agentId : undefined,
+            provider: provider || undefined,
+            newWorktree,
+          }));
+    setBusy(true);
+    setResults(null);
+    void onRun({ values, targets })
+      .then((items) => setResults(items))
+      .catch((error: unknown) =>
+        setResults([
+          {
+            key: "error",
+            workspaceName: "",
+            hostLabel: "",
+            ok: false,
+            kind: isShell ? "terminal" : "new-agent",
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ]),
+      )
+      .finally(() => setBusy(false));
+  };
 
   return (
     <View style={styles.container}>
       <Text style={[styles.title, { color: foreground }]}>{command.name}</Text>
       <Text style={[styles.subtitle, { color: foregroundMuted }]}>
         {isShell
-          ? "Runs in a new terminal of the selected workspace."
-          : command.scope === "workspace"
-            ? "Runs in the selected workspace."
-            : "Creates a new agent."}
+          ? `Runs in a new terminal on each selected workspace (${targetCount}).`
+          : targetCount > 1
+            ? `Creates a new agent on each of the ${targetCount} selected workspaces.`
+            : command.scope === "workspace"
+              ? "Runs in the selected workspace."
+              : "Creates a new agent in the selected workspace."}
       </Text>
 
       {merged.length > 0 ? (
@@ -87,31 +216,60 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, theme,
         </>
       ) : null}
 
-      {needsWorkspace ? (
-        <View style={styles.field}>
-          <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>Workspace</Text>
-          <View style={styles.row}>
-            {workspaces.slice(0, 6).map((workspace) => (
-              <Pressable
-                key={workspace.id}
-                style={[
-                  styles.chip,
-                  { borderColor: theme.colors.border },
-                  workspaceId === workspace.id && styles.chipActive,
-                ]}
-                onPress={() => setWorkspaceId(workspace.id)}
-              >
-                <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
-                  {workspace.name}
-                </Text>
-              </Pressable>
-            ))}
+      <View style={styles.field}>
+        <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>
+          Workspaces{targetCount > 1 ? ` (${targetCount} selected)` : ""} — tap to select several
+        </Text>
+        {workspaces.length === 0 ? (
+          <Text style={[styles.hint, { color: foregroundMuted }]}>
+            No workspaces found — the run will use the server&apos;s best guess.
+          </Text>
+        ) : null}
+        {groupedWorkspaces.map((group) => (
+          <View key={group.label} style={styles.group}>
+            {multiHost ? <Text style={[styles.groupLabel, { color: foregroundMuted }]}>{group.label}</Text> : null}
+            <View style={styles.row}>
+              {group.options.map((option) => {
+                const key = JSON.stringify([option.serverId, option.id]);
+                const active = selectedKeys.includes(key);
+                return (
+                  <Pressable
+                    key={key}
+                    style={[styles.chip, { borderColor: theme.colors.border }, active && styles.chipActive]}
+                    onPress={() => toggleWorkspace(key)}
+                  >
+                    <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
+                      {active ? "✓ " : ""}{option.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-        </View>
-      ) : null}
+        ))}
+      </View>
 
       {!isShell ? (
         <>
+          <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>Provider / model</Text>
+            <ProviderModelPicker
+              providers={providers}
+              value={provider}
+              loading={modelsLoading}
+              multiHost={multiHost}
+              theme={theme}
+              onChange={(next) => {
+                setProvider(next);
+                setResults(null);
+              }}
+            />
+            {!providerValid ? (
+              <Text style={[styles.hint, { color: theme.colors.statusDanger }]}>
+                Pick a provider/model — Paseo requires the full format, e.g. cline/claude-opus-4-6.
+              </Text>
+            ) : null}
+          </View>
           <View style={styles.field}>
             <Pressable style={styles.checkRow} onPress={() => setNewWorktree((value) => !value)}>
               <Text style={[styles.check, { color: foreground }]}>{newWorktree ? "☑" : "☐"}</Text>
@@ -119,58 +277,69 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, theme,
             </Pressable>
           </View>
           <View style={styles.field}>
-            <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>Send to an existing agent (optional)</Text>
-            <View style={styles.row}>
-              <Pressable
-                style={[styles.chip, { borderColor: theme.colors.border }, agentId === "" && styles.chipActive]}
-                onPress={() => setAgentId("")}
-              >
-                <Text style={[styles.chipText, { color: foreground }]}>New agent</Text>
-              </Pressable>
-              {openAgents.slice(0, 5).map((agent) => (
+            <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>
+              {selectedWorkspaces.length <= 1 ? "Send to an existing agent (optional)" : "Existing agent (single target only)"}
+            </Text>
+            {selectedWorkspaces.length <= 1 ? (
+              <View style={styles.row}>
                 <Pressable
-                  key={agent.id}
-                  style={[
-                    styles.chip,
-                    { borderColor: theme.colors.border },
-                    agentId === agent.id && styles.chipActive,
-                  ]}
-                  onPress={() => setAgentId(agent.id)}
+                  style={[styles.chip, { borderColor: theme.colors.border }, agentId === "" && styles.chipActive]}
+                  onPress={() => setAgentId("")}
                 >
-                  <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
-                    {agent.title ?? agent.id.slice(0, 10)}
-                  </Text>
+                  <Text style={[styles.chipText, { color: foreground }]}>New agent</Text>
                 </Pressable>
-              ))}
-            </View>
+                {agentsForTarget.map((agent) => (
+                  <Pressable
+                    key={`${agent.serverId}:${agent.id}`}
+                    style={[
+                      styles.chip,
+                      { borderColor: theme.colors.border },
+                      agentId === agent.id && styles.chipActive,
+                    ]}
+                    onPress={() => setAgentId(agent.id)}
+                  >
+                    <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
+                      {agent.title ?? agent.id.slice(0, 10)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <Text style={[styles.hint, { color: foregroundMuted }]}>
+                Each target gets a new agent — pick a single workspace to reuse an existing one.
+              </Text>
+            )}
           </View>
         </>
       ) : null}
 
       <View style={styles.previewBox}>
-        <Text style={[styles.previewLabel, { color: foregroundMuted }]}>Preview</Text>
+        <Text style={[styles.previewLabel, { color: foregroundMuted }]}>
+          Preview{firstWorkspace ? ` — ${firstWorkspace.name}` : ""}{targetCount > 1 ? ` (+${targetCount - 1} more)` : ""}
+        </Text>
         <Text style={[styles.previewText, { color: foreground }]}>{preview || "—"}</Text>
       </View>
 
-      {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+      {results ? (
+        <View style={styles.field}>
+          {results.map((item) => (
+            <Text
+              key={item.key}
+              style={[styles.resultLine, { color: item.ok ? foreground : theme.colors.statusDanger }]}
+            >
+              {item.ok ? "✓" : "✗"} {item.hostLabel.length > 0 ? `${item.hostLabel} / ` : ""}{item.workspaceName}
+              {item.error ? ` — ${item.error}` : ""}
+            </Text>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.row}>
         <Pressable style={[styles.button, styles.secondaryButton]} onPress={onCancel} disabled={busy}>
-          <Text style={styles.buttonText}>Cancel</Text>
+          <Text style={styles.buttonText}>{results ? "Close" : "Cancel"}</Text>
         </Pressable>
-        <Pressable
-          style={[styles.button, busy && styles.buttonDisabled]}
-          disabled={busy}
-          onPress={() =>
-            onRun({
-              values,
-              workspaceId: needsWorkspace ? workspaceId || undefined : undefined,
-              agentId: !isShell && agentId !== "" ? agentId : undefined,
-              newWorktree: !isShell && newWorktree,
-            })
-          }
-        >
-          <Text style={styles.buttonText}>{busy ? "Running…" : isShell ? "Run in terminal" : "Run"}</Text>
+        <Pressable style={[styles.button, !canRun && styles.buttonDisabled]} disabled={!canRun} onPress={handleRun}>
+          <Text style={styles.buttonText}>{runLabel}</Text>
         </Pressable>
       </View>
     </View>
@@ -184,6 +353,8 @@ const styles = StyleSheet.create({
   label: { marginTop: 10, fontSize: 12, opacity: 0.7 },
   field: { marginTop: 8 },
   fieldLabel: { fontSize: 12, opacity: 0.7, marginBottom: 3 },
+  group: { marginTop: 4 },
+  groupLabel: { fontSize: 11, opacity: 0.7, marginBottom: 2 },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     paddingHorizontal: 10,
@@ -214,7 +385,8 @@ const styles = StyleSheet.create({
   },
   previewLabel: { fontSize: 11, opacity: 0.6, marginBottom: 2 },
   previewText: { fontSize: 12, fontFamily: "monospace" },
-  errorText: { color: "rgb(220,80,80)", fontSize: 12, marginTop: 6 },
+  hint: { fontSize: 11, opacity: 0.7, marginTop: 2 },
+  resultLine: { fontSize: 12, marginTop: 2 },
   button: {
     flex: 1,
     marginTop: 12,

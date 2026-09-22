@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { executeCommand } from "../server/executor";
+import { executeBatch, executeCommand } from "../server/executor";
 import { loadHistory, paseoHome } from "../server/store";
 import type { CommandDefinition } from "../shared/commands";
 
@@ -204,5 +204,109 @@ describe("executeCommand", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
+  });
+
+  it("prefers the run-time provider override over the stored provider", async () => {
+    const fake = fakePaseo({ workspaces: [workspace] });
+    const result = await executeCommand(
+      promptCommand(),
+      { values: { who: "override" }, newWorktree: false, provider: "qwen/qwen3-coder" },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.createdAgents[0]!.request).toMatchObject({
+      config: { provider: "qwen/qwen3-coder" },
+    });
+  });
+
+  it("fails clearly when neither an override nor a stored provider exists", async () => {
+    const fake = fakePaseo({ workspaces: [workspace] });
+    const result = await executeCommand(
+      promptCommand({ provider: undefined }),
+      { values: {}, newWorktree: false },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("provider");
+  });
+
+  it("rejects a bare provider id without a model", async () => {
+    const fake = fakePaseo({ workspaces: [workspace] });
+    const result = await executeCommand(
+      promptCommand({ provider: "opencode" }),
+      { values: {}, newWorktree: false },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("provider/model");
+    expect(fake.createdAgents).toHaveLength(0);
+  });
+});
+
+describe("executeBatch", () => {
+  const workspace2 = {
+    id: "ws_2",
+    name: "centurion-prod",
+    workspaceDirectory: "/disk/centurion-prod",
+    projectRootPath: null,
+  };
+
+  it("runs shell commands on every target workspace", async () => {
+    const fake = fakePaseo({ workspaces: [workspace, workspace2] });
+    const command = promptCommand({ type: "shell", template: "git pull" });
+    const results = await executeBatch(
+      command,
+      {
+        values: {},
+        targets: [{ workspaceId: "ws_1" }, { workspaceId: "ws_2" }],
+      },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(results.map((result) => result.workspaceId)).toEqual(["ws_1", "ws_2"]);
+    expect(fake.terminals).toHaveLength(2);
+    expect(loadHistory()).toHaveLength(2);
+  });
+
+  it("keeps going after a failed target", async () => {
+    const fake = fakePaseo({
+      workspaces: [workspace],
+      agents: [{ id: "ag_gone", archivedAt: "2026-09-01T00:00:00.000Z" }],
+    });
+    const results = await executeBatch(
+      promptCommand(),
+      {
+        values: { who: "batch" },
+        targets: [{ agentId: "ag_gone" }, { workspaceId: "ws_1" }],
+      },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results[0]!.ok).toBe(false);
+    expect(results[0]!.error).toContain("archived");
+    expect(results[1]!.ok).toBe(true);
+    expect(fake.createdAgents).toHaveLength(1);
+  });
+
+  it("applies a per-target provider override", async () => {
+    const fake = fakePaseo({ workspaces: [workspace, workspace2] });
+    const results = await executeBatch(
+      promptCommand(),
+      {
+        values: { who: "per-target" },
+        targets: [{ workspaceId: "ws_1", provider: "a/model" }, { workspaceId: "ws_2" }],
+      },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(fake.createdAgents[0]!.request).toMatchObject({ config: { provider: "a/model" } });
+    expect(fake.createdAgents[1]!.request).toMatchObject({ config: { provider: "claude/opus-4.6" } });
   });
 });

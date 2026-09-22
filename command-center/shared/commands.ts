@@ -41,6 +41,65 @@ export const commandSchema = z.object({
 export type CommandDefinition = z.infer<typeof commandSchema>;
 export type CommandVariable = z.infer<typeof commandVariableSchema>;
 
+/** One selectable model of a provider, as reported by the daemon. */
+export interface ProviderModelInfo {
+  id: string;
+  label: string;
+  isDefault: boolean;
+}
+
+/** An enabled provider with its models, qualified by host. Client-safe. */
+export interface ProviderWithModels {
+  id: string;
+  serverId: string;
+  hostLabel: string;
+  models: ProviderModelInfo[];
+}
+
+/**
+ * Full `provider/model` reference for `PaseoAgentConfig.provider`.
+ * Tolerates both daemon shapes: a bare model id (`opus-4.6`) and an already
+ * qualified one (`claude/opus-4.6`).
+ */
+export function fullModelRef(providerId: string, modelId: string): string {
+  const trimmed = modelId.trim();
+  if (trimmed.includes("/")) return trimmed;
+  return `${providerId}/${trimmed}`;
+}
+
+/** True when the value is usable as `PaseoAgentConfig.provider`. */
+export function isFullModelRef(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  const slash = trimmed.indexOf("/");
+  return slash > 0 && slash < trimmed.length - 1;
+}
+
+/**
+ * Normalizes a daemon `models` array into picker-ready entries, storing the
+ * full `provider/model` reference as `id`. Non-selectable entries are dropped.
+ * Returns null when the input is not an array (caller should fall back to
+ * `listModels`), or an empty array when nothing usable was reported.
+ */
+export function normalizeProviderModels(raw: unknown, providerId: string): ProviderModelInfo[] | null {
+  if (!Array.isArray(raw)) return null;
+  const models: ProviderModelInfo[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const record = item as Record<string, unknown>;
+    if (record["isSelectable"] === false) continue;
+    const rawId = record["id"];
+    if (typeof rawId !== "string" || rawId.trim().length === 0) continue;
+    const label = typeof record["label"] === "string" && record["label"].length > 0 ? record["label"] : rawId.trim();
+    models.push({
+      id: fullModelRef(providerId, rawId),
+      label,
+      isDefault: record["isDefault"] === true,
+    });
+  }
+  return models;
+}
+
 /** One history entry per run, appended after the run is dispatched. */
 export const historyEntrySchema = z.object({
   id: z.string(),
@@ -129,6 +188,43 @@ export const runCommand = defineRpc({
     agentId: z.string().optional(),
     /** Create the agent in a branch-off worktree of the target workspace. */
     newWorktree: z.boolean().optional(),
+    /** Run-time provider/model override; falls back to the stored command provider. */
+    provider: z.string().optional(),
   }),
   output: runResultSchema,
+});
+
+/** One fan-out target inside a batch run. All fields optional; the executor
+ * falls back to the stored command defaults and the best-guess workspace. */
+export const runTargetSchema = z.object({
+  workspaceId: z.string().optional(),
+  agentId: z.string().optional(),
+  provider: z.string().optional(),
+  newWorktree: z.boolean().optional(),
+});
+
+export type RunTarget = z.infer<typeof runTargetSchema>;
+
+export const runBatch = defineRpc({
+  name: "command-center.run-batch",
+  input: z.object({
+    commandId: z.string(),
+    /** Final values for every declared variable, already validated client-side. */
+    values: z.record(z.string(), z.string()),
+    targets: z.array(runTargetSchema).min(1).max(20),
+  }),
+  output: z.object({
+    results: z.array(runResultSchema),
+  }),
+});
+
+export const appendHistory = defineRpc({
+  name: "command-center.history-append",
+  input: z.object({
+    entry: historyEntrySchema.omit({ id: true, at: true }),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    id: z.string().nullable(),
+  }),
 });
