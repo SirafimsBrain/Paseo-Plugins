@@ -10,6 +10,27 @@ transcripts that accumulate on disk.
 The plugin runs in the Paseo daemon subprocess (full filesystem and process
 access on the daemon host) and renders a React Native panel in the Paseo app.
 
+## Compatibility
+
+Verified against Paseo `0.9.0` (2026-09-22, SDK `@getpaseo/plugin@0.9.0`):
+no code changes required, and the manifest range `>=0.8.0` already covers it.
+
+- The 0.9.0 plugin changelog is additive for every API this plugin uses:
+  `defineRpc`, `server.handle`, `defineSettings` / `server.registerSettings`
+  (the new `read()` / `subscribe()` settings handle is optional and unused
+  here), `client.addWorkspacePanel` / `addSettingsScreen` /
+  `addCommandCenterItem`, `useRpc` / `useSettings`, and
+  `navigation.openAgent({ agentId })` (the new optional `serverId` changes
+  nothing at the existing call site). The changed `assistant_message` /
+  `tool_call` transformer behaviour does not apply: the plugin registers no
+  timeline transformers.
+- The SDK diff `0.8.0 → 0.9.0` touches only additive declarations
+  (`useHosts`, `getPaseoClient`, `openExternalUrl`, `ExternalLink`,
+  `navigation.openBrowser`, the server settings handle, sub-agent
+  `parentSessionId` / `toolCallId`) plus a heartbeat-lease fix.
+- Verification (throwaway copy with `@getpaseo/plugin@0.9.0` installed):
+  `npm run typecheck` passes, `npm test` passes (8 suites, 70 tests).
+
 ## Session store audit (verified 2026-09-21, Paseo 0.8.0)
 
 The original revision of this plugin only managed `~/.acpx/sessions/`. That

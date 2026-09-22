@@ -53,6 +53,10 @@ client panel.
 ## Requirements
 
 - Paseo `>=0.8.0` (declared in `paseo-plugin.json`).
+- Verified against Paseo `0.9.0` (2026-09-22, SDK `@getpaseo/plugin@0.9.0`):
+  `npm run typecheck` and `npm test` (70 tests, 8 suites) pass with no code
+  changes; the 0.9.0 plugin changes are additive for every API this plugin
+  uses (see Compatibility in [`__doc.md`](./__doc.md)).
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
   `cline`, `opencode`, `kilo`. Qwen Code and `acpx` are read and written as files
   and need no CLI.
