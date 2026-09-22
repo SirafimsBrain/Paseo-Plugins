@@ -99,12 +99,15 @@ export async function executeCommand(
     newWorktree: boolean;
     /** Run-time provider/model override; falls back to the stored command provider. */
     provider?: string;
+    /** Groups history entries of one fan-out run; null for single runs. */
+    batchId?: string | null;
   },
   deps: RunDeps,
 ): Promise<RunResult> {
   const { paseo } = deps;
   const now = deps.now ?? (() => new Date());
   const provider = input.provider?.trim() || command.provider?.trim() || "";
+  const batchId = input.batchId ?? null;
 
   try {
     if (command.type === "shell") {
@@ -130,6 +133,9 @@ export async function executeCommand(
         ok: true,
         error: null,
         at: now().toISOString(),
+        provider: null,
+        values: { ...input.values },
+        batchId,
       };
       appendHistory(loadHistory(), entry);
       return {
@@ -173,7 +179,17 @@ export async function executeCommand(
       }
       const handle = paseo.agents.ref(input.agentId);
       await handle.send(rendered);
-      recordHistory(command, rendered, "existing-agent", contextWorkspace?.id ?? null, input.agentId, true, null, now);
+      recordHistory(
+        command,
+        rendered,
+        "existing-agent",
+        contextWorkspace?.id ?? null,
+        input.agentId,
+        true,
+        null,
+        now,
+        { provider, values: input.values, batchId },
+      );
       return {
         ok: true,
         kind: "existing-agent",
@@ -210,6 +226,7 @@ export async function executeCommand(
       true,
       null,
       now,
+      { provider, values: input.values, batchId },
     );
     return {
       ok: true,
@@ -236,9 +253,12 @@ export async function executeBatch(
   input: {
     values: Record<string, string>;
     targets: RunTarget[];
+    batchId?: string | null;
   },
   deps: RunDeps,
 ): Promise<RunResult[]> {
+  const batchId =
+    input.batchId ?? `b_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const results: RunResult[] = [];
   for (const target of input.targets) {
     results.push(
@@ -250,6 +270,7 @@ export async function executeBatch(
           agentId: target.agentId,
           newWorktree: target.newWorktree ?? false,
           provider: target.provider,
+          batchId,
         },
         deps,
       ),
@@ -279,6 +300,11 @@ function recordHistory(
   ok: boolean,
   error: string | null,
   now: () => Date,
+  extra: {
+    provider?: string | null;
+    values?: Record<string, string>;
+    batchId?: string | null;
+  } = {},
 ): void {
   appendHistory(loadHistory(), {
     id: `h_${now().getTime()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -291,6 +317,9 @@ function recordHistory(
     ok,
     error,
     at: now().toISOString(),
+    provider: extra.provider ?? null,
+    values: extra.values ? { ...extra.values } : undefined,
+    batchId: extra.batchId ?? null,
   });
 }
 

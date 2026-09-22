@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { CommandDefinition, ProviderWithModels } from "../shared/commands";
-import { isFullModelRef } from "../shared/commands";
+import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
 import { ProviderModelPicker } from "./provider-model-picker";
 
@@ -37,6 +37,12 @@ export function CommandForm({ initial, providers, modelsLoading, multiHost, them
   const [provider, setProvider] = useState(initial?.provider ?? "");
   const [terminalName, setTerminalName] = useState(initial?.terminalName ?? "");
   const [scope, setScope] = useState<"global" | "workspace">(initial?.scope ?? "global");
+
+  // Migrate stale stored values (bare ids, pre-compose refs) against the live
+  // catalog. Explicit picks that are still known survive unchanged.
+  useEffect(() => {
+    setProvider((current) => resolveModelRef(providers, current || initial?.provider));
+  }, [providers, initial?.provider]);
 
   const variables = useMemo(() => inputVariablesOf(template), [template]);
   const nameError = name.trim().length === 0 ? "Name is required." : null;

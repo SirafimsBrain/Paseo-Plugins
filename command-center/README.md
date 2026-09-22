@@ -17,7 +17,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
   - Unknown tokens stay visible in the preview instead of silently disappearing.
 - **Live preview** — the run dialog shows the fully rendered prompt/line before it is dispatched.
 - **Targeting** — multi-select workspaces grouped by host (prompt and shell), run-time provider/model picker with live model lists (disabled providers hidden), optional existing agent for single-target runs, optional branch-off worktree. One click fans out to many workspaces and hosts with per-target results.
-- **History** — the last 50 runs with the rendered payload, target, and error, one click to clear.
+- **History** — the last 50 runs with the rendered payload, target, used model/agent, and error; any entry can be repeated in one click with its values, target, and model prefilled.
 - **Entry points** — sidebar item, Command Center item (⌘K), and a `/cc <command name>` slash command in agent chats.
 
 ## Install

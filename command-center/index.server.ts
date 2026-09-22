@@ -125,7 +125,7 @@ export default function contribute(server: PluginServerContext) {
     }
     const results = await executeBatch(
       command,
-      { values: input.values, targets: input.targets },
+      { values: input.values, targets: input.targets, batchId: input.batchId },
       { paseo },
     );
     const succeeded = results.filter((result) => result.ok).length;

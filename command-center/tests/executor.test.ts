@@ -309,4 +309,25 @@ describe("executeBatch", () => {
     expect(fake.createdAgents[0]!.request).toMatchObject({ config: { provider: "a/model" } });
     expect(fake.createdAgents[1]!.request).toMatchObject({ config: { provider: "claude/opus-4.6" } });
   });
+
+  it("groups batch entries under one batchId with provider and values", async () => {
+    const fake = fakePaseo({ workspaces: [workspace, workspace2] });
+    await executeBatch(
+      promptCommand(),
+      {
+        values: { who: "grouped" },
+        targets: [{ workspaceId: "ws_1" }, { workspaceId: "ws_2" }],
+        batchId: "b_test",
+      },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    const history = loadHistory();
+    expect(history).toHaveLength(2);
+    expect(history.map((entry) => entry.batchId)).toEqual(["b_test", "b_test"]);
+    expect(history[0]).toMatchObject({
+      provider: "claude/opus-4.6",
+      values: { who: "grouped" },
+    });
+  });
 });

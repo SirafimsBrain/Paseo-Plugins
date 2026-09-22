@@ -84,8 +84,13 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   const [editing, setEditing] = useState<CommandDefinition | null>(null);
   const [creating, setCreating] = useState(false);
   const [running, setRunning] = useState<CommandDefinition | null>(null);
+  const [repeatPreset, setRepeatPreset] = useState<{
+    values: Record<string, string>;
+    workspaceKey: string | null;
+    provider: string | null;
+    agentId: string | null;
+  } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [historyVisible, setHistoryVisible] = useState(false);
 
   const [commands, setCommands] = useState<CommandDefinition[] | null>(null);
   const [commandsError, setCommandsError] = useState<string | null>(null);
@@ -98,6 +103,36 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   const refresh = useCallback(() => {
     setReloadKey((key) => key + 1);
   }, []);
+
+  const closeRunDialog = useCallback(() => {
+    setRunning(null);
+    setRepeatPreset(null);
+  }, []);
+
+  /** Re-run a history entry: reopens the dialog prefilled with its values, target and model. */
+  const handleRepeat = useCallback(
+    (entry: HistoryEntry) => {
+      const command = commands?.find((candidate) => candidate.id === entry.commandId) ?? null;
+      if (!command) {
+        toast.error("The command was deleted — recreate it first to repeat this run.");
+        return;
+      }
+      const workspace =
+        entry.targetWorkspaceId !== null
+          ? (workspaces.find((option) => option.id === entry.targetWorkspaceId) ?? null)
+          : null;
+      const agentOpen =
+        entry.targetAgentId !== null && agents.some((agent) => agent.id === entry.targetAgentId);
+      setRepeatPreset({
+        values: entry.values ? { ...entry.values } : {},
+        workspaceKey: workspace ? workspaceKey(workspace) : null,
+        provider: entry.provider ?? command.provider ?? null,
+        agentId: agentOpen ? entry.targetAgentId : null,
+      });
+      setRunning(command);
+    },
+    [commands, workspaces, agents, toast],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -117,7 +152,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   }, [listRpc, reloadKey]);
 
   useEffect(() => {
-    if (!historyVisible) return;
+    if (tab !== "history") return;
     let cancelled = false;
     historyRpc({})
       .then((result) => {
@@ -129,7 +164,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [historyRpc, historyVisible, reloadKey]);
+  }, [historyRpc, tab, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -394,8 +429,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
     command: CommandDefinition;
     values: Record<string, string>;
     targets: BatchTarget[];
-  }): Promise<BatchItemResult[]> => {
-    const resolved = input.targets.map((target) => {
+  }): Promise<BatchItemResult[]> => {    const resolved = input.targets.map((target) => {
       const workspace =
         target.workspaceKey !== null
           ? (workspaces.find((candidate) => workspaceKey(candidate) === target.workspaceKey) ?? null)
@@ -424,6 +458,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
     resolved.forEach(({ serverId }, index) => {
       (isLocalServer(serverId) ? localIndices : remoteIndices).push(index);
     });
+    const batchId = `b_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
     // 1. Local targets — a single daemon-side batch call.
     if (localIndices.length > 0) {
@@ -431,6 +466,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
         const { results } = await runBatchRpc({
           commandId: input.command.id,
           values: input.values,
+          batchId,
           targets: localIndices.map((index) => ({
             workspaceId: resolved[index]!.workspaceId,
             agentId: resolved[index]!.target.agentId,
@@ -481,6 +517,9 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
               kind: dispatched.kind,
               ok: dispatched.ok,
               error: dispatched.error,
+              provider: target.provider ?? input.command.provider ?? null,
+              values: { ...input.values },
+              batchId,
             },
           });
         } catch {
@@ -557,14 +596,13 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
         <Pressable
           style={styles.smallButton}
           onPress={() => {
-            if (tab === "history" && historyVisible) {
+            if (tab === "history") {
               void clearHistoryRpc({}).then(() => {
                 toast.show("History cleared");
                 refresh();
               });
             } else {
-              setHistoryVisible((value) => !value);
-              refresh();
+              setTab("history");
             }
           }}
         >
@@ -634,31 +672,56 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
           {history !== null && history.length === 0 ? (
             <Text style={[styles.muted, { color: foregroundMuted }]}>Nothing has run yet.</Text>
           ) : null}
-          {(history ?? []).map((entry: HistoryEntry) => (
-            <View key={entry.id} style={[styles.card, { borderColor: theme.colors.border }]}>
-              <View style={styles.cardHeader}>
-                <Text style={[styles.cardTitle, { color: foreground }]} numberOfLines={1}>
-                  {entry.commandName}
+          {(history ?? []).map((entry: HistoryEntry) => {
+            const repeatable = (commands ?? []).some((command) => command.id === entry.commandId);
+            const agent = entry.targetAgentId
+              ? (agents.find((candidate) => candidate.id === entry.targetAgentId) ?? null)
+              : null;
+            const agentLabel = agent ? (agent.title ?? agent.id.slice(0, 10)) : entry.targetAgentId?.slice(0, 10);
+            return (
+              <View key={entry.id} style={[styles.card, { borderColor: theme.colors.border }]}>
+                <View style={styles.cardHeader}>
+                  <Text style={[styles.cardTitle, { color: foreground }]} numberOfLines={1}>
+                    {entry.commandName}
+                  </Text>
+                  <Text style={[styles.badge, { color: foreground }, !entry.ok && styles.badgeError]}>
+                    {entry.ok ? entry.kind : "failed"}
+                  </Text>
+                </View>
+                <Text style={[styles.cardTemplate, { color: foregroundMuted }]} numberOfLines={3}>
+                  {entry.rendered}
                 </Text>
-                <Text style={[styles.badge, { color: foreground }, !entry.ok && styles.badgeError]}>
-                  {entry.ok ? entry.kind : "failed"}
+                <Text style={[styles.timestamp, { color: foregroundMuted }]}>
+                  {new Date(entry.at).toLocaleString()}
                 </Text>
+                {entry.provider || agentLabel ? (
+                  <Text style={[styles.timestamp, { color: foregroundMuted }]} numberOfLines={1}>
+                    {[entry.provider ?? null, agentLabel ? `agent ${agentLabel}` : null]
+                      .filter((part): part is string => typeof part === "string" && part.length > 0)
+                      .join(" · ")}
+                  </Text>
+                ) : null}
+                {entry.error ? <Text style={styles.errorText}>{entry.error}</Text> : null}
+                <View style={styles.cardActions}>
+                  <Pressable
+                    style={[styles.actionButton, !repeatable && { opacity: 0.5 }]}
+                    disabled={!repeatable}
+                    onPress={() => handleRepeat(entry)}
+                  >
+                    <Text style={[styles.actionText, { color: foreground }]}>
+                      {repeatable ? "Repeat the task" : "Command deleted"}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
-              <Text style={[styles.cardTemplate, { color: foregroundMuted }]} numberOfLines={3}>
-                {entry.rendered}
-              </Text>
-              <Text style={[styles.timestamp, { color: foregroundMuted }]}>
-                {new Date(entry.at).toLocaleString()}
-              </Text>
-              {entry.error ? <Text style={styles.errorText}>{entry.error}</Text> : null}
-            </View>
-          ))}
+            );
+          })}
         </ScrollView>
       )}
 
       <Modal
         open={running !== null}
-        onOpenChange={(open) => !open && setRunning(null)}
+        onOpenChange={(open) => !open && closeRunDialog()}
         title={`Run “${running?.name ?? ""}”`}
       >
         <Modal.Content>
@@ -671,7 +734,11 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
               modelsLoading={modelsLoading}
               multiHost={hosts.length > 1}
               theme={theme}
-              onCancel={() => setRunning(null)}
+              initialValues={repeatPreset?.values}
+              initialProvider={repeatPreset?.provider}
+              initialWorkspaceKey={repeatPreset?.workspaceKey}
+              initialAgentId={repeatPreset?.agentId}
+              onCancel={closeRunDialog}
               onRun={(input) => handleRunBatch({ command: running, values: input.values, targets: input.targets })}
             />
           ) : null}

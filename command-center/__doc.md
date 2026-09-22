@@ -52,7 +52,7 @@ Verified against the running daemon and `@getpaseo/plugin@0.9.0` / `@getpaseo/cl
 - **`worktree: true` does not exist.** The wire schema is a discriminated union: `{ mode: "branch-off", newBranch: string, base? }` | `{ mode: "checkout-branch", branch }` | `{ mode: "checkout-pr", prNumber }`. Branch-off requires an explicit branch name, so the executor generates `command-center/<slug>-<base36 time>`.
 - **Creating an agent inside a workspace** goes through `paseo.workspaces.ref(id).agents.create(options)` (`Omit<PaseoAgentCreateOptions, "cwd">`); the daemon then pins the agent to that workspace.
 - **Provider list**: `paseo.providers.snapshot()` returns entries `{ provider, status, enabled, ... }`, optionally with inline `models`. The surface resolves models per enabled provider (inline first, `providers.listModels(id)` as fallback, loaded before the run modal can open) and offers only full `provider/model` references via a dropdown; disabled providers and providers without models are hidden entirely, not dimmed.
-- **Provider/model format**: the daemon rejects bare provider ids (`Expected config.provider in 'provider/model' format`). Both executors validate with `isFullModelRef` and fail with a readable message; the run dialog blocks Run until a full reference is picked, and the editor migrates stale bare-id values on the next save.
+- **Provider/model format**: the daemon rejects bare provider ids (`Expected config.provider in 'provider/model' format`) — and worse, an unknown model does not error but silently falls back to the provider default. The daemon splits the reference on the FIRST "/" and looks up the remainder in the provider catalog, while catalog model ids may themselves contain slashes (provider `opencode` lists model id `opencode/mimo-v2.6-flash-free`). The reference must therefore always be composed as `<providerId>/<modelIdAsListed>` (`opencode/opencode/mimo-v2.6-flash-free`, as seen on agents created by the Paseo UI). `fullModelRef` implements this; `resolveModelRef` additionally re-qualifies stale stored values against the live catalog and falls back to the default model. Both executors validate with `isFullModelRef`; the run dialog blocks Run until a full reference is picked.
 - **Terminals**: `terminals.create({ workspaceId, name })` → `PaseoTerminalHandle` with `write(data)`. There is no execution acknowledgement; the write is fire-and-forget by design.
 - **Workspace descriptor fields**: `name`, `title`, `projectCustomName`, `projectRootPath`, `workspaceDirectory`, `status`. The UI prefers `projectCustomName ?? title ?? name`.
 - **Agent snapshot fields**: `id`, `title`, `status` (`error|initializing|idle|running|closed`), `archivedAt`. "Open" means `status !== "closed"` and no `archivedAt`.
@@ -71,11 +71,13 @@ Verified against the running daemon and `@getpaseo/plugin@0.9.0` / `@getpaseo/cl
 | File | Content |
 | --- | --- |
 | `commands.json` | `CommandDefinition[]`, sorted by name, favorites first in UI |
-| `history.json` | last 50 `HistoryEntry` entries, newest first |
+| `history.json` | last 50 `HistoryEntry` entries, newest first — each with the used `provider`, the render `values`, and a `batchId` grouping fan-out runs (all optional: pre-upgrade entries parse without them) |
 
 Writes are atomic (temp file + rename). A corrupted file is treated as empty rather than crashing the plugin.
 
 `useCount` is server-owned: the client editor sends its stale value, but `save` preserves the stored counter and `run` increments it.
+
+Each history card shows the used model and agent (resolved live from the agents list, falling back to the id prefix) and a "Repeat the task" button that reopens the run dialog prefilled with the recorded values, target workspace, model, and — when still open — the same agent. Entries whose command was deleted show a disabled button instead.
 
 ## 5. RPC surface
 
@@ -98,7 +100,7 @@ All schemas are zod schemas in `shared/commands.ts`; the same module is imported
 Verified on 2026-09-22 against the running daemon `paseo 0.9.0` with `@getpaseo/plugin@0.9.0`:
 
 - `npm run typecheck` — clean.
-- `npx vitest run` — 5 suites, 51 tests, all green.
+- `npx vitest run` — 5 suites, 58 tests, all green.
 - `paseo plugin add <dir>` → status `running`, daemon logs show `Plugin ready` with no plugin errors.
 - The `version` manifest key is rejected by 0.9.0 (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
 
@@ -108,7 +110,7 @@ Verified on 2026-09-22 against the running daemon `paseo 0.9.0` with `@getpaseo/
 - **One host.** Commands live on the daemon host's filesystem; multi-host setups would need sync or per-host copies.
 - **No secrets.** Templates are plain files; do not put tokens into templates.
 - **Worktree runs require a git workspace.** Branch-off mode on a non-git directory will fail with a daemon-side error surfaced in the run dialog.
-- **History is linear and bounded** (50 entries); there is no per-command filtering yet.
+- **History is linear and bounded** (50 entries); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
 - **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required.
 
 ## 8. Roadmap (technically feasible on SDK 0.9)

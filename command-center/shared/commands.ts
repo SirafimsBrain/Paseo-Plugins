@@ -58,13 +58,43 @@ export interface ProviderWithModels {
 
 /**
  * Full `provider/model` reference for `PaseoAgentConfig.provider`.
- * Tolerates both daemon shapes: a bare model id (`opus-4.6`) and an already
- * qualified one (`claude/opus-4.6`).
+ *
+ * The daemon splits the reference on the FIRST "/" (provider id) and looks up
+ * the REMAINDER in that provider's model catalog — while the catalog lists
+ * model ids that may themselves contain slashes (e.g. provider `opencode`
+ * lists model id `opencode/mimo-v2.6-flash-free`). Hence the reference must
+ * ALWAYS be composed as `<providerId>/<modelIdAsListed>`, even when the model
+ * id already contains slashes: `opencode` + `opencode/mimo-v2.6-flash-free` =
+ * `opencode/opencode/mimo-v2.6-flash-free`. Sending the model id alone
+ * (`opencode/mimo-v2.6-flash-free`) does not error — the daemon silently falls
+ * back to the provider default model instead.
  */
 export function fullModelRef(providerId: string, modelId: string): string {
-  const trimmed = modelId.trim();
-  if (trimmed.includes("/")) return trimmed;
-  return `${providerId}/${trimmed}`;
+  return `${providerId}/${modelId.trim()}`;
+}
+
+/**
+ * Resolves a stored or typed provider value against the live catalog.
+ * Returns a verified full reference, or "" when nothing matches (callers fall
+ * back to the default model). Handles stale values written before the
+ * always-compose rule: a stored `opencode/mimo-v2.6-flash-free` is re-qualified
+ * to `opencode/opencode/mimo-v2.6-flash-free` when that reference exists.
+ */
+export function resolveModelRef(providers: ProviderWithModels[], stored: string | null | undefined): string {
+  const trimmed = (stored ?? "").trim();
+  const known = new Set<string>();
+  for (const provider of providers) {
+    for (const model of provider.models) known.add(model.id);
+  }
+  if (trimmed.length > 0 && known.has(trimmed)) return trimmed;
+  const slash = trimmed.indexOf("/");
+  if (slash > 0) {
+    const providerId = trimmed.slice(0, slash);
+    const candidate = `${providerId}/${trimmed}`;
+    if (known.has(candidate)) return candidate;
+  }
+  const all = providers.flatMap((provider) => provider.models);
+  return (all.find((model) => model.isDefault) ?? all[0])?.id ?? "";
 }
 
 /** True when the value is usable as `PaseoAgentConfig.provider`. */
@@ -113,6 +143,12 @@ export const historyEntrySchema = z.object({
   ok: z.boolean(),
   error: z.string().nullable(),
   at: z.string(),
+  /** Full `provider/model` reference the run used; absent on old entries and shell runs. */
+  provider: z.string().nullable().optional(),
+  /** Input values the run was rendered with (for "Repeat"); absent on old entries. */
+  values: z.record(z.string(), z.string()).optional(),
+  /** Groups entries of one fan-out run; null for single runs. Absent on old entries. */
+  batchId: z.string().nullable().optional(),
 });
 
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
@@ -212,6 +248,8 @@ export const runBatch = defineRpc({
     /** Final values for every declared variable, already validated client-side. */
     values: z.record(z.string(), z.string()),
     targets: z.array(runTargetSchema).min(1).max(20),
+    /** Groups the recorded history entries; generated server-side when omitted. */
+    batchId: z.string().optional(),
   }),
   output: z.object({
     results: z.array(runResultSchema),

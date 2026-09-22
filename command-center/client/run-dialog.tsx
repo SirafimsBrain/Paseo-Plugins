@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { CommandDefinition, ProviderWithModels, RunResult } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
-import { isFullModelRef } from "../shared/commands";
+import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { renderPreview } from "./preview";
 import { ProviderModelPicker } from "./provider-model-picker";
 
@@ -56,17 +56,41 @@ interface Props {
   modelsLoading: boolean;
   multiHost: boolean;
   theme: PluginTheme;
+  /** Repeat preset from a history entry; overrides template defaults. */
+  initialValues?: Record<string, string>;
+  initialProvider?: string | null;
+  /** JSON workspace key; null/unknown falls back to the default target. */
+  initialWorkspaceKey?: string | null;
+  initialAgentId?: string | null;
   onRun: (input: { values: Record<string, string>; targets: BatchTarget[] }) => Promise<BatchItemResult[]>;
   onCancel: () => void;
 }
 
-function defaultProviderRef(command: CommandDefinition, providers: ProviderWithModels[]): string {
-  if (isFullModelRef(command.provider ?? "")) return (command.provider as string).trim();
-  const all = providers.flatMap((provider) => provider.models);
-  return (all.find((model) => model.isDefault) ?? all[0])?.id ?? "";
+function isKnownWorkspaceKey(workspaces: DialogWorkspaceOption[], key: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(key);
+    if (!Array.isArray(parsed)) return false;
+    return workspaces.some((option) => option.serverId === parsed[0] && option.id === parsed[1]);
+  } catch {
+    return false;
+  }
 }
 
-export function RunDialog({ command, workspaces, agents, providers, modelsLoading, multiHost, theme, onRun, onCancel }: Props) {
+export function RunDialog({
+  command,
+  workspaces,
+  agents,
+  providers,
+  modelsLoading,
+  multiHost,
+  theme,
+  initialValues,
+  initialProvider,
+  initialWorkspaceKey,
+  initialAgentId,
+  onRun,
+  onCancel,
+}: Props) {
   const declared = command.variables;
   const discovered = useMemo(() => inputVariablesOf(command.template), [command.template]);
   const merged = useMemo(() => {
@@ -77,17 +101,33 @@ export function RunDialog({ command, workspaces, agents, providers, modelsLoadin
     return [...byName.values()];
   }, [declared, discovered]);
 
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(merged.map((variable) => [variable.name, variable.defaultValue ?? ""])),
+  const [values, setValues] = useState<Record<string, string>>(() => ({
+    ...Object.fromEntries(merged.map((variable) => [variable.name, variable.defaultValue ?? ""])),
+    ...initialValues,
+  }));
+  const [selectedKeys, setSelectedKeys] = useState<string[]>(() => {
+    if (initialWorkspaceKey && isKnownWorkspaceKey(workspaces, initialWorkspaceKey)) {
+      return [initialWorkspaceKey];
+    }
+    return workspaces.length > 0 ? [JSON.stringify([workspaces[0]!.serverId, workspaces[0]!.id])] : [];
+  });
+  const [provider, setProvider] = useState<string>(() =>
+    resolveModelRef(providers, initialProvider ?? command.provider),
   );
-  const [selectedKeys, setSelectedKeys] = useState<string[]>(() =>
-    workspaces.length > 0 ? [JSON.stringify([workspaces[0]!.serverId, workspaces[0]!.id])] : [],
+  const [agentId, setAgentId] = useState<string>(() =>
+    initialAgentId && agents.some((agent) => agent.id === initialAgentId && agent.status !== "closed")
+      ? initialAgentId
+      : "",
   );
-  const [provider, setProvider] = useState<string>(() => defaultProviderRef(command, providers));
-  const [agentId, setAgentId] = useState<string>("");
   const [newWorktree, setNewWorktree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<BatchItemResult[] | null>(null);
+
+  // Re-resolve when the model catalog arrives/changes. Safe: a picked value
+  // that is still known is returned unchanged, so explicit picks survive.
+  useEffect(() => {
+    setProvider((current) => resolveModelRef(providers, current || initialProvider || command.provider));
+  }, [providers, command.provider, initialProvider]);
 
   const isShell = command.type === "shell";
   const openAgents = agents.filter((agent) => agent.status !== "closed");
