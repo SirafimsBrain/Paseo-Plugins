@@ -54,6 +54,7 @@ Verified against the running daemon and `@getpaseo/plugin@0.9.0` / `@getpaseo/cl
 - **Agent snapshot fields**: `id`, `title`, `status` (`error|initializing|idle|running|closed`), `archivedAt`. "Open" means `status !== "closed"` and no `archivedAt`.
 - **Slash command context**: `onSubmit` receives `{ args, paseo, rpc, openSurface, workspace, agent }`; `rpc(contract, input)` is typed by the contract.
 - **Manifest**: the daemon rejects unknown manifest keys — a `version` key makes `plugin add` fail with `Unrecognized key: "version"` (same behavior as the `description` key in 0.8.x). Only `id` and `requirements` are currently accepted.
+- **Theming**: React Native `Text`/`TextInput` default to black, which is unreadable on the dark Paseo background. The surface therefore reads `theme` from `PluginSurfaceProps` (`theme.colors.foreground`, `foregroundMuted`, `border`) and threads it into `CommandForm` and `RunDialog`; inputs also set `placeholderTextColor`. No color is hardcoded.
 - **Safety**: sending to an archived/unknown agent is refused with a readable error instead of dispatching into the void.
 
 ## 4. Storage

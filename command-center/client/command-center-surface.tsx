@@ -34,7 +34,7 @@ interface ProviderOption {
   enabled: boolean;
 }
 
-export function CommandCenterSurface(_props: PluginSurfaceProps) {
+export function CommandCenterSurface({ theme }: PluginSurfaceProps) {
   const paseo = usePaseo();
   const toast = useToast();
   const listRpc = useRpc(listCommands);
@@ -156,6 +156,8 @@ export function CommandCenterSurface(_props: PluginSurfaceProps) {
     return [...(commands ?? [])].sort(favoriteFirst);
   }, [commands]);
 
+  const { foreground, foregroundMuted } = theme.colors;
+
   const handleSave = async (form: CommandFormResult) => {
     const now = new Date().toISOString();
     const base = editing;
@@ -246,10 +248,11 @@ export function CommandCenterSurface(_props: PluginSurfaceProps) {
   if (creating || editing) {
     return (
       <ScrollView contentContainerStyle={styles.formContainer}>
-        <Text style={styles.heading}>{editing ? "Edit command" : "New command"}</Text>
+        <Text style={[styles.heading, { color: foreground }]}>{editing ? "Edit command" : "New command"}</Text>
         <CommandForm
           initial={editing}
           providers={providers}
+          theme={theme}
           onCancel={() => {
             setEditing(null);
             setCreating(false);
@@ -269,7 +272,7 @@ export function CommandCenterSurface(_props: PluginSurfaceProps) {
             style={[styles.tab, tab === option && styles.tabActive]}
             onPress={() => setTab(option)}
           >
-            <Text style={[styles.tabText, tab === option && styles.tabTextActive]}>
+            <Text style={[styles.tabText, { color: foreground }, tab === option && styles.tabTextActive]}>
               {option === "library" ? "Commands" : "History"}
             </Text>
           </Pressable>
@@ -289,7 +292,9 @@ export function CommandCenterSurface(_props: PluginSurfaceProps) {
             }
           }}
         >
-          <Text style={styles.smallButtonText}>{tab === "history" ? "Clear" : "History"}</Text>
+          <Text style={[styles.smallButtonText, { color: foreground }]}>
+            {tab === "history" ? "Clear" : "History"}
+          </Text>
         </Pressable>
         <Pressable style={[styles.smallButton, styles.primarySmallButton]} onPress={() => setCreating(true)}>
           <Text style={[styles.smallButtonText, styles.primarySmallButtonText]}>+ New</Text>
@@ -298,25 +303,31 @@ export function CommandCenterSurface(_props: PluginSurfaceProps) {
 
       {tab === "library" ? (
         <ScrollView contentContainerStyle={styles.list}>
-          {commands === null && commandsError === null ? <Text style={styles.muted}>Loading…</Text> : null}
+          {commands === null && commandsError === null ? (
+            <Text style={[styles.muted, { color: foregroundMuted }]}>Loading…</Text>
+          ) : null}
           {commandsError ? <Text style={styles.errorText}>Failed to load commands: {commandsError}</Text> : null}
           {commands !== null && sorted.length === 0 ? (
-            <Text style={styles.muted}>
+            <Text style={[styles.muted, { color: foregroundMuted }]}>
               No commands yet. Create one with “+ New” — for example a review prompt or a build shell line.
             </Text>
           ) : null}
           {sorted.map((command) => (
-            <View key={command.id} style={styles.card}>
+            <View key={command.id} style={[styles.card, { borderColor: theme.colors.border }]}>
               <View style={styles.cardHeader}>
                 <Pressable style={styles.star} onPress={() => void handleFavorite(command)}>
-                  <Text style={styles.starText}>{command.favorite ? "★" : "☆"}</Text>
+                  <Text style={[styles.starText, { color: foreground }]}>
+                    {command.favorite ? "★" : "☆"}
+                  </Text>
                 </Pressable>
-                <Text style={styles.cardTitle} numberOfLines={1}>
+                <Text style={[styles.cardTitle, { color: foreground }]} numberOfLines={1}>
                   {command.name}
                 </Text>
-                <Text style={styles.badge}>{command.type === "shell" ? "shell" : command.provider ?? "prompt"}</Text>
+                <Text style={[styles.badge, { color: foreground }]}>
+                  {command.type === "shell" ? "shell" : command.provider ?? "prompt"}
+                </Text>
               </View>
-              <Text style={styles.cardTemplate} numberOfLines={2}>
+              <Text style={[styles.cardTemplate, { color: foregroundMuted }]} numberOfLines={2}>
                 {command.template}
               </Text>
               <View style={styles.cardActions}>
@@ -327,37 +338,43 @@ export function CommandCenterSurface(_props: PluginSurfaceProps) {
                     setRunning(command);
                   }}
                 >
-                  <Text style={[styles.actionText, styles.runText]}>Run</Text>
+                  <Text style={[styles.actionText, styles.runText, { color: foreground }]}>Run</Text>
                 </Pressable>
                 <Pressable style={styles.actionButton} onPress={() => setEditing(command)}>
-                  <Text style={styles.actionText}>Edit</Text>
+                  <Text style={[styles.actionText, { color: foreground }]}>Edit</Text>
                 </Pressable>
                 <Pressable style={styles.actionButton} onPress={() => void handleDelete(command)}>
                   <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
                 </Pressable>
-                <Text style={styles.useCount}>{command.useCount} runs</Text>
+                <Text style={[styles.useCount, { color: foregroundMuted }]}>{command.useCount} runs</Text>
               </View>
             </View>
           ))}
         </ScrollView>
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
-          {history === null ? <Text style={styles.muted}>Loading…</Text> : null}
-          {history !== null && history.length === 0 ? <Text style={styles.muted}>Nothing has run yet.</Text> : null}
+          {history === null ? (
+            <Text style={[styles.muted, { color: foregroundMuted }]}>Loading…</Text>
+          ) : null}
+          {history !== null && history.length === 0 ? (
+            <Text style={[styles.muted, { color: foregroundMuted }]}>Nothing has run yet.</Text>
+          ) : null}
           {(history ?? []).map((entry: HistoryEntry) => (
-            <View key={entry.id} style={styles.card}>
+            <View key={entry.id} style={[styles.card, { borderColor: theme.colors.border }]}>
               <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle} numberOfLines={1}>
+                <Text style={[styles.cardTitle, { color: foreground }]} numberOfLines={1}>
                   {entry.commandName}
                 </Text>
-                <Text style={[styles.badge, !entry.ok && styles.badgeError]}>
+                <Text style={[styles.badge, { color: foreground }, !entry.ok && styles.badgeError]}>
                   {entry.ok ? entry.kind : "failed"}
                 </Text>
               </View>
-              <Text style={styles.cardTemplate} numberOfLines={3}>
+              <Text style={[styles.cardTemplate, { color: foregroundMuted }]} numberOfLines={3}>
                 {entry.rendered}
               </Text>
-              <Text style={styles.timestamp}>{new Date(entry.at).toLocaleString()}</Text>
+              <Text style={[styles.timestamp, { color: foregroundMuted }]}>
+                {new Date(entry.at).toLocaleString()}
+              </Text>
               {entry.error ? <Text style={styles.errorText}>{entry.error}</Text> : null}
             </View>
           ))}
@@ -377,6 +394,7 @@ export function CommandCenterSurface(_props: PluginSurfaceProps) {
               agents={agents}
               busy={false}
               errorText={runError}
+              theme={theme}
               onCancel={() => setRunning(null)}
               onRun={(input) =>
                 void handleRun({

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import type { PluginTheme } from "@getpaseo/plugin";
 import type { CommandDefinition } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
 
@@ -16,6 +17,7 @@ interface Props {
   initial?: CommandDefinition | null;
   /** Provider ids known to the daemon (e.g. cline, kilo, qwen-code). */
   providers: { id: string; enabled: boolean }[];
+  theme: PluginTheme;
   onCancel: () => void;
   onSubmit: (result: CommandFormResult) => void;
 }
@@ -24,7 +26,7 @@ function fieldStyle(errors: string | null) {
   return errors ? [styles.input, styles.inputError] : styles.input;
 }
 
-export function CommandForm({ initial, providers, onCancel, onSubmit }: Props) {
+export function CommandForm({ initial, providers, theme, onCancel, onSubmit }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState<"prompt" | "shell">(initial?.type ?? "prompt");
   const [template, setTemplate] = useState(initial?.template ?? "");
@@ -38,20 +40,28 @@ export function CommandForm({ initial, providers, onCancel, onSubmit }: Props) {
   const providerError = type === "prompt" && provider.trim().length === 0 ? "Provider is required." : null;
   const valid = !nameError && !templateError && !providerError;
 
+  const { foreground, foregroundMuted } = theme.colors;
+
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>Name</Text>
-      <TextInput style={fieldStyle(nameError)} value={name} onChangeText={setName} placeholder="Review pull request" />
+      <Text style={[styles.label, { color: foregroundMuted }]}>Name</Text>
+      <TextInput
+        style={[fieldStyle(nameError), { color: foreground, borderColor: theme.colors.border }]}
+        value={name}
+        onChangeText={setName}
+        placeholder="Review pull request"
+        placeholderTextColor={foregroundMuted}
+      />
 
-      <Text style={styles.label}>Type</Text>
+      <Text style={[styles.label, { color: foregroundMuted }]}>Type</Text>
       <View style={styles.row}>
         {(["prompt", "shell"] as const).map((option) => (
           <Pressable
             key={option}
-            style={[styles.chip, type === option && styles.chipActive]}
+            style={[styles.chip, { borderColor: theme.colors.border }, type === option && styles.chipActive]}
             onPress={() => setType(option)}
           >
-            <Text style={[styles.chipText, type === option && styles.chipTextActive]}>
+            <Text style={[styles.chipText, { color: foreground }, type === option && styles.chipTextActive]}>
               {option === "prompt" ? "Prompt → agent" : "Shell → terminal"}
             </Text>
           </Pressable>
@@ -60,12 +70,13 @@ export function CommandForm({ initial, providers, onCancel, onSubmit }: Props) {
 
       {type === "prompt" ? (
         <>
-          <Text style={styles.label}>Provider (provider/model)</Text>
+          <Text style={[styles.label, { color: foregroundMuted }]}>Provider (provider/model)</Text>
           <TextInput
-            style={fieldStyle(providerError)}
+            style={[fieldStyle(providerError), { color: foreground, borderColor: theme.colors.border }]}
             value={provider}
             onChangeText={setProvider}
             placeholder="provider/model, e.g. cline"
+            placeholderTextColor={foregroundMuted}
             autoCapitalize="none"
           />
           {providers.length > 0 ? (
@@ -73,10 +84,17 @@ export function CommandForm({ initial, providers, onCancel, onSubmit }: Props) {
               {providers.slice(0, 10).map((option) => (
                 <Pressable
                   key={option.id}
-                  style={[styles.chip, provider === option.id && styles.chipActive]}
+                  style={[
+                    styles.chip,
+                    { borderColor: theme.colors.border },
+                    provider === option.id && styles.chipActive,
+                  ]}
                   onPress={() => setProvider(option.id)}
                 >
-                  <Text style={[styles.chipText, !option.enabled && styles.chipTextDisabled]} numberOfLines={1}>
+                  <Text
+                    style={[styles.chipText, { color: foreground }, !option.enabled && styles.chipTextDisabled]}
+                    numberOfLines={1}
+                  >
                     {option.id}
                   </Text>
                 </Pressable>
@@ -86,39 +104,51 @@ export function CommandForm({ initial, providers, onCancel, onSubmit }: Props) {
         </>
       ) : (
         <>
-          <Text style={styles.label}>Terminal name (optional)</Text>
-          <TextInput style={styles.input} value={terminalName} onChangeText={setTerminalName} placeholder="build" />
+          <Text style={[styles.label, { color: foregroundMuted }]}>Terminal name (optional)</Text>
+          <TextInput
+            style={[styles.input, { color: foreground, borderColor: theme.colors.border }]}
+            value={terminalName}
+            onChangeText={setTerminalName}
+            placeholder="build"
+            placeholderTextColor={foregroundMuted}
+          />
         </>
       )}
 
-      <Text style={styles.label}>Scope</Text>
+      <Text style={[styles.label, { color: foregroundMuted }]}>Scope</Text>
       <View style={styles.row}>
         {(["global", "workspace"] as const).map((option) => (
           <Pressable
             key={option}
-            style={[styles.chip, scope === option && styles.chipActive]}
+            style={[styles.chip, { borderColor: theme.colors.border }, scope === option && styles.chipActive]}
             onPress={() => setScope(option)}
           >
-            <Text style={[styles.chipText, scope === option && styles.chipTextActive]}>
+            <Text style={[styles.chipText, { color: foreground }, scope === option && styles.chipTextActive]}>
               {option === "global" ? "Global" : "This workspace only"}
             </Text>
           </Pressable>
         ))}
       </View>
 
-      <Text style={styles.label}>Template</Text>
+      <Text style={[styles.label, { color: foregroundMuted }]}>Template</Text>
       <TextInput
-        style={[styles.input, styles.multiline, templateError ? styles.inputError : null]}
+        style={[
+          styles.input,
+          styles.multiline,
+          { color: foreground, borderColor: theme.colors.border },
+          templateError ? styles.inputError : null,
+        ]}
         value={template}
         onChangeText={setTemplate}
         placeholder={"Review {{input:pr}} and fix the failing tests."}
+        placeholderTextColor={foregroundMuted}
         multiline
       />
-      <Text style={styles.hint}>
+      <Text style={[styles.hint, { color: foregroundMuted }]}>
         Variables: {"{{input:name|default}}"}, {"{{workspace.name}}"}, {"{{workspace.path}}"}, {"{{date}}"}, {"{{time}}"}
       </Text>
       {variables.length > 0 ? (
-        <Text style={styles.hint}>
+        <Text style={[styles.hint, { color: foregroundMuted }]}>
           Inputs detected: {variables.map((variable) => variable.name).join(", ")}
         </Text>
       ) : null}

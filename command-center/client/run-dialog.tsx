@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import type { PluginTheme } from "@getpaseo/plugin";
 import type { CommandDefinition } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
 import { renderPreview } from "./preview";
@@ -21,6 +22,7 @@ interface Props {
   agents: AgentOption[];
   busy: boolean;
   errorText: string | null;
+  theme: PluginTheme;
   onRun: (input: {
     values: Record<string, string>;
     workspaceId: string | undefined;
@@ -30,7 +32,7 @@ interface Props {
   onCancel: () => void;
 }
 
-export function RunDialog({ command, workspaces, agents, busy, errorText, onRun, onCancel }: Props) {
+export function RunDialog({ command, workspaces, agents, busy, errorText, theme, onRun, onCancel }: Props) {
   const declared = command.variables;
   const discovered = useMemo(() => inputVariablesOf(command.template), [command.template]);
   const merged = useMemo(() => {
@@ -54,11 +56,12 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, onRun,
   const needsWorkspace = isShell || command.scope === "workspace" || newWorktree;
   const openAgents = agents.filter((agent) => agent.status !== "closed");
   const preview = renderPreview(command.template, values, workspaceId, workspaces);
+  const { foreground, foregroundMuted } = theme.colors;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{command.name}</Text>
-      <Text style={styles.subtitle}>
+      <Text style={[styles.title, { color: foreground }]}>{command.name}</Text>
+      <Text style={[styles.subtitle, { color: foregroundMuted }]}>
         {isShell
           ? "Runs in a new terminal of the selected workspace."
           : command.scope === "workspace"
@@ -68,15 +71,16 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, onRun,
 
       {merged.length > 0 ? (
         <>
-          <Text style={styles.label}>Inputs</Text>
+          <Text style={[styles.label, { color: foregroundMuted }]}>Inputs</Text>
           {merged.map((variable) => (
             <View key={variable.name} style={styles.field}>
-              <Text style={styles.fieldLabel}>{variable.prompt || variable.name}</Text>
+              <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>{variable.prompt || variable.name}</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: foreground, borderColor: theme.colors.border }]}
                 value={values[variable.name] ?? ""}
                 onChangeText={(text) => setValues((previous) => ({ ...previous, [variable.name]: text }))}
                 placeholder={variable.defaultValue ?? variable.name}
+                placeholderTextColor={foregroundMuted}
               />
             </View>
           ))}
@@ -85,15 +89,19 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, onRun,
 
       {needsWorkspace ? (
         <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Workspace</Text>
+          <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>Workspace</Text>
           <View style={styles.row}>
             {workspaces.slice(0, 6).map((workspace) => (
               <Pressable
                 key={workspace.id}
-                style={[styles.chip, workspaceId === workspace.id && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  { borderColor: theme.colors.border },
+                  workspaceId === workspace.id && styles.chipActive,
+                ]}
                 onPress={() => setWorkspaceId(workspace.id)}
               >
-                <Text style={styles.chipText} numberOfLines={1}>
+                <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
                   {workspace.name}
                 </Text>
               </Pressable>
@@ -106,26 +114,30 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, onRun,
         <>
           <View style={styles.field}>
             <Pressable style={styles.checkRow} onPress={() => setNewWorktree((value) => !value)}>
-              <Text style={styles.check}>{newWorktree ? "☑" : "☐"}</Text>
-              <Text style={styles.checkLabel}>Branch off into a new worktree</Text>
+              <Text style={[styles.check, { color: foreground }]}>{newWorktree ? "☑" : "☐"}</Text>
+              <Text style={[styles.checkLabel, { color: foreground }]}>Branch off into a new worktree</Text>
             </Pressable>
           </View>
           <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Send to an existing agent (optional)</Text>
+            <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>Send to an existing agent (optional)</Text>
             <View style={styles.row}>
               <Pressable
-                style={[styles.chip, agentId === "" && styles.chipActive]}
+                style={[styles.chip, { borderColor: theme.colors.border }, agentId === "" && styles.chipActive]}
                 onPress={() => setAgentId("")}
               >
-                <Text style={styles.chipText}>New agent</Text>
+                <Text style={[styles.chipText, { color: foreground }]}>New agent</Text>
               </Pressable>
               {openAgents.slice(0, 5).map((agent) => (
                 <Pressable
                   key={agent.id}
-                  style={[styles.chip, agentId === agent.id && styles.chipActive]}
+                  style={[
+                    styles.chip,
+                    { borderColor: theme.colors.border },
+                    agentId === agent.id && styles.chipActive,
+                  ]}
                   onPress={() => setAgentId(agent.id)}
                 >
-                  <Text style={styles.chipText} numberOfLines={1}>
+                  <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
                     {agent.title ?? agent.id.slice(0, 10)}
                   </Text>
                 </Pressable>
@@ -136,8 +148,8 @@ export function RunDialog({ command, workspaces, agents, busy, errorText, onRun,
       ) : null}
 
       <View style={styles.previewBox}>
-        <Text style={styles.previewLabel}>Preview</Text>
-        <Text style={styles.previewText}>{preview || "—"}</Text>
+        <Text style={[styles.previewLabel, { color: foregroundMuted }]}>Preview</Text>
+        <Text style={[styles.previewText, { color: foreground }]}>{preview || "—"}</Text>
       </View>
 
       {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
