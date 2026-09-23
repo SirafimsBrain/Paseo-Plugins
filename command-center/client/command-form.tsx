@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import type { CommandDefinition, ProviderWithModels } from "../shared/commands";
+import type { CommandCategory, CommandDefinition, ProviderWithModels } from "../shared/commands";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
+import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 import { ProviderModelPicker } from "./provider-model-picker";
 
 export interface CommandFormResult {
@@ -13,6 +14,8 @@ export interface CommandFormResult {
   provider: string | null;
   terminalName: string | null;
   scope: "global" | "workspace";
+  /** Chosen from the stored list, or a brand-new label typed in. Empty = none. */
+  category: string | null;
 }
 
 interface Props {
@@ -21,6 +24,8 @@ interface Props {
   providers: ProviderWithModels[];
   modelsLoading: boolean;
   multiHost: boolean;
+  /** Stored category labels; the picker also offers creating a new one. */
+  categories: CommandCategory[];
   theme: PluginTheme;
   onCancel: () => void;
   onSubmit: (result: CommandFormResult) => void;
@@ -30,13 +35,23 @@ function fieldStyle(errors: string | null) {
   return errors ? [styles.input, styles.inputError] : styles.input;
 }
 
-export function CommandForm({ initial, providers, modelsLoading, multiHost, theme, onCancel, onSubmit }: Props) {
+export function CommandForm({
+  initial,
+  providers,
+  modelsLoading,
+  multiHost,
+  categories,
+  theme,
+  onCancel,
+  onSubmit,
+}: Props) {
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState<"prompt" | "shell">(initial?.type ?? "prompt");
   const [template, setTemplate] = useState(initial?.template ?? "");
   const [provider, setProvider] = useState(initial?.provider ?? "");
   const [terminalName, setTerminalName] = useState(initial?.terminalName ?? "");
   const [scope, setScope] = useState<"global" | "workspace">(initial?.scope ?? "global");
+  const [category, setCategory] = useState(initial?.category ?? "");
 
   // Migrate stale stored values (bare ids, pre-compose refs) against the live
   // catalog. Explicit picks that are still known survive unchanged.
@@ -58,12 +73,17 @@ export function CommandForm({ initial, providers, modelsLoading, multiHost, them
   const valid = !nameError && !templateError && !providerError;
 
   const { foreground, foregroundMuted } = theme.colors;
+  const typography = useHostTypography();
+  const font = (base: number) => scaledFont(base, typography);
+  const uiFont = interfaceFontFamily(typography);
+  const monoFont = monoFontFamily(typography);
+  const uiFontStyle = uiFont ? { fontFamily: uiFont } : null;
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.label, { color: foregroundMuted }]}>Name</Text>
+      <Text style={[styles.label, { color: foregroundMuted, fontSize: font(12) }]}>Name</Text>
       <TextInput
-        style={[fieldStyle(nameError), { color: foreground, borderColor: theme.colors.border }]}
+        style={[fieldStyle(nameError), { color: foreground, borderColor: theme.colors.border, fontSize: font(13) }, uiFontStyle]}
         value={name}
         onChangeText={setName}
         placeholder="Review pull request"
@@ -115,6 +135,57 @@ export function CommandForm({ initial, providers, modelsLoading, multiHost, them
         </>
       )}
 
+      <Text style={[styles.label, { color: foregroundMuted }]}>Category</Text>
+      <View style={styles.row}>
+        <Pressable
+          style={[styles.chip, { borderColor: theme.colors.border }, category.trim().length === 0 && styles.chipActive]}
+          onPress={() => setCategory("")}
+        >
+          <Text
+            style={[
+              styles.chipText,
+              { color: foreground },
+              category.trim().length === 0 && styles.chipTextActive,
+            ]}
+          >
+            None
+          </Text>
+        </Pressable>
+        {categories.map((entry) => (
+          <Pressable
+            key={entry.sortKey}
+            style={[
+              styles.chip,
+              { borderColor: theme.colors.border },
+              category.trim().toLowerCase() === entry.sortKey && styles.chipActive,
+            ]}
+            onPress={() => setCategory(entry.name)}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                { color: foreground },
+                category.trim().toLowerCase() === entry.sortKey && styles.chipTextActive,
+              ]}
+            >
+              {entry.name}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <TextInput
+        style={[styles.input, { color: foreground, borderColor: theme.colors.border }]}
+        value={category}
+        onChangeText={setCategory}
+        placeholder="Or type a new category name"
+        placeholderTextColor={foregroundMuted}
+      />
+      {category.trim().length > 0 && !categories.some((entry) => entry.sortKey === category.trim().toLowerCase()) ? (
+        <Text style={[styles.hint, { color: foregroundMuted }]}>
+          “{category.trim()}” is new — it is added to the category list when the command is saved.
+        </Text>
+      ) : null}
+
       <Text style={[styles.label, { color: foregroundMuted }]}>Scope</Text>
       <View style={styles.row}>
         {(["global", "workspace"] as const).map((option) => (
@@ -130,12 +201,13 @@ export function CommandForm({ initial, providers, modelsLoading, multiHost, them
         ))}
       </View>
 
-      <Text style={[styles.label, { color: foregroundMuted }]}>Template</Text>
+      <Text style={[styles.label, { color: foregroundMuted, fontSize: font(12) }]}>Template</Text>
       <TextInput
         style={[
           styles.input,
           styles.multiline,
-          { color: foreground, borderColor: theme.colors.border },
+          { color: foreground, borderColor: theme.colors.border, fontSize: font(13) },
+          monoFont ? { fontFamily: monoFont } : null,
           templateError ? styles.inputError : null,
         ]}
         value={template}
@@ -172,6 +244,7 @@ export function CommandForm({ initial, providers, modelsLoading, multiHost, them
               provider: type === "prompt" ? provider.trim() || null : null,
               terminalName: type === "shell" ? terminalName.trim() || null : null,
               scope,
+              category: category.trim() || null,
             })
           }
         >

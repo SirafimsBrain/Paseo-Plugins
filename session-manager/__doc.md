@@ -10,6 +10,18 @@ transcripts that accumulate on disk.
 The plugin runs in the Paseo daemon subprocess (full filesystem and process
 access on the daemon host) and renders a React Native panel in the Paseo app.
 
+### Host typography (plugin 0.2.0)
+
+Paseo's `PluginTheme` passes colors only — no font settings — while the app has
+Appearance settings for interface font, code font, and interface text size.
+The panel therefore reads the app settings JSON from web `localStorage`
+(`@paseo:app-settings`) and scales its text sizes by `uiBaseFontSize / 14` with
+`shared/host-fonts.ts` (identical module to command-center; see that plugin's
+`__doc.md` § 5b for the full reverse-engineering details). A configured
+interface font family is applied via the hook in `client/use-host-typography.ts`
+usage in the panel styles; when unset, no `fontFamily` is forced so the host's
+`--paseo-ui-font` CSS rule stays in effect.
+
 ## Compatibility
 
 Verified against Paseo `0.9.0` (2026-09-22, SDK `@getpaseo/plugin@0.9.0`):
@@ -70,7 +82,8 @@ session-manager/
 ├── index.client.tsx             # Client entry: panel, settings screen, Command Center items
 ├── shared/
 │   ├── session-manager.ts       # Zod schemas + defineRpc contracts
-│   └── settings.ts              # Host-scoped settings definition
+│   ├── settings.ts              # Host-scoped settings definition
+│   └── host-fonts.ts            # Host Appearance settings parsing + font scale math
 ├── server/
 │   ├── session-manager.ts       # Aggregation, safety guards, RPC handlers, listing cache
 │   ├── exports.ts               # "Export before delete" file writer
@@ -89,7 +102,8 @@ session-manager/
 ├── client/
 │   ├── session-manager-panel.tsx
 │   ├── settings-screen.tsx      # Editor for the host-scoped settings
-│   └── intent.ts                # Panel filters handed over by Command Center items
+│   ├── intent.ts                # Panel filters handed over by Command Center items
+│   └── use-host-typography.ts   # hook: host font settings → scale + families
 └── tests/                       # vitest suites (`npm test`)
 ```
 

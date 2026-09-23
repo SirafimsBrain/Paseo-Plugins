@@ -2,23 +2,27 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { CommandDefinition, HistoryEntry, ProviderWithModels } from "../shared/commands";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderWithModels } from "../shared/commands";
 import { normalizeProviderModels } from "../shared/commands";
+import { commandMatchesCategory, commandMatchesQuery } from "../shared/search";
 import {
   appendHistory,
   clearHistory,
   deleteCommand,
+  listCategories,
   listCommands,
   listHistory,
   runBatch,
   runCommand,
+  saveCategories,
   saveCommand,
   toggleFavorite,
 } from "../shared/commands";
 import { CommandForm, type CommandFormResult } from "./command-form";
 import { dispatchRemoteTarget } from "./dispatch";
 import { RunDialog, type BatchItemResult, type BatchTarget } from "./run-dialog";
+import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 
 type Tab = "library" | "history";
 
@@ -66,6 +70,8 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   const saveRpc = useRpc(saveCommand);
   const runBatchRpc = useRpc(runBatch);
   const appendHistoryRpc = useRpc(appendHistory);
+  const categoriesRpc = useRpc(listCategories);
+  const saveCategoriesRpc = useRpc(saveCategories);
 
   // All configured app hosts (multi-host fan-out). Older hosts may not provide
   // the loader — fall back to single-host mode instead of crashing.
@@ -99,6 +105,10 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [providers, setProviders] = useState<ProviderWithModels[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [categories, setCategories] = useState<CommandCategory[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchVisible, setSearchVisible] = useState(false);
 
   const refresh = useCallback(() => {
     setReloadKey((key) => key + 1);
@@ -165,6 +175,20 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
       cancelled = true;
     };
   }, [historyRpc, tab, reloadKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    categoriesRpc({})
+      .then((result) => {
+        if (!cancelled) setCategories(result.categories);
+      })
+      .catch(() => {
+        if (!cancelled) setCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [categoriesRpc, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -361,10 +385,19 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   const sorted = useMemo(() => {
     const favoriteFirst = (a: CommandDefinition, b: CommandDefinition) =>
       Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name);
-    return [...(commands ?? [])].sort(favoriteFirst);
-  }, [commands]);
+    return [...(commands ?? [])]
+      .filter((command) => commandMatchesCategory(command, categoryFilter))
+      .filter((command) => commandMatchesQuery(command, searchQuery))
+      .sort(favoriteFirst);
+  }, [commands, categoryFilter, searchQuery]);
 
   const { foreground, foregroundMuted } = theme.colors;
+  const typography = useHostTypography();
+  const uiFont = interfaceFontFamily(typography);
+  const monoFont = monoFontFamily(typography);
+  const font = (base: number) => scaledFont(base, typography);
+  const fontFamilyStyle = uiFont ? { fontFamily: uiFont } : null;
+  const monoFontStyle = monoFont ? { fontFamily: monoFont } : null;
 
   const handleSave = async (form: CommandFormResult) => {
     const now = new Date().toISOString();
@@ -380,6 +413,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
           provider: form.provider ?? undefined,
           terminalName: form.terminalName ?? undefined,
           scope: form.scope,
+          category: form.category ?? undefined,
           variables: [],
           favorite: base?.favorite ?? false,
           createdAt: base?.createdAt ?? now,
@@ -388,6 +422,13 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
         },
       });
       if (result.saved) {
+        // A brand-new category label is registered together with the command
+        // so it appears in the filter row immediately.
+        if (form.category && !categories.some((entry) => entry.sortKey === form.category!.toLowerCase())) {
+          await saveCategoriesRpc({
+            category: { name: form.category, sortKey: form.category.toLowerCase() },
+          }).catch(() => null);
+        }
         toast.show("Command saved", { variant: "success" });
         setEditing(null);
         setCreating(false);
@@ -567,6 +608,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
           providers={providers}
           modelsLoading={modelsLoading}
           multiHost={hosts.length > 1}
+          categories={categories}
           theme={theme}
           onCancel={() => {
             setEditing(null);
@@ -578,6 +620,14 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
     );
   }
 
+  const categoryChips: { key: string; label: string }[] = [
+    { key: "", label: "All" },
+    ...categories.map((entry) => ({ key: entry.sortKey, label: entry.name })),
+  ];
+  const hasCategoryOnAny = (commands ?? []).some(
+    (command) => typeof command.category === "string" && command.category.trim().length > 0,
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.tabRow}>
@@ -587,7 +637,13 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
             style={[styles.tab, tab === option && styles.tabActive]}
             onPress={() => setTab(option)}
           >
-            <Text style={[styles.tabText, { color: foreground }, tab === option && styles.tabTextActive]}>
+            <Text
+              style={[
+                styles.tabText,
+                { color: foreground, fontSize: font(13) },
+                tab === option && styles.tabTextActive,
+              ]}
+            >
               {option === "library" ? "Commands" : "History"}
             </Text>
           </Pressable>
@@ -606,42 +662,105 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
             }
           }}
         >
-          <Text style={[styles.smallButtonText, { color: foreground }]}>
+          <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>
             {tab === "history" ? "Clear" : "History"}
           </Text>
         </Pressable>
         <Pressable style={[styles.smallButton, styles.primarySmallButton]} onPress={() => setCreating(true)}>
-          <Text style={[styles.smallButtonText, styles.primarySmallButtonText]}>+ New</Text>
+          <Text style={[styles.smallButtonText, styles.primarySmallButtonText, { fontSize: font(12) }]}>+ New</Text>
         </Pressable>
       </View>
 
       {tab === "library" ? (
         <ScrollView contentContainerStyle={styles.list}>
+          <View style={styles.toolbar}>
+            <View style={styles.categoryRow}>
+              {hasCategoryOnAny || categoryFilter !== null
+                ? categoryChips.map((chip) => (
+                    <Pressable
+                      key={chip.key || "all"}
+                      style={[
+                        styles.chip,
+                        { borderColor: theme.colors.border },
+                        (categoryFilter ?? "") === chip.key && styles.chipActive,
+                      ]}
+                      onPress={() => setCategoryFilter(chip.key === "" ? null : chip.key)}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          { color: foreground, fontSize: font(12) },
+                          (categoryFilter ?? "") === chip.key && styles.chipTextActive,
+                        ]}
+                      >
+                        {chip.label}
+                      </Text>
+                    </Pressable>
+                  ))
+                : null}
+            </View>
+            {searchVisible ? (
+              <TextInput
+                autoFocus
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search commands…"
+                placeholderTextColor={foregroundMuted}
+                style={[styles.searchInput, { color: foreground, borderColor: theme.colors.border }]}
+              />
+            ) : null}
+            <Pressable
+              style={[styles.smallButton, searchVisible && { backgroundColor: "rgba(90,140,255,0.25)" }]}
+              onPress={() => {
+                setSearchVisible((visible) => !visible);
+                if (searchVisible) setSearchQuery("");
+              }}
+            >
+              <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Search</Text>
+            </Pressable>
+          </View>
           {commands === null && commandsError === null ? (
-            <Text style={[styles.muted, { color: foregroundMuted }]}>Loading…</Text>
+            <Text style={[styles.muted, { color: foregroundMuted, fontSize: font(13) }]}>Loading…</Text>
           ) : null}
-          {commandsError ? <Text style={styles.errorText}>Failed to load commands: {commandsError}</Text> : null}
+          {commandsError ? (
+            <Text style={[styles.errorText, { fontSize: font(12) }]}>Failed to load commands: {commandsError}</Text>
+          ) : null}
           {commands !== null && sorted.length === 0 ? (
-            <Text style={[styles.muted, { color: foregroundMuted }]}>
-              No commands yet. Create one with “+ New” — for example a review prompt or a build shell line.
+            <Text style={[styles.muted, { color: foregroundMuted, fontSize: font(13) }]}>
+              {(commands ?? []).length === 0
+                ? "No commands yet. Create one with “+ New” — for example a review prompt or a build shell line."
+                : "No commands match the current search or category filter."}
             </Text>
           ) : null}
           {sorted.map((command) => (
             <View key={command.id} style={[styles.card, { borderColor: theme.colors.border }]}>
               <View style={styles.cardHeader}>
                 <Pressable style={styles.star} onPress={() => void handleFavorite(command)}>
-                  <Text style={[styles.starText, { color: foreground }]}>
+                  <Text style={[styles.starText, { color: foreground, fontSize: font(16) }]}>
                     {command.favorite ? "★" : "☆"}
                   </Text>
                 </Pressable>
-                <Text style={[styles.cardTitle, { color: foreground }]} numberOfLines={1}>
+                <Text style={[styles.cardTitle, { color: foreground }, fontFamilyStyle, { fontSize: font(14) }]} numberOfLines={1}>
                   {command.name}
                 </Text>
-                <Text style={[styles.badge, { color: foreground }]}>
+                {typeof command.category === "string" && command.category.trim().length > 0 ? (
+                  <Text style={[styles.categoryBadge, { color: foregroundMuted }, { fontSize: font(10) }]}>
+                    {command.category}
+                  </Text>
+                ) : null}
+                <Text style={[styles.badge, { color: foreground, fontSize: font(10) }]}>
                   {command.type === "shell" ? "shell" : command.provider ?? "prompt"}
                 </Text>
               </View>
-              <Text style={[styles.cardTemplate, { color: foregroundMuted }]} numberOfLines={2}>
+              <Text
+                style={[
+                  styles.cardTemplate,
+                  { color: foregroundMuted },
+                  monoFontStyle,
+                  { fontSize: font(12) },
+                ]}
+                numberOfLines={2}
+              >
                 {command.template}
               </Text>
               <View style={styles.cardActions}>
@@ -651,15 +770,15 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
                     setRunning(command);
                   }}
                 >
-                  <Text style={[styles.actionText, styles.runText, { color: foreground }]}>Run</Text>
+                  <Text style={[styles.actionText, styles.runText, { color: foreground, fontSize: font(12) }]}>Run</Text>
                 </Pressable>
                 <Pressable style={styles.actionButton} onPress={() => setEditing(command)}>
-                  <Text style={[styles.actionText, { color: foreground }]}>Edit</Text>
+                  <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Edit</Text>
                 </Pressable>
                 <Pressable style={styles.actionButton} onPress={() => void handleDelete(command)}>
-                  <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
+                  <Text style={[styles.actionText, styles.deleteText, { fontSize: font(12) }]}>Delete</Text>
                 </Pressable>
-                <Text style={[styles.useCount, { color: foregroundMuted }]}>{command.useCount} runs</Text>
+                <Text style={[styles.useCount, { color: foregroundMuted, fontSize: font(11) }]}>{command.useCount} runs</Text>
               </View>
             </View>
           ))}
@@ -681,21 +800,21 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
             return (
               <View key={entry.id} style={[styles.card, { borderColor: theme.colors.border }]}>
                 <View style={styles.cardHeader}>
-                  <Text style={[styles.cardTitle, { color: foreground }]} numberOfLines={1}>
+                  <Text style={[styles.cardTitle, { color: foreground }, fontFamilyStyle, { fontSize: font(14) }]} numberOfLines={1}>
                     {entry.commandName}
                   </Text>
-                  <Text style={[styles.badge, { color: foreground }, !entry.ok && styles.badgeError]}>
+                  <Text style={[styles.badge, { color: foreground, fontSize: font(10) }, !entry.ok && styles.badgeError]}>
                     {entry.ok ? entry.kind : "failed"}
                   </Text>
                 </View>
-                <Text style={[styles.cardTemplate, { color: foregroundMuted }]} numberOfLines={3}>
+                <Text style={[styles.cardTemplate, { color: foregroundMuted }, monoFontStyle, { fontSize: font(12) }]} numberOfLines={3}>
                   {entry.rendered}
                 </Text>
-                <Text style={[styles.timestamp, { color: foregroundMuted }]}>
+                <Text style={[styles.timestamp, { color: foregroundMuted, fontSize: font(11) }]}>
                   {new Date(entry.at).toLocaleString()}
                 </Text>
                 {entry.provider || agentLabel ? (
-                  <Text style={[styles.timestamp, { color: foregroundMuted }]} numberOfLines={1}>
+                  <Text style={[styles.timestamp, { color: foregroundMuted, fontSize: font(11) }]} numberOfLines={1}>
                     {[entry.provider ?? null, agentLabel ? `agent ${agentLabel}` : null]
                       .filter((part): part is string => typeof part === "string" && part.length > 0)
                       .join(" · ")}
@@ -708,7 +827,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
                     disabled={!repeatable}
                     onPress={() => handleRepeat(entry)}
                   >
-                    <Text style={[styles.actionText, { color: foreground }]}>
+                    <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>
                       {repeatable ? "Repeat the task" : "Command deleted"}
                     </Text>
                   </Pressable>
@@ -752,6 +871,35 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   heading: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
   formContainer: { padding: 4 },
+  toolbar: { gap: 8, marginBottom: 2 },
+  categoryRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(128,128,128,0.4)",
+  },
+  chipActive: { backgroundColor: "rgba(90,140,255,0.25)", borderColor: "rgba(90,140,255,0.8)" },
+  chipText: { fontSize: 12 },
+  chipTextActive: { fontWeight: "700" },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: "rgba(128,128,128,0.4)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 13,
+  },
+  categoryBadge: {
+    fontSize: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: "rgba(90,140,255,0.15)",
+    overflow: "hidden",
+    opacity: 0.9,
+  },
   tabRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
   tab: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   tabActive: { backgroundColor: "rgba(90,140,255,0.2)" },

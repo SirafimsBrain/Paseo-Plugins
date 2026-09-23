@@ -26,6 +26,9 @@ connected to Paseo, so old transcripts stop filling the disk.
   the panel pre-filtered ("older than 30 days", archived sessions, settings).
 - **Extensible** — a new coding agent means one adapter file plus one line in the
   provider registry.
+- **Host typography** — panel text sizes follow the interface text size from
+  Paseo's Settings → Appearance, and a configured interface font is applied to
+  panel text.
 
 ## How it works
 

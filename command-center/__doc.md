@@ -16,7 +16,9 @@ command-center/
 ├── index.client.tsx           # surface, sidebar item, ⌘K items, /cc slash command
 ├── shared/
 │   ├── commands.ts            # zod schemas, RPC contracts (defineRpc), types
-│   └── template.ts            # pure template renderer + input discovery (client-safe)
+│   ├── template.ts            # pure template renderer + input discovery (client-safe)
+│   ├── search.ts              # pure command search/filter over name, category, template, variables
+│   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
 │   ├── executor.ts            # run engine: resolve target, render, dispatch, log
@@ -27,8 +29,9 @@ command-center/
 │   ├── run-dialog.tsx              # multi-select workspaces, provider/model picker, live preview, per-target results
 │   ├── provider-model-picker.tsx   # dropdown for full `provider/model` references with filter
 │   ├── dispatch.ts                 # client-side executor mirror for non-local hosts (multi-host fan-out)
+│   ├── use-host-typography.ts     # hook: host font settings → scale + families
 │   └── preview.ts                  # preview rendering helper
-└── tests/                     # vitest suites (5 files, 51 tests)
+└── tests/                     # vitest suites (8 files, 78 tests)
 ```
 
 Data flow for a run:
@@ -58,7 +61,8 @@ Verified against the running daemon and `@getpaseo/plugin@0.9.0` / `@getpaseo/cl
 - **Agent snapshot fields**: `id`, `title`, `status` (`error|initializing|idle|running|closed`), `archivedAt`. "Open" means `status !== "closed"` and no `archivedAt`.
 - **Slash command context**: `onSubmit` receives `{ args, paseo, rpc, openSurface, workspace, agent }`; `rpc(contract, input)` is typed by the contract.
 - **Manifest**: the daemon rejects unknown manifest keys — a `version` key makes `plugin add` fail with `Unrecognized key: "version"` (same behavior as the `description` key in 0.8.x). Only `id` and `requirements` are currently accepted.
-- **Theming**: React Native `Text`/`TextInput` default to black, which is unreadable on the dark Paseo background. The surface therefore reads `theme` from `PluginSurfaceProps` (`theme.colors.foreground`, `foregroundMuted`, `border`) and threads it into `CommandForm` and `RunDialog`; inputs also set `placeholderTextColor`. No color is hardcoded.
+- **Theming**: React Native `Text`/`TextInput` default to black, which is unreadable on the dark Paseo background. The surface therefore reads `theme` from `PluginSurfaceProps` (`theme.colors.foreground`, `foregroundMuted`, `border`) and threads it into `CommandForm` and `RunDialog`; inputs also set `placeholderTextColor`. No color is hardcoded. Font sizes are scaled through `shared/host-fonts.ts` (see 5b).
+- **No dropdown Menu component**: the host exposes only `Modal`, `Icon`, `ScrollView`, `FlatList`, `TextInput`, `copyText`, toasts from `client/react-native` — there is no `Menu`/`Picker`. The category picker is therefore chips + a plain text input.
 - **Multi-host split**: `PluginServerContext.paseo` is bound to one daemon, so the server cannot reach other daemons. Fan-out across hosts is therefore split — local targets via `command-center.run-batch`, remote targets via per-host `PaseoApi` from `getPaseoClient(serverId)` with host enumeration from `useHosts()`. `useHosts()` is wrapped in try/catch with a single-host fallback for older hosts.
 - **Provider override**: the stored `command.provider` is only the default. `run`/`run-batch` accept an optional per-target `provider`; the executor uses `input.provider ?? command.provider`. The dialog offers the union of providers reported by the selected targets' hosts.
 - **Workspace picker is always visible**, including global prompts: the old behavior (hidden picker, silent server-side best-guess) left users with no control over `cwd` and `{{workspace.*}}` context. Deselecting everything keeps the legacy best-guess path.
@@ -71,6 +75,7 @@ Verified against the running daemon and `@getpaseo/plugin@0.9.0` / `@getpaseo/cl
 | File | Content |
 | --- | --- |
 | `commands.json` | `CommandDefinition[]`, sorted by name, favorites first in UI |
+| `categories.json` | known category labels `CommandCategory[]` (`{ name, sortKey }`), deduped case-insensitively on load |
 | `history.json` | last 50 `HistoryEntry` entries, newest first — each with the used `provider`, the render `values`, and a `batchId` grouping fan-out runs (all optional: pre-upgrade entries parse without them) |
 
 Writes are atomic (temp file + rename). A corrupted file is treated as empty rather than crashing the plugin.
@@ -92,15 +97,55 @@ Each history card shows the used model and agent (resolved live from the agents 
 | `command-center.run` | `{ commandId, values, workspaceId?, agentId?, newWorktree?, provider? }` | `RunResult` (kept for the `/cc` slash command) |
 | `command-center.run-batch` | `{ commandId, values, targets }` — 1–20 targets of `{ workspaceId?, agentId?, provider?, newWorktree? }` | `{ results: RunResult[] }`, one entry per target in order |
 | `command-center.history-append` | `{ entry }` without `id`/`at` (stamped server-side) | `{ ok, id }` — used by multi-host client dispatch |
+| `command-center.categories` | `{}` | `{ categories: CommandCategory[] }` — stored labels plus implicit ones found on commands |
+| `command-center.categories-save` | `{ category?, renameFrom?, deleteName? }` | `{ ok, error }` — create/rename/delete in one call; deleting unsets the label on referencing commands |
 
 All schemas are zod schemas in `shared/commands.ts`; the same module is imported by server and client, so contracts cannot drift.
 
+## 5a. Categories and search
+
+### Categories
+
+- `CommandDefinition.category` — an optional free-form label (≤ 40 chars, trimmed). There is no fixed taxonomy: the picker in the editor lists stored labels, and a typed new label is registered through `categories-save` right after the command is saved.
+- `categories.json` is the source of truth for the label list. Commands may reference labels missing from it (manual edits, sync races); `listCategories` merges such "implicit" labels into the response so the filter never silently hides commands.
+- Deleting a category unsets it on all referencing commands (server-side, single write). Renaming moves commands over in the same call.
+- UI: a chip row above the library (rendered only when at least one command has a category); `All` resets the filter. The active category is highlighted with the accent color.
+
+### Search
+
+- Pure module `shared/search.ts`: `commandMatchesQuery` (multi-term AND, case-insensitive over name + category + template + variable prompts/names) and `commandMatchesCategory` (exact label, `null` = show all).
+- The search field is toggled with the `Search` button in the library toolbar; clearing the query or toggling it off resets filtering. Filtering composes with the category chips and favorites-first ordering.
+- Search is client-side over the already-loaded list — command libraries are small (dozens), so an index or an RPC-side search is unnecessary complexity at this scale.
+
+## 5b. Host typography (fonts from Paseo Appearance settings)
+
+### The problem
+
+Paseo's `PluginTheme` passes **colors only** — there is no typography API in SDK 0.9 (verified in `@getpaseo/plugin/dist/contracts.d.ts` and in the host bundle). Meanwhile the desktop app has full Appearance settings (since 0.1.88): interface font, code font, interface text size, code text size. Plugin UIs hardcode px sizes, so with a larger-than-default interface size configured, plugin text renders smaller than the rest of the app. This is a host-side gap, not a plugin bug.
+
+### How the host applies its settings (reverse-engineered from the 0.9 app bundle)
+
+- Font **sizes** scale only inside the host's Unistyles theme: `FONT_SIZE = { sm: 12, base: 14, lg: 16, xl: 18, 2xl: 20, 3xl: 22, 4xl: 26 }`, factor `k = uiBaseFontSize / 14`. Plugin React components cannot read Unistyles.
+- Font **family** is applied document-wide via injected CSS: `applyRootUiFont` sets `--paseo-ui-font` on `documentElement` plus the rule `:is(#root, #overlay-root) *:not([data-pmono]):not([data-pmono] *) { font-family: var(--paseo-ui-font) }`. So a configured interface font DOES reach plugin text in the web/desktop runtime already; but the CSS variable is only set when the user configured a custom font (empty = no variable, system stack applies).
+- Settings are persisted to web `localStorage` under `@paseo:app-settings` (keys: `uiFontFamily`, `monoFontFamily`, `uiBaseFontSize`, `contentFontSize`, `codeFontSize`). Observed live values: `uiFontFamily: "Roboto…"`, `monoFontFamily: "Fira Code"`, `uiBaseFontSize: 16` (host default 14).
+
+### The plugin-side solution
+
+`shared/host-fonts.ts` + `client/use-host-typography.ts` (copied 1:1 into session-manager):
+
+1. Read `@paseo:app-settings` from `localStorage` (synchronous, in-page; falls back to defaults when unavailable, e.g. native runtime).
+2. Compute `scale = uiBaseFontSize / 14` (legacy `uiFontSize` percent-style field migrated the same way the host does), sanitized font families (same character strip as the host's `sanitizeFontFamily`).
+3. Every previously hardcoded `fontSize: N` in the surface/form/dialog becomes `fontSize: scaledFont(N, typography)` — an integer px that tracks the user's setting.
+4. When the user configured an interface font, it is applied explicitly as `fontFamily` (helps runtimes where the host CSS rule does not reach); when empty, no `fontFamily` is set so the host rule/system stack stays in effect. Same for the code font on template/preview texts.
+
+Limitations: changes apply on next mount (settings change rarely; re-reading per render would add jank); the scale tracks `uiBaseFontSize` only — `contentFontSize`/`codeFontSize` are parsed but intentionally not applied (the host uses them for chat/code panes, not UI chrome). If the host later adds typography to `PluginTheme`, this module should be replaced by it.
+
 ## 6. Compatibility
 
-Verified on 2026-09-22 against the running daemon `paseo 0.9.0` with `@getpaseo/plugin@0.9.0`:
+Verified on 2026-09-23 against the running daemon `paseo 0.9.0` with `@getpaseo/plugin@0.9.0`:
 
 - `npm run typecheck` — clean.
-- `npx vitest run` — 5 suites, 58 tests, all green.
+- `npx vitest run` — 8 suites, 78 tests, all green.
 - `paseo plugin add <dir>` → status `running`, daemon logs show `Plugin ready` with no plugin errors.
 - The `version` manifest key is rejected by 0.9.0 (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
 

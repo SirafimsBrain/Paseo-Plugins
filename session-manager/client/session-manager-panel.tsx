@@ -12,6 +12,11 @@ import {
   getSessionManagerIntent,
   subscribeSessionManagerIntent,
 } from "./intent";
+import {
+  defaultHostTypography,
+  readHostTypographyFromLocalStorage,
+  scaledFont,
+} from "../shared/host-fonts";
 
 const AGE_FILTERS: { label: string; days: number }[] = [
   { label: "Any age", days: 0 },
@@ -341,7 +346,13 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
   });
 
   const styles = useMemo(
-    () => ({
+    () => {
+      const typography = readHostTypographyFromLocalStorage(
+        (globalThis as unknown as { localStorage?: { getItem(key: string): string | null } | undefined })
+          .localStorage,
+      ) ?? defaultHostTypography();
+      const font = (base: number) => scaledFont(base, typography);
+      return {
       root: {
         flex: 1,
         padding: layout.compact ? 12 : 20,
@@ -354,8 +365,8 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
         gap: 8,
         marginBottom: 8,
       },
-      title: { color: theme.colors.foreground, fontSize: 16, fontWeight: "600" as const },
-      muted: { color: theme.colors.foregroundMuted, fontSize: 12 },
+      title: { color: theme.colors.foreground, fontSize: font(16), fontWeight: "600" as const },
+      muted: { color: theme.colors.foregroundMuted, fontSize: font(12) },
       chipRow: {
         flexDirection: "row" as const,
         flexWrap: "wrap" as const,
@@ -378,8 +389,8 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
         borderColor: theme.colors.accent,
         backgroundColor: theme.colors.accent,
       },
-      chipText: { color: theme.colors.foreground, fontSize: 12 },
-      chipTextActive: { color: theme.colors.accentForeground, fontSize: 12 },
+      chipText: { color: theme.colors.foreground, fontSize: font(12) },
+      chipTextActive: { color: theme.colors.accentForeground, fontSize: font(12) },
       row: {
         paddingVertical: 10,
         paddingHorizontal: 12,
@@ -409,12 +420,12 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
         borderRadius: 4,
         backgroundColor: theme.colors.surface2,
       },
-      badgeText: { color: theme.colors.foregroundMuted, fontSize: 10 },
-      rowTitle: { color: theme.colors.foreground, fontWeight: "600" as const, flexShrink: 1 },
+      badgeText: { color: theme.colors.foregroundMuted, fontSize: font(10) },
+      rowTitle: { color: theme.colors.foreground, fontWeight: "600" as const, flexShrink: 1, fontSize: font(14) },
       actions: { flexDirection: "row" as const, gap: 12, marginTop: 8, alignItems: "center" as const },
       danger: { color: theme.colors.statusDanger, fontWeight: "600" as const },
-      warning: { color: theme.colors.statusWarning, fontSize: 12, marginTop: 4 },
-      success: { color: theme.colors.statusSuccess, fontSize: 12 },
+      warning: { color: theme.colors.statusWarning, fontSize: font(12), marginTop: 4 },
+      success: { color: theme.colors.statusSuccess, fontSize: font(12) },
       confirmBox: {
         marginTop: 10,
         padding: 12,
@@ -431,7 +442,8 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
         borderColor: theme.colors.border,
         backgroundColor: theme.colors.surface1,
       },
-    }),
+      };
+    },
     [theme, layout.compact],
   );
 

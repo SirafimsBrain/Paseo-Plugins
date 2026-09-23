@@ -3,17 +3,28 @@ import {
   appendHistory,
   clearHistory,
   deleteCommand,
+  listCategories,
   listCommands,
   listHistory,
   runBatch,
   runCommand,
+  saveCategories,
   saveCommand,
   toggleFavorite,
   type CommandDefinition,
   type RunResult,
 } from "./shared/commands";
 import { commandSchema } from "./shared/commands";
-import { appendHistory as appendHistoryEntry, clearHistoryStore, loadCommands, loadHistory, saveCommands } from "./server/store";
+import {
+  appendHistory as appendHistoryEntry,
+  clearHistoryStore,
+  collectImplicitCategories,
+  loadCategories,
+  loadCommands,
+  loadHistory,
+  saveCategories as persistCategories,
+  saveCommands,
+} from "./server/store";
 import { executeBatch, executeCommand } from "./server/executor";
 
 function parseCommand(raw: unknown): CommandDefinition | null {
@@ -52,6 +63,68 @@ export default function contribute(server: PluginServerContext) {
   server.handle(deleteCommand, (input) => {
     saveCommands(loadCommands().filter((command) => command.id !== input.id));
     return { deleted: true };
+  });
+
+  server.handle(listCategories, () => {
+    // Commands may reference labels that are not in the store (manual edits of
+    // commands.json, or a sync race). Surface them so they are editable and
+    // the filter never silently hides commands.
+    const implicit = collectImplicitCategories(loadCommands());
+    const stored = loadCategories();
+    const known = new Set(stored.map((category) => category.sortKey));
+    const merged = [
+      ...stored,
+      ...implicit
+        .filter((key) => !known.has(key))
+        .map((key) => ({ name: key, sortKey: key })),
+    ];
+    merged.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    return { categories: merged };
+  });
+
+  server.handle(saveCategories, (input) => {
+    const commands = loadCommands();
+    let categories = loadCategories();
+
+    if (input.deleteName) {
+      const key = input.deleteName.trim().toLowerCase();
+      categories = categories.filter((category) => category.sortKey !== key);
+      // Commands referencing the deleted label fall back to uncategorized.
+      let changed = false;
+      for (const command of commands) {
+        if (typeof command.category === "string" && command.category.trim().toLowerCase() === key) {
+          delete command.category;
+          changed = true;
+        }
+      }
+      if (changed) saveCommands(commands);
+    }
+
+    if (input.category) {
+      const name = input.category.name.trim();
+      if (name.length === 0) {
+        return { ok: false, error: "Category name must not be empty." };
+      }
+      const sortKey = name.toLowerCase();
+      const renameKey = input.renameFrom?.trim().toLowerCase() ?? null;
+      if (renameKey !== null && renameKey !== sortKey) {
+        // Rename: move commands over, drop the old label from the store.
+        for (const command of commands) {
+          if (typeof command.category === "string" && command.category.trim().toLowerCase() === renameKey) {
+            command.category = name;
+            command.updatedAt = new Date().toISOString();
+          }
+        }
+        saveCommands(commands);
+        categories = categories.filter((category) => category.sortKey !== renameKey);
+      }
+      categories = categories.filter((category) => category.sortKey !== sortKey);
+      categories.push({ name, sortKey });
+      categories.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    }
+
+    persistCategories(categories);
+    return { ok: true, error: null };
   });
 
   server.handle(toggleFavorite, (input) => {

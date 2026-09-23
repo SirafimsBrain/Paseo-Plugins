@@ -5,6 +5,7 @@ import type { CommandDefinition, ProviderWithModels, RunResult } from "../shared
 import { inputVariablesOf } from "../shared/template";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { renderPreview } from "./preview";
+import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 import { ProviderModelPicker } from "./provider-model-picker";
 
 export interface DialogWorkspaceOption {
@@ -182,6 +183,10 @@ export function RunDialog({
   );
 
   const { foreground, foregroundMuted } = theme.colors;
+  const typography = useHostTypography();
+  const font = (base: number) => scaledFont(base, typography);
+  const uiFont = interfaceFontFamily(typography);
+  const monoFont = monoFontFamily(typography);
 
   const toggleWorkspace = (key: string) => {
     setResults(null);
@@ -227,8 +232,10 @@ export function RunDialog({
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.title, { color: foreground }]}>{command.name}</Text>
-      <Text style={[styles.subtitle, { color: foregroundMuted }]}>
+      <Text style={[styles.title, { color: foreground }, uiFont ? { fontFamily: uiFont } : null, { fontSize: font(16) }]}>
+        {command.name}
+      </Text>
+      <Text style={[styles.subtitle, { color: foregroundMuted, fontSize: font(12) }]}>
         {isShell
           ? `Runs in a new terminal on each selected workspace (${targetCount}).`
           : targetCount > 1
@@ -357,7 +364,9 @@ export function RunDialog({
         <Text style={[styles.previewLabel, { color: foregroundMuted }]}>
           Preview{firstWorkspace ? ` — ${firstWorkspace.name}` : ""}{targetCount > 1 ? ` (+${targetCount - 1} more)` : ""}
         </Text>
-        <Text style={[styles.previewText, { color: foreground }]}>{preview || "—"}</Text>
+        <Text style={[styles.previewText, { color: foreground, fontSize: font(12) }, monoFont ? { fontFamily: monoFont } : null]}>
+          {preview || "—"}
+        </Text>
       </View>
 
       {results ? (

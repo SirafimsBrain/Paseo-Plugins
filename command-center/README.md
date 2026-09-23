@@ -16,9 +16,12 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
   - `{{date}}`, `{{time}}` — current date/time on the daemon clock.
   - Unknown tokens stay visible in the preview instead of silently disappearing.
 - **Live preview** — the run dialog shows the fully rendered prompt/line before it is dispatched.
+- **Categories** — every command can carry a free-form category label. The library shows a category chip row; picking a chip filters the list, and a new label typed in the editor is registered automatically on save.
+- **Search** — a toggleable search field filters commands by name, category, template body, and variable prompts. Matching is case-insensitive and multi-term (AND).
 - **Targeting** — multi-select workspaces grouped by host (prompt and shell), run-time provider/model picker with live model lists (disabled providers hidden), optional existing agent for single-target runs, optional branch-off worktree. One click fans out to many workspaces and hosts with per-target results.
 - **History** — the last 50 runs with the rendered payload, target, used model/agent, and error; any entry can be repeated in one click with its values, target, and model prefilled.
 - **Entry points** — sidebar item, Command Center item (⌘K), and a `/cc <command name>` slash command in agent chats.
+- **Host typography** — text sizes in the surface are scaled by the interface text size from Paseo's Settings → Appearance, and a configured interface/code font family is applied to plugin text (see limitations in `__doc.md`).
 
 ## Install
 
@@ -40,8 +43,9 @@ Storage layout on the daemon host:
 
 ```
 $PASEO_HOME/plugins/command-center/
-├── commands.json   # the command library
-└── history.json    # the last 50 runs
+├── commands.json    # the command library
+├── categories.json  # known category labels
+└── history.json     # the last 50 runs
 ```
 
 Technical details, design decisions, limitations and the roadmap: see [__doc.md](./__doc.md).

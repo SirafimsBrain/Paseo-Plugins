@@ -31,6 +31,8 @@ export const commandSchema = z.object({
   terminalName: z.string().optional(),
   /** Prompt commands only: `provider/model` of the agent created for a run. */
   provider: z.string().optional(),
+  /** Free-form grouping label managed via the categories RPCs; empty = uncategorized. */
+  category: z.string().trim().max(40).optional(),
   favorite: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -253,6 +255,39 @@ export const runBatch = defineRpc({
   }),
   output: z.object({
     results: z.array(runResultSchema),
+  }),
+});
+
+/** One stored category label. `sortKey` is its lowercase name for stable ordering. */
+export const categorySchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  sortKey: z.string(),
+});
+
+export type CommandCategory = z.infer<typeof categorySchema>;
+
+export const listCategories = defineRpc({
+  name: "command-center.categories",
+  input: z.object({}),
+  output: z.object({ categories: z.array(categorySchema) }),
+});
+
+/**
+ * Save and/or delete categories in one call (the editor does not need two
+ * round-trips). `deleteName` is matched exactly; commands referencing the
+ * deleted category fall back to uncategorized server-side.
+ */
+export const saveCategories = defineRpc({
+  name: "command-center.categories-save",
+  input: z.object({
+    /** Add or rename: missing `renameFrom` means create. */
+    category: categorySchema.optional(),
+    renameFrom: z.string().optional(),
+    deleteName: z.string().optional(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable(),
   }),
 });
 
