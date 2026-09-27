@@ -1,5 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { inputVariablesOf } from "./template";
 
 /**
  * Commands are templates rendered into a prompt or shell line. A command never
@@ -42,6 +43,21 @@ export const commandSchema = z.object({
 
 export type CommandDefinition = z.infer<typeof commandSchema>;
 export type CommandVariable = z.infer<typeof commandVariableSchema>;
+
+/**
+ * Input values a stored command starts from: declared variables first, then
+ * `{{input:...}}` names discovered in the template (the same merge the run
+ * dialog performs). Used to prefill the schedule dialog straight from the
+ * saved command without opening the run dialog first.
+ */
+export function defaultValuesForCommand(command: CommandDefinition): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const variable of command.variables) values[variable.name] = variable.defaultValue ?? "";
+  for (const variable of inputVariablesOf(command.template)) {
+    if (!(variable.name in values)) values[variable.name] = variable.defaultValue ?? "";
+  }
+  return values;
+}
 
 /** One selectable model of a provider, as reported by the daemon. */
 export interface ProviderModelInfo {

@@ -4,7 +4,7 @@ import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/cli
 import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderWithModels } from "../shared/commands";
-import { normalizeProviderModels } from "../shared/commands";
+import { defaultValuesForCommand, isFullModelRef, normalizeProviderModels, resolveModelRef } from "../shared/commands";
 import { commandMatchesCategory, commandMatchesQuery } from "../shared/search";
 import {
   appendHistory,
@@ -19,12 +19,16 @@ import {
   saveCommand,
   toggleFavorite,
 } from "../shared/commands";
+import { createSchedule } from "../shared/schedules";
 import { CommandForm, type CommandFormResult } from "./command-form";
 import { dispatchRemoteTarget } from "./dispatch";
+import { renderPreview } from "./preview";
 import { RunDialog, type BatchItemResult, type BatchTarget } from "./run-dialog";
+import { ScheduleDialog } from "./schedule-dialog";
+import { SchedulesTab } from "./schedules-tab";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 
-type Tab = "library" | "history";
+type Tab = "library" | "history" | "schedules";
 
 interface WorkspaceOption {
   id: string;
@@ -72,6 +76,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   const appendHistoryRpc = useRpc(appendHistory);
   const categoriesRpc = useRpc(listCategories);
   const saveCategoriesRpc = useRpc(saveCategories);
+  const createScheduleRpc = useRpc(createSchedule);
 
   // All configured app hosts (multi-host fan-out). Older hosts may not provide
   // the loader — fall back to single-host mode instead of crashing.
@@ -90,6 +95,10 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   const [editing, setEditing] = useState<CommandDefinition | null>(null);
   const [creating, setCreating] = useState(false);
   const [running, setRunning] = useState<CommandDefinition | null>(null);
+  /** Card-level "Schedule" flow: the dialog opens prefilled from this command. */
+  const [scheduling, setScheduling] = useState<CommandDefinition | null>(null);
+  const [schedulingBusy, setSchedulingBusy] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [repeatPreset, setRepeatPreset] = useState<{
     values: Record<string, string>;
     workspaceKey: string | null;
@@ -441,6 +450,50 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
     }
   };
 
+  /**
+   * Creates a daemon schedule from the run dialog state. Values and provider
+   * are frozen into the schedule prompt; scheduling always targets the local
+   * daemon (the native scheduler runs on its own host). Returns null on
+   * success or a message shown inside the dialog.
+   */
+  const handleCreateSchedule = async (input: {
+    command: CommandDefinition;
+    values: Record<string, string>;
+    provider: string;
+    workspaceId: string | undefined;
+    newWorktree: boolean;
+    name: string;
+    cron: string;
+    maxRuns: number | null;
+    runOnCreate: boolean;
+  }): Promise<string | null> => {
+    if (!isFullModelRef(input.provider)) {
+      return "No provider/model is loaded yet — wait for the model list, then try again.";
+    }
+    try {
+      const result = await createScheduleRpc({
+        commandId: input.command.id,
+        name: input.name,
+        values: input.values,
+        workspaceId: input.workspaceId,
+        provider: input.provider,
+        newWorktree: input.newWorktree,
+        archiveOnFinish: true,
+        cron: input.cron,
+        maxRuns: input.maxRuns,
+        runOnCreate: input.runOnCreate,
+      });
+      if (result.ok) {
+        toast.show("Schedule created — see the Schedules tab", { variant: "success" });
+        refresh();
+        return null;
+      }
+      return result.error ?? "The daemon rejected the schedule.";
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+
   const handleDelete = async (command: CommandDefinition) => {
     try {
       await deleteRpc({ id: command.id });
@@ -631,7 +684,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
   return (
     <View style={styles.container}>
       <View style={styles.tabRow}>
-        {(["library", "history"] as Tab[]).map((option) => (
+        {(["library", "history", "schedules"] as Tab[]).map((option) => (
           <Pressable
             key={option}
             style={[styles.tab, tab === option && styles.tabActive]}
@@ -644,7 +697,7 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
                 tab === option && styles.tabTextActive,
               ]}
             >
-              {option === "library" ? "Commands" : "History"}
+              {option === "library" ? "Commands" : option === "history" ? "History" : "Schedules"}
             </Text>
           </Pressable>
         ))}
@@ -666,12 +719,16 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
             {tab === "history" ? "Clear" : "History"}
           </Text>
         </Pressable>
-        <Pressable style={[styles.smallButton, styles.primarySmallButton]} onPress={() => setCreating(true)}>
-          <Text style={[styles.smallButtonText, styles.primarySmallButtonText, { fontSize: font(12) }]}>+ New</Text>
-        </Pressable>
+        {tab === "library" ? (
+          <Pressable style={[styles.smallButton, styles.primarySmallButton]} onPress={() => setCreating(true)}>
+            <Text style={[styles.smallButtonText, styles.primarySmallButtonText, { fontSize: font(12) }]}>+ New</Text>
+          </Pressable>
+        ) : null}
       </View>
 
-      {tab === "library" ? (
+      {tab === "schedules" ? (
+        <SchedulesTab theme={theme} reloadKey={reloadKey} onChanged={refresh} />
+      ) : tab === "library" ? (
         <ScrollView contentContainerStyle={styles.list}>
           <View style={styles.toolbar}>
             <View style={styles.categoryRow}>
@@ -775,6 +832,15 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
                 <Pressable style={styles.actionButton} onPress={() => setEditing(command)}>
                   <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Edit</Text>
                 </Pressable>
+                <Pressable
+                  style={styles.actionButton}
+                  onPress={() => {
+                    setScheduleError(null);
+                    setScheduling(command);
+                  }}
+                >
+                  <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Schedule</Text>
+                </Pressable>
                 <Pressable style={styles.actionButton} onPress={() => void handleDelete(command)}>
                   <Text style={[styles.actionText, styles.deleteText, { fontSize: font(12) }]}>Delete</Text>
                 </Pressable>
@@ -859,6 +925,68 @@ export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
               initialAgentId={repeatPreset?.agentId}
               onCancel={closeRunDialog}
               onRun={(input) => handleRunBatch({ command: running, values: input.values, targets: input.targets })}
+              onSchedule={(input) => handleCreateSchedule({ command: running, ...input })}
+            />
+          ) : null}
+        </Modal.Content>
+      </Modal>
+
+      <Modal
+        open={scheduling !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setScheduling(null);
+            setScheduleError(null);
+          }
+        }}
+        title={`Schedule “${scheduling?.name ?? ""}”`}
+      >
+        <Modal.Content>
+          {scheduling ? (
+            <ScheduleDialog
+              command={scheduling}
+              theme={theme}
+              renderedPrompt={renderPreview(
+                scheduling.template,
+                defaultValuesForCommand(scheduling),
+                workspaces[0]?.id,
+                workspaces.map((option) => ({ id: option.id, name: option.name })),
+              )}
+              provider={resolveModelRef(providers, scheduling.provider)}
+              workspaceName={workspaces[0]?.name ?? null}
+              newWorktree={false}
+              busy={schedulingBusy}
+              error={scheduleError}
+              onCancel={() => {
+                setScheduling(null);
+                setScheduleError(null);
+              }}
+              onCreate={(input) => {
+                const command = scheduling;
+                if (!command) return;
+                setSchedulingBusy(true);
+                setScheduleError(null);
+                void handleCreateSchedule({
+                  command,
+                  values: defaultValuesForCommand(command),
+                  provider: resolveModelRef(providers, command.provider),
+                  workspaceId: workspaces[0]?.id,
+                  newWorktree: false,
+                  name: input.name,
+                  cron: input.cron,
+                  maxRuns: input.maxRuns,
+                  runOnCreate: input.runOnCreate,
+                })
+                  .then((errorMessage) => {
+                    if (errorMessage === null) {
+                      setScheduling(null);
+                      setScheduleError(null);
+                    } else {
+                      setScheduleError(errorMessage);
+                    }
+                  })
+                  .finally(() => setSchedulingBusy(false));
+              }}
             />
           ) : null}
         </Modal.Content>

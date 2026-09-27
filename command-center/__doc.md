@@ -12,26 +12,33 @@ The concept was inspired by [stablyai/orca](https://github.com/stablyai/orca) (a
 
 ```
 command-center/
-├── index.server.ts            # RPC handlers (list/save/delete/favorite/history/run)
+├── index.server.ts            # RPC handlers (list/save/delete/favorite/history/run/schedules)
 ├── index.client.tsx           # surface, sidebar item, ⌘K items, /cc slash command
 ├── shared/
 │   ├── commands.ts            # zod schemas, RPC contracts (defineRpc), types
+│   ├── schedules.ts           # schedule view models, RPC contracts, cadence helpers (client-safe)
 │   ├── template.ts            # pure template renderer + input discovery (client-safe)
 │   ├── search.ts              # pure command search/filter over name, category, template, variables
 │   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
 │   ├── executor.ts            # run engine: resolve target, render, dispatch, log
+│   ├── daemon-connection.ts   # lazy DaemonClient singleton to the local daemon websocket
+│   ├── schedules.ts           # schedule bridge: daemon schedule/* RPCs ↔ plugin contracts
+│   ├── schedules-mapping.ts   # pure daemon→view mapping (unit-tested)
+│   ├── schedule-links.ts      # schedules.json link store (scheduleId ↔ commandId)
 │   └── (template.ts removed — shared module is used instead)
 ├── client/
-│   ├── command-center-surface.tsx  # library + history tabs, editor host, run modal, multi-host fan-out
+│   ├── command-center-surface.tsx  # library + history + schedules tabs, editor host, run modal, fan-out
 │   ├── command-form.tsx            # create/edit form, provider/model picker
-│   ├── run-dialog.tsx              # multi-select workspaces, provider/model picker, live preview, per-target results
+│   ├── run-dialog.tsx              # multi-select workspaces, provider/model picker, preview, Schedule… button
+│   ├── schedule-dialog.tsx         # cadence presets, cron input, max runs, run-on-create
+│   ├── schedules-tab.tsx           # schedule list: status, next/last run, actions, run history
 │   ├── provider-model-picker.tsx   # dropdown for full `provider/model` references with filter
 │   ├── dispatch.ts                 # client-side executor mirror for non-local hosts (multi-host fan-out)
 │   ├── use-host-typography.ts     # hook: host font settings → scale + families
 │   └── preview.ts                  # preview rendering helper
-└── tests/                     # vitest suites (8 files, 78 tests)
+└── tests/                     # vitest suites (9 files, 95 tests)
 ```
 
 Data flow for a run:
@@ -99,6 +106,11 @@ Each history card shows the used model and agent (resolved live from the agents 
 | `command-center.history-append` | `{ entry }` without `id`/`at` (stamped server-side) | `{ ok, id }` — used by multi-host client dispatch |
 | `command-center.categories` | `{}` | `{ categories: CommandCategory[] }` — stored labels plus implicit ones found on commands |
 | `command-center.categories-save` | `{ category?, renameFrom?, deleteName? }` | `{ ok, error }` — create/rename/delete in one call; deleting unsets the label on referencing commands |
+| `command-center.schedules` | `{}` | `{ schedules: ScheduleView[] }` — every daemon schedule plus the plugin link (commandId/commandName); prunes stale links |
+| `command-center.schedule-create` | `{ commandId, values, provider, cron, name?, workspaceId?, cwd?, newWorktree?, archiveOnFinish?, maxRuns?, runOnCreate? }` | `{ ok, id, view, error }` — renders the template once, creates the daemon schedule, stores the link |
+| `command-center.schedule-action` | `{ id, action: pause\|resume\|run-once\|delete }` | `{ ok, error }` |
+| `command-center.schedule-runs` | `{ id }` | `{ runs: ScheduleRun[] }` — daemon run log (status/timing/agent/output/error) |
+| `command-center.schedule-update` | `{ id, cron?, maxRuns? }` | `{ ok, error }` — cadence/run-cap edits |
 
 All schemas are zod schemas in `shared/commands.ts`; the same module is imported by server and client, so contracts cannot drift.
 
@@ -140,19 +152,45 @@ Paseo's `PluginTheme` passes **colors only** — there is no typography API in S
 
 Limitations: changes apply on next mount (settings change rarely; re-reading per render would add jank); the scale tracks `uiBaseFontSize` only — `contentFontSize`/`codeFontSize` are parsed but intentionally not applied (the host uses them for chat/code panes, not UI chrome). If the host later adds typography to `PluginTheme`, this module should be replaced by it.
 
+## 5c. Scheduler integration (standard Paseo Schedules)
+
+### Daemon API findings (verified live against 0.9.2)
+
+- The schedule RPCs (`schedule/create|list|inspect|logs|pause|resume|delete|run-once|update`) live on the **low-level `DaemonClient`** (`@getpaseo/client/internal/daemon-client`), **not** on `PaseoApi` — `context.paseo` (server) and `usePaseo()`/`getPaseoClient()` (client) do not expose them.
+- The plugin server process therefore opens its own websocket connection to the local daemon: URL from `$PASEO_HOME/config.json` → `daemon.listen` (default `ws://127.0.0.1:6767/ws`; the websocket endpoint is `/ws`). `server/daemon-connection.ts` keeps a lazy singleton with built-in reconnect; the client type is `cli` and reconnect resumes the same `clientId` session.
+- `automation.manage` permission strings in the daemon bundle apply to hub/relay connections only — a direct loopback client is not gated (verified by an end-to-end probe: create → inspect → pause → resume → update → delete all succeeded).
+- Create payload: `{ name?, prompt, cadence: {type:"cron", expression, timezone?}, target: {type:"new-agent", config:{provider, cwd, isolation:"local"|"worktree", archiveOnFinish, ...}} | {type:"agent", agentId}, maxRuns?, runOnCreate? }`. The full `provider/model` reference (e.g. `zhipuai/MiMo-V2.6-Flash Free`) is accepted as-is.
+- Responses carry `status: active|paused|completed`, `nextRunAt/lastRunAt/maxRuns`; `scheduleLogs` returns runs `{status: running|failed|succeeded, startedAt, endedAt, agentId, output, error}` — this is the run-tracking source of truth.
+- Schedules always execute on the daemon that owns them (the native form's "Host" field) — multi-host fan-out does not apply to scheduling.
+
+### Plugin design
+
+- The daemon owns schedules; the plugin adds command-centric management. `schedules.json` maps `scheduleId → {commandId, commandName}` so the Schedules tab can show the creating command; links to schedules deleted elsewhere are pruned on the next list.
+- **Create** has two entry points, both opening the same dialog (presets `*/15 * * * *`, `0 * * * *`, `0 */6 * * *`, `0 9 * * *`, `0 9 * * 1`, free cron, max runs, run-on-create):
+  - the run dialog (`Schedule…`) — freezes exactly the values/provider/workspace/worktree previewed there;
+  - the library card's `Schedule` button right after `Edit` — prefills the dialog from the stored command alone: `defaultValuesForCommand()` merges declared variables with `{{input:…}}` names discovered in the template, the prompt is rendered with those defaults, the stored `provider` is resolved against the live model catalog, and the first loaded workspace supplies the target cwd (shown in the dialog subtitle).
+  - The prompt is rendered **once** and frozen — `{{input:…}}` and `{{date}}/{{time}}` do not re-resolve per run.
+- **Track/manage** happens in the Schedules tab: status, humanized cadence (`describeCadence`), next/last run, pause/resume, run-now, inline cadence editing (`scheduleUpdate`), delete, and the last 10 runs per schedule from `scheduleLogs`.
+- Shell commands are schedulable too: the scheduler runs prompts only, so `schedulePromptFor(type, rendered)` (shared module) wraps the rendered line into an agent instruction with a fenced `sh` block. The schedule dialog preview and the server's create path call the same helper, so what the user sees is exactly what the daemon stores.
+- Cwd is required by the daemon `new-agent` target: the dialog passes the selected workspace directory, else the creation fails with a readable error.
+
 ## 6. Compatibility
 
-Verified on 2026-09-23 against the running daemon `paseo 0.9.0` with `@getpaseo/plugin@0.9.0`:
+Verified on 2026-09-27 against the running daemon `paseo 0.9.2` with `@getpaseo/plugin@0.9.0`:
 
 - `npm run typecheck` — clean.
-- `npx vitest run` — 8 suites, 78 tests, all green.
+- `npx vitest run` — 9 suites, 95 tests, all green.
+- Live probe of the whole schedule lifecycle (create with full model ref, inspect, pause, resume, update, delete) — succeeded.
 - `paseo plugin add <dir>` → status `running`, daemon logs show `Plugin ready` with no plugin errors.
-- The `version` manifest key is rejected by 0.9.0 (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
+- The `version` manifest key is rejected by 0.9.x (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
 
 ## 7. Limitations
 
 - **Shell commands are write-only.** The terminal is created and the line is typed, but output is not captured or returned; use the terminal UI to see results.
 - **One host.** Commands live on the daemon host's filesystem; multi-host setups would need sync or per-host copies.
+- **Schedules run on the local daemon only.** The native scheduler executes on the daemon that owns the schedule; there is no cross-host scheduling.
+- **Scheduled prompts are frozen.** Variable values and workspace context are rendered at creation time; editing a command later does not change existing schedules (delete and recreate, or edit the cadence inline).
+- **The bridge needs the daemon config.** `daemon-connection.ts` reads `daemon.listen` from `$PASEO_HOME/config.json`; if the daemon listens behind authentication, the bridge would need the password — not required in the default local setup (no password set).
 - **No secrets.** Templates are plain files; do not put tokens into templates.
 - **Worktree runs require a git workspace.** Branch-off mode on a non-git directory will fail with a daemon-side error surfaced in the run dialog.
 - **History is linear and bounded** (50 entries); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
@@ -162,7 +200,7 @@ Verified on 2026-09-23 against the running daemon `paseo 0.9.0` with `@getpaseo/
 
 Ordered by value/effort, all verified to exist in the SDK:
 
-1. **Trigger automation** — `server.on("workspace.created" | "agent.turn_ended", ...)` lifecycle hooks: auto-run a command when a workspace opens or when an agent finishes a turn (e.g. auto-run tests after each completed task).
+1. **Trigger automation** — `server.on("workspace.created" | "agent.turn_ended", ...)` lifecycle hooks: auto-run a command when a workspace opens or when an agent finishes a turn (e.g. auto-run tests after each completed task). Scheduler-driven runs are now covered by the Schedules integration (§5c).
 2. **Workflows** — a command type that chains several steps (create workspace → create agent → wait → send follow-up) using `agent.run()/waitForFinish()`; needs per-step state persisted in the store.
 3. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration (not present in 0.9), otherwise emulable via Command Center items only.
 4. **Import/export & sharing** — export `commands.json` selections as a shareable JSON or install from a git repo (mirroring how Paseo plugins are distributed).

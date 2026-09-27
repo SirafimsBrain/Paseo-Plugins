@@ -5,6 +5,7 @@ import type { CommandDefinition, ProviderWithModels, RunResult } from "../shared
 import { inputVariablesOf } from "../shared/template";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { renderPreview } from "./preview";
+import { ScheduleDialog } from "./schedule-dialog";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 import { ProviderModelPicker } from "./provider-model-picker";
 
@@ -64,6 +65,17 @@ interface Props {
   initialWorkspaceKey?: string | null;
   initialAgentId?: string | null;
   onRun: (input: { values: Record<string, string>; targets: BatchTarget[] }) => Promise<BatchItemResult[]>;
+  /** Creates a schedule from the current dialog state; absent on old hosts. */
+  onSchedule?: (input: {
+    values: Record<string, string>;
+    provider: string;
+    workspaceId: string | undefined;
+    newWorktree: boolean;
+    name: string;
+    cron: string;
+    maxRuns: number | null;
+    runOnCreate: boolean;
+  }) => Promise<string | null>;
   onCancel: () => void;
 }
 
@@ -90,6 +102,7 @@ export function RunDialog({
   initialWorkspaceKey,
   initialAgentId,
   onRun,
+  onSchedule,
   onCancel,
 }: Props) {
   const declared = command.variables;
@@ -123,6 +136,8 @@ export function RunDialog({
   const [newWorktree, setNewWorktree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<BatchItemResult[] | null>(null);
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   // Re-resolve when the model catalog arrives/changes. Safe: a picked value
   // that is still known is returned unchanged, so explicit picks survive.
@@ -387,10 +402,62 @@ export function RunDialog({
         <Pressable style={[styles.button, styles.secondaryButton]} onPress={onCancel} disabled={busy}>
           <Text style={styles.buttonText}>{results ? "Close" : "Cancel"}</Text>
         </Pressable>
+        {onSchedule ? (
+          <Pressable
+            style={[styles.button, styles.scheduleButton, (!isFullModelRef(provider) || busy) && styles.buttonDisabled]}
+            disabled={!isFullModelRef(provider) || busy}
+            onPress={() => setScheduling(true)}
+          >
+            <Text style={styles.buttonText}>Schedule…</Text>
+          </Pressable>
+        ) : null}
         <Pressable style={[styles.button, !canRun && styles.buttonDisabled]} disabled={!canRun} onPress={handleRun}>
           <Text style={styles.buttonText}>{runLabel}</Text>
         </Pressable>
       </View>
+
+      {scheduling && onSchedule ? (
+        <ScheduleDialog
+          command={command}
+          theme={theme}
+          renderedPrompt={preview}
+          provider={provider}
+          workspaceName={firstWorkspace?.name ?? null}
+          newWorktree={newWorktree}
+          busy={busy}
+          error={scheduleError}
+          onCancel={() => {
+            setScheduling(false);
+            setScheduleError(null);
+          }}
+          onCreate={(input) => {
+            setBusy(true);
+            setScheduleError(null);
+            void onSchedule({
+              values,
+              provider,
+              workspaceId: firstWorkspace?.id,
+              newWorktree,
+              name: input.name,
+              cron: input.cron,
+              maxRuns: input.maxRuns,
+              runOnCreate: input.runOnCreate,
+            })
+              .then((errorResult) => {
+                if (errorResult === null) {
+                  setScheduling(false);
+                  onCancel();
+                } else {
+                  setScheduleError(errorResult);
+                }
+              })
+              .catch((createError: unknown) =>
+                setScheduleError(createError instanceof Error ? createError.message : String(createError)),
+              )
+              .finally(() => setBusy(false));
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -446,5 +513,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.5 },
   secondaryButton: { backgroundColor: "rgba(128,128,128,0.3)" },
+  scheduleButton: { backgroundColor: "rgba(90,140,255,0.45)" },
   buttonText: { color: "white", fontWeight: "600" },
 });

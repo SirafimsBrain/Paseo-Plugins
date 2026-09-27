@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   commandSchema,
+  defaultValuesForCommand,
   fullModelRef,
   historyEntrySchema,
   isFullModelRef,
@@ -206,5 +207,42 @@ describe("resolveModelRef", () => {
     expect(resolveModelRef(catalog, "opencode")).toBe("opencode/opencode/nemotron-3-ultra-free");
     expect(resolveModelRef(catalog, "")).toBe("opencode/opencode/nemotron-3-ultra-free");
     expect(resolveModelRef([], "opencode/mimo-v2.6-flash-free")).toBe("");
+  });
+});
+
+describe("defaultValuesForCommand", () => {
+  it("merges declared variables with template-discovered inputs", () => {
+    const command = commandSchema.parse({
+      id: "cmd_d",
+      name: "Deploy",
+      template: "Deploy {{input:branch|main}} to {{input:env}}",
+      variables: [{ name: "env", prompt: "Environment", defaultValue: "staging" }],
+      createdAt: "2026-09-22T00:00:00.000Z",
+      updatedAt: "2026-09-22T00:00:00.000Z",
+    });
+    expect(defaultValuesForCommand(command)).toEqual({ env: "staging", branch: "main" });
+  });
+
+  it("declared defaults win over template-discovered ones and unknown inputs are empty", () => {
+    const command = commandSchema.parse({
+      id: "cmd_e",
+      name: "Ping",
+      template: "Ping {{input:target|localhost}} {{input:count}}",
+      variables: [{ name: "target", prompt: "Target", defaultValue: "10.0.0.1" }],
+      createdAt: "2026-09-22T00:00:00.000Z",
+      updatedAt: "2026-09-22T00:00:00.000Z",
+    });
+    expect(defaultValuesForCommand(command)).toEqual({ target: "10.0.0.1", count: "" });
+  });
+
+  it("returns an empty record for templates without inputs", () => {
+    const command = commandSchema.parse({
+      id: "cmd_f",
+      name: "Plain",
+      template: "git status",
+      createdAt: "2026-09-22T00:00:00.000Z",
+      updatedAt: "2026-09-22T00:00:00.000Z",
+    });
+    expect(defaultValuesForCommand(command)).toEqual({});
   });
 });

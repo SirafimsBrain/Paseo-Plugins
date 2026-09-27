@@ -16,6 +16,13 @@ import {
 } from "./shared/commands";
 import { commandSchema } from "./shared/commands";
 import {
+  createSchedule,
+  listScheduleRuns,
+  listSchedules,
+  scheduleAction,
+  updateSchedule,
+} from "./shared/schedules";
+import {
   appendHistory as appendHistoryEntry,
   clearHistoryStore,
   collectImplicitCategories,
@@ -26,6 +33,14 @@ import {
   saveCommands,
 } from "./server/store";
 import { executeBatch, executeCommand } from "./server/executor";
+import { renderTemplate } from "./shared/template";
+import {
+  createScheduleFromCommand,
+  fetchScheduleRuns,
+  fetchScheduleViews,
+  runScheduleAction,
+  updateScheduleOnDaemon,
+} from "./server/schedules";
 
 function parseCommand(raw: unknown): CommandDefinition | null {
   const result = commandSchema.safeParse(raw);
@@ -223,6 +238,67 @@ export default function contribute(server: PluginServerContext) {
     appendHistoryEntry(loadHistory(), entry);
     return { ok: true, id: entry.id };
   });
+
+  server.handle(listSchedules, () =>
+    fetchScheduleViews().then((schedules) => ({ schedules })),
+  );
+
+  server.handle(createSchedule, async (input, { paseo }) => {
+    // Resolve the workspace for template context and the run cwd via the
+    // normal plugin API; the schedule itself is created on the daemon.
+    let workspaceName: string | null = null;
+    let workspaceDirectory: string | null = null;
+    if (input.workspaceId) {
+      try {
+        const result = await paseo.workspaces.list();
+        for (const entry of result.entries) {
+          const record = entry as {
+            id?: string;
+            name?: string | null;
+            workspaceDirectory?: string | null;
+            projectRootPath?: string | null;
+          };
+          if (record.id === input.workspaceId) {
+            workspaceName = record.name ?? null;
+            workspaceDirectory = record.workspaceDirectory ?? record.projectRootPath ?? null;
+            break;
+          }
+        }
+      } catch {
+        // Workspace listing failed — fall back to the explicit cwd input.
+      }
+    }
+    return createScheduleFromCommand({
+      commandId: input.commandId,
+      name: input.name ?? null,
+      values: input.values,
+      workspaceId: input.workspaceId ?? null,
+      cwd: input.cwd ?? null,
+      provider: input.provider,
+      newWorktree: input.newWorktree,
+      archiveOnFinish: input.archiveOnFinish,
+      cron: input.cron,
+      maxRuns: input.maxRuns ?? null,
+      runOnCreate: input.runOnCreate,
+      workspaceName,
+      workspaceDirectory,
+      render: renderTemplate,
+    });
+  });
+
+  server.handle(scheduleAction, (input) => runScheduleAction(input.id, input.action));
+
+  server.handle(listScheduleRuns, (input) =>
+    fetchScheduleRuns(input.id).then((runs) => ({ runs })),
+  );
+
+  server.handle(updateSchedule, (input) =>
+    updateScheduleOnDaemon({
+      id: input.id,
+      cron: input.cron,
+      maxRuns: input.maxRuns,
+    }),
+  );
 
   return () => {};
 }
