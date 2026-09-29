@@ -55,8 +55,23 @@ export function loadHistory(): HistoryEntry[] {
   return readJsonArray<HistoryEntry>(historyFile());
 }
 
-export function appendHistory(entries: HistoryEntry[], entry: HistoryEntry, limit = 50): HistoryEntry[] {
-  const next = [entry, ...entries].slice(0, limit);
+/**
+ * Configurable history limit (plugin settings, default 50). Module-level so
+ * both the executor and RPC handlers trim consistently; a lower setting is
+ * enforced lazily on the next append or history list call.
+ */
+let historyLimit = 50;
+
+export function setHistoryLimit(limit: number): void {
+  if (Number.isFinite(limit)) historyLimit = Math.max(10, Math.min(500, Math.floor(limit)));
+}
+
+export function trimHistory(entries: HistoryEntry[]): HistoryEntry[] {
+  return entries.length > historyLimit ? entries.slice(0, historyLimit) : entries;
+}
+
+export function appendHistory(entries: HistoryEntry[], entry: HistoryEntry): HistoryEntry[] {
+  const next = [entry, ...entries].slice(0, historyLimit);
   writeJsonAtomic(historyFile(), next);
   return next;
 }
@@ -66,6 +81,15 @@ export function clearHistoryStore(): void {
     fs.rmSync(historyFile(), { force: true });
   } catch {
     // Already gone.
+  }
+}
+
+/** Applies the configured limit to the stored file immediately. */
+export function enforceHistoryLimit(): void {
+  const entries = loadHistory();
+  const trimmed = trimHistory(entries);
+  if (trimmed.length !== entries.length) {
+    writeJsonAtomic(historyFile(), trimmed);
   }
 }
 

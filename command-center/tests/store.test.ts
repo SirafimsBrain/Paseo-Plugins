@@ -8,6 +8,7 @@ import {
   loadCommands,
   loadHistory,
   saveCommands,
+  setHistoryLimit,
 } from "../server/store";
 import type { CommandDefinition, HistoryEntry } from "../shared/commands";
 
@@ -80,9 +81,10 @@ describe("history store", () => {
   });
 
   it("prepends new entries and keeps the list bounded", () => {
+    setHistoryLimit(50);
     let entries: HistoryEntry[] = [];
     for (let index = 0; index < 60; index += 1) {
-      entries = appendHistory(entries, entry(`h${index}`), 50);
+      entries = appendHistory(entries, entry(`h${index}`));
     }
     expect(loadHistory()).toHaveLength(50);
     expect(loadHistory()[0]!.id).toBe("h59");

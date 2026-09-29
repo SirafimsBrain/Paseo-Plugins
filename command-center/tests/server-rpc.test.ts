@@ -27,6 +27,22 @@ function fakeServer(): never {
     handle(rpc: { name: string }, handler: Handler) {
       handlers.set(rpc.name, handler);
     },
+    registerSettings() {
+      const listeners = new Set<(state: { status: string }) => void>();
+      return {
+        read: async () => ({
+          status: "ready",
+          revision: "r1",
+          values: { historyLimit: 50, defaultProvider: "", autoRunCommandOnTurnEnd: "", bootstrapCommand: "" },
+        }),
+        subscribe: (listener: (state: { status: string }) => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      };
+    },
+    on() {},
+    before() {},
   } as never;
 }
 
@@ -234,5 +250,59 @@ describe("command-center RPC handlers", () => {
     expect(listed.entries).toHaveLength(1);
     expect(listed.entries[0]).toMatchObject({ id: result.id, rendered: "Review #remote" });
     expect(typeof listed.entries[0]!.at).toBe("string");
+  });
+
+  it("run passes the command mcpServers into the created agent config", async () => {
+    call("command-center.save", {
+      command: command({
+        mcpServers: { github: { type: "http", url: "https://api.github.com/mcp" } },
+      }),
+    });
+    const created: unknown[] = [];
+    const paseo = {
+      workspaces: { list: async () => ({ entries: [] }) },
+      agents: {
+        list: async () => ({ entries: [] }),
+        create: async (input: unknown) => {
+          created.push(input);
+          return { id: "ag_mcp" };
+        },
+      },
+    };
+    const result = (await call("command-center.run", {
+      commandId: "cmd_1",
+      values: { pr: "#1" },
+      newWorktree: false,
+    }, paseo)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(created[0]).toMatchObject({
+      config: { mcpServers: { github: { type: "http", url: "https://api.github.com/mcp" } } },
+    });
+  });
+
+  it("attachment-search finds commands by name and returns picker-ready items", () => {
+    call("command-center.save", { command: command({ name: "Nightly Review" }) });
+    call("command-center.save", {
+      command: command({ id: "cmd_2", name: "Deploy", template: "deploy to prod" }),
+    });
+    const result = call("command-center.attachment-search", { query: "review" }) as {
+      items: { id: string; title: string; text: string; url: string; resourceType: string }[];
+    };
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: "cmd_1",
+      title: "Nightly Review",
+      text: "Review {{input:pr}}",
+      resourceType: "prompt-command",
+    });
+    expect(result.items[0]!.url.startsWith("command-center://command/")).toBe(true);
+  });
+
+  it("attachment-search returns everything for an empty query", () => {
+    call("command-center.save", { command: command() });
+    const result = call("command-center.attachment-search", { query: "" }) as {
+      items: unknown[];
+    };
+    expect(result.items).toHaveLength(1);
   });
 });

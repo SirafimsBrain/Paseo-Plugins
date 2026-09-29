@@ -32,6 +32,40 @@ export const commandSchema = z.object({
   terminalName: z.string().optional(),
   /** Prompt commands only: `provider/model` of the agent created for a run. */
   provider: z.string().optional(),
+  /**
+   * Prompt commands only: MCP servers attached to every agent created by this
+   * command. Keys are server names, values are daemon MCP configs
+   * (`McpServerConfig`: stdio `{type:"stdio",command,args?,env?}`, http
+   * `{type:"http",url,headers?}`, sse `{type:"sse",url,headers?}`), e.g.
+   * `{ "github": { "type": "http", "url": "https://api.github.com/mcp" } }`.
+   * Sending to an existing agent does not change its MCP configuration.
+   */
+  mcpServers: z
+    .record(
+      z.string(),
+      z.union([
+        z.object({
+          type: z.literal("stdio"),
+          command: z.string().min(1),
+          args: z.array(z.string()).optional(),
+          env: z.record(z.string(), z.string()).optional(),
+          alwaysLoad: z.boolean().optional(),
+        }),
+        z.object({
+          type: z.literal("http"),
+          url: z.string().min(1),
+          headers: z.record(z.string(), z.string()).optional(),
+          alwaysLoad: z.boolean().optional(),
+        }),
+        z.object({
+          type: z.literal("sse"),
+          url: z.string().min(1),
+          headers: z.record(z.string(), z.string()).optional(),
+          alwaysLoad: z.boolean().optional(),
+        }),
+      ]),
+    )
+    .optional(),
   /** Free-form grouping label managed via the categories RPCs; empty = uncategorized. */
   category: z.string().trim().max(40).optional(),
   favorite: z.boolean().default(false),
@@ -271,6 +305,29 @@ export const runBatch = defineRpc({
   }),
   output: z.object({
     results: z.array(runResultSchema),
+  }),
+});
+
+/**
+ * Attachment-source search: finds commands by name/template for the composer
+ * attachment picker. Resolved items insert the rendered-free template text
+ * (raw template — inputs stay as `{{input:…}}` tokens for the user to fill).
+ */
+export const searchCommandsForAttachment = defineRpc({
+  name: "command-center.attachment-search",
+  input: z.object({ query: z.string() }),
+  output: z.object({
+    items: z.array(
+      z.object({
+        id: z.string(),
+        identifier: z.string(),
+        title: z.string(),
+        subtitle: z.string().optional(),
+        url: z.string(),
+        text: z.string(),
+        resourceType: z.string(),
+      }),
+    ),
   }),
 });
 

@@ -19,9 +19,13 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 - **Categories** — every command can carry a free-form category label. The library shows a category chip row; picking a chip filters the list, and a new label typed in the editor is registered automatically on save.
 - **Search** — a toggleable search field filters commands by name, category, template body, and variable prompts. Matching is case-insensitive and multi-term (AND).
 - **Targeting** — multi-select workspaces grouped by host (prompt and shell), run-time provider/model picker with live model lists (disabled providers hidden), optional existing agent for single-target runs, optional branch-off worktree. One click fans out to many workspaces and hosts with per-target results.
-- **History** — the last 50 runs with the rendered payload, target, used model/agent, and error; any entry can be repeated in one click with its values, target, and model prefilled.
+- **History** — the last N runs (configurable, default 50) with the rendered payload, target, used model/agent, and error; any entry can be repeated in one click with its values, target, and model prefilled.
+- **MCP servers per command** — a prompt command can carry MCP server configs (`stdio`/`http`/`sse`), attached to every agent the command creates.
+- **Automation** — optional server-side hooks, configured in the plugin settings: run a command (with template defaults) every time an agent finishes a turn successfully, and/or bootstrap every newly created workspace with a command.
+- **Settings screen** — Paseo Settings → Plugins → Command Center: history retention (10–500), default provider/model for new prompt commands, and the automation hooks.
 - **Schedules** — any command (prompt or shell) can be scheduled on the standard Paseo scheduler, managed entirely from the plugin: the `Schedule` button next to `Edit` on a command card opens the form prefilled from the saved command (rendered prompt with default inputs, stored model, workspace), while the run dialog's `Schedule…` button freezes exactly the values you previewed. Pick a cadence preset or a cron expression, cap the number of runs, optionally fire once immediately; shell lines are wrapped into an agent instruction for each run. Schedules run on the daemon host (they also appear in the native Schedules sidebar), the plugin keeps the link to the creating command, and a dedicated tab offers pause/resume, run-now, an inline cadence editor and per-run tracking (status, timing, output/errors).
-- **Entry points** — sidebar item, Command Center item (⌘K), and a `/cc <command name>` slash command in agent chats.
+- **Composer attachment source** — saved commands are searchable from the composer's attachment picker; picking one inserts the template text into the message.
+- **Entry points** — sidebar item, Command Center item (⌘K), and a `/cc` slash command in agent chats (`/cc <name>` runs with defaults; `/cc list`, `/cc history`, `/cc schedule <name> <cron> [name]` open the surface / create a schedule).
 - **Host typography** — text sizes in the surface are scaled by the interface text size from Paseo's Settings → Appearance, and a configured interface/code font family is applied to plugin text (see limitations in `__doc.md`).
 
 ## Install
@@ -30,7 +34,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 paseo plugin add /path/to/command-center
 ```
 
-Requires Paseo ≥ 0.8.0 (verified against 0.9.0).
+Requires Paseo ≥ 0.9.0 (verified against 0.9.2 and 0.10.1; the settings screen, attachment source and lifecycle hooks use SDK 0.10 APIs).
 
 ## Development
 
@@ -46,7 +50,7 @@ Storage layout on the daemon host:
 $PASEO_HOME/plugins/command-center/
 ├── commands.json    # the command library
 ├── categories.json  # known category labels
-├── history.json     # the last 50 runs
+├── history.json     # the last N runs (settings.historyLimit)
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
 

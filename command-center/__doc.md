@@ -12,10 +12,16 @@ The concept was inspired by [stablyai/orca](https://github.com/stablyai/orca) (a
 
 ```
 command-center/
-├── index.server.ts            # RPC handlers (list/save/delete/favorite/history/run/schedules)
+├── index.server.ts            # RPC handlers, settings registration, lifecycle hooks,
+│   │                          # attachment-search handler (list/save/delete/favorite/history/
+│   │                          # run/schedules/attachment-search)
 ├── index.client.tsx           # surface, sidebar item, ⌘K items, /cc slash command
+│   │                          # (list|history|schedule|<name>), attachment source,
+│   │                          # settings screen registration
 ├── shared/
-│   ├── commands.ts            # zod schemas, RPC contracts (defineRpc), types
+│   ├── commands.ts            # zod schemas (incl. commandSchema.mcpServers), RPC contracts
+│   │                          # (defineRpc), types
+│   ├── settings.ts            # host-scoped plugin settings definition (defineSettings)
 │   ├── schedules.ts           # schedule view models, RPC contracts, cadence helpers (client-safe)
 │   ├── template.ts            # pure template renderer + input discovery (client-safe)
 │   ├── search.ts              # pure command search/filter over name, category, template, variables
@@ -30,7 +36,8 @@ command-center/
 │   └── (template.ts removed — shared module is used instead)
 ├── client/
 │   ├── command-center-surface.tsx  # library + history + schedules tabs, editor host, run modal, fan-out
-│   ├── command-form.tsx            # create/edit form, provider/model picker
+│   ├── command-form.tsx            # create/edit form, provider/model picker, defaultProvider from settings
+│   ├── settings-screen.tsx         # Paseo Settings → Plugins screen (host settings via useSettings)
 │   ├── run-dialog.tsx              # multi-select workspaces, provider/model picker, preview, Schedule… button
 │   ├── schedule-dialog.tsx         # cadence presets, cron input, max runs, run-on-create
 │   ├── schedules-tab.tsx           # schedule list: status, next/last run, actions, run history
@@ -38,7 +45,7 @@ command-center/
 │   ├── dispatch.ts                 # client-side executor mirror for non-local hosts (multi-host fan-out)
 │   ├── use-host-typography.ts     # hook: host font settings → scale + families
 │   └── preview.ts                  # preview rendering helper
-└── tests/                     # vitest suites (9 files, 95 tests)
+└── tests/                     # vitest suites (9 files, 98 tests)
 ```
 
 Data flow for a run:
@@ -83,7 +90,7 @@ Verified against the running daemon and `@getpaseo/plugin@0.9.0` / `@getpaseo/cl
 | --- | --- |
 | `commands.json` | `CommandDefinition[]`, sorted by name, favorites first in UI |
 | `categories.json` | known category labels `CommandCategory[]` (`{ name, sortKey }`), deduped case-insensitively on load |
-| `history.json` | last 50 `HistoryEntry` entries, newest first — each with the used `provider`, the render `values`, and a `batchId` grouping fan-out runs (all optional: pre-upgrade entries parse without them) |
+| `history.json` | last N `HistoryEntry` entries, newest first (N = `historyLimit` setting, default 50, range 10–500) — each with the used `provider`, the render `values`, and a `batchId` grouping fan-out runs (all optional: pre-upgrade entries parse without them) |
 
 Writes are atomic (temp file + rename). A corrupted file is treated as empty rather than crashing the plugin.
 
@@ -111,6 +118,7 @@ Each history card shows the used model and agent (resolved live from the agents 
 | `command-center.schedule-action` | `{ id, action: pause\|resume\|run-once\|delete }` | `{ ok, error }` |
 | `command-center.schedule-runs` | `{ id }` | `{ runs: ScheduleRun[] }` — daemon run log (status/timing/agent/output/error) |
 | `command-center.schedule-update` | `{ id, cron?, maxRuns? }` | `{ ok, error }` — cadence/run-cap edits |
+| `command-center.attachment-search` | `{ query }` | `{ items }` ≤ 20 — multi-term search over name/template/category for the composer attachment picker (`identifier`, `url`, `text` = raw template, `resourceType`) |
 
 All schemas are zod schemas in `shared/commands.ts`; the same module is imported by server and client, so contracts cannot drift.
 
@@ -174,12 +182,74 @@ Limitations: changes apply on next mount (settings change rarely; re-reading per
 - Shell commands are schedulable too: the scheduler runs prompts only, so `schedulePromptFor(type, rendered)` (shared module) wraps the rendered line into an agent instruction with a fenced `sh` block. The schedule dialog preview and the server's create path call the same helper, so what the user sees is exactly what the daemon stores.
 - Cwd is required by the daemon `new-agent` target: the dialog passes the selected workspace directory, else the creation fails with a readable error.
 
+## 5d. Version 0.5.0 — settings, automation hooks, MCP injection, attachment source
+
+All features below are verified against `@getpaseo/plugin@0.10.1` type definitions; the SDK reference for this release is Paseo `0.10.1`.
+
+### Settings screen (host-scoped settings)
+
+- `shared/settings.ts` defines `commandCenterSettings = defineSettings({ id: "command-center", scope: "host", version: 1, schema })` with four fields: `historyLimit` (10–500, default 50), `defaultProvider` (prefilled for new prompt commands), `autoRunCommandOnTurnEnd` and `bootstrapCommand` (automation: command **names**, resolved by the server at event time — renamed/deleted commands simply stop firing, no stale ids).
+- The server registers the definition via `server.registerSettings(...)` (see §2), reads it once at startup and on every change (`settings.subscribe`) to apply `setHistoryLimit` + `enforceHistoryLimit` live, without a restart.
+- The client contributes a screen via `client.addSettingsScreen` → Paseo Settings → Plugins → Command Center ([settings-screen.tsx](./client/settings-screen.tsx)). The UI is built from `@getpaseo/plugin/client/ui` components (`SettingsCard`/`SettingsSection`/`SettingsInput`/`SettingsSwitch`) — note this is a **separate subpath import**, not part of `@getpaseo/plugin/client`.
+- `CommandForm` pre-fills `defaultProvider` from settings (via `useSettings`) so new prompt commands start with the configured model.
+
+### Lifecycle-hook automation
+
+- `agent.turn_ended` — when `event.outcome.kind === "completed"`, runs the command named in `autoRunCommandOnTurnEnd` with template defaults (`values: {}`). Prompt commands only (a shell line cannot sensibly "auto-run" after every turn). Errors are swallowed: a failing auto-run must not break the agent that just finished.
+- `workspace.created` — runs the `bootstrapCommand` command in the new workspace (`workspaceId: event.workspace.id`): install deps, lint, build. Same defaults-and-swallow-errors policy.
+- Both handlers resolve the command by **name, case-insensitively**, at event time — automation config survives command renames that keep the name and never dangles pointers to deleted commands.
+
+### MCP server injection
+
+- `commandSchema.mcpServers` (shared/commands.ts) — a strict zod union matching the SDK `McpServerConfig`: `{ type: "stdio", command, args?, env?, alwaysLoad? } | { type: "http", url, headers?, alwaysLoad? } | { type: "sse", url, headers?, alwaysLoad? }`.
+- `executor.ts` passes `{ provider, mcpServers: command.mcpServers }` into `agents.create` config on both the local and multi-host dispatch paths. Per-command MCP attachment — a command can, e.g., always create its agents with a GitHub MCP server attached.
+- Injection happens **per command** at creation time, not via `server.before("agent.create")`: the plugin only intercepts its own agent creations, and config-level attachment is the explicit, user-visible way to do it. A global `before("agent.create")` hook would silently modify agents created by other surfaces and was intentionally not used.
+
+### Attachment source (composer picker)
+
+- `client.addAttachmentSource(defineAttachmentSource({ ... search: searchCommandsForAttachment }))` — the Command Center appears in the composer attachment picker; searching runs the `command-center.attachment-search` RPC against the server store.
+- The handler does a multi-term AND search over name/template/category, returns ≤ 20 items with `identifier: "command-center:<id>"`, `url: "command-center://command/<id>"`, `resourceType: prompt-command | shell-command`, and `text` = the **raw template** (inputs stay as `{{input:…}}` tokens for the user to fill in the message).
+- SDK constraint honored: the attachment item contract requires `url` to be a `ZodURL`, hence the custom `command-center://command/<id>` scheme instead of a bare id.
+
+### `/cc` slash command extensions
+
+The slash context has **no message channel** — output can only be shown by opening the surface, so the subcommands navigate rather than print:
+
+- `/cc` or `/cc list` — opens the surface (library listing).
+- `/cc history` — opens the surface on the history view.
+- `/cc schedule <name> <cron> [scheduleName]` — creates a daemon schedule from a prompt command that has a stored provider; falls back to the first workspace server-side (`createSchedule` without `workspaceId`). Defaults to `0 9 * * *` when the cron argument is omitted.
+- `/cc <command name>` — runs the command with template defaults (unchanged behavior).
+
+## 5e. Ideas evaluated and not implemented (why)
+
+The 10-idea analysis for 0.5.0; every item verified against the 0.10.1 SDK and host bundle before deciding.
+
+### Composer pills — not implemented (SDK constraint)
+
+`client.addComposerPill` requires both `workspaceId` and **`agentId`** — pills are per-agent, not global. The host bundle throws `Plugin composer pill needs an agent` when `agentId` is empty. There is no plugin-side hook that fires "for every open chat", so a pill cannot be attached to arbitrary conversations at plugin startup. Command Center remains reachable from chats via `/cc` and the ⌘K items. Revisit if the SDK grows a per-surface or global pill registration.
+
+### Timeline transformer/renderer for command runs — not implemented (architecture)
+
+`addTimelineTransformer` can only transform items whose `itemType` is a valid `AgentTimelineItem` type. Command Center runs are **not** tool calls: the plugin server creates agents/terminals directly via daemon RPCs, so no `tool_call` timeline item is ever produced that could be transformed. There is nothing in the agent timeline to hook into. Rendering run cards in the agent chat would require the host to emit plugin-attributed timeline items — a host-side change.
+
+### Theme contribution — intentionally skipped
+
+The host already supplies a full `PluginTheme` (colors, appearance) to plugin surfaces, and the plugin follows host Appearance settings for typography (§5b). A custom `addTheme` theme would fight the host theme (mismatched borders/foreground) for negligible value. Revisit only if the host lets users opt into plugin themes.
+
+### Workflows (multi-step chained commands) — deferred
+
+The schema extension (a `workflow` command type with conditional steps `always | on-success | on-failure`) is straightforward and does not require new SDK APIs — the executor already runs batches sequentially and knows per-target success/failure. Deferred as a scope decision: 0.5.0 was already large, and a workflow editor UI (step ordering, conditions, failure handling) plus per-step state in the store is a feature-sized change on its own. Natural candidate for 0.6.0.
+
+### Web dashboard / remote access — deferred
+
+The surface is a React Native component rendered inside the host webview; "read-only view on a phone" would mean either a separate HTTP server exposing the store (new attack surface, token handling, host port management) or the host's own remote-access feature. High effort, medium value for a personal plugin.
+
 ## 6. Compatibility
 
 Verified on 2026-09-29 against Paseo `0.10.1` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
-- `npx vitest run` — 9 suites, 95 tests, all green.
+- `npx vitest run` — 9 suites, 98 tests, all green.
 - Live probe of the whole schedule lifecycle (create with full model ref, inspect, pause, resume, update, delete) — succeeded.
 - `paseo plugin add <dir>` → status `running`, daemon logs show `Plugin ready` with no plugin errors.
 - The `version` manifest key is rejected by 0.10.x (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
@@ -190,10 +260,10 @@ Paseo 0.10.0 (2026-09-28) and 0.10.1 (2026-09-29) are **additive** for every API
 
 - **OpenCode v2 support** added — the plugin's provider resolution via `paseo.providers.snapshot()` and `providers.listModels()` automatically includes the new OpenCode v2 models when the daemon detects them. No plugin change required.
 - **Password checks for relay connections** added — this is a daemon/network-layer change; the plugin's local loopback `DaemonClient` (server/daemon-connection.ts) is unaffected as it connects directly to the local daemon websocket without relay.
-- **Settings reorganization** — the plugin does not use Paseo's built-in settings screens; its own settings are managed via the panel.
+- **Settings reorganization** — superseded in 0.5.0: the plugin now contributes its own settings screen via `client.addSettingsScreen` + `server.registerSettings` (§5d), which is the SDK-native mechanism on 0.10.x.
 - **Bug fixes** (workspace sidebar persistence, agent import, daemon startup, Pi/OpenCode/Codex edge cases) — none affect the plugin's RPC surface or client contributions.
 
-The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bumped to 0.4.1 (patch) to reflect the SDK dependency update.
+The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bumped to 0.5.0 (new functionality: settings screen, automation hooks, MCP injection, attachment source, `/cc` subcommands, history retention setting).
 
 ## 7. Limitations
 
@@ -204,19 +274,20 @@ The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bum
 - **The bridge needs the daemon config.** `daemon-connection.ts` reads `daemon.listen` from `$PASEO_HOME/config.json`; if the daemon listens behind authentication, the bridge would need the password — not required in the default local setup (no password set).
 - **No secrets.** Templates are plain files; do not put tokens into templates.
 - **Worktree runs require a git workspace.** Branch-off mode on a non-git directory will fail with a daemon-side error surfaced in the run dialog.
-- **History is linear and bounded** (50 entries); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
-- **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required.
+- **History is linear and bounded** (default 50, user-configurable 10–500 via settings, §5d); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
+- **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required. `list`/`history` only open the surface: the slash context has no message channel to print into.
+- **Automation is best-effort.** Auto-run/bootstrap commands execute with template defaults and swallow errors (§5d); a failing automation never blocks the triggering event, and failures are only visible via the run history.
 
-## 8. Roadmap (technically feasible on SDK 0.9)
+## 8. Roadmap
 
-Ordered by value/effort, all verified to exist in the SDK:
+Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger automation) and 9 (MCP injection) of the previous roadmap were delivered in 0.5.0 (§5d) and removed from this list.
 
-1. **Trigger automation** — `server.on("workspace.created" | "agent.turn_ended", ...)` lifecycle hooks: auto-run a command when a workspace opens or when an agent finishes a turn (e.g. auto-run tests after each completed task). Scheduler-driven runs are now covered by the Schedules integration (§5c).
-2. **Workflows** — a command type that chains several steps (create workspace → create agent → wait → send follow-up) using `agent.run()/waitForFinish()`; needs per-step state persisted in the store.
-3. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration (not present in 0.9), otherwise emulable via Command Center items only.
-4. **Import/export & sharing** — export `commands.json` selections as a shareable JSON or install from a git repo (mirroring how Paseo plugins are distributed).
-5. **Multi-agent fan-out** — done for workspaces/hosts via `run-batch` + client dispatch; per-agent (N existing agents as targets) fan-out is still open.
-6. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is still open and would use `useHosts()` + per-host `getPaseoClient(serverId)` RPCs.
-7. **Command parameters beyond strings** — file pickers, workspace pickers as first-class variable types in the run dialog.
-8. **Usage analytics** — aggregate `useCount`/history into a "most used" section; data already exists.
-9. **MCP injection** — commands that attach an MCP server config to the created agent via `config.mcpServers`.
+1. **Workflows** — a `workflow` command type chaining several steps with `always | on-success | on-failure` conditions (§5e): the executor already runs batches sequentially, so the runtime is close; the work is the schema, per-step state, and a workflow editor UI.
+2. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration (not present in 0.10.x), otherwise emulable via Command Center items only.
+3. **Import/export & sharing** — export `commands.json` selections as a shareable JSON or install from a git repo (mirroring how Paseo plugins are distributed).
+4. **Multi-agent fan-out** — done for workspaces/hosts via `run-batch` + client dispatch; per-agent (N existing agents as targets) fan-out is still open.
+5. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is still open and would use `useHosts()` + per-host `getPaseoClient(serverId)` RPCs.
+6. **Command parameters beyond strings** — file pickers, workspace pickers as first-class variable types in the run dialog.
+7. **Usage analytics** — aggregate `useCount`/history into a "most used" section; data already exists.
+8. **Composer pills / timeline run cards** — blocked today (§5e); revisit when the SDK gains global pill registration or plugin-attributed timeline items.
+9. **Web dashboard** — deferred (§5e); revisit if the host adds a remote-access surface plugins can attach to.

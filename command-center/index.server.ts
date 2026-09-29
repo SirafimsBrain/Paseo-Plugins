@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { commandCenterSettings } from "./shared/settings";
 import {
   appendHistory,
   clearHistory,
@@ -9,6 +10,7 @@ import {
   runBatch,
   runCommand,
   saveCategories,
+  searchCommandsForAttachment,
   saveCommand,
   toggleFavorite,
   type CommandDefinition,
@@ -26,11 +28,13 @@ import {
   appendHistory as appendHistoryEntry,
   clearHistoryStore,
   collectImplicitCategories,
+  enforceHistoryLimit,
   loadCategories,
   loadCommands,
   loadHistory,
   saveCategories as persistCategories,
   saveCommands,
+  setHistoryLimit,
 } from "./server/store";
 import { executeBatch, executeCommand } from "./server/executor";
 import { renderTemplate } from "./shared/template";
@@ -48,6 +52,53 @@ function parseCommand(raw: unknown): CommandDefinition | null {
 }
 
 export default function contribute(server: PluginServerContext) {
+  const settings = server.registerSettings(commandCenterSettings);
+
+  // History retention: apply the configured limit at startup and on changes.
+  void settings.read().then((state) => {
+    if (state.status === "ready") setHistoryLimit(state.values.historyLimit);
+    enforceHistoryLimit();
+  });
+  settings.subscribe((state) => {
+    if (state.status === "ready") setHistoryLimit(state.values.historyLimit);
+    enforceHistoryLimit();
+  });
+
+  // Automation: run a configured command when an agent turn completes. The
+  // command runs with template defaults in its default workspace — automation
+  // has no user to answer input prompts. Errors are swallowed: a failing
+  // auto-run must not break the agent that just finished.
+  server.on("agent.turn_ended", async (event, { paseo }) => {
+    if (event.outcome.kind !== "completed") return;
+    const state = await settings.read();
+    if (state.status !== "ready") return;
+    const name = state.values.autoRunCommandOnTurnEnd.trim();
+    if (name.length === 0) return;
+    const command = loadCommands().find(
+      (candidate) => candidate.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (!command || command.type !== "prompt") return;
+    await executeCommand(command, { values: {}, newWorktree: false }, { paseo }).catch(() => undefined);
+  });
+
+  // Automation: bootstrap every newly created workspace with a configured
+  // command (install deps, lint…). Same defaults-and-swallow-errors policy.
+  server.on("workspace.created", async (event, { paseo }) => {
+    const state = await settings.read();
+    if (state.status !== "ready") return;
+    const name = state.values.bootstrapCommand.trim();
+    if (name.length === 0) return;
+    const command = loadCommands().find(
+      (candidate) => candidate.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (!command) return;
+    await executeCommand(
+      command,
+      { values: {}, newWorktree: false, workspaceId: event.workspace.id },
+      { paseo },
+    ).catch(() => undefined);
+  });
+
   server.handle(listCommands, () => ({
     commands: loadCommands(),
   }));
@@ -246,27 +297,33 @@ export default function contribute(server: PluginServerContext) {
   server.handle(createSchedule, async (input, { paseo }) => {
     // Resolve the workspace for template context and the run cwd via the
     // normal plugin API; the schedule itself is created on the daemon.
+    // No workspaceId (e.g. `/cc schedule` from chat) falls back to the first
+    // workspace — the same best-guess the run flow uses.
     let workspaceName: string | null = null;
     let workspaceDirectory: string | null = null;
-    if (input.workspaceId) {
-      try {
-        const result = await paseo.workspaces.list();
-        for (const entry of result.entries) {
-          const record = entry as {
+    try {
+      const result = await paseo.workspaces.list();
+      const entries = result.entries;
+      const record = (
+        input.workspaceId
+          ? entries.find(
+              (entry) => (entry as { id?: string }).id === input.workspaceId,
+            )
+          : entries[0]
+      ) as
+        | {
             id?: string;
             name?: string | null;
             workspaceDirectory?: string | null;
             projectRootPath?: string | null;
-          };
-          if (record.id === input.workspaceId) {
-            workspaceName = record.name ?? null;
-            workspaceDirectory = record.workspaceDirectory ?? record.projectRootPath ?? null;
-            break;
           }
-        }
-      } catch {
-        // Workspace listing failed — fall back to the explicit cwd input.
+        | undefined;
+      if (record) {
+        workspaceName = record.name ?? null;
+        workspaceDirectory = record.workspaceDirectory ?? record.projectRootPath ?? null;
       }
+    } catch {
+      // Workspace listing failed — fall back to the explicit cwd input.
     }
     return createScheduleFromCommand({
       commandId: input.commandId,
@@ -287,6 +344,32 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(scheduleAction, (input) => runScheduleAction(input.id, input.action));
+
+  server.handle(searchCommandsForAttachment, (input) => {
+    const query = input.query.trim().toLowerCase();
+    const terms = query.length > 0 ? query.split(/\s+/) : [];
+    const matches = (command: CommandDefinition): boolean =>
+      terms.every((term) =>
+        [command.name, command.template, command.category ?? ""]
+          .join("\n")
+          .toLowerCase()
+          .includes(term),
+      );
+    return {
+      items: loadCommands()
+        .filter(matches)
+        .slice(0, 20)
+        .map((command) => ({
+          id: command.id,
+          identifier: `command-center:${command.id}`,
+          title: command.name,
+          subtitle: command.category,
+          url: `command-center://command/${command.id}`,
+          text: command.template,
+          resourceType: command.type === "shell" ? "shell-command" : "prompt-command",
+        })),
+    };
+  });
 
   server.handle(listScheduleRuns, (input) =>
     fetchScheduleRuns(input.id).then((runs) => ({ runs })),

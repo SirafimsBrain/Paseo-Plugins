@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSettings } from "@getpaseo/plugin/client";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { CommandCategory, CommandDefinition, ProviderWithModels } from "../shared/commands";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
+import { commandCenterSettings } from "../shared/settings";
 import { ProviderModelPicker } from "./provider-model-picker";
 
 export interface CommandFormResult {
@@ -45,19 +47,25 @@ export function CommandForm({
   onCancel,
   onSubmit,
 }: Props) {
+  const settings = useSettings(commandCenterSettings);
+  const defaultProviderFromSettings =
+    settings.status === "ready" ? settings.values.defaultProvider.trim() : "";
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState<"prompt" | "shell">(initial?.type ?? "prompt");
   const [template, setTemplate] = useState(initial?.template ?? "");
-  const [provider, setProvider] = useState(initial?.provider ?? "");
+  const [provider, setProvider] = useState(initial?.provider ?? defaultProviderFromSettings);
   const [terminalName, setTerminalName] = useState(initial?.terminalName ?? "");
   const [scope, setScope] = useState<"global" | "workspace">(initial?.scope ?? "global");
   const [category, setCategory] = useState(initial?.category ?? "");
 
   // Migrate stale stored values (bare ids, pre-compose refs) against the live
-  // catalog. Explicit picks that are still known survive unchanged.
+  // catalog. Explicit picks that are still known survive unchanged; the
+  // settings default fills brand-new commands once the catalog loads.
   useEffect(() => {
-    setProvider((current) => resolveModelRef(providers, current || initial?.provider));
-  }, [providers, initial?.provider]);
+    setProvider((current) =>
+      resolveModelRef(providers, current || initial?.provider || defaultProviderFromSettings),
+    );
+  }, [providers, initial?.provider, defaultProviderFromSettings]);
 
   const variables = useMemo(() => inputVariablesOf(template), [template]);
   const nameError = name.trim().length === 0 ? "Name is required." : null;

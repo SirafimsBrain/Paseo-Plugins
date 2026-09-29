@@ -203,14 +203,14 @@ export async function executeCommand(
 
     const created = input.newWorktree && workspace
       ? await paseo.workspaces.ref(workspace.id).agents.create({
-          config: { provider },
+          config: { provider, mcpServers: command.mcpServers },
           prompt: rendered,
           worktree: { mode: "branch-off", newBranch: worktreeBranchName(command) },
           title: commandTitle(command),
           labels: { source: "command-center" },
         })
       : await paseo.agents.create({
-          config: { provider },
+          config: { provider, mcpServers: command.mcpServers },
           cwd: contextWorkspace?.workspaceDirectory ?? contextWorkspace?.projectRootPath ?? process.cwd(),
           prompt: rendered,
           title: commandTitle(command),
