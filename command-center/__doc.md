@@ -176,13 +176,24 @@ Limitations: changes apply on next mount (settings change rarely; re-reading per
 
 ## 6. Compatibility
 
-Verified on 2026-09-27 against the running daemon `paseo 0.9.2` with `@getpaseo/plugin@0.9.0`:
+Verified on 2026-09-29 against Paseo `0.10.1` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
 - `npx vitest run` — 9 suites, 95 tests, all green.
 - Live probe of the whole schedule lifecycle (create with full model ref, inspect, pause, resume, update, delete) — succeeded.
 - `paseo plugin add <dir>` → status `running`, daemon logs show `Plugin ready` with no plugin errors.
-- The `version` manifest key is rejected by 0.9.x (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
+- The `version` manifest key is rejected by 0.10.x (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
+
+### 6.1 Paseo 0.10.x changes affecting this plugin
+
+Paseo 0.10.0 (2026-09-28) and 0.10.1 (2026-09-29) are **additive** for every API this plugin uses:
+
+- **OpenCode v2 support** added — the plugin's provider resolution via `paseo.providers.snapshot()` and `providers.listModels()` automatically includes the new OpenCode v2 models when the daemon detects them. No plugin change required.
+- **Password checks for relay connections** added — this is a daemon/network-layer change; the plugin's local loopback `DaemonClient` (server/daemon-connection.ts) is unaffected as it connects directly to the local daemon websocket without relay.
+- **Settings reorganization** — the plugin does not use Paseo's built-in settings screens; its own settings are managed via the panel.
+- **Bug fixes** (workspace sidebar persistence, agent import, daemon startup, Pi/OpenCode/Codex edge cases) — none affect the plugin's RPC surface or client contributions.
+
+The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bumped to 0.4.1 (patch) to reflect the SDK dependency update.
 
 ## 7. Limitations
 

@@ -24,6 +24,27 @@ usage in the panel styles; when unset, no `fontFamily` is forced so the host's
 
 ## Compatibility
 
+Verified against Paseo `0.10.1` (2026-09-29, SDK `@getpaseo/plugin@0.10.1`):
+no code changes required, and the manifest range `>=0.8.0` already covers it.
+
+### 0.10.x changes affecting this plugin
+
+Paseo 0.10.0 (2026-09-28) and 0.10.1 (2026-09-29) are **additive** for every API this plugin uses:
+
+- **OpenCode v2 support** added — the plugin's OpenCode provider adapter uses the vendor CLI (`opencode session list/delete/export`), which is automatically compatible with OpenCode v2 when the CLI is updated. The adapter does not depend on internal schemas.
+- **Password checks for relay connections** added — this is a daemon/network-layer change; the plugin runs in the daemon subprocess and accesses local files/CLI directly, so it is unaffected.
+- **Settings reorganization** — the plugin registers its own host-scoped settings screen via `client.addSettingsScreen`; the Paseo Settings UI reorganization does not affect plugin settings screens.
+- **Bug fixes** (workspace sidebar persistence, agent import, daemon startup, Pi/OpenCode/Codex edge cases) — none affect the plugin's RPC surface, provider adapters, or client contributions.
+
+The 0.9.0 → 0.10.0 SDK diff touches only additive declarations and bug fixes. The version was bumped to 0.2.1 (patch) to reflect the SDK dependency update.
+
+Verification (with `@getpaseo/plugin@0.10.1` installed):
+- `npm run typecheck` passes
+- `npm test` passes (8 suites, 70 tests)
+
+<details>
+<summary>Historical: 0.9.0 compatibility notes</summary>
+
 Verified against Paseo `0.9.0` (2026-09-22, SDK `@getpaseo/plugin@0.9.0`):
 no code changes required, and the manifest range `>=0.8.0` already covers it.
 
@@ -42,6 +63,7 @@ no code changes required, and the manifest range `>=0.8.0` already covers it.
   `parentSessionId` / `toolCallId`) plus a heartbeat-lease fix.
 - Verification (throwaway copy with `@getpaseo/plugin@0.9.0` installed):
   `npm run typecheck` passes, `npm test` passes (8 suites, 70 tests).
+</details>
 
 ## Session store audit (verified 2026-09-21, Paseo 0.8.0)
 
