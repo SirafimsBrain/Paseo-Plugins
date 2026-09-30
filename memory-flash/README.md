@@ -27,6 +27,8 @@ Requires Paseo ≥ 0.10.0 (verified against 0.10.2; uses the plugin SDK 0.10 set
 
 After install: open **Settings → Plugins → Memory Flash** and press **Install into all agents** to place the skill where your agents look for it. The MCP server is injected into new agents automatically.
 
+The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "run", "bundle"]]`) is executed by the daemon on every plugin load, so `dist/mcp-server.js` is regenerated automatically and MCP-server changes reach agents without a manual rebundle.
+
 ## Development
 
 ```bash
@@ -34,6 +36,13 @@ npm install
 npm run bundle   # dist/mcp-server.js — standalone stdio server (esbuild)
 npm test         # vitest: store, tools, protocol, skill/hosts, e2e over stdio
 npm run typecheck
+```
+
+Working with an installed plugin:
+
+```bash
+paseo plugin logs memory-flash                 # includes the `[memory-flash] MCP injected: … (entry exists|MISSING)` diagnostic
+paseo plugin disable memory-flash && paseo plugin enable memory-flash   # reload (`paseo plugin reload` currently fails manifest validation on the daemon side)
 ```
 
 Storage layout on the daemon host:
