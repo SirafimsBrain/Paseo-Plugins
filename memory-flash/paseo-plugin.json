@@ -2,5 +2,8 @@
   "id": "memory-flash",
   "requirements": {
     "paseo": ">=0.10.0"
-  }
+  },
+  "build": [
+    "npm run bundle"
+  ]
 }

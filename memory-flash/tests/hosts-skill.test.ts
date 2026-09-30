@@ -77,12 +77,30 @@ describe("remote hosts registry", () => {
 describe("skill installer", () => {
   it("reports targets with install state", () => {
     const statuses = skillStatuses();
-    expect(statuses.length).toBeGreaterThanOrEqual(4);
+    expect(statuses.length).toBe(7);
+    // All targets should have the skill file path containing "memory-flash/SKILL.md"
     for (const status of statuses) {
-      expect(status.installed).toBe(false);
-      expect(status.upToDate).toBeNull();
       expect(status.path).toContain("memory-flash/SKILL.md");
+      expect(typeof status.detected).toBe("boolean");
+      expect(typeof status.installed).toBe("boolean");
+      // upToDate is boolean when installed, null when not
+      if (status.installed) {
+        expect(typeof status.upToDate).toBe("boolean");
+      } else {
+        expect(status.upToDate).toBeNull();
+      }
     }
+    // Check all expected targets are present
+    const ids = statuses.map((s) => s.id).sort();
+    expect(ids).toEqual([
+      "agents",
+      "claude",
+      "cline",
+      "codex",
+      "kilo",
+      "opencode",
+      "qwen",
+    ]);
   });
 
   it("installs and uninstalls into a target directory", () => {
