@@ -23,7 +23,7 @@ interface JsonRpcRequest {
 }
 
 const PROTOCOL_VERSION = "2024-11-05";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.1";
 
 function writeMessage(message: unknown): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);

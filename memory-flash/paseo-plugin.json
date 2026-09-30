@@ -4,6 +4,10 @@
     "paseo": ">=0.10.0"
   },
   "build": [
-    "npm run bundle"
+    [
+      "npm",
+      "run",
+      "bundle"
+    ]
   ]
 }
