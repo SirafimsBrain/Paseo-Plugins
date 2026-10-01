@@ -95,6 +95,7 @@ __pycache__/
 # 🤖 ЛОКАЛЬНЫЕ АГЕНТЫ И AI-КОНФИГИ
 # ==========================================
 AGENTS.md
+.freebuff
 .qwenignore
 .graphifyignore
 .qwen/
@@ -104,6 +105,6 @@ OLD\ files/
 Documentations/Inbox/
 "Documentations/Reference Guides/"
 Documentations/Reference\ Guides/
-.freebuff
+
 
 gha-creds-*.json
