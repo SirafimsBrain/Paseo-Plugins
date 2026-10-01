@@ -11,12 +11,22 @@ import {
   SettingsSwitch,
 } from "@getpaseo/plugin/client/ui";
 import {
+  clineMcpStatus,
+  codexMcpStatus,
+  registerCodexMcp,
+  unregisterCodexMcp,
+  cursorMcpStatus,
+  registerCursorMcp,
+  unregisterCursorMcp,
   installSkill,
+  memoryStats,
   purgeMemories,
+  registerAllAgentMcp,
+  registerClineMcp,
   skillPreview,
   skillStatus,
+  unregisterClineMcp,
   uninstallSkill,
-  memoryStats,
 } from "../shared/memories";
 import { interfaceFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 
@@ -39,6 +49,24 @@ type SkillRow = {
   upToDate: boolean | null;
 };
 
+type AgentMcpStatus = {
+  path: string;
+  detected: boolean;
+  installed: boolean;
+  upToDate: boolean | null;
+  command: string | null;
+  args: string[] | null;
+  /** Live spawn check (Cline only). */
+  live?: boolean | null;
+};
+
+type AgentMcpAgent = {
+  id: string;
+  label: string;
+  register: (input: Record<string, never>) => Promise<{ ok: boolean; error: string | null } | null>;
+  unregister: (input: Record<string, never>) => Promise<{ ok: boolean; error: string | null } | null>;
+};
+
 export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(memoryFlashSettings);
   const typography = useHostTypography();
@@ -56,6 +84,37 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
   const statsRpc = useRpc(memoryStats);
   const purgeRpc = useRpc(purgeMemories);
   const skillPreviewRpc = useRpc(skillPreview);
+  const clineStatusRpc = useRpc(clineMcpStatus);
+  const clineRegisterRpc = useRpc(registerClineMcp);
+  const clineUnregisterRpc = useRpc(unregisterClineMcp);
+  const cursorStatusRpc = useRpc(cursorMcpStatus);
+  const cursorRegisterRpc = useRpc(registerCursorMcp);
+  const cursorUnregisterRpc = useRpc(unregisterCursorMcp);
+  const codexStatusRpc = useRpc(codexMcpStatus);
+  const codexRegisterRpc = useRpc(registerCodexMcp);
+  const codexUnregisterRpc = useRpc(unregisterCodexMcp);
+  const registerAllRpc = useRpc(registerAllAgentMcp);
+
+  const agentMcpAgents: AgentMcpAgent[] = [
+    {
+      id: "cline",
+      label: "Cline",
+      register: clineRegisterRpc,
+      unregister: clineUnregisterRpc,
+    },
+    {
+      id: "cursor",
+      label: "Cursor",
+      register: cursorRegisterRpc,
+      unregister: cursorUnregisterRpc,
+    },
+    {
+      id: "codex",
+      label: "Codex CLI",
+      register: codexRegisterRpc,
+      unregister: codexUnregisterRpc,
+    },
+  ];
 
   const [skillDoc, setSkillDoc] = useState<string>("");
   useEffect(() => {
@@ -64,6 +123,8 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
 
   const [skillRows, setSkillRows] = useState<SkillRow[]>([]);
   const [skillMessage, setSkillMessage] = useState<string | null>(null);
+  const [agentMcps, setAgentMcps] = useState<Record<string, AgentMcpStatus | null>>({});
+  const [agentMcpMessage, setAgentMcpMessage] = useState<string | null>(null);
   const [dbSummary, setDbSummary] = useState<string | null>(null);
   const [purgeTag, setPurgeTag] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -72,12 +133,19 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
     void skillStatusRpc({}).then((result) => setSkillRows(result.targets)).catch(() => undefined);
   }, [skillStatusRpc]);
 
+  const reloadAgentMcps = useCallback(() => {
+    void Promise.all([clineStatusRpc({}), cursorStatusRpc({}), codexStatusRpc({})])
+      .then(([cline, cursor, codex]) => setAgentMcps({ cline, cursor, codex }))
+      .catch(() => undefined);
+  }, [clineStatusRpc, cursorStatusRpc, codexStatusRpc]);
+
   useEffect(() => {
     reloadSkills();
+    reloadAgentMcps();
     void statsRpc({}).then((snapshot) => {
       setDbSummary(`${snapshot.total} memories · ${(snapshot.dbSizeBytes / 1024).toFixed(1)} KiB`);
     }).catch(() => undefined);
-  }, [reloadSkills, statsRpc]);
+  }, [reloadSkills, reloadAgentMcps, statsRpc]);
 
   if (settings.status === "loading") {
     return (
@@ -129,6 +197,46 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
         : `Installed with failures: ${failures.join(", ")}`,
     );
     reloadSkills();
+  };
+
+  const registerAgentMcp = async (agent: AgentMcpAgent) => {
+    setAgentMcpMessage(null);
+    const result = await agent.register({}).catch(() => null);
+    setAgentMcpMessage(
+      result?.ok
+        ? `memory-flash registered in ${agent.label}'s MCP config.`
+        : (result?.error ?? "Registration failed."),
+    );
+    reloadAgentMcps();
+  };
+
+  const unregisterAgentMcp = async (agent: AgentMcpAgent) => {
+    setAgentMcpMessage(null);
+    const result = await agent.unregister({}).catch(() => null);
+    setAgentMcpMessage(
+      result?.ok
+        ? `memory-flash removed from ${agent.label}'s MCP config.`
+        : (result?.error ?? "Removal failed."),
+    );
+    reloadAgentMcps();
+  };
+
+  const registerAllAgentMcps = async () => {
+    setAgentMcpMessage(null);
+    const result = await registerAllRpc({}).catch(() => null);
+    if (!result) {
+      setAgentMcpMessage("Registration failed.");
+      return;
+    }
+    const failed = result.results.filter((entry) => !entry.ok);
+    setAgentMcpMessage(
+      failed.length === 0
+        ? `Registered memory-flash in ${result.results.map((entry) => entry.agent).join(", ")}.`
+        : `Registered with failures: ${failed
+            .map((entry) => `${entry.agent}${entry.error ? ` (${entry.error})` : ""}`)
+            .join(", ")}.`,
+    );
+    reloadAgentMcps();
   };
 
   const purgeByTag = async () => {
@@ -207,6 +315,59 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
             </View>
           ))}
           {skillMessage ? <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }}>{skillMessage}</Text> : null}
+        </SettingsSection>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingsSection
+          title="Agent MCP registration"
+          info="Cline, Cursor and Codex CLI ignore stdio MCP servers delivered through the agent session and read them from their own config files — register the server there directly (other servers in each file are preserved).">
+          <SettingsAction
+            label="Register"
+            actionLabel="Register for all local agent configs"
+            onPress={() => void registerAllAgentMcps()}
+          />
+          {agentMcpAgents.map((agent) => {
+            const status = agentMcps[agent.id];
+            return (
+              <View key={agent.id} style={styles.skillRow}>
+                <View style={styles.skillInfo}>
+                  <Text style={{ color: fg, fontSize: font(12), ...uiFontStyle }}>{agent.label}</Text>
+                  {status ? (
+                    <>
+                      <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }} numberOfLines={2}>
+                        {status.path}
+                        {"\n"}
+                        {status.installed
+                          ? (status.upToDate ? "installed · up to date" : "installed · outdated — re-register to update")
+                          : status.detected ? "config detected · not registered" : "not detected on this host"}
+                      </Text>
+                      {status.live === false ? (
+                        <Text style={{ color: danger, fontSize: font(10), ...uiFontStyle }} numberOfLines={2}>
+                          live check failed — the registered command does not answer the MCP handshake
+                        </Text>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}>Checking…</Text>
+                  )}
+                </View>
+                <View style={styles.skillActions}>
+                  <Pressable onPress={() => void registerAgentMcp(agent)} style={[styles.skillButton, { borderColor: accent }]}>
+                    <Text style={{ color: accent, fontSize: font(11), ...uiFontStyle }}>
+                      {status?.installed ? "Re-register" : "Register"}
+                    </Text>
+                  </Pressable>
+                  {status?.installed ? (
+                    <Pressable onPress={() => void unregisterAgentMcp(agent)} style={[styles.skillButton, { borderColor: danger }]}>
+                      <Text style={{ color: danger, fontSize: font(11), ...uiFontStyle }}>Remove</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+            );
+          })}
+          {agentMcpMessage ? <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }}>{agentMcpMessage}</Text> : null}
         </SettingsSection>
       </SettingsCard>
 

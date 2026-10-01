@@ -15,17 +15,24 @@ import {
   uninstallSkill,
 } from "../server/skill";
 
-// Isolate $PASEO_HOME for every test (hosts.json lives there).
+// Isolate $PASEO_HOME (hosts.json lives there) and $HOME: skill targets
+// resolve through os.homedir(), which on POSIX reads $HOME — without this
+// the install/uninstall test would touch the real ~/.agents/skills.
 let home: string;
 let originalPaseoHome: string | undefined;
+let originalHome: string | undefined;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "mf-hosts-"));
   originalPaseoHome = process.env.PASEO_HOME;
+  originalHome = process.env.HOME;
   process.env.PASEO_HOME = home;
+  process.env.HOME = home;
   return () => {
     if (originalPaseoHome === undefined) delete process.env.PASEO_HOME;
     else process.env.PASEO_HOME = originalPaseoHome;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     fs.rmSync(home, { recursive: true, force: true });
   };
 });

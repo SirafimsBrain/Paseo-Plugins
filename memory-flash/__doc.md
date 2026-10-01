@@ -24,8 +24,15 @@ memory-flash/
 │   │                          # revision history, stats, purge/reset
 │   ├── mcp-server.ts          # standalone stdio MCP server (JSON-RPC 2.0)
 │   ├── mcp-tools.ts           # tool definitions + transport-independent dispatch
+│   ├── mcp-launch.ts          # node + dist/mcp-server.js resolution (shared by
+│   │                          # agent injection and direct registration)
+│   ├── mcp-probe.ts           # live spawn check: MCP initialize handshake probe
 │   ├── settings-file.ts       # settings.json reader for the spawned server process
 │   ├── skill.ts               # SKILL.md content + multi-target installer
+│   ├── agent-mcp-json.ts      # shared mcpServers JSON file handling (Cline, Cursor)
+│   ├── cline-mcp.ts           # register/unregister in Cline's own MCP settings
+│   ├── cursor-mcp.ts          # register/unregister in Cursor's ~/.cursor/mcp.json
+│   ├── codex-mcp.ts           # register/unregister in Codex's ~/.codex/config.toml (TOML)
 │   └── remote-hosts.ts        # hosts.json registry, paseo-ssh probe, stubs
 ├── client/
 │   ├── memory-surface.tsx     # Memories / History & tasks / Remote hosts tabs
@@ -34,7 +41,7 @@ memory-flash/
 ├── scripts/
 │   └── bundle-mcp-server.mjs  # esbuild → dist/mcp-server.js (standalone stdio server)
 ├── skill/                     # (reserved for extra skill assets; SKILL.md is generated)
-└── tests/                     # vitest: 5 suites, 38 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 6 suites, 45 tests (incl. real-process stdio e2e)
 ```
 
 ### Data flow
@@ -80,7 +87,7 @@ The stdio server implements the MCP 2024-11-05 baseline: `initialize` (protocol 
 
 ## 4. Paseo integration points (SDK 0.10.x)
 
-- **`server.before("agent.create")`** — injects `config.mcpServers["memory-flash"] = { type: "stdio", command, args: [<dist/mcp-server.js>], alwaysLoad: true }` when the `injectIntoAgents` setting is on. The hook is `async` (the SDK awaits before-hooks) — it reads settings first and returns the mutated request, so the injection is guaranteed to be applied before the agent is created; a settings-read failure leaves agent creation untouched. A diagnostic line (`[memory-flash] MCP injected: … (entry exists|MISSING)`) is printed to `paseo plugin logs memory-flash` on every injection.
+- **`server.before("agent.create")`** — injects `config.mcpServers["memory-flash"] = { type: "stdio", command, args: [<dist/mcp-server.js>], alwaysLoad: true }` when the `injectIntoAgents` setting is on. The hook is `async` (the SDK awaits before-hooks) — it reads settings first and returns the mutated request, so the injection is guaranteed to be applied before the agent is created; a settings-read failure leaves agent creation untouched. A diagnostic line (`[memory-flash] MCP injected: <command> <args…>`) is printed to `paseo plugin logs memory-flash` on every injection. Both resolutions live in `server/mcp-launch.ts` and are shared with the Cline registration below, so every integration path launches the identical command.
 - **Command resolution (`resolveNodeCommand`)** — the MCP server is spawned by the *agent* process, not the plugin host, and the plugin host binary is an Electron binary running with `ELECTRON_RUN_AS_NODE=1`, which agents do not inherit. The plugin therefore resolves a real Node.js binary: `process.execPath` when it already is `node`, then a sibling `node` binary, then a PATH scan (result is an absolute path so the agent's own PATH never matters), with plain `node` as the last resort. Verified on this machine: the injected command resolves to `~/.nvm/versions/node/v24.20.0/bin/node`.
 - **Entry resolution (`resolveMcpEntry`)** — the plugin host bundles this module somewhere internal, so `__dirname` does not point at the plugin source directory (it can resolve to `$PASEO_HOME/plugins/memory-flash/`, the settings/data directory, which produced a `Connection closed` MCP error until fixed). The authoritative location of a directory plugin is `plugins.<id>.path` in `$PASEO_HOME/config.json`; `__dirname`/`import.meta.url` and `$PASEO_HOME/plugins/<id>` are fallbacks, first existing `mcp-server.js` wins.
 - **`paseo-plugin.json` `build`** — optional build steps run by the daemon before the plugin loads. The schema is strict `string[][]` (each step is an argv array, `command[0]` + arguments), *not* an array of shell strings: `"build": [["npm", "run", "bundle"]]`. A flat `"build": ["npm run bundle"]` fails manifest validation (`expected array, received string` at `build[0]`) and the plugin shows as `failed`. The build step regenerates `dist/mcp-server.js` on every plugin load, so MCP-server source edits reach agents without a manual rebundle. Note: `paseo plugin reload <id>` currently errors with this same validation on the daemon side; `paseo plugin disable <id> && paseo plugin enable <id>` works as a reload.
@@ -93,20 +100,40 @@ The stdio server implements the MCP 2024-11-05 baseline: `initialize` (protocol 
 
 `SKILL.md` follows the standard skills format (YAML frontmatter `name`/`description`, markdown body) observed on this machine across `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills` and `~/.kilo/skills` — the same layout Paseo itself uses for its bundled skills.
 
-Content covers: when to **read** (before starting a task, before fixing a bug, entering unfamiliar code), when to **write** (kind table: one fact — one memory), **mandatory tagging rules** (project tag + topic tag, lowercase), end-of-session **handoff discipline**, and conservative **housekeeping** (prefer update over delete, list matches first, confirm scope).
+Content covers: when to **read** (before starting a task, before fixing a bug, entering unfamiliar code), when to **write** (kind table: one fact — one memory), **mandatory recording rules** (every bugfix is saved with symptom/root cause/fix/verification — no exceptions; positive results that worked are saved as `pattern`; when functionality changes or a bugfix lands, existing memories describing the old behavior are updated via `memory_update` so the base never contradicts the code), the **English-language rule** (title, content and tags in English for cross-agent unification), **mandatory tagging rules** (project tag + topic tag, lowercase), end-of-session **handoff discipline**, and conservative **housekeeping** (prefer update over delete, list matches first, confirm scope). Installer: per-target Install/Update (re-install when content drifts, `upToDate` flag)/Remove, plus *Install into all agents*. Targets whose directory does not exist are still installable (created on demand) so the button works before the first launch of e.g. Codex.
 
-Installer: per-target Install/Update (re-install when content drifts, `upToDate` flag)/Remove, plus *Install into all agents*. Targets whose directory does not exist are still installable (created on demand) so the button works before the first launch of e.g. Codex.
 
-## 6. Remote hosts (requirement 8)
+## 6. Direct MCP registration for Cline, Cursor and Codex CLI (requirement 9)
+
+These agents ignore stdio MCP servers delivered through an orchestrator's agent session and read them from their own global config files instead:
+
+| Agent | Config file | Entry shape |
+| ----- | ----------- | ----------- |
+| Cline | `~/.cline/data/settings/cline_mcp_settings.json` | `{ mcpServers: { <name>: { transport: { type, command, args } } } }` (the file its own UI manages; verified live: the ACP payload is accepted but no stdio server is ever spawned) |
+| Cursor | `~/.cursor/mcp.json` | flat `{ mcpServers: { <name>: { command, args } } }` |
+| Codex CLI | `~/.codex/config.toml` | TOML table `[mcp_servers.<name>]` with `command`/`args` keys |
+
+- **JSON agents (Cline, Cursor)** share `server/agent-mcp-json.ts`: load → merge the `memory-flash` entry → atomic write (temp file + rename, same pattern as `hosts.json`). Only the entry shape differs (Cline nests under `transport`); callers provide `isEntry`/`fromEntry`/`toEntry` adapters. A corrupted (unparseable) file is never overwritten — register/unregister fail with a clear error instead.
+- **Codex CLI** (`server/codex-mcp.ts`) edits the TOML as text: only the `[mcp_servers.memory-flash]` table (bare or quoted key) is replaced, everything else — other tables, keys, comments — is preserved byte-for-byte. Register appends the table when absent; unregister removes the table plus one separator blank line. This minimal parser covers flat `command`/`args` lines (single- or multi-line arrays); exotic TOML (inline tables, dotted keys inside the table) is not rewritten, only detected.
+- `status()` per agent — `detected` (file or config dir exists), `installed` (entry/table present), `upToDate` (registered command/args match the current `mcpServerCommand()` from `mcp-launch.ts`, so a moved plugin directory shows as "outdated — re-register").
+- `register*Mcp()` — merges the entry, preserving every other server (verified against configs that also carry `websearch`).
+- `unregister*Mcp()` — removes only the `memory-flash` entry; a no-op (still `ok`) when nothing is registered.
+- **Live spawn check** (`server/mcp-probe.ts`) — file status answers "is the entry present", not "does it work". The Cline status RPC additionally spawns the registered command exactly as the agent would, sends an MCP `initialize` request and waits for the JSON-RPC response (`withLiveSpawn`, 4 s budget). The Cline row in the settings screen shows a red warning when the registered command does not answer the handshake. Nothing is written to the database by the probe (the handshake alone calls no tool).
+- **Register for all local agent configs** — one RPC (`memory-flash.agent-mcp-register-all`) and one settings button run all three registrations and report per-agent results, mirroring *Install into all agents* for the skill.
+
+The settings screen shows one row per agent (path + state + live check) with Register/Re-register/Remove buttons next to the skill installers. The Cline write format was verified end-to-end against a live Cline agent: after registration Cline spawns the server as its own child process and `memory_stats` returns real JSON.
+
+
+## 7. Remote hosts (requirement 8)
 
 `hosts.json` stores connection definitions `{name, transport, host, port, user, enabled, status, lastError, checkedAt}`.
 
 - **`paseo-ssh` (implemented)** — probes the remote through the standard Paseo CLI transport (`paseo --host ssh://[user@]host[:port] status --json`, 20 s timeout) and reports the remote memory database path (`~/.paseo/plugins/memory-flash/memory.db`). Authentication is whatever the user's SSH config provides — the same prerequisite the Paseo app itself has for remote daemons.
 - **`tcp` / `relay` (stubs)** — stored and displayed, checks return `unsupported` without marking the host broken. The registry and status model are transport-agnostic so a real implementation only adds a `check*` branch (direct `ws://host:port` probe for TCP; relay pairing for Hub).
 
-Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§9).
+Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§10).
 
-## 7. RPC surface
+## 8. RPC surface
 
 | Contract | Input | Output |
 | --- | --- | --- |
@@ -126,18 +153,24 @@ Remote hosts today provide reachability and the remote DB path; live cross-host 
 | `memory-flash.skill-install` | `{ targetId }` | `{ ok, path, error }` |
 | `memory-flash.skill-uninstall` | `{ targetId }` | `{ ok, error }` |
 | `memory-flash.skill-preview` | `{}` | `{ markdown }` |
+| `memory-flash.cline-mcp-status` | `{}` | `{ path, detected, installed, upToDate, command, args, live }` (`live` = spawn probe result) |
+| `memory-flash.cline-mcp-register` | `{}` | `{ ok, error }` |
+| `memory-flash.cline-mcp-unregister` | `{}` | `{ ok, error }` |
+| `memory-flash.cursor-mcp-status` / `-register` / `-unregister` | `{}` | same as Cline (no `live`) |
+| `memory-flash.codex-mcp-status` / `-register` / `-unregister` | `{}` | same as Cline (no `live`) |
+| `memory-flash.agent-mcp-register-all` | `{}` | `{ results: [{ agent, ok, error }] }` |
 | `memory-flash.hosts` / `hosts-save` / `hosts-delete` / `hosts-check` | host CRUD | registry + probe results |
 
-## 8. Compatibility
+## 9. Compatibility
 
 Verified on 2026-09-30 against Paseo `0.10.2` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
-- `npm test` — 5 suites, 38 tests, all green, including an end-to-end test that spawns the bundled MCP server and speaks real JSON-RPC over stdio (handshake → tools/list → save → FTS search → file-on-disk assertions).
+- `npm test` — 9 suites, 65 tests, all green, including an end-to-end test that spawns the bundled MCP server and speaks real JSON-RPC over stdio (handshake → tools/list → save → FTS search → file-on-disk assertions), dedicated registration suites for Cline, Cursor and Codex CLI (isolated `$HOME`: register/unregister/status, preservation of foreign servers and unrelated TOML content, quoted-key tables, corrupted-file refusal, stale-entry refresh) and a live-spawn probe suite (real `node -e` fake MCP server, immediate exit, timeout, missing command).
 - Manual probe: `printf … | PASEO_HOME=… node dist/mcp-server.js` — `initialize`, `tools/list`, `tools/call` (save + search with snippet) all correct; tags normalized (`Paseo` → `paseo`).
 - Node ≥ 24.20 required on the daemon host for built-in `node:sqlite` with FTS5 (verified FTS5 present in the runtime; porter/unicode61 tokenizer verified via search results).
 - The bundle depends on nothing beyond Node built-ins, so agents' own Node runtimes can spawn it without `npm install`.
-- Installed into the running daemon (`paseo plugin add` → `running`, `Plugin ready`, `npm run bundle` executed by the daemon build step). End-to-end: a real OpenCode agent created via `paseo run --provider opencode` accepted the injected MCP config (previously failed with `MCP error -32000: Connection closed` when the entry path resolved to the data directory) and the injection diagnostic confirmed `entry exists`. Plugin version 0.1.1 (0.1.0 was the pre-release state).
+- Installed into the running daemon (`paseo plugin add` → `running`, `Plugin ready`, `npm run bundle` executed by the daemon build step). End-to-end: a real OpenCode agent created via `paseo run --provider opencode` accepted the injected MCP config (previously failed with `MCP error -32000: Connection closed` when the entry path resolved to the data directory) and the injection diagnostic confirmed the resolved entry. Plugin version 0.3.1 (0.1.x: core plugin; 0.2.0 added Cline MCP registration; 0.3.0 added Cursor + Codex CLI registration, the register-all button and the live spawn check; 0.3.1 strengthened the agent skill: mandatory bugfix recording, positive-result recording, knowledge-base updates on functionality change/bugfix, English-language rule).
 
 ### Provider verification matrix (2026-09-30, live daemon)
 
@@ -148,13 +181,13 @@ Each provider was verified by creating a real agent via `paseo run` and asking i
 | OpenCode | `agent.create` hook → `opencode-agent.js` registers MCP before the first turn | yes | yes (registration error surfaced loudly pre-fix) | Fails fast with `MCP error -32000` if the entry path is wrong — this is how the `resolveMcpEntry` bug was found. |
 | Qwen Code | ACP `session/new` → `toAcpMcpServers` | yes (server owned by `qwen-code/cli.js`) | yes — `mcp__memory-flash__memory_stats` returned real JSON | Qwen defers MCP tools behind `tool_search`; the model finds them on demand. Permission prompts appear via Paseo (`paseo permit allow`). |
 | Kilo | ACP `session/new` | yes (server owned by `.kilo acp`) | connection only | Kilo's configured model requires sign-in (`You need to sign in to use this model`), so the model round-trip could not be completed; the MCP side is healthy. |
-| Cline | ACP `session/new` — payload **accepted** but stdio server **never spawned** | via own config only | yes — after registering in `~/.cline/data/settings/cline_mcp_settings.json` | Cline 3.0.66 validates ACP `mcpServers` (requires explicit `type`; `env` as `[{name,value}]` array) but does not connect stdio servers from the ACP session — remote http/sse only. The plugin's skill DOES work in Cline (`skills: memory-flash …`). Workaround implemented: `memory-flash` entry added to `cline_mcp_settings.json` (`{transport:{type:"stdio",command,args}}`), after which Cline spawned the server and returned real tool JSON. |
+| Cline | ACP `session/new` — payload **accepted** but stdio server **never spawned** | via own config only | yes — after the plugin registered it in `~/.cline/data/settings/cline_mcp_settings.json` | Cline 3.0.66 validates ACP `mcpServers` (requires explicit `type`; `env` as `[{name,value}]` array) but does not connect stdio servers from the ACP session — remote http/sse only. The plugin's skill DOES work in Cline (`skills: memory-flash …`). Since 0.2.0 the plugin registers itself in Cline's own settings file via the **Register in Cline** button (`{transport:{type:"stdio",command,args}}`, other servers preserved, atomic write); Cline then spawns the server and returns real tool JSON. Registration was verified end-to-end against the live config (register → unregister → re-register, file byte-identical afterwards). |
 
 ACP payload details (from `@getpaseo/server` `toAcpMcpServers`): stdio servers are sent as `{name, command, args, env:[{name,value}]}` **without** `type`; Cline's schema requires `type` — harmless today only because Cline ignores session stdio servers anyway.
 
 Also verified: `paseo permit allow <agent> <req_id>` approves the MCP tool-call permission that ACP agents raise on first use.
 
-## 9. Limitations and roadmap
+## 10. Limitations and roadmap
 
 Limitations:
 

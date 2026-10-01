@@ -1,5 +1,4 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { fileURLToPath } from "node:url";
 import type { McpStdioServerConfig } from "@getpaseo/protocol/agent-types";
 import { memoryFlashSettings } from "./shared/settings";
 import {
@@ -23,8 +22,35 @@ import {
   skillPreview,
   uninstallSkill,
   checkRemoteHost,
+  clineMcpStatus,
+  codexMcpStatus,
+  registerCodexMcp,
+  unregisterCodexMcp,
+  cursorMcpStatus,
+  registerCursorMcp,
+  unregisterCursorMcp,
+  registerClineMcp,
+  unregisterClineMcp,
+  registerAllAgentMcp,
 } from "./shared/memories";
-import { MemoryStore, paseoHome } from "./server/store";
+import { MemoryStore } from "./server/store";
+import { mcpServerCommand } from "./server/mcp-launch";
+import {
+  clineMcpStatus as readClineMcpStatus,
+  registerClineMcp as registerClineMcpOnDisk,
+  unregisterClineMcp as unregisterClineMcpOnDisk,
+} from "./server/cline-mcp";
+import {
+  cursorMcpStatus as readCursorMcpStatus,
+  registerCursorMcp as registerCursorMcpOnDisk,
+  unregisterCursorMcp as unregisterCursorMcpOnDisk,
+} from "./server/cursor-mcp";
+import {
+  codexMcpStatus as readCodexMcpStatus,
+  registerCodexMcp as registerCodexMcpOnDisk,
+  unregisterCodexMcp as unregisterCodexMcpOnDisk,
+} from "./server/codex-mcp";
+import { withLiveSpawn } from "./server/mcp-probe";
 import { skillStatuses, skillMarkdown, installSkill as installSkillOnDisk, uninstallSkill as uninstallSkillOnDisk } from "./server/skill";
 import {
   listRemoteHosts as loadHosts,
@@ -32,9 +58,6 @@ import {
   deleteRemoteHost as removeHost,
   checkRemoteHost as probeHost,
 } from "./server/remote-hosts";
-import * as path from "node:path";
-import * as process from "node:process";
-import { statSync as fsStatSync, readFileSync } from "node:fs";
 
 /**
  * Plugin server for Memory Flash.
@@ -47,93 +70,6 @@ import { statSync as fsStatSync, readFileSync } from "node:fs";
  * 3. Serves the plugin RPC surface for the Paseo UI (browse, search, edit,
  *    delete, history, stats, skill install, remote hosts, delegation).
  */
-
-/**
- * Resolves the command that spawns the MCP server for an agent process.
- *
- * The MCP server is spawned by the agent process itself (OpenCode, Kilo,
- * Cline, ...), not by the plugin host. The plugin host binary is an Electron
- * binary run in node mode (ELECTRON_RUN_AS_NODE=1), but agents do not
- * necessarily inherit that variable — so prefer a real `node` binary and only
- * fall back to `process.execPath` when nothing better exists.
- */
-function mcpServerCommand(): { command: string; args: string[] } {
-  const entry = resolveMcpEntry();
-  const command = resolveNodeCommand();
-  return { command, args: [entry] };
-}
-
-function resolveNodeCommand(): string {
-  // A plain node binary — the ideal case (plugin host run by node).
-  if (path.basename(process.execPath) === "node" || path.basename(process.execPath) === "node.exe") {
-    return process.execPath;
-  }
-  // Electron distributions sometimes sit next to a node binary.
-  const sibling = path.join(path.dirname(process.execPath), "node");
-  if (isExecutableFile(sibling)) return sibling;
-  // Scan PATH for a real Node.js binary and return its absolute path. The
-  // plugin host runs on Electron, but the agent that spawns the MCP server
-  // needs plain Node — an absolute path avoids relying on the agent's PATH.
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, "node");
-    if (isExecutableFile(candidate)) return candidate;
-  }
-  // Last resort: plain `node` resolved by the spawning agent's PATH.
-  return "node";
-}
-
-function isExecutableFile(candidate: string): boolean {
-  try {
-    return fsStatSync(candidate).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Locates the bundled stdio MCP server (`dist/mcp-server.js`).
- *
- * The plugin host bundles this module somewhere internal, so `__dirname`
- * does not point to the plugin source directory. The authoritative location
- * for a directory plugin is the `path` entry in `$PASEO_HOME/config.json`;
- * a few fallbacks cover other install layouts. The first existing candidate
- * wins.
- */
-function resolveMcpEntry(): string {
-  const candidates: string[] = [];
-  const configured = configuredPluginPath();
-  if (configured) {
-    candidates.push(path.join(configured, "dist", "mcp-server.js"));
-    candidates.push(path.join(configured, "mcp-server.js"));
-  }
-  if (typeof __dirname === "string") candidates.push(path.join(__dirname, "mcp-server.js"));
-  try {
-    candidates.push(path.join(path.dirname(fileURLToPath(import.meta.url)), "mcp-server.js"));
-  } catch {
-    // Not an ES module context — ignore.
-  }
-  candidates.push(path.join(paseoHome(), "plugins", "memory-flash", "mcp-server.js"));
-  for (const candidate of candidates) {
-    if (isExecutableFile(candidate)) return candidate;
-  }
-  // Return the primary candidate so a missing entry is reported clearly.
-  return candidates[0] ?? path.join(configured ?? ".", "dist", "mcp-server.js");
-}
-
-/** Reads the plugin directory from the daemon config (`plugins.<id>.path`). */
-function configuredPluginPath(): string | null {
-  try {
-    const raw = JSON.parse(readFileSync(path.join(paseoHome(), "config.json"), "utf8")) as {
-      plugins?: Record<string, { path?: unknown }>;
-    };
-    const entry = raw.plugins?.["memory-flash"];
-    if (entry && typeof entry.path === "string" && entry.path.length > 0) return entry.path;
-  } catch {
-    // Config unavailable — fall through to the other candidates.
-  }
-  return null;
-}
 
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(memoryFlashSettings);
@@ -172,7 +108,7 @@ export default function contribute(server: PluginServerContext) {
     // Diagnostic: visible in `paseo plugin logs memory-flash` — helps to
     // troubleshoot MCP spawn failures on the agent side.
     console.log(
-      `[memory-flash] MCP injected: ${command} ${args.join(" ")} (entry ${isExecutableFile(args[0] ?? "") ? "exists" : "MISSING"})`,
+      `[memory-flash] MCP injected: ${command} ${args.join(" ")}`,
     );
     return request;
   });
@@ -305,6 +241,39 @@ export default function contribute(server: PluginServerContext) {
     const result = uninstallSkillOnDisk(input.targetId);
     return { ok: result.ok, error: result.error };
   });
+
+  // --- Direct MCP registration for session-agnostic agents -------------
+  // Cline, Cursor and Codex CLI ignore stdio MCP servers delivered
+  // through the agent session; each reads them from its own config
+  // file, so the plugin registers the server there directly. The
+  // Cline status additionally probes the registered command with a
+  // live MCP initialize handshake.
+
+  server.handle(clineMcpStatus, async () => withLiveSpawn(readClineMcpStatus()));
+
+  server.handle(registerClineMcp, () => registerClineMcpOnDisk());
+
+  server.handle(unregisterClineMcp, () => unregisterClineMcpOnDisk());
+
+  server.handle(cursorMcpStatus, () => readCursorMcpStatus());
+
+  server.handle(registerCursorMcp, () => registerCursorMcpOnDisk());
+
+  server.handle(unregisterCursorMcp, () => unregisterCursorMcpOnDisk());
+
+  server.handle(codexMcpStatus, () => readCodexMcpStatus());
+
+  server.handle(registerCodexMcp, () => registerCodexMcpOnDisk());
+
+  server.handle(unregisterCodexMcp, () => unregisterCodexMcpOnDisk());
+
+  server.handle(registerAllAgentMcp, () => ({
+    results: [
+      { agent: "Cline", ...registerClineMcpOnDisk() },
+      { agent: "Cursor", ...registerCursorMcpOnDisk() },
+      { agent: "Codex CLI", ...registerCodexMcpOnDisk() },
+    ],
+  }));
 
   // --- Remote hosts ----------------------------------------------------------
 

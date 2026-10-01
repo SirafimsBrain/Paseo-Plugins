@@ -17,9 +17,7 @@ import { MCP_TOOLS } from "./mcp-tools";
 
 export const SKILL_NAME = "memory-flash";
 
-const TOOL_NAMES = MCP_TOOLS.map((tool) => tool.name);
-
-function skillBody(): string {
+const TOOL_NAMES = MCP_TOOLS.map((tool) => tool.name);function skillBody(): string {
   return `---
 
 name: memory-flash
@@ -30,11 +28,13 @@ description: >
 
   task (search for prior decisions, known bugs, procedures and handoffs from
 
-  other agents), when you discover something durable (a decision, a bugfix
+  other agents), while working (record decisions, every positive result that
 
-  explanation, a pitfall, a working pattern), and when ending a session
+  worked, and — always — every bugfix), and whenever functionality changes
 
-  (write a handoff). Tools: ${TOOL_NAMES.join(", ")}.
+  (update the existing memories so the base stays current). Write all memory
+
+  content in English. Tools: ${TOOL_NAMES.join(", ")}.
 
 ---
 
@@ -49,6 +49,14 @@ You have access to the team memory: a tagged, searchable database shared by
 **all** coding agents (Cline, OpenCode, Kilo, Qwen Code, Codex, …) across
 
 projects. Another agent may have already solved your problem.
+
+
+
+**Language rule:** write every memory in **English** — title, content and
+
+tags. The base is shared by agents and humans working in different languages;
+
+one language keeps search reliable and the knowledge unified.
 
 
 
@@ -78,7 +86,9 @@ memory_list_by_tag { "tag": "<project>" }
 
 
 
-Save anything the next agent (or future you) will need. One fact — one memory:
+Save anything the next agent (or future you) will need. One fact — one memory.
+
+Write titles and content in English.
 
 
 
@@ -104,9 +114,45 @@ Save anything the next agent (or future you) will need. One fact — one memory:
 
 
 
+### Mandatory rules
+
+
+
+1. **Every bugfix is recorded — no exceptions.** When a bug is fixed, save a
+
+   \`bugfix\` memory with the symptom, root cause, the fix and how to verify
+
+   it. If a memory about the same bug already exists, update it with
+
+   \`memory_update\` instead of creating a duplicate.
+
+
+
+2. **Record positive results.** It is not only failures that are worth keeping.
+
+   When a solution succeeds, a configuration pays off, or an approach proves
+
+   fast, reliable or elegant — save it as a \`pattern\` so other agents reuse
+
+   it instead of rediscovering it.
+
+
+
+3. **Keep the base current.** When functionality is added or changed, or a
+
+   bugfix changes behavior, first search for memories describing the old
+
+   behavior and update them with \`memory_update\`. The knowledge base must
+
+   never contradict the code — prefer updating an existing memory over
+
+   saving a second, conflicting one.
+
+
+
 \`\`\`
 
-memory_save { "kind": "decision", "title": "Use WAL mode", "content": "…", "tags": ["<project>", "sqlite"] }
+memory_save { "kind": "bugfix", "title": "Fix WAL checkpoint stall", "content": "Symptom: … Root cause: … Fix: … Verify: …", "tags": ["<project>", "sqlite"] }
 
 \`\`\`
 
@@ -159,6 +205,7 @@ Be conservative with deletes: prefer updating a memory to be correct over
 deleting it. When asked to clean up, list matches first and confirm the scope
 
 (especially tag-based purges) before deleting.
+
 `;
 }
 

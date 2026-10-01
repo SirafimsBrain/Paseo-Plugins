@@ -302,6 +302,96 @@ export const skillStatus = defineRpc({
 });
 
 // ---------------------------------------------------------------------------
+// Direct MCP registration for agents that ignore stdio MCP servers
+// delivered through the agent session (Cline, Cursor, Codex CLI).
+// Each keeps MCP servers in its own global config file, so the plugin
+// registers the server there directly.
+// ---------------------------------------------------------------------------
+
+/** File-based registration state, shared by the JSON and TOML agents. */
+export const agentMcpStatusSchema = z.object({
+  /** Absolute path of the agent's MCP config file. */
+  path: z.string(),
+  detected: z.boolean(),
+  installed: z.boolean(),
+  upToDate: z.boolean().nullable(),
+  command: z.string().nullable(),
+  args: z.array(z.string()).nullable(),
+});
+
+export const clineMcpStatus = defineRpc({
+  name: "memory-flash.cline-mcp-status",
+  input: z.object({}),
+  output: agentMcpStatusSchema.extend({
+    /** Live spawn check: the registered command answers an MCP initialize handshake. */
+    live: z.boolean().nullable(),
+  }),
+});
+
+export const registerClineMcp = defineRpc({
+  name: "memory-flash.cline-mcp-register",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const unregisterClineMcp = defineRpc({
+  name: "memory-flash.cline-mcp-unregister",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const cursorMcpStatus = defineRpc({
+  name: "memory-flash.cursor-mcp-status",
+  input: z.object({}),
+  output: agentMcpStatusSchema,
+});
+
+export const registerCursorMcp = defineRpc({
+  name: "memory-flash.cursor-mcp-register",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const unregisterCursorMcp = defineRpc({
+  name: "memory-flash.cursor-mcp-unregister",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const codexMcpStatus = defineRpc({
+  name: "memory-flash.codex-mcp-status",
+  input: z.object({}),
+  output: agentMcpStatusSchema,
+});
+
+export const registerCodexMcp = defineRpc({
+  name: "memory-flash.codex-mcp-register",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const unregisterCodexMcp = defineRpc({
+  name: "memory-flash.codex-mcp-unregister",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+/** Result of registering memory-flash in one agent's MCP config. */
+export const agentMcpRegistrationResultSchema = z.object({
+  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI"). */
+  agent: z.string(),
+  ok: z.boolean(),
+  error: z.string().nullable(),
+});
+
+/** Registers memory-flash in every supported local agent config at once. */
+export const registerAllAgentMcp = defineRpc({
+  name: "memory-flash.agent-mcp-register-all",
+  input: z.object({}),
+  output: z.object({ results: z.array(agentMcpRegistrationResultSchema) }),
+});
+
+// ---------------------------------------------------------------------------
 // Remote hosts (requirement 8). Only the "paseo-ssh" transport is functional;
 // other transports are stubs reserved for later work.
 // ---------------------------------------------------------------------------
