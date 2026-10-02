@@ -1,5 +1,4 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import type { McpStdioServerConfig } from "@getpaseo/protocol/agent-types";
 import { bunnySearchSettings } from "./shared/settings";
 import type { BunnySearchSettings } from "./shared/settings";
 import {
@@ -113,12 +112,17 @@ export default function contribute(server: PluginServerContext) {
     const state = await settings.read().catch(() => null);
     if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
     const { command, args } = mcpServerCommand();
-    const config: McpStdioServerConfig = {
+    // `as const` instead of a named `McpStdioServerConfig` annotation: the MCP
+    // config types live in @getpaseo/protocol, which is not a host-supplied
+    // specifier, so importing them would make this bundle need node_modules at
+    // install time. Assigning into `request.config.mcpServers` below checks the
+    // literal against the host's own type, which is a stronger guarantee.
+    const config = {
       type: "stdio",
       command,
       args,
       alwaysLoad: true,
-    };
+    } as const;
     request.config.mcpServers = {
       ...(request.config.mcpServers ?? {}),
       "bunny-search": config,

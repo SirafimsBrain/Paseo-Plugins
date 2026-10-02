@@ -22,16 +22,16 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 ## Install
 
 ```bash
-paseo plugin add /path/to/bunny-search
+paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.10.0 (verified against 0.10.2; uses the plugin SDK 0.10 settings screens and lifecycle hooks). Node ≥ 18 on the daemon host (global `fetch`).
+Requires Paseo ≥ 0.10.0 (verified against 0.10.3; uses the plugin SDK 0.10 settings screens and lifecycle hooks). Node ≥ 18 on the daemon host (global `fetch`).
 
 After install: open **Settings → Plugins → Bunny Search**, pick the search service, configure its URL/key, and press **Test connection**. For SearXNG, point `SearXNG base URL` at your instance's JSON endpoint (e.g. `http://127.0.0.1:8888/search` — the same default as the reference MCP). Optionally set `Search interface URL` to the human-facing page of your instance (defaults to the API URL's origin) and use **Open in browser** to browse it. New agents get the `web_search` tool automatically.
 
 Settings changed in the UI take effect immediately for the connection test and quick search (the plugin reads the host settings store live) and are mirrored to `$PASEO_HOME/plugins/bunny-search/settings.json` for the spawned MCP server — every newly created agent picks them up on spawn.
 
-The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "run", "bundle"]]`) is executed by the daemon on every plugin load, so `dist/mcp-server.js` is regenerated automatically and MCP-server changes reach agents without a manual rebundle.
+The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "ci"], ["npm", "run", "bundle"]]`) is executed by the daemon on every plugin load: `npm ci` installs the dependencies into the freshly cloned checkout, then `dist/mcp-server.js` is regenerated, so MCP-server changes reach agents without a manual rebundle. Both commands need registry access on the host. A local checkout (`paseo plugin add /path/to/bunny-search`) runs no build commands at all, so run `npm ci && npm run bundle` there once yourself.
 
 ## Development
 

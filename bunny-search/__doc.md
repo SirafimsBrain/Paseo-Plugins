@@ -104,6 +104,8 @@ This answers the task requirement directly: the user sees, at a glance, whether 
 
 ## 6. Agent injection
 
+The injected MCP entry is built as an `as const` literal rather than annotated with `McpStdioServerConfig` from `@getpaseo/protocol`: that package is not supplied by Paseo, so a type-only import of it makes the plugin's server bundle depend on `node_modules` existing at install time. Assigning the literal into `request.config.mcpServers` type-checks it against the host's own type, which is the stronger guarantee. See [__doc.md](../command-center/__doc.md#5f-version-051--install-time-resolution-and-the-host-bundler-boundary) in command-center for the host-side rules this satisfies.
+
 `index.server.ts` registers a `server.before('agent.create', …)` hook (awaited by the host): when `injectIntoAgents` is on, it adds
 
 ```json
@@ -116,10 +118,11 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.10.2 (requirement `>=0.10.0`) |
+| Paseo | verified against 0.10.3 (requirement `>=0.10.0`) |
 | SDK | `@getpaseo/plugin@0.10.1` |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
-| Verification | typecheck clean; vitest 7 suites / 65 tests (providers with stubbed fetch, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG) |
+| Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the manifest build step is `[["npm", "ci"], ["npm", "run", "bundle"]]`, so the daemon installs the dependencies and rebuilds `dist/mcp-server.js` in its managed clone (both commands need registry access). A local-directory install runs no build commands: run `npm ci && npm run bundle` there once. |
+| Verification | typecheck clean; vitest 7 suites / 65 tests (providers with stubbed fetch, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors |
 
 ## 8. Alternatives considered
 
