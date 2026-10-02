@@ -56,14 +56,14 @@ The secret is never written to git, agent prompts or agent logs, and it is never
 ## Install
 
 ```bash
-paseo plugin add /path/to/memory-flash
+paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash
 ```
 
-Requires Paseo ≥ 0.10.0 (verified against 0.10.2; uses the plugin SDK 0.10 settings screens, lifecycle hooks and MCP config types). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
+Requires Paseo ≥ 0.10.0 (verified against 0.10.3; uses the plugin SDK 0.10 settings screens and lifecycle hooks). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
 
 After install: open **Settings → Plugins → Memory Flash** and press **Install into all agents** to place the skill where your agents look for it. The MCP server is injected into new agents automatically. For Cline, Cursor and Codex CLI, additionally press **Register for all local agent configs** (these agents do not pick up stdio MCP servers from the agent session — they need their own config entries, which the button writes for you). The Cline row also shows a live spawn check of the registered command.
 
-The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "run", "bundle"]]`) is executed by the daemon on every plugin load, so `dist/mcp-server.js` is regenerated automatically and MCP-server changes reach agents without a manual rebundle.
+The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "ci"], ["npm", "run", "bundle"]]`) is executed by the daemon on every plugin load: `npm ci` installs the dependencies into the freshly cloned checkout, then `dist/mcp-server.js` is regenerated, so MCP-server changes reach agents without a manual rebundle. Both commands need registry access on the host. A local checkout (`paseo plugin add /path/to/memory-flash`) runs no build commands at all, so run `npm ci && npm run bundle` there once yourself.
 
 ## Development
 

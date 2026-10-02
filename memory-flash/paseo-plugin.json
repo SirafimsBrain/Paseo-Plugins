@@ -6,6 +6,10 @@
   "build": [
     [
       "npm",
+      "ci"
+    ],
+    [
+      "npm",
       "run",
       "bundle"
     ]
