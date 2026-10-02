@@ -280,7 +280,7 @@ Paseo does not hand the plugin directory to esbuild as-is. It installs a boundar
 
 1. `paseo-plugin.json` — `"build": [["npm", "ci"]]`. With the Git source
    (`paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center`)
-   the daemon clones the repository, installs the dependencies itself and only then bundles. This makes the documented one-command install self-sufficient; a local directory install still needs `npm ci` once, which the README states.
+   the daemon clones the repository into `~/.paseo/plugins/command-center/<revision>/checkout/command-center`, installs the dependencies itself and only then bundles — the plugin's code, dependencies and rebuilt artifacts all live in the Paseo home. This is the only supported source for this repository: a local-directory source would run the plugin straight from the working copy and execute no build commands, so updates go through `git push` + `paseo plugin update command-center`.
 2. `package.json` — `@getpaseo/client` is now a declared, version-pinned dev dependency (`0.10.1`, matching `@getpaseo/plugin`) instead of an accidental peer. `package-lock.json` was regenerated: the root `version` field was stale at `0.4.1`, and the package lost its `"peer": true` marker.
 
 Nothing about the plugin's behaviour changed — no runtime code was touched. The scheduler bridge still uses `DaemonClient` over the local websocket; it simply now has its dependency guaranteed to exist at install time.
@@ -295,7 +295,9 @@ Reproduced the host's own walk statically (TypeScript resolver + the same exempt
 | before the fix, `npm ci` run | clean | clean |
 | after the fix, staged + `build` commands | clean | clean |
 
-Plus `npm run typecheck` (clean) and `npx vitest run` (9 suites, 98 tests). A live `paseo plugin add` into a running daemon was not performed as part of this change.
+Plus `npm run typecheck` (clean) and `npx vitest run` (9 suites, 98 tests).
+
+**Verified live on 2026-10-02** against Paseo `0.10.3` on the daemon host: before the change the plugin was installed from this working directory and sat in status `failed` with exactly the reported error; after the change `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center` reported `running` at revision `8f36572`, the daemon logs show `Plugin ready`, the managed checkout contains `node_modules/@getpaseo/{client,plugin,protocol,relay}` installed by the build step, and `paseo plugin update command-center` reports `current`.
 
 The same defect existed in three sibling plugins and was fixed the same way — see the repository [README](../README.md#installation).
 

@@ -121,7 +121,7 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 | Paseo | verified against 0.10.3 (requirement `>=0.10.0`) |
 | SDK | `@getpaseo/plugin@0.10.1` |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
-| Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the manifest build step is `[["npm", "ci"], ["npm", "run", "bundle"]]`, so the daemon installs the dependencies and rebuilds `dist/mcp-server.js` in its managed clone (both commands need registry access). A local-directory install runs no build commands: run `npm ci && npm run bundle` there once. |
+| Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
 | Verification | typecheck clean; vitest 7 suites / 65 tests (providers with stubbed fetch, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors |
 
 ## 8. Alternatives considered

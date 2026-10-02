@@ -63,7 +63,7 @@ Requires Paseo ≥ 0.10.0 (verified against 0.10.3; uses the plugin SDK 0.10 set
 
 After install: open **Settings → Plugins → Memory Flash** and press **Install into all agents** to place the skill where your agents look for it. The MCP server is injected into new agents automatically. For Cline, Cursor and Codex CLI, additionally press **Register for all local agent configs** (these agents do not pick up stdio MCP servers from the agent session — they need their own config entries, which the button writes for you). The Cline row also shows a live spawn check of the registered command.
 
-The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "ci"], ["npm", "run", "bundle"]]`) is executed by the daemon on every plugin load: `npm ci` installs the dependencies into the freshly cloned checkout, then `dist/mcp-server.js` is regenerated, so MCP-server changes reach agents without a manual rebundle. Both commands need registry access on the host. A local checkout (`paseo plugin add /path/to/memory-flash`) runs no build commands at all, so run `npm ci && npm run bundle` there once yourself.
+The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/memory-flash/<revision>/checkout/memory-flash`. The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "ci"], ["npm", "run", "bundle"]]`) is executed by the daemon in that directory on every install and every update: `npm ci` installs the dependencies, then `dist/mcp-server.js` is regenerated, so MCP-server changes reach agents without a manual rebundle. Both commands need registry access on the host. Updates: `paseo plugin update memory-flash`.
 
 ## Development
 

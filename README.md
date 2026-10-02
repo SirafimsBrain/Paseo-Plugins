@@ -28,7 +28,9 @@ paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash
 
 `github:SirafimsBrain/Paseo-Plugins:command-center` is accepted as a shorthand for the same source. Pin a revision with `--ref <branch|tag|commit>`; upgrades go through `paseo plugin update <id>`.
 
-Why the Git source is the documented path: Paseo clones the repository into a managed directory and then runs the `build` commands from the plugin manifest **before** it bundles the plugin. That is the only install path where the host installs anything for you. `paseo plugin add <local directory>` registers the directory as-is and runs no build commands at all, so a plugin installed that way must already have its dependencies present on disk.
+**Every plugin runs from the Paseo home, never from a development checkout.** A Git install clones the repository into `~/.paseo/plugins/<plugin-id>/<revision>/checkout/<plugin>`, runs the `build` commands from the plugin manifest there, and only then bundles the plugin — the plugin's code, its dependencies and its rebuilt MCP bundles all live under `~/.paseo/plugins/`. Plugin data (stores, settings) sits next to those versioned directories in the same `~/.paseo/plugins/<plugin-id>/` folder and survives updates.
+
+`paseo plugin add <local directory>` is deliberately **not** part of this repository's workflow: it registers the directory as-is, so the plugin would execute straight from the working copy and the host would run no build commands at all. Development changes reach a running plugin through `git push` followed by `paseo plugin update <id>`, which re-clones and re-runs the build steps.
 
 | Plugin | Install-time `build` | Dependencies needed to bundle |
 | ------ | -------------------- | ------------------------------ |
@@ -38,12 +40,7 @@ Why the Git source is the documented path: Paseo clones the repository into a ma
 | [memory-flash](./memory-flash/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
 | [bunny-search](./bunny-search/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
 
-Installing from a local checkout works too and is the development workflow — run the install once, because the host will not:
-
-```bash
-cd command-center && npm ci        # any plugin with a build step needs its dependencies first
-paseo plugin add /path/to/Paseo Plugins/command-center
-```
+The three plugins with a build step need npm-registry access on the host during install and update; the other two have no external dependency at all.
 
 The host's bundler resolves a plugin's imports in two different ways: `@getpaseo/plugin*`, `zod`, `react`, `react-native`, `@tanstack/react-query` and `@types/node` are supplied by Paseo itself, while everything else must exist in the plugin's `node_modules` at install time — including *type-only* imports, which fail the build when they cannot be resolved. That is why the plugins above only reach for non-host packages deliberately, and why every non-host import is a declared dependency. Details per plugin: `__doc.md`.
 

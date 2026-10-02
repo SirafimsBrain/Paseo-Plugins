@@ -59,9 +59,11 @@ client panel.
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:session-manager
 ```
 
-Every import in this plugin is supplied by Paseo itself, so it has no
-install-time build step and no registry access requirement: the command above is
-the whole installation, from a clean checkout or from a local directory.
+The plugin is installed into the Paseo home and runs from there:
+`~/.paseo/plugins/session-manager/<revision>/checkout/session-manager`. Every
+import in this plugin is supplied by Paseo itself, so it has no install-time
+build step and no registry access requirement — the command above is the whole
+installation. Updates: `paseo plugin update session-manager`.
 
 ## Requirements
 

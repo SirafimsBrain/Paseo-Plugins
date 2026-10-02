@@ -23,7 +23,9 @@ paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash
 
 Requires Paseo ≥ 0.10.0 (verified against 0.10.3) and Memory Flash 0.5.0+ with the HTTP endpoint enabled on the remote host.
 
-Every import in this plugin is supplied by Paseo itself, so it has no install-time build step and no registry access requirement: the command above is the whole installation, from a clean checkout or from a local directory.
+The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/memory-flash-client/<revision>/checkout/memory-flash-client`. Every import in this plugin is supplied by Paseo itself, so it has no install-time build step and no registry access requirement — the command above is the whole installation. Updates: `paseo plugin update memory-flash-client`.
+
+**Rule for this plugin: install it from the Git source only.** `paseo plugin add <local directory>` is not supported here — it would execute the plugin straight from a working copy instead of from the Paseo home. This machine is only the client side, so the memory host needs no plugin at all: an HTTP MCP URL plus an API key are enough.
 
 ## How to use
 
