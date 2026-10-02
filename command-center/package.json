@@ -1,13 +1,14 @@
 {
   "name": "command-center",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@getpaseo/client": "0.10.1",
     "@getpaseo/plugin": "0.10.1",
     "@types/node": "^22.0.0",
     "@types/react": "~19.2.0",

@@ -74,7 +74,7 @@ Verified against the running daemon and `@getpaseo/plugin@0.9.0` / `@getpaseo/cl
 - **Workspace descriptor fields**: `name`, `title`, `projectCustomName`, `projectRootPath`, `workspaceDirectory`, `status`. The UI prefers `projectCustomName ?? title ?? name`.
 - **Agent snapshot fields**: `id`, `title`, `status` (`error|initializing|idle|running|closed`), `archivedAt`. "Open" means `status !== "closed"` and no `archivedAt`.
 - **Slash command context**: `onSubmit` receives `{ args, paseo, rpc, openSurface, workspace, agent }`; `rpc(contract, input)` is typed by the contract.
-- **Manifest**: the daemon rejects unknown manifest keys — a `version` key makes `plugin add` fail with `Unrecognized key: "version"` (same behavior as the `description` key in 0.8.x). Only `id` and `requirements` are currently accepted.
+- **Manifest**: the daemon rejects unknown manifest keys — a `version` key makes `plugin add` fail with `Unrecognized key: "version"`. The accepted keys are `id`, `description`, `requirements` and `build` (see §5f for what `build` does).
 - **Theming**: React Native `Text`/`TextInput` default to black, which is unreadable on the dark Paseo background. The surface therefore reads `theme` from `PluginSurfaceProps` (`theme.colors.foreground`, `foregroundMuted`, `border`) and threads it into `CommandForm` and `RunDialog`; inputs also set `placeholderTextColor`. No color is hardcoded. Font sizes are scaled through `shared/host-fonts.ts` (see 5b).
 - **No dropdown Menu component**: the host exposes only `Modal`, `Icon`, `ScrollView`, `FlatList`, `TextInput`, `copyText`, toasts from `client/react-native` — there is no `Menu`/`Picker`. The category picker is therefore chips + a plain text input.
 - **Multi-host split**: `PluginServerContext.paseo` is bound to one daemon, so the server cannot reach other daemons. Fan-out across hosts is therefore split — local targets via `command-center.run-batch`, remote targets via per-host `PaseoApi` from `getPaseoClient(serverId)` with host enumeration from `useHosts()`. `useHosts()` is wrapped in try/catch with a single-host fallback for older hosts.
@@ -166,6 +166,7 @@ Limitations: changes apply on next mount (settings change rarely; re-reading per
 
 - The schedule RPCs (`schedule/create|list|inspect|logs|pause|resume|delete|run-once|update`) live on the **low-level `DaemonClient`** (`@getpaseo/client/internal/daemon-client`), **not** on `PaseoApi` — `context.paseo` (server) and `usePaseo()`/`getPaseoClient()` (client) do not expose them.
 - The plugin server process therefore opens its own websocket connection to the local daemon: URL from `$PASEO_HOME/config.json` → `daemon.listen` (default `ws://127.0.0.1:6767/ws`; the websocket endpoint is `/ws`). `server/daemon-connection.ts` keeps a lazy singleton with built-in reconnect; the client type is `cli` and reconnect resumes the same `clientId` session.
+- This bridge is the **only** reason the plugin depends on a package Paseo does not supply, and it is what forces the install-time build step described in §5f.
 - `automation.manage` permission strings in the daemon bundle apply to hub/relay connections only — a direct loopback client is not gated (verified by an end-to-end probe: create → inspect → pause → resume → update → delete all succeeded).
 - Create payload: `{ name?, prompt, cadence: {type:"cron", expression, timezone?}, target: {type:"new-agent", config:{provider, cwd, isolation:"local"|"worktree", archiveOnFinish, ...}} | {type:"agent", agentId}, maxRuns?, runOnCreate? }`. The full `provider/model` reference (e.g. `zhipuai/MiMo-V2.6-Flash Free`) is accepted as-is.
 - Responses carry `status: active|paused|completed`, `nextRunAt/lastRunAt/maxRuns`; `scheduleLogs` returns runs `{status: running|failed|succeeded, startedAt, endedAt, agentId, output, error}` — this is the run-tracking source of truth.
@@ -244,14 +245,68 @@ The schema extension (a `workflow` command type with conditional steps `always |
 
 The surface is a React Native component rendered inside the host webview; "read-only view on a phone" would mean either a separate HTTP server exposing the store (new attack surface, token handling, host port management) or the host's own remote-access feature. High effort, medium value for a personal plugin.
 
+## 5f. Version 0.5.1 — install-time resolution and the host bundler boundary
+
+### The failure
+
+`paseo plugin add /path/to/command-center` on a fresh checkout failed with:
+
+```
+[plugin: paseo-plugin-server-runtime-boundary] Could not resolve type dependency
+"@getpaseo/client" imported by …/command-center/server/executor.ts
+```
+
+The reported file is the first one the check trips over; behind it were two more failures — the same type-only import in `server/schedules.ts` and the *runtime* import of `DaemonClient` in `server/daemon-connection.ts`.
+
+### How the host resolves plugin imports
+
+Paseo does not hand the plugin directory to esbuild as-is. It installs a boundary plugin (`paseo-plugin-server-runtime-boundary` / `…-client-…`, found in the desktop `app.asar`) that walks every source file reachable from `index.server.ts` / `index.client.tsx` and checks each import:
+
+1. Files must live under `server/`, `client/`, `shared/` or be `index.server.*` / `index.client.*`; a `client/`-only module may not enter the server bundle and vice versa.
+2. Imports are resolved with the **TypeScript resolver** (`ts.resolveModuleName`, `moduleResolution: Bundler`, options from the plugin's own `tsconfig.json`) — not with esbuild's resolver, because esbuild erases type-only imports and the check needs the original syntax.
+3. A fixed list of specifiers is treated as **supplied by the host** and skipped entirely: `@getpaseo/plugin`, `@getpaseo/plugin/{client,client/ui,client/react-native,server,server/provider,server/acp}`, plus `zod`, `react`, `react-native`, `@tanstack/react-query`, `@types/node` and Node built-ins.
+4. For any other **type-only** specifier that does not resolve, the check throws `Could not resolve type dependency "…"`. Value imports are left to esbuild (erased imports and guarded `require`s are legal), but a missing one still fails the build there.
+5. Resolved packages under `node_modules` are accepted; the plugin's own `client/`/`server/`/`shared/` split is enforced recursively.
+
+`@getpaseo/client` is **not** on the host-supplied list, so this plugin's scheduler bridge (§5c) made every install depend on a populated `node_modules`.
+
+### Why a fresh checkout had none
+
+- `node_modules` is git-ignored, so a clone has no dependencies.
+- `paseo plugin add <directory>` goes through `installDirectory()`, which reads the manifest, registers the path and starts the plugin — it runs **no** build commands. Only the npm- and git-source path (`prepareInstall()` → `runPluginBuild(directory, manifest.build)`) executes anything, and it does so *before* the bundle is validated.
+- `@getpaseo/client` was not a declared dependency at all: it arrived only as an auto-installed peer of `@getpaseo/plugin` (marked `"peer": true` in the lockfile), so it disappeared under `--legacy-peer-deps` / `--omit=peer` as well.
+
+### The fix
+
+1. `paseo-plugin.json` — `"build": [["npm", "ci"]]`. With the Git source
+   (`paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center`)
+   the daemon clones the repository, installs the dependencies itself and only then bundles. This makes the documented one-command install self-sufficient; a local directory install still needs `npm ci` once, which the README states.
+2. `package.json` — `@getpaseo/client` is now a declared, version-pinned dev dependency (`0.10.1`, matching `@getpaseo/plugin`) instead of an accidental peer. `package-lock.json` was regenerated: the root `version` field was stale at `0.4.1`, and the package lost its `"peer": true` marker.
+
+Nothing about the plugin's behaviour changed — no runtime code was touched. The scheduler bridge still uses `DaemonClient` over the local websocket; it simply now has its dependency guaranteed to exist at install time.
+
+### Verification
+
+Reproduced the host's own walk statically (TypeScript resolver + the same exempt list + the same throw-on-unresolved-type rule) against a staged copy of the plugin with the manifest `build` commands executed first:
+
+| State | server bundle | client bundle |
+| --- | --- | --- |
+| before the fix, no `node_modules` | 3 errors (`executor.ts`, `schedules.ts`, `daemon-connection.ts`) | 1 error (`client/dispatch.ts`) |
+| before the fix, `npm ci` run | clean | clean |
+| after the fix, staged + `build` commands | clean | clean |
+
+Plus `npm run typecheck` (clean) and `npx vitest run` (9 suites, 98 tests). A live `paseo plugin add` into a running daemon was not performed as part of this change.
+
+The same defect existed in three sibling plugins and was fixed the same way — see the repository [README](../README.md#installation).
+
 ## 6. Compatibility
 
-Verified on 2026-09-29 against Paseo `0.10.1` with `@getpaseo/plugin@0.10.1`:
+Verified on 2026-10-02 against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1` + `@getpaseo/client@0.10.1`:
 
 - `npm run typecheck` — clean.
 - `npx vitest run` — 9 suites, 98 tests, all green.
-- Live probe of the whole schedule lifecycle (create with full model ref, inspect, pause, resume, update, delete) — succeeded.
-- `paseo plugin add <dir>` → status `running`, daemon logs show `Plugin ready` with no plugin errors.
+- Static reproduction of the host's bundler boundary check against a staged copy — no boundary errors in the server or client bundle (§5f).
+- Earlier verification, on 2026-09-29 against Paseo `0.10.1`: live probe of the whole schedule lifecycle (create with full model ref, inspect, pause, resume, update, delete) succeeded, and `paseo plugin add <dir>` reached status `running` with `Plugin ready` in the daemon logs. That install used a working copy with `node_modules` already present — the path §5f fixes.
 - The `version` manifest key is rejected by 0.10.x (`Unrecognized key`) — the key must not be reintroduced until the daemon accepts it.
 
 ### 6.1 Paseo 0.10.x changes affecting this plugin
@@ -263,7 +318,7 @@ Paseo 0.10.0 (2026-09-28) and 0.10.1 (2026-09-29) are **additive** for every API
 - **Settings reorganization** — superseded in 0.5.0: the plugin now contributes its own settings screen via `client.addSettingsScreen` + `server.registerSettings` (§5d), which is the SDK-native mechanism on 0.10.x.
 - **Bug fixes** (workspace sidebar persistence, agent import, daemon startup, Pi/OpenCode/Codex edge cases) — none affect the plugin's RPC surface or client contributions.
 
-The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bumped to 0.5.0 (new functionality: settings screen, automation hooks, MCP injection, attachment source, `/cc` subcommands, history retention setting).
+The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bumped to 0.5.0 (new functionality: settings screen, automation hooks, MCP injection, attachment source, `/cc` subcommands, history retention setting) and to 0.5.1 (bugfix: installation from a clean checkout, §5f).
 
 ## 7. Limitations
 
@@ -277,6 +332,7 @@ The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bum
 - **History is linear and bounded** (default 50, user-configurable 10–500 via settings, §5d); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
 - **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required. `list`/`history` only open the surface: the slash context has no message channel to print into.
 - **Automation is best-effort.** Auto-run/bootstrap commands execute with template defaults and swallow errors (§5d); a failing automation never blocks the triggering event, and failures are only visible via the run history.
+- **Installation needs the npm registry.** The manifest build step is `npm ci`, because the scheduler bridge depends on `@getpaseo/client`, which Paseo does not supply to plugins (§5f). A host without registry access cannot install or update this plugin; the other four plugins in this repository have no such requirement.
 
 ## 8. Roadmap
 

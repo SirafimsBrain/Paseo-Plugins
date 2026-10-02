@@ -31,10 +31,19 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 ## Install
 
 ```bash
+paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center
+```
+
+Requires Paseo ≥ 0.8.0 (verified against 0.10.3; the settings screen, attachment source and lifecycle hooks use SDK 0.10 APIs).
+
+The plugin talks to the standard Paseo scheduler through the low-level `@getpaseo/client` daemon client, which Paseo does **not** supply to plugins — so the manifest runs `npm ci` as its install-time build step and the daemon installs the dependencies before bundling. The plugin needs registry access on the host at install time; a local checkout has to be prepared by hand once, because `paseo plugin add <directory>` runs no build commands:
+
+```bash
+cd command-center && npm ci
 paseo plugin add /path/to/command-center
 ```
 
-Requires Paseo ≥ 0.9.0 (verified against 0.9.2 and 0.10.1; the settings screen, attachment source and lifecycle hooks use SDK 0.10 APIs).
+See [__doc.md](./__doc.md) §5f for the bundler rules this plugin has to respect.
 
 ## Development
 
