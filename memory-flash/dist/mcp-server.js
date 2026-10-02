@@ -20043,6 +20043,9 @@ function paseoHome() {
 function memoryDbPath() {
   return path.join(paseoHome(), "plugins", "memory-flash", "memory.db");
 }
+var DB_BUSY_TIMEOUT_MS = 5e3;
+var WRITE_ATTEMPTS = 3;
+var WRITE_RETRY_DELAY_MS = 25;
 function normalizeTag(raw) {
   return raw.trim().toLowerCase().slice(0, 64);
 }
@@ -20054,15 +20057,20 @@ function normalizeTags(tags) {
   }
   return [...seen].sort();
 }
+function effectiveTags(tags, project) {
+  if (!project || project.trim().length === 0) return normalizeTags(tags);
+  return normalizeTags([...tags, project]);
+}
 var MemoryStore = class {
   constructor(options = {}) {
     this.dbPath = options.dbPath ?? memoryDbPath();
     this.historyPerMemory = options.historyPerMemory ?? 50;
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
-    const openOptions = {};
+    const openOptions = { timeout: DB_BUSY_TIMEOUT_MS };
     this.db = new DatabaseSync(this.dbPath, openOptions);
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA synchronous = NORMAL;");
+    this.db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS};`);
     this.migrate();
     this.prepareStatements();
   }
@@ -20130,9 +20138,17 @@ var MemoryStore = class {
         INSERT INTO memories_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
       END;
     `);
-    const version2 = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
-    if (!version2) {
-      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '1')").run();
+    const versionRow = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
+    const schemaVersion = versionRow ? Number.parseInt(versionRow.value, 10) : 0;
+    if (schemaVersion < 1) {
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
+    } else if (schemaVersion < 2) {
+      this.db.exec(`
+        INSERT OR IGNORE INTO memory_tags (memory_id, tag)
+        SELECT id, substr(lower(trim(project)), 1, 64) FROM memories
+        WHERE project IS NOT NULL AND trim(project) <> '';
+      `);
+      this.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
     }
   }
   prepareStatements() {
@@ -20206,75 +20222,103 @@ var MemoryStore = class {
     return memory;
   }
   // -------------------------------------------------------------------------
+  // Concurrency: several agent processes write the same WAL database
+  // -------------------------------------------------------------------------
+  /**
+   * Runs a write operation, retrying when another process holds the
+   * write lock. The driver-level busy timeout (5 s) already waits out
+   * ordinary contention; the retry covers the rest of the collision
+   * window of a multi-statement operation, so parallel agent workers
+   * no longer lose writes to a transient "database is locked".
+   */
+  withWriteRetry(operation) {
+    let attempt = 0;
+    for (; ; ) {
+      try {
+        return operation();
+      } catch (cause) {
+        attempt += 1;
+        if (attempt >= WRITE_ATTEMPTS || !isLockError(cause)) throw cause;
+        sleepSync(WRITE_RETRY_DELAY_MS * 2 ** (attempt - 1));
+      }
+    }
+  }
+  // -------------------------------------------------------------------------
   // Write operations
   // -------------------------------------------------------------------------
   /** Creates a memory. Throws a readable Error when validation fails. */
   create(input2, changedBy = null) {
-    const parsed = memoryInputSchema.safeParse(input2);
-    if (!parsed.success) {
-      throw new Error(`Invalid memory: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
-    }
-    const value = parsed.data;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const result = this.stmtInsert.run(
-      value.kind,
-      value.title,
-      value.content,
-      value.project,
-      value.agentId,
-      now,
-      now
-    );
-    const id = Number(result.lastInsertRowid);
-    for (const tag of normalizeTags(value.tags)) this.stmtAddTag.run(id, tag);
-    this.recordHistory(id, 1, "create", changedBy, now);
-    return this.getById(id);
+    return this.withWriteRetry(() => {
+      const parsed = memoryInputSchema.safeParse(input2);
+      if (!parsed.success) {
+        throw new Error(`Invalid memory: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+      }
+      const value = parsed.data;
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const result = this.stmtInsert.run(
+        value.kind,
+        value.title,
+        value.content,
+        value.project,
+        value.agentId,
+        now,
+        now
+      );
+      const id = Number(result.lastInsertRowid);
+      for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
+      this.recordHistory(id, 1, "create", changedBy, now);
+      return this.getById(id);
+    });
   }
   /** Updates a memory (full replace of mutable fields). */
   update(id, input2, changedBy = null) {
-    const parsed = memoryUpdateSchema.safeParse(input2);
-    if (!parsed.success) {
-      throw new Error(`Invalid memory update: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
-    }
-    const existing = this.stmtById.get(id);
-    if (!existing) throw new Error(`Memory ${id} not found.`);
-    const value = parsed.data;
-    const author = changedBy ?? value.changedBy ?? null;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    this.stmtUpdate.run(
-      value.kind,
-      value.title,
-      value.content,
-      value.project,
-      value.agentId,
-      now,
-      id
-    );
-    this.stmtTagsDelete.run(id);
-    for (const tag of normalizeTags(value.tags)) this.stmtAddTag.run(id, tag);
-    const nextRevision = Number(existing.revision) + 1;
-    this.recordHistory(id, nextRevision, "update", author, now);
-    return this.getById(id);
+    return this.withWriteRetry(() => {
+      const parsed = memoryUpdateSchema.safeParse(input2);
+      if (!parsed.success) {
+        throw new Error(`Invalid memory update: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+      }
+      const existing = this.stmtById.get(id);
+      if (!existing) throw new Error(`Memory ${id} not found.`);
+      const value = parsed.data;
+      const author = changedBy ?? value.changedBy ?? null;
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      this.stmtUpdate.run(
+        value.kind,
+        value.title,
+        value.content,
+        value.project,
+        value.agentId,
+        now,
+        id
+      );
+      this.stmtTagsDelete.run(id);
+      for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
+      const nextRevision = Number(existing.revision) + 1;
+      this.recordHistory(id, nextRevision, "update", author, now);
+      return this.getById(id);
+    });
   }
   /** Deletes a memory and its tags. History rows are kept with change_kind='delete'. */
   delete(id, changedBy = null) {
-    const existing = this.stmtById.get(id);
-    if (!existing) return false;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    this.recordHistoryWith(
-      id,
-      Number(existing.revision),
-      "delete",
-      changedBy,
-      now,
-      String(existing.title),
-      String(existing.content),
-      String(existing.kind),
-      this.tagsFor(id)
-    );
-    this.stmtDelete.run(id);
-    this.stmtTagsDelete.run(id);
-    return true;
+    return this.withWriteRetry(() => {
+      const existing = this.stmtById.get(id);
+      if (!existing) return false;
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      this.recordHistoryWith(
+        id,
+        Number(existing.revision),
+        "delete",
+        changedBy,
+        now,
+        String(existing.title),
+        String(existing.content),
+        String(existing.kind),
+        this.tagsFor(id)
+      );
+      this.stmtDelete.run(id);
+      this.stmtTagsDelete.run(id);
+      return true;
+    });
   }
   recordHistory(memoryId, revision, changeKind, changedBy, changedAt) {
     const row = this.stmtById.get(memoryId);
@@ -20384,46 +20428,52 @@ var MemoryStore = class {
   // Search
   // -------------------------------------------------------------------------
   /**
-   * Hybrid search: FTS5 full-text when a query is present (ranked, with a
-   * snippet), structured filtering over kind/tags/project/agent otherwise.
-   * Text and filters compose (AND).
+   * Hybrid search: FTS5 full-text when the query has indexable terms
+   * (ranked, with a snippet), structured filtering over kind/tags/
+   * project/agent otherwise. Text and filters compose (AND); the terms
+   * inside a text query rank (OR), so natural-language queries with
+   * extra words still match. `key=value` pairs in the query
+   * (project=, kind=, tag=, agent=) act as structured filters.
    */
   search(options) {
     const limit = Math.max(1, Math.min(100, options.limit));
+    const parsed = parseQuery(options.query);
+    const kinds = mergeUnique(options.kinds, parsed.filters.kinds);
+    const tags = mergeUnique(options.tags, parsed.filters.tags);
+    const project = options.project ?? parsed.filters.project;
+    const agentId = options.agentId ?? parsed.filters.agentId;
     const where = [];
     const params = [];
-    const useFts = options.query.trim().length > 0;
+    const ftsMatch = parsed.match;
+    const useFts = ftsMatch !== null;
     let sql;
     if (useFts) {
       sql = `SELECT m.*, bm25(memories_fts) AS score`;
-      const match = ftsQuery(options.query);
-      if (match) {
-        where.push("memories_fts MATCH ?");
-        params.push(match);
-      } else {
-        sql = `SELECT m.*, 0 AS score`;
-        where.push("(m.title LIKE ? OR m.content LIKE ?)");
-        const like = `%${options.query.trim()}%`;
-        params.push(like, like);
-      }
+      where.push("memories_fts MATCH ?");
+      params.push(ftsMatch);
       sql += " FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id";
+    } else if (parsed.freeText.trim().length > 0) {
+      sql = `SELECT m.*, 0 AS score`;
+      where.push("(m.title LIKE ? OR m.content LIKE ?)");
+      const like = `%${parsed.freeText.trim()}%`;
+      params.push(like, like);
     } else {
       sql = "SELECT m.*, 0 AS score FROM memories m";
     }
-    if (options.kinds.length > 0) {
-      where.push(`m.kind IN (${options.kinds.map(() => "?").join(",")})`);
-      params.push(...options.kinds);
+    if (kinds.length > 0) {
+      where.push(`m.kind IN (${kinds.map(() => "?").join(",")})`);
+      params.push(...kinds);
     }
-    if (options.project) {
+    if (project) {
       where.push("m.project = ?");
-      params.push(options.project);
+      params.push(project);
     }
-    if (options.agentId) {
+    if (agentId) {
       where.push("m.agent_id = ?");
-      params.push(options.agentId);
+      params.push(agentId);
     }
-    if (options.tags.length > 0) {
-      const normalized = normalizeTags(options.tags);
+    if (tags.length > 0) {
+      const normalized = normalizeTags(tags);
       const placeholders = normalized.map(() => "?").join(",");
       if (options.tagMode === "all") {
         where.push(
@@ -20439,7 +20489,7 @@ var MemoryStore = class {
     }
     const whereSql = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
     const orderSql = useFts ? " ORDER BY score LIMIT ?" : " ORDER BY m.updated_at DESC LIMIT ?";
-    params.push(limit * 3 > 0 ? limit : limit);
+    params.push(limit);
     const rows = this.db.prepare(`${sql}${whereSql}${orderSql}`).all(...params);
     const results = [];
     for (const row of rows.slice(0, limit)) {
@@ -20449,14 +20499,13 @@ var MemoryStore = class {
       results.push({
         memory,
         score,
-        snippet: useFts ? this.snippetFor(memory.id, options.query) : null
+        snippet: useFts ? this.snippetFor(memory.id, ftsMatch) : null
       });
     }
     return results;
   }
-  snippetFor(id, query) {
-    const match = ftsQuery(query);
-    if (!match) return null;
+  /** Highlighted FTS5 snippet for a matched row. */
+  snippetFor(id, match) {
     try {
       const row = this.db.prepare(
         "SELECT snippet(memories_fts, 1, '[\u2026]', '[\u2026]', '\u2026', 12) AS s FROM memories_fts WHERE rowid = ? AND memories_fts MATCH ?"
@@ -20558,12 +20607,14 @@ var MemoryStore = class {
   }
   /** Deletes every memory and history row. Used by the surface with confirm. */
   reset() {
-    const count = this.db.prepare("SELECT COUNT(*) AS c FROM memories").get().c;
-    this.db.exec("DELETE FROM memories;");
-    this.db.exec("DELETE FROM memory_tags;");
-    this.db.exec("DELETE FROM memory_history;");
-    this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');");
-    return count;
+    return this.withWriteRetry(() => {
+      const count = this.db.prepare("SELECT COUNT(*) AS c FROM memories").get().c;
+      this.db.exec("DELETE FROM memories;");
+      this.db.exec("DELETE FROM memory_tags;");
+      this.db.exec("DELETE FROM memory_history;");
+      this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');");
+      return count;
+    });
   }
   close() {
     this.db.close();
@@ -20577,25 +20628,189 @@ function safeParseTags(raw) {
     return [];
   }
 }
+var STOP_WORDS = /* @__PURE__ */ new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "or",
+  "but",
+  "if",
+  "then",
+  "else",
+  "when",
+  "where",
+  "why",
+  "how",
+  "what",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "am",
+  "do",
+  "does",
+  "did",
+  "done",
+  "doing",
+  "have",
+  "has",
+  "had",
+  "having",
+  "will",
+  "would",
+  "shall",
+  "should",
+  "can",
+  "could",
+  "may",
+  "might",
+  "must",
+  "i",
+  "you",
+  "he",
+  "she",
+  "it",
+  "we",
+  "they",
+  "me",
+  "him",
+  "her",
+  "us",
+  "them",
+  "my",
+  "your",
+  "his",
+  "its",
+  "our",
+  "their",
+  "this",
+  "that",
+  "these",
+  "those",
+  "in",
+  "on",
+  "at",
+  "to",
+  "for",
+  "of",
+  "with",
+  "by",
+  "from",
+  "as",
+  "into",
+  "onto",
+  "over",
+  "under",
+  "between",
+  "through",
+  "during",
+  "before",
+  "after",
+  "above",
+  "below",
+  "up",
+  "down",
+  "out",
+  "off",
+  "again",
+  "once",
+  "here",
+  "there",
+  "all",
+  "any",
+  "both",
+  "each",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "no",
+  "not",
+  "only",
+  "own",
+  "same",
+  "so",
+  "than",
+  "too",
+  "very",
+  "just",
+  "because",
+  "until",
+  "while",
+  "about"
+]);
+var MIN_TOKEN_LENGTH = 2;
+var KEY_VALUE_PATTERN = /([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("[^"]*"|'[^']*'|\S+)/g;
+function unquote(value) {
+  if (value.length >= 2 && (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+function mergeUnique(...lists) {
+  return [...new Set(lists.flat())];
+}
+function isLockError(cause) {
+  return cause instanceof Error && /database is locked/i.test(cause.message);
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function parseQuery(raw) {
+  const filters = { kinds: [], tags: [], project: null, agentId: null };
+  const replacements = [];
+  const regex = new RegExp(KEY_VALUE_PATTERN.source, "g");
+  let match;
+  while ((match = regex.exec(raw)) !== null) {
+    const key = match[1].toLowerCase();
+    const value = unquote(match[2]).trim();
+    if (value.length === 0) continue;
+    if (key === "project") {
+      filters.project = value;
+    } else if (key === "kind" || key === "kinds") {
+      filters.kinds.push(value);
+    } else if (key === "tag" || key === "tags") {
+      filters.tags.push(value);
+    } else if (key === "agent" || key === "agentid" || key === "agent_id") {
+      filters.agentId = value;
+    } else {
+      replacements.push({ start: match.index, end: regex.lastIndex, text: `${match[1]} ${value}` });
+      continue;
+    }
+    replacements.push({ start: match.index, end: regex.lastIndex, text: " " });
+  }
+  let freeText = raw;
+  for (const { start, end, text: text2 } of replacements.reverse()) {
+    freeText = freeText.slice(0, start) + text2 + freeText.slice(end);
+  }
+  return { match: ftsQuery(freeText), freeText, filters };
+}
 function ftsQuery(raw) {
   const terms = [];
   const phraseRegex = /"([^"]+)"/g;
-  const phrases = [];
-  let working = raw;
   let match;
   while ((match = phraseRegex.exec(raw)) !== null) {
-    phrases.push(match[1]);
-  }
-  working = working.replace(phraseRegex, " ");
-  for (const phrase of phrases) {
-    const cleaned = phrase.trim();
+    const cleaned = match[1].trim();
     if (cleaned.length > 0) terms.push(`"${cleaned.replace(/"/g, '""')}"`);
   }
-  for (const token of working.split(/\s+/)) {
+  const withoutPhrases = raw.replace(phraseRegex, " ");
+  for (const token of withoutPhrases.split(/\s+/)) {
     const cleaned = token.replace(/[^\p{L}\p{N}_-]/gu, "");
-    if (cleaned.length > 0) terms.push(`"${cleaned}"`);
+    if (cleaned.length < MIN_TOKEN_LENGTH) continue;
+    if (STOP_WORDS.has(cleaned.toLowerCase())) continue;
+    terms.push(`"${cleaned}"`);
   }
-  return terms.length > 0 ? terms.join(" AND ") : null;
+  return terms.length > 0 ? terms.join(" OR ") : null;
 }
 
 // server/mcp-tools.ts
@@ -20630,11 +20845,11 @@ var MCP_TOOLS = [
   {
     name: "memory_search",
     title: "Search shared memory",
-    description: "Full-text search over the shared memory of ALL agents. Use before starting work to recall prior decisions, known bugs and procedures. Filters compose: query AND tags AND kind AND project.",
+    description: "Full-text search over the shared memory of ALL agents. Use before starting work to recall prior decisions, known bugs and procedures. Natural-language queries are fine (terms are ranked by relevance); key=value pairs in the query (project=, kind=, tag=, agent=) act as filters. Filters compose: query AND tags AND kind AND project.",
     inputSchema: {
       type: "object",
       properties: {
-        query: str("Free-text query; empty returns the most recent memories."),
+        query: str("Free-text query; empty returns the most recent memories. Quoted phrases match verbatim; key=value pairs (project=, kind=, tag=, agent=) act as filters."),
         tags: strArray("Filter: memories must carry at least one of these tags."),
         kinds: { type: "array", items: { type: "string" }, description: "Filter by memory kinds." },
         project: str("Filter by project name."),
@@ -20683,11 +20898,12 @@ var MCP_TOOLS = [
   {
     name: "memory_list_by_tag",
     title: "List memories by tag",
-    description: "List recent memories carrying a specific tag (e.g. a project name or 'handoff'). Handy for picking up a topic without knowing what to search for.",
+    description: "List recent memories carrying a specific tag (e.g. a project name or 'handoff'). Handy for picking up a topic without knowing what to search for. Optionally narrow the listing to selected kinds (e.g. handoff and decision).",
     inputSchema: {
       type: "object",
       properties: {
         tag: str("Exact tag (case-insensitive)."),
+        kinds: { type: "array", items: { type: "string", enum: ["decision", "procedure", "handoff", "bugfix", "pattern", "pitfall", "reference", "note"] }, description: KIND_DESCRIPTION },
         limit: num("Max results (default 20).")
       },
       required: ["tag"]
@@ -20803,10 +21019,18 @@ function dispatchMcpTool(name, args, context) {
       const tag = String(input2.tag ?? "").trim();
       if (tag.length === 0) return error62("tag is required.");
       const limit = Math.max(1, Math.min(50, Number(input2.limit) || 20));
+      const kinds = [];
+      for (const raw of Array.isArray(input2.kinds) ? input2.kinds : []) {
+        const parsed = memoryKindSchema.safeParse(raw);
+        if (!parsed.success) {
+          return error62(`Invalid kind: ${String(raw)}. ${KIND_DESCRIPTION}`);
+        }
+        kinds.push(parsed.data);
+      }
       const results = store.search({
         query: "",
         tags: [tag],
-        kinds: [],
+        kinds,
         project: null,
         agentId: null,
         tagMode: "any",

@@ -76,7 +76,7 @@ one language keeps search reliable and the knowledge unified.
 
 memory_search { "query": "auth token refresh", "tags": ["<project>"] }
 
-memory_list_by_tag { "tag": "<project>" }
+memory_list_by_tag { "tag": "<project>", "kinds": ["handoff", "decision"] }
 
 \`\`\`
 

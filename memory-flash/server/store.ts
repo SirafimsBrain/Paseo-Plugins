@@ -68,6 +68,18 @@ const KINDS: readonly MemoryKind[] = [
   "note",
 ];
 
+/**
+ * How long a statement waits for a competing writer. WAL allows many
+ * readers but still only one writer at a time, and every agent process
+ * shares this file, so a zero busy timeout turns ordinary write
+ * contention into a lost write.
+ */
+const DB_BUSY_TIMEOUT_MS = 5000;
+/** Write attempts before "database is locked" surfaces to the caller. */
+const WRITE_ATTEMPTS = 3;
+/** Backoff before the first write retry; doubles per attempt. */
+const WRITE_RETRY_DELAY_MS = 25;
+
 function normalizeTag(raw: string): string {
   return raw.trim().toLowerCase().slice(0, 64);
 }
@@ -79,6 +91,17 @@ function normalizeTags(tags: readonly string[]): string[] {
     if (normalized.length > 0) seen.add(normalized);
   }
   return [...seen].sort();
+}
+
+/**
+ * Tags actually stored for a memory: the given tags plus the project
+ * name. Both access paths — the `project` column filter and the tag
+ * index — must find the same memories, so the project is indexed as a
+ * tag too (0.3.2; existing rows are backfilled by the migration).
+ */
+function effectiveTags(tags: readonly string[], project: string | null): string[] {
+  if (!project || project.trim().length === 0) return normalizeTags(tags);
+  return normalizeTags([...tags, project]);
 }
 
 export class MemoryStore {
@@ -107,10 +130,14 @@ export class MemoryStore {
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
     // `enableForeignKeyConstraints: false` is the default; we enforce
     // referential integrity manually to keep deletes simple and explicit.
-    const openOptions: DatabaseSyncOptions = {};
+    // The busy timeout makes concurrent agent writers wait out short
+    // lock contention instead of failing immediately; withWriteRetry()
+    // covers the rest of the collision window.
+    const openOptions: DatabaseSyncOptions = { timeout: DB_BUSY_TIMEOUT_MS };
     this.db = new DatabaseSync(this.dbPath, openOptions);
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA synchronous = NORMAL;");
+    this.db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS};`);
     this.migrate();
     this.prepareStatements();
   }
@@ -182,11 +209,23 @@ export class MemoryStore {
         INSERT INTO memories_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
       END;
     `);
-    const version = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
-    if (!version) {
-      this.db
-        .prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '1')")
-        .run();
+    const versionRow = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'schema_version'")
+      .get() as { value: string } | undefined;
+    const schemaVersion = versionRow ? Number.parseInt(versionRow.value, 10) : 0;
+    if (schemaVersion < 1) {
+      // Fresh database: start at the current version (nothing to backfill).
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
+    } else if (schemaVersion < 2) {
+      // 0.3.2: the project name became part of the tag index, so searching
+      // by the project tag finds memories that only set the `project`
+      // field. Backfill existing rows (PK conflict is ignored).
+      this.db.exec(`
+        INSERT OR IGNORE INTO memory_tags (memory_id, tag)
+        SELECT id, substr(lower(trim(project)), 1, 64) FROM memories
+        WHERE project IS NOT NULL AND trim(project) <> '';
+      `);
+      this.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
     }
   }
 
@@ -266,81 +305,111 @@ export class MemoryStore {
   }
 
   // -------------------------------------------------------------------------
+  // Concurrency: several agent processes write the same WAL database
+  // -------------------------------------------------------------------------
+
+  /**
+   * Runs a write operation, retrying when another process holds the
+   * write lock. The driver-level busy timeout (5 s) already waits out
+   * ordinary contention; the retry covers the rest of the collision
+   * window of a multi-statement operation, so parallel agent workers
+   * no longer lose writes to a transient "database is locked".
+   */
+  private withWriteRetry<T>(operation: () => T): T {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return operation();
+      } catch (cause) {
+        attempt += 1;
+        if (attempt >= WRITE_ATTEMPTS || !isLockError(cause)) throw cause;
+        sleepSync(WRITE_RETRY_DELAY_MS * 2 ** (attempt - 1));
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Write operations
   // -------------------------------------------------------------------------
 
   /** Creates a memory. Throws a readable Error when validation fails. */
   create(input: MemoryInput, changedBy: string | null = null): Memory {
-    const parsed = memoryInputSchema.safeParse(input);
-    if (!parsed.success) {
-      throw new Error(`Invalid memory: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
-    }
-    const value = parsed.data;
-    const now = new Date().toISOString();
-    const result = this.stmtInsert.run(
-      value.kind,
-      value.title,
-      value.content,
-      value.project,
-      value.agentId,
-      now,
-      now,
-    );
-    const id = Number(result.lastInsertRowid);
-    for (const tag of normalizeTags(value.tags)) this.stmtAddTag.run(id, tag);
-    this.recordHistory(id, 1, "create", changedBy, now);
-    return this.getById(id) as Memory;
+    return this.withWriteRetry(() => {
+      const parsed = memoryInputSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new Error(`Invalid memory: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+      }
+      const value = parsed.data;
+      const now = new Date().toISOString();
+      const result = this.stmtInsert.run(
+        value.kind,
+        value.title,
+        value.content,
+        value.project,
+        value.agentId,
+        now,
+        now,
+      );
+      const id = Number(result.lastInsertRowid);
+      for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
+      this.recordHistory(id, 1, "create", changedBy, now);
+      return this.getById(id) as Memory;
+    });
   }
 
   /** Updates a memory (full replace of mutable fields). */
   update(id: number, input: MemoryUpdate, changedBy: string | null = null): Memory {
-    const parsed = memoryUpdateSchema.safeParse(input);
-    if (!parsed.success) {
-      throw new Error(`Invalid memory update: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
-    }
-    const existing = this.stmtById.get(id) as Record<string, unknown> | undefined;
-    if (!existing) throw new Error(`Memory ${id} not found.`);
-    const value = parsed.data;
-    // `changedBy` rides inside the update payload for RPC/MCP callers; the
-    // positional argument wins when both are provided.
-    const author = changedBy ?? value.changedBy ?? null;
-    const now = new Date().toISOString();
-    this.stmtUpdate.run(
-      value.kind,
-      value.title,
-      value.content,
-      value.project,
-      value.agentId,
-      now,
-      id,
-    );
-    this.stmtTagsDelete.run(id);
-    for (const tag of normalizeTags(value.tags)) this.stmtAddTag.run(id, tag);
-    const nextRevision = Number(existing.revision) + 1;
-    this.recordHistory(id, nextRevision, "update", author, now);
-    return this.getById(id) as Memory;
+    return this.withWriteRetry(() => {
+      const parsed = memoryUpdateSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new Error(`Invalid memory update: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+      }
+      const existing = this.stmtById.get(id) as Record<string, unknown> | undefined;
+      if (!existing) throw new Error(`Memory ${id} not found.`);
+      const value = parsed.data;
+      // `changedBy` rides inside the update payload for RPC/MCP callers; the
+      // positional argument wins when both are provided.
+      const author = changedBy ?? value.changedBy ?? null;
+      const now = new Date().toISOString();
+      this.stmtUpdate.run(
+        value.kind,
+        value.title,
+        value.content,
+        value.project,
+        value.agentId,
+        now,
+        id,
+      );
+      this.stmtTagsDelete.run(id);
+      for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
+      const nextRevision = Number(existing.revision) + 1;
+      this.recordHistory(id, nextRevision, "update", author, now);
+      return this.getById(id) as Memory;
+    });
   }
 
   /** Deletes a memory and its tags. History rows are kept with change_kind='delete'. */
   delete(id: number, changedBy: string | null = null): boolean {
-    const existing = this.stmtById.get(id) as Record<string, unknown> | undefined;
-    if (!existing) return false;
-    const now = new Date().toISOString();
-    // Keep a tombstone revision before removing the row.
-    this.recordHistoryWith(
-      id,
-      Number(existing.revision),
-      "delete",
-      changedBy,
-      now,
-      String(existing.title),
-      String(existing.content),
-      String(existing.kind),
-      this.tagsFor(id),
-    );
-    this.stmtDelete.run(id);
-    this.stmtTagsDelete.run(id);
-    return true;
+    return this.withWriteRetry(() => {
+      const existing = this.stmtById.get(id) as Record<string, unknown> | undefined;
+      if (!existing) return false;
+      const now = new Date().toISOString();
+      // Keep a tombstone revision before removing the row.
+      this.recordHistoryWith(
+        id,
+        Number(existing.revision),
+        "delete",
+        changedBy,
+        now,
+        String(existing.title),
+        String(existing.content),
+        String(existing.kind),
+        this.tagsFor(id),
+      );
+      this.stmtDelete.run(id);
+      this.stmtTagsDelete.run(id);
+      return true;
+    });
   }
 
   private recordHistory(
@@ -482,50 +551,59 @@ export class MemoryStore {
   // -------------------------------------------------------------------------
 
   /**
-   * Hybrid search: FTS5 full-text when a query is present (ranked, with a
-   * snippet), structured filtering over kind/tags/project/agent otherwise.
-   * Text and filters compose (AND).
+   * Hybrid search: FTS5 full-text when the query has indexable terms
+   * (ranked, with a snippet), structured filtering over kind/tags/
+   * project/agent otherwise. Text and filters compose (AND); the terms
+   * inside a text query rank (OR), so natural-language queries with
+   * extra words still match. `key=value` pairs in the query
+   * (project=, kind=, tag=, agent=) act as structured filters.
    */
   search(options: SearchOptions): SearchResult[] {
     const limit = Math.max(1, Math.min(100, options.limit));
+    const parsed = parseQuery(options.query);
+    const kinds = mergeUnique(options.kinds, parsed.filters.kinds);
+    const tags = mergeUnique(options.tags, parsed.filters.tags);
+    const project = options.project ?? parsed.filters.project;
+    const agentId = options.agentId ?? parsed.filters.agentId;
+
     const where: string[] = [];
     const params: Array<string | number> = [];
 
-    const useFts = options.query.trim().length > 0;
+    const ftsMatch = parsed.match;
+    const useFts = ftsMatch !== null;
     let sql: string;
     if (useFts) {
       sql = `SELECT m.*, bm25(memories_fts) AS score`;
-      const match = ftsQuery(options.query);
-      if (match) {
-        where.push("memories_fts MATCH ?");
-        params.push(match);
-      } else {
-        // Query had no usable terms — fall back to LIKE so the user still
-        // sees something for punctuation-only input.
-        sql = `SELECT m.*, 0 AS score`;
-        where.push("(m.title LIKE ? OR m.content LIKE ?)");
-        const like = `%${options.query.trim()}%`;
-        params.push(like, like);
-      }
+      where.push("memories_fts MATCH ?");
+      params.push(ftsMatch);
       sql += " FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id";
+    } else if (parsed.freeText.trim().length > 0) {
+      // Query had free text but no indexable terms (punctuation or stop
+      // words only) — fall back to LIKE so the user still sees something.
+      sql = `SELECT m.*, 0 AS score`;
+      where.push("(m.title LIKE ? OR m.content LIKE ?)");
+      const like = `%${parsed.freeText.trim()}%`;
+      params.push(like, like);
     } else {
+      // No free text (empty query or pure key=value filters):
+      // plain structured listing, newest first.
       sql = "SELECT m.*, 0 AS score FROM memories m";
     }
 
-    if (options.kinds.length > 0) {
-      where.push(`m.kind IN (${options.kinds.map(() => "?").join(",")})`);
-      params.push(...options.kinds);
+    if (kinds.length > 0) {
+      where.push(`m.kind IN (${kinds.map(() => "?").join(",")})`);
+      params.push(...kinds);
     }
-    if (options.project) {
+    if (project) {
       where.push("m.project = ?");
-      params.push(options.project);
+      params.push(project);
     }
-    if (options.agentId) {
+    if (agentId) {
       where.push("m.agent_id = ?");
-      params.push(options.agentId);
+      params.push(agentId);
     }
-    if (options.tags.length > 0) {
-      const normalized = normalizeTags(options.tags);
+    if (tags.length > 0) {
+      const normalized = normalizeTags(tags);
       const placeholders = normalized.map(() => "?").join(",");
       if (options.tagMode === "all") {
         where.push(
@@ -542,7 +620,7 @@ export class MemoryStore {
 
     const whereSql = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
     const orderSql = useFts ? " ORDER BY score LIMIT ?" : " ORDER BY m.updated_at DESC LIMIT ?";
-    params.push(limit * 3 > 0 ? limit : limit);
+    params.push(limit);
 
     const rows = this.db
       .prepare(`${sql}${whereSql}${orderSql}`)
@@ -556,15 +634,14 @@ export class MemoryStore {
       results.push({
         memory,
         score,
-        snippet: useFts ? this.snippetFor(memory.id, options.query) : null,
+        snippet: useFts ? this.snippetFor(memory.id, ftsMatch) : null,
       });
     }
     return results;
   }
 
-  private snippetFor(id: number, query: string): string | null {
-    const match = ftsQuery(query);
-    if (!match) return null;
+  /** Highlighted FTS5 snippet for a matched row. */
+  private snippetFor(id: number, match: string): string | null {
     try {
       const row = this.db
         .prepare(
@@ -699,12 +776,14 @@ export class MemoryStore {
 
   /** Deletes every memory and history row. Used by the surface with confirm. */
   reset(): number {
-    const count = (this.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number }).c;
-    this.db.exec("DELETE FROM memories;");
-    this.db.exec("DELETE FROM memory_tags;");
-    this.db.exec("DELETE FROM memory_history;");
-    this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');");
-    return count;
+    return this.withWriteRetry(() => {
+      const count = (this.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number }).c;
+      this.db.exec("DELETE FROM memories;");
+      this.db.exec("DELETE FROM memory_tags;");
+      this.db.exec("DELETE FROM memory_history;");
+      this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');");
+      return count;
+    });
   }
 
   close(): void {
@@ -722,26 +801,120 @@ function safeParseTags(raw: string): string[] {
 }
 
 /**
- * Builds an FTS5 MATCH expression from a free-form query. Terms are ANDed;
- * quoted phrases are preserved; punctuation-only tokens are dropped.
+ * Common English stop words. FTS5 ships no stop-word list of its own, so
+ * they are dropped here: otherwise every natural-language query carrying
+ * a function word ("the bug where login fails") demands that the
+ * document contain that word too and matches nothing.
+ */
+const STOP_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "if", "then", "else", "when", "where", "why", "how", "what", "which", "who", "whom", "whose",
+  "is", "are", "was", "were", "be", "been", "being", "am",
+  "do", "does", "did", "done", "doing",
+  "have", "has", "had", "having",
+  "will", "would", "shall", "should", "can", "could", "may", "might", "must",
+  "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their",
+  "this", "that", "these", "those",
+  "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "into", "onto", "over", "under", "between", "through", "during", "before", "after", "above", "below", "up", "down", "out", "off", "again", "once", "here", "there", "all", "any", "both", "each", "few", "more", "most", "other", "some", "such", "no", "not", "only", "own", "same", "so", "than", "too", "very", "just", "because", "until", "while", "about",
+]);
+
+/** Tokens shorter than this are dropped from the FTS query. */
+const MIN_TOKEN_LENGTH = 2;
+
+/** `key=value` pairs recognized inside a free-text search query. */
+const KEY_VALUE_PATTERN = /([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("[^"]*"|'[^']*'|\S+)/g;
+
+function unquote(value: string): string {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function mergeUnique<T>(...lists: readonly T[][]): T[] {
+  return [...new Set(lists.flat())];
+}
+
+/** node:sqlite throws a plain Error carrying "database is locked". */
+function isLockError(cause: unknown): boolean {
+  return cause instanceof Error && /database is locked/i.test(cause.message);
+}
+
+/** Synchronous sleep — the store is synchronous end to end. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export interface ParsedQuery {
+  /** FTS5 MATCH expression built from the free-text terms; null when nothing indexable remains. */
+  match: string | null;
+  /** The query text with recognized `key=value` filters removed (LIKE fallback). */
+  freeText: string;
+  /** Structured filters parsed out of the query. */
+  filters: { kinds: string[]; tags: string[]; project: string | null; agentId: string | null };
+}
+
+/**
+ * Splits a free-form query into an FTS5 MATCH expression and structured
+ * filters. Recognized `key=value` pairs (project=, kind=, tag=, agent=)
+ * become filters; unknown pairs contribute both sides as search terms
+ * (never glued into a single token). The remaining free text goes to
+ * {@link ftsQuery}, so `project=auth-api login` means "login" ANDed
+ * with the project filter instead of searching for "projectauth-api".
+ */
+export function parseQuery(raw: string): ParsedQuery {
+  const filters: ParsedQuery["filters"] = { kinds: [], tags: [], project: null, agentId: null };
+  const replacements: Array<{ start: number; end: number; text: string }> = [];
+  const regex = new RegExp(KEY_VALUE_PATTERN.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw)) !== null) {
+    const key = match[1].toLowerCase();
+    const value = unquote(match[2]).trim();
+    if (value.length === 0) continue;
+    if (key === "project") {
+      filters.project = value;
+    } else if (key === "kind" || key === "kinds") {
+      filters.kinds.push(value);
+    } else if (key === "tag" || key === "tags") {
+      filters.tags.push(value);
+    } else if (key === "agent" || key === "agentid" || key === "agent_id") {
+      filters.agentId = value;
+    } else {
+      // Unknown filter: keep both sides as separate search terms.
+      replacements.push({ start: match.index, end: regex.lastIndex, text: `${match[1]} ${value}` });
+      continue;
+    }
+    replacements.push({ start: match.index, end: regex.lastIndex, text: " " });
+  }
+  let freeText = raw;
+  for (const { start, end, text } of replacements.reverse()) {
+    freeText = freeText.slice(0, start) + text + freeText.slice(end);
+  }
+  return { match: ftsQuery(freeText), freeText, filters };
+}
+
+/**
+ * Builds an FTS5 MATCH expression from a free-form query. Quoted phrases
+ * are preserved verbatim; single terms are OR-ed (bm25 ranks the best
+ * matches first) after dropping stop words and very short tokens.
+ * Returns null when nothing indexable remains.
  */
 export function ftsQuery(raw: string): string | null {
   const terms: string[] = [];
   const phraseRegex = /"([^"]+)"/g;
-  const phrases: string[] = [];
-  let working = raw;
   let match: RegExpExecArray | null;
   while ((match = phraseRegex.exec(raw)) !== null) {
-    phrases.push(match[1]);
-  }
-  working = working.replace(phraseRegex, " ");
-  for (const phrase of phrases) {
-    const cleaned = phrase.trim();
+    const cleaned = match[1].trim();
     if (cleaned.length > 0) terms.push(`"${cleaned.replace(/"/g, '""')}"`);
   }
-  for (const token of working.split(/\s+/)) {
+  const withoutPhrases = raw.replace(phraseRegex, " ");
+  for (const token of withoutPhrases.split(/\s+/)) {
     const cleaned = token.replace(/[^\p{L}\p{N}_-]/gu, "");
-    if (cleaned.length > 0) terms.push(`"${cleaned}"`);
+    if (cleaned.length < MIN_TOKEN_LENGTH) continue;
+    if (STOP_WORDS.has(cleaned.toLowerCase())) continue;
+    terms.push(`"${cleaned}"`);
   }
-  return terms.length > 0 ? terms.join(" AND ") : null;
+  return terms.length > 0 ? terms.join(" OR ") : null;
 }

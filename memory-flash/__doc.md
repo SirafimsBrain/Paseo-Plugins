@@ -22,6 +22,9 @@ memory-flash/
 ├── server/
 │   ├── store.ts               # SQLite store: schema/migrations, FTS5, tags,
 │   │                          # revision history, stats, purge/reset
+│   ├── knowledge-transfer.ts  # export/backup/import: VACUUM INTO snapshot and
+│   │                          # raw-file-copy images, .mfkb/.mfb container,
+│   │                          # zstd/gzip/brotli streaming, merge/replace/restore
 │   ├── mcp-server.ts          # standalone stdio MCP server (JSON-RPC 2.0)
 │   ├── mcp-tools.ts           # tool definitions + transport-independent dispatch
 │   ├── mcp-launch.ts          # node + dist/mcp-server.js resolution (shared by
@@ -41,7 +44,7 @@ memory-flash/
 ├── scripts/
 │   └── bundle-mcp-server.mjs  # esbuild → dist/mcp-server.js (standalone stdio server)
 ├── skill/                     # (reserved for extra skill assets; SKILL.md is generated)
-└── tests/                     # vitest: 6 suites, 45 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 9 suites, 74 tests (incl. real-process stdio e2e)
 ```
 
 ### Data flow
@@ -77,11 +80,29 @@ The stdio server implements the MCP 2024-11-05 baseline: `initialize` (protocol 
 | `meta` | schema version marker |
 
 - WAL journal mode + `synchronous = NORMAL`: concurrent readers (surface, many agent processes) never block on a writer.
+- The schema version lives in `meta.schema_version` (currently `2`). Version 2 (0.3.2) backfills the project name into `memory_tags` for pre-existing rows (`INSERT OR IGNORE … SELECT id, substr(lower(trim(project)),1,64)`), so both access paths — the `project` column filter and the tag index — find the same memories. `create()`/`update()` derive the project tag through `effectiveTags()` from the start.
 - Deletes keep a tombstone revision before removing the row; restores of deleted rows re-create the memory.
 - Per-memory history is capped (default 50, setting range 10–200) trimming oldest revisions.
 - `purge` refuses to run without at least one filter (tag/project/kind); a full wipe goes through the explicit `reset()` path only.
 
-### Kind taxonomy
+### Concurrency: parallel agent writers (fixed in 0.3.2)
+
+WAL allows many readers but still only one writer at a time, and every agent process shares the file. Before 0.3.2 the database was opened with a zero busy timeout, so ordinary write contention between parallel agent workers surfaced as `database is locked` and the write was lost — measured: 10 concurrent writer processes, 8/10 succeeded (2 failed), and a 4-writer × 200-write soak lost ~32 % of all writes. The store now:
+
+- opens the database with a 5 s busy timeout (both the `DatabaseSync` `timeout` option and `PRAGMA busy_timeout`), which waits out ordinary contention;
+- runs every write operation (`create`/`update`/`delete`/`reset`) inside `withWriteRetry()`: a transient `database is locked` error is retried up to 3 attempts with exponential backoff (25 ms → 50 ms) before it surfaces to the caller as a readable MCP error (`isError` response / `{ok:false,error}` RPC).
+
+Re-measured after the fix: 10/10 concurrent writer processes succeed, 10/10 rows land; the soak loses zero writes.
+
+### Search semantics (rewritten in 0.3.2)
+
+`search()` splits the raw query with `parseQuery()` and composes three layers (text AND filters):
+
+1. **`key=value` pairs** — `project=`, `kind=`/`kinds=`, `tag=`/`tags=`, `agent=`/`agentid=`/`agent_id=` become structured filters and are removed from the text; values may be quoted. Unknown pairs (e.g. `severity=high`) contribute *both sides* as search terms instead of gluing into one token (the old code produced `severityhigh`, which could never match).
+2. **Free text → `ftsQuery()`** — quoted phrases are kept verbatim; single terms are OR-joined (bm25 ranks the best matches first) after dropping ~120 English stop words and tokens shorter than two characters. Before 0.3.2 every token was AND-ed including function words, so a natural-language query like "the bug where login fails" matched nothing; it now returns the relevant memory. When nothing indexable remains (stop words/punctuation only), the search falls back to a `LIKE` scan of title and content.
+3. **No free text** (empty query or pure `key=value` filters) — a plain structured listing ordered by `updated_at DESC`.
+
+Structured filters from the query compose with the explicit `options` filters (deduplicated, `options` winning for `project`/`agentId`).
 
 `decision`, `procedure`, `handoff`, `bugfix`, `pattern`, `pitfall`, `reference`, `note` — the handoff-oriented vocabulary from the requirements, mapped 1:1 to the skill guidance ("one fact — one memory").
 
@@ -131,9 +152,177 @@ The settings screen shows one row per agent (path + state + live check) with Reg
 - **`paseo-ssh` (implemented)** — probes the remote through the standard Paseo CLI transport (`paseo --host ssh://[user@]host[:port] status --json`, 20 s timeout) and reports the remote memory database path (`~/.paseo/plugins/memory-flash/memory.db`). Authentication is whatever the user's SSH config provides — the same prerequisite the Paseo app itself has for remote daemons.
 - **`tcp` / `relay` (stubs)** — stored and displayed, checks return `unsupported` without marking the host broken. The registry and status model are transport-agnostic so a real implementation only adds a `check*` branch (direct `ws://host:port` probe for TCP; relay pairing for Hub).
 
-Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§10).
+Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§11).
 
-## 8. RPC surface
+## 8. Export, import and backup of the knowledge base
+
+**Status: design only.** The mechanics below were verified experimentally on this host against generated databases (20 000 memories for export, 30 000 memories with 60 % deleted for backup); the measured numbers are quoted inline. No code is wired up yet, so the plugin version is unchanged.
+
+Purpose: move the shared memory from one machine to another (daemon reinstall, laptop → workstation, team hand-over), and keep restorable backups of the live file.
+
+Three paths, one archive container:
+
+| Path | Reads | Produces | Restorable as | Use |
+| --- | --- | --- | --- | --- |
+| **Export** | live DB via `VACUUM INTO` | logical snapshot archive | **merge** (safe) or replace | moving the knowledge base between machines |
+| **Import** | archive | rows merged into the live DB | — | consuming an export, or merging a colleague's base |
+| **Backup** | live DB via checkpoint + raw file copy | raw-image archive | **replace** only | fast local/off-machine safety copy of the exact file |
+
+The distinction is deliberate: an export is a *logical* artifact (small, portable across plugin versions, mergeable), a backup is a *physical* artifact (byte-identical image of the file, cheap to take, restorable only as a whole and only on the same schema).
+
+### 8.1 Representations
+
+| Representation | What it is | Use |
+| --- | --- | --- |
+| **Snapshot DB** (transient) | `VACUUM INTO '<tmp>'` → a defragmented, sidecar-free, transactional copy of the live database | payload of an export |
+| **Raw image** (transient) | `PRAGMA wal_checkpoint(TRUNCATE)` then `copyFileSync(memory.db, tmp)` → byte-identical image, freelist and all | payload of a backup |
+| **Archive** (on disk) | header + manifest + compressed payload, `.mfkb` for export, `.mfb` for backup | what the user copies to another machine or files away |
+
+`VACUUM INTO` is the right primitive for an export (verified): the output is a consistent snapshot taken inside a single transaction, deleted content is purged, no sidecar files exist afterwards. The temporary snapshot is written to the OS temp directory (never next to the live DB) and removed in a `finally` block. Interruption during `VACUUM INTO` can leave an incomplete temp file — harmless, since the live DB is untouched and the temp path is per-run.
+
+For a backup the file itself is the unit, so the image is copied directly. The one non-obvious prerequisite is the checkpoint: **a naive copy of `memory.db` alone silently loses committed rows.** Verified on a database with `wal_autocheckpoint=0`: after committing 2 more rows (8 KiB of WAL), `copyFileSync` of the main file alone produced an image containing only the pre-WAL rows; copying `memory.db-wal` next to it recovered all of them. The backup flow therefore *always* checkpoints first and never copies sidecars — after a successful `TRUNCATE` checkpoint the WAL is empty and the main file is self-contained.
+
+Import never runs an archive through `VACUUM INTO`; it decompresses to a temp file, opens it read-only, and reads from it.
+
+### 8.2 Archive container format
+
+Node has no tar/zip writer in the plugin's dependency budget (the plugin ships **zero runtime npm dependencies**, Node built-ins only), and brotli has no magic bytes at all, so format detection on import cannot rely on sniffing alone. The container is therefore a purpose-built single file:
+
+```
+offset  size  field
+0       8     magic "MFKB1\0\0"   (export)  |  "MFBK1\0\0" (backup)
+8       4     uint32 LE  headerLength
+12      H     headerLength bytes of UTF-8 JSON manifest
+12+H    …     compressed payload (raw zstd / gzip / brotli frame stream)
+```
+
+Two magics, one container: a backup is a raw image, an export is a logical snapshot, and mixing them up is the one mistake that loses data (merging a raw image would import freelist garbage; restoring an export as if it were a backup would silently lose freelist reuse, which is harmless but changes the physical layout). The reader validates the magic against the requested operation.
+
+Manifest (JSON, forward-compatible — unknown keys are ignored by older readers):
+
+```json
+{
+  "format": "memory-flash/knowledge-base",
+  "formatVersion": 1,
+  "variant": "snapshot",
+  "createdAt": "2026-10-01T15:48:02.399Z",
+  "pluginVersion": "0.4.0",
+  "schemaVersion": "1",
+  "codec": "zstd",
+  "compressionLevel": 9,
+  "uncompressedBytes": 29853696,
+  "payloadSha256": "abf88437…",
+  "counts": { "memories": 20000, "tags": 60000, "history": 20000 },
+  "sourceHost": "workstation",
+  "includes": ["memories", "memory_tags", "memory_history", "meta"]
+}
+```
+
+For a backup, `variant` is `"raw-image"`, `includes` is omitted, and the manifest carries the extra fields `pageSize`, `sqliteVersion` and `checkpointedAt` (the backup is only self-contained because the checkpoint succeeded, so the timestamp of that checkpoint is recorded).
+
+Design notes:
+
+- **Single file, no tar.** One payload = one archive keeps the reader trivial (read header → stream the rest) and stream-friendly for multi-gigabyte databases. If settings/hosts ever need to travel with it, they become extra entries in `includes` and, if needed, a second payload block with its own length prefix.
+- **`payloadSha256` is mandatory** and computed over the *uncompressed* payload while it is streamed, so corruption is detected before a single row is written into the live database. Import refuses a mismatch; restore refuses too.
+- **`meta` rows `export_manifest` / `schema_version` are preserved** in exports, so an extracted snapshot is self-describing even when unpacked by hand (`zstd -d` + `sqlite3`). A backup carries no manifest row — it is a raw image and must not be modified.
+- **Format sniffing on import**: `.mfkb` / `.mfb` → container; otherwise fall back to detecting gzip (`1f 8b`), zstd (`28 b5 2f fd`) or a raw SQLite header (`SQLite format 3`) so a hand-made archive or a plain `memory.db` still imports.
+
+### 8.3 Three compression levels (user choice)
+
+Both export and backup offer the **same three presets** — the choice is size vs. time and nothing else changes. All three keep the same decoder requirement (Node ≥ 22.15 has `node:zlib` zstd; the plugin already requires Node ≥ 24.20 for `node:sqlite`).
+
+| Preset | Level | Export payload (28.5 MiB snapshot) | Backup payload (13.3 MiB raw image) | When to pick it |
+| --- | --- | --- | --- | --- |
+| **Fast** | `zstd -3` | **1.25 MiB** (23×), 49 ms | **0.42 MiB** (32×), 43 ms | default; interactive runs, big bases on slow disks |
+| **Balanced** | `zstd -9` | **1.15 MiB** (25×), 229 ms | **0.38 MiB** (35×) | recommended default for backups and archives |
+| **Maximum** | `zstd -19` | **1.01 MiB** (28×), 18.1 s | **0.36 MiB** (37×) | archival, transferring over a metered link |
+
+Numbers measured on this host (Node 24.20.0, zstd 1.5.7) against a generated 20 000-memory database (28.6 MiB live / 28.5 MiB after `VACUUM INTO`) and a 30 000-memory database reduced to 6 000 rows, whose 13.34 MiB file still carried the deleted pages (4.42 MiB after `VACUUM INTO`). The ratio gains flatten hard above level 9, which is why "Maximum" is an explicit opt-in rather than the default. Brotli (`q11`) reaches 0.82 MiB on the snapshot but takes 18.7 s — better ratio, worse time, and no magic bytes; gzip stays available for interoperability (level 9 → 1.80 MiB, 15.8×, 489 ms) but is 15–20 % larger than zstd and is not offered as a preset.
+
+Compression is **streamed**, never `readFileSync` + `compressSync`: `createReadStream → sha256 tap → createZstdCompress → createWriteStream`, which keeps memory flat regardless of database size (verified: 28.5 MiB round-trips byte-identically through the streaming pipeline in 440 ms; the backup path measures 43 ms end-to-end for copy + hash + `zstd -3`). Decompression mirrors it and enforces `maxOutputLength`, so a hostile or corrupt archive aborts with `ERR_BUFFER_TOO_LARGE` instead of exhausting memory (verified).
+
+A counter-intuitive consequence worth knowing when choosing a preset: a **backup of a churned database compresses better than an export of the same data** (35× vs 26×) even though it is larger, because the raw image contains the long runs of deleted text that `VACUUM INTO` throws away.
+
+### 8.4 Export flow
+
+1. `PRAGMA wal_checkpoint(TRUNCATE)` — fold the WAL back into the main file so the snapshot is as small as possible (non-fatal if another process holds a read lock).
+2. `VACUUM INTO` the temp snapshot.
+3. Read `stats()` for `counts`, insert the manifest row into the snapshot's `meta` table (parameterized `INSERT OR REPLACE`, never string interpolation — JSON with quotes breaks literal SQL).
+4. Stream: snapshot → sha256 → zstd(level) → `<target>.tmp` → `fsync` → `rename` to the final path (atomic; a failed export never leaves a half-written archive under the target name).
+5. Report `path`, `bytes`, `uncompressedBytes`, `durationMs`, `memories` to the UI.
+
+Target selection: there is no OS file dialog in the Paseo plugin SDK (verified against `@getpaseo/plugin@0.10.1` — the client API exposes only `openExternalUrl`, RPC, settings and UI primitives), so the settings screen uses a `SettingsInput` path field with a default of `$PASEO_HOME/plugins/memory-flash/exports/memory-<timestamp>.mfkb`, mirroring the existing "Purge by tag" text-input pattern. The directory is created on demand.
+
+### 8.5 Import flow — merge is the safe default
+
+**Mode `merge` (default).** Decompress + verify → open the archive read-only → `ATTACH` it to the live connection → in one `BEGIN IMMEDIATE` transaction copy rows and remap ids:
+
+- `memories` are inserted **without their original ids** (`RETURNING id` per row builds an `old_id → new_id` map in a temp table), so a base that already contains memories with the same ids never collides — the imported rows simply get fresh ids. (Verified: local `#1` plus archived `#1`/`#2` import as `#2`/`#3`, with `memory_tags` and `memory_history` correctly re-pointed.)
+- `memory_tags` and `memory_history` are re-inserted through that map (`INSERT OR IGNORE` for tags), so history follows the memories.
+- The `AFTER INSERT` trigger on `memories` populates the FTS5 index — no separate rebuild step (verified: imported rows are immediately findable via `memories_fts MATCH`).
+- `meta` is left untouched: schema version and settings markers of the live base win.
+- A duplicate-suppression mode (`skipExisting`, keyed on `kind|title|content`) is available for merging a second backup into a machine that already has overlapping memories.
+
+Atomicity: everything happens inside the single transaction, so a failure anywhere rolls back and leaves the live database untouched.
+
+**Mode `replace`.** Copy the verified snapshot over `memory.db`. This mode is **unsafe while MCP servers are running** and the UI must say so. Measured behaviour when `memory.db` is overwritten under a second live SQLite connection: the open connection keeps reading its cached pages and its next write flushes the *old* content back over the new file — the imported data is silently lost and `integrity_check` still reports `ok`. Therefore `replace` is only offered when the plugin verifies no other process holds the file (`PRAGMA locking_mode=EXCLUSIVE` probe on a scratch connection, plus a check that no `mcp-server.js` child is alive); otherwise the RPC returns a readable error telling the user to close agents or use merge. If it does run, the plugin checkpoints, closes its own store, replaces the file, removes stale `-wal`/`-shm`, and reopens — agents must be restarted afterwards to pick up the new file.
+
+`replace` also takes a safety copy first (`memory.db.pre-import-<timestamp>`), because it is the only destructive path.
+
+### 8.6 Backup flow — direct file copy
+
+The backup path skips `VACUUM INTO` entirely: it copies `memory.db` as-is, which is the cheapest possible snapshot (measured: 6 ms for 13.3 MiB vs 8 ms for `VACUUM INTO`, and no rewriting of pages) and preserves the exact physical image.
+
+1. Open a short-lived connection and run `PRAGMA wal_checkpoint(TRUNCATE)` — **mandatory**, not an optimisation. A copy of the main file alone does not contain rows still living in the WAL (verified: committed rows were lost). If the checkpoint reports `SQLITE_BUSY` (another process is mid-write), the backup is retried with `busy_timeout` a few times and then aborted with a readable error rather than silently producing an incomplete image.
+2. Verify the main file starts with `SQLite format 3` (16 bytes) before copying — a truncated or foreign file is rejected.
+3. `copyFileSync(memory.db, tmp)` into the OS temp directory; the `-wal`/`-shm` sidecars are deliberately **not** copied, because after the successful checkpoint they carry no committed data. The temp image is deleted in a `finally` block.
+4. Read the counts for the manifest from the **live** store (`stats()`) and record `pageSize`, `sqliteVersion`, `checkpointedAt`, `variant: "raw-image"`.
+5. Stream: temp image → sha256 → zstd(preset) → `<target>.tmp` → `fsync` → `rename` to `<target>`. Same atomic-rename discipline as export, so a failed backup never destroys the previous one.
+6. Report `path`, `bytes`, `uncompressedBytes`, `durationMs`, `memories` and the measured compression ratio.
+
+Defaults: `$PASEO_HOME/plugins/memory-flash/backups/memory-<timestamp>.mfb`, preset **Balanced**. The UI exposes a *Backup now* button plus an optional retention setting (`keepLastBackups`, default 10 — the plugin prunes the oldest `.mfb` files in its own `backups/` directory after a successful write, never touching archives the user placed elsewhere).
+
+Because the payload is a raw image, `includeHistory: false` and any row filtering are **not offered** for backups: pruning history means editing the image, which would break the "byte-identical" promise that makes a backup trustworthy. If a slim backup is wanted, that is an *export* (which supports `includeHistory: false`).
+
+### 8.7 Backup restore flow
+
+Restore is the inverse and is deliberately narrower than import:
+
+1. Read the header; require magic `MFBK1\0\0` and `variant: "raw-image"` — an export archive (`.mfkb`) is rejected with a message pointing at the import path, and vice versa.
+2. Decompress to a temp file (bounded by `maxOutputLength`), verify `payloadSha256`, then open the image and require `PRAGMA integrity_check` = `ok` **and** that the image contains the expected tables (`memories`, `memories_fts`, `memory_tags`, `memory_history`, `meta`) before anything is touched. The FTS index is part of the image, so no rebuild is needed (verified: a restored raw image answers `memories_fts MATCH` immediately, 4 286 hits).
+3. Cross-check `schemaVersion` from the manifest against the live `meta.schema_version`; a mismatch is refused with a readable message (restoring a raw image from a different schema version is exactly how bases get corrupted).
+4. Gate: `replace` semantics only — probe for other holders with a scratch connection using `PRAGMA locking_mode=EXCLUSIVE` + `BEGIN EXCLUSIVE` (verified: succeeds when nobody holds the file, refused while any other connection — idle or writing — is open), plus a liveness check for `mcp-server.js` children. If holders exist, abort with "close running agents or restore later"; there is no merge path for a raw image.
+5. Safety copy: `memory.db.pre-restore-<timestamp>` (raw, uncompressed) next to the live file.
+6. Swap: close the plugin's own store → remove stale `-wal`/`-shm` → `fsync` → `rename` the extracted image over `memory.db` → reopen the store. Verified end-to-end: after the swap the reopened database reads the restored rows and accepts new writes, `integrity_check` stays `ok`.
+7. Tell the user in the response that running agents must be restarted to pick up the restored file.
+
+### 8.8 RPC surface
+
+| Contract | Input | Output |
+| --- | --- | --- |
+| `memory-flash.export` | `{ level: "fast"\|"balanced"\|"maximum", codec?: "zstd"\|"gzip"\|"brotli", targetPath?, includeHistory?: boolean }` | `{ ok, path, bytes, uncompressedBytes, memories, durationMs, error }` |
+| `memory-flash.import` | `{ sourcePath, mode: "merge"\|"replace", onDuplicate?: "insert"\|"skip", confirm: "IMPORT" }` | `{ ok, imported, skipped, historyImported, mode, durationMs, error }` |
+| `memory-flash.backup` | `{ level: "fast"\|"balanced"\|"maximum", codec?, targetPath? }` | `{ ok, path, bytes, uncompressedBytes, ratio, memories, checkpointedAt, durationMs, pruned: string[], error }` |
+| `memory-flash.backup-restore` | `{ sourcePath, confirm: "RESTORE" }` | `{ ok, restored, previousFile, memories, requiresAgentRestart: true, durationMs, error }` |
+| `memory-flash.archive-info` | `{ sourcePath }` | `{ ok, variant: "snapshot"\|"raw-image", format, codec, compressionLevel, createdAt, pluginVersion, counts, bytes, error }` — reads only the header; lets the UI preview any archive before importing or restoring |
+
+Shared conventions: export and backup are non-destructive and atomic; import and backup-restore require a literal confirmation string (`"IMPORT"` / `"RESTORE"`, same guard style as `memory-flash.purge`); `archive-info` is read-only and works for both magics. Every failure path returns a readable `error` message rather than throwing a raw SQLite message. The three presets are the *same* enum for export and backup, so the settings screen can offer one shared picker.
+
+### 8.9 Failure handling
+
+- Missing/empty file, wrong magic, unknown `formatVersion` → readable error, nothing written.
+- Operation/magic mismatch (restore of an `.mfkb`, import of an `.mfb`) → refused with a message naming the correct operation.
+- `payloadSha256` mismatch → refuse (the archive is truncated or corrupted).
+- Decompressed size above `maxOutputLength` → abort before writing anything.
+- `integrity_check` on the extracted payload → must return `ok` before any merge or swap starts.
+- **Backup:** `wal_checkpoint` reports `SQLITE_BUSY` after the retries → abort, no image written (a partial image is worse than none).
+- **Backup:** the main file does not start with `SQLite format 3` → abort.
+- **Restore:** another connection holds the file, or the manifest `schemaVersion` differs from the live one → refuse before the safety copy is even made.
+- Disk full during export/backup → the `.tmp` file is removed; the previous archive at the target path stays intact.
+- Interrupted import → single transaction rollback; live database unchanged.
+- Interrupted restore → the rename is atomic, so `memory.db` is either the old file or the complete restored one; the `pre-restore` safety copy remains in place.
+
+## 9. RPC surface
 
 | Contract | Input | Output |
 | --- | --- | --- |
@@ -160,17 +349,18 @@ Remote hosts today provide reachability and the remote DB path; live cross-host 
 | `memory-flash.codex-mcp-status` / `-register` / `-unregister` | `{}` | same as Cline (no `live`) |
 | `memory-flash.agent-mcp-register-all` | `{}` | `{ results: [{ agent, ok, error }] }` |
 | `memory-flash.hosts` / `hosts-save` / `hosts-delete` / `hosts-check` | host CRUD | registry + probe results |
+| `memory-flash.export` / `import` / `backup` / `backup-restore` / `archive-info` | see §8.8 | see §8.8 |
 
-## 9. Compatibility
+## 10. Compatibility
 
 Verified on 2026-09-30 against Paseo `0.10.2` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
-- `npm test` — 9 suites, 65 tests, all green, including an end-to-end test that spawns the bundled MCP server and speaks real JSON-RPC over stdio (handshake → tools/list → save → FTS search → file-on-disk assertions), dedicated registration suites for Cline, Cursor and Codex CLI (isolated `$HOME`: register/unregister/status, preservation of foreign servers and unrelated TOML content, quoted-key tables, corrupted-file refusal, stale-entry refresh) and a live-spawn probe suite (real `node -e` fake MCP server, immediate exit, timeout, missing command).
+- `npm test` — 9 suites, 74 tests, all green, including an end-to-end test that spawns the bundled MCP server and speaks real JSON-RPC over stdio (handshake → tools/list → save → FTS search → file-on-disk assertions), dedicated registration suites for Cline, Cursor and Codex CLI (isolated `$HOME`: register/unregister/status, preservation of foreign servers and unrelated TOML content, quoted-key tables, corrupted-file refusal, stale-entry refresh) and a live-spawn probe suite (real `node -e` fake MCP server, immediate exit, timeout, missing command).
 - Manual probe: `printf … | PASEO_HOME=… node dist/mcp-server.js` — `initialize`, `tools/list`, `tools/call` (save + search with snippet) all correct; tags normalized (`Paseo` → `paseo`).
 - Node ≥ 24.20 required on the daemon host for built-in `node:sqlite` with FTS5 (verified FTS5 present in the runtime; porter/unicode61 tokenizer verified via search results).
 - The bundle depends on nothing beyond Node built-ins, so agents' own Node runtimes can spawn it without `npm install`.
-- Installed into the running daemon (`paseo plugin add` → `running`, `Plugin ready`, `npm run bundle` executed by the daemon build step). End-to-end: a real OpenCode agent created via `paseo run --provider opencode` accepted the injected MCP config (previously failed with `MCP error -32000: Connection closed` when the entry path resolved to the data directory) and the injection diagnostic confirmed the resolved entry. Plugin version 0.3.1 (0.1.x: core plugin; 0.2.0 added Cline MCP registration; 0.3.0 added Cursor + Codex CLI registration, the register-all button and the live spawn check; 0.3.1 strengthened the agent skill: mandatory bugfix recording, positive-result recording, knowledge-base updates on functionality change/bugfix, English-language rule).
+- Installed into the running daemon (`paseo plugin add` → `running`, `Plugin ready`, `npm run bundle` executed by the daemon build step). End-to-end: a real OpenCode agent created via `paseo run --provider opencode` accepted the injected MCP config (previously failed with `MCP error -32000: Connection closed` when the entry path resolved to the data directory) and the injection diagnostic confirmed the resolved entry. Plugin version 0.4.2 (0.1.x: core plugin; 0.2.0 added Cline MCP registration; 0.3.0 added Cursor + Codex CLI registration, the register-all button and the live spawn check; 0.3.1 strengthened the agent skill: mandatory bugfix recording, positive-result recording, knowledge-base updates on functionality change/bugfix, English-language rule; 0.3.2 fixed the three concurrency/search defects: `busy_timeout` + write retry so parallel agent writers no longer lose writes, natural-language/`key=value` search (stop words, OR-ranking, phrase and filter parsing), and the project name indexed as a tag with a schema-v2 backfill migration; 0.4.2 added the optional `kinds` filter to `memory_list_by_tag`, so a tag listing can be narrowed to selected kinds — handoff+decision — through a single tool).
 
 ### Provider verification matrix (2026-09-30, live daemon)
 
@@ -187,7 +377,7 @@ ACP payload details (from `@getpaseo/server` `toAcpMcpServers`): stdio servers a
 
 Also verified: `paseo permit allow <agent> <req_id>` approves the MCP tool-call permission that ACP agents raise on first use.
 
-## 10. Limitations and roadmap
+## 11. Limitations and roadmap
 
 Limitations:
 
@@ -201,5 +391,4 @@ Roadmap:
 1. **Cross-host memory federation** — query fan-out to enabled `paseo-ssh` hosts over the Paseo CLI, merging results with host labels; write-through to a chosen host.
 2. **Vector recall** — optional `sqlite-vec` table + local embeddings for semantic search alongside FTS5.
 3. **Timeline surfacing** — post a plugin timeline item when a delegated agent finishes memory maintenance (`agent.turn_ended` hook + timeline renderer).
-4. **Import/export** — JSONL export of the memory database for backup and machine migration.
-5. **More transports** — real `tcp` and `relay` implementations behind the existing registry.
+4. **More transports** — real `tcp` and `relay` implementations behind the existing registry.

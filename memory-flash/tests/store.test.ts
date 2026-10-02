@@ -2,7 +2,8 @@ import { describe, expect, it, beforeEach, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MemoryStore, ftsQuery } from "../server/store";
+import { DatabaseSync } from "node:sqlite";
+import { MemoryStore, ftsQuery, parseQuery } from "../server/store";
 
 let dir: string;
 let store: MemoryStore;
@@ -21,16 +22,47 @@ afterAll(() => {
 });
 
 describe("ftsQuery", () => {
-  it("builds AND-ed quoted terms", () => {
-    expect(ftsQuery("login bug fix")).toBe('"login" AND "bug" AND "fix"');
+  it("builds OR-ed quoted terms so partial queries still match", () => {
+    expect(ftsQuery("login bug fix")).toBe('"login" OR "bug" OR "fix"');
   });
 
   it("keeps quoted phrases and strips punctuation", () => {
-    expect(ftsQuery('auth "sign in" flow!')).toBe('"sign in" AND "auth" AND "flow"');
+    expect(ftsQuery('auth "sign in" flow!')).toBe('"sign in" OR "auth" OR "flow"');
+  });
+
+  it("drops stop words and very short tokens", () => {
+    expect(ftsQuery("the bug where login fails")).toBe('"bug" OR "login" OR "fails"');
+    expect(ftsQuery("a I x")).toBeNull();
   });
 
   it("returns null for punctuation-only input", () => {
     expect(ftsQuery("!!! ???")).toBeNull();
+  });
+});
+
+describe("parseQuery", () => {
+  it("extracts key=value pairs as structured filters", () => {
+    const parsed = parseQuery('project=auth-api kind=handoff tag="login flow" agent=coder "sync tokens"');
+    expect(parsed.filters).toEqual({
+      kinds: ["handoff"],
+      tags: ["login flow"],
+      project: "auth-api",
+      agentId: "coder",
+    });
+    expect(parsed.match).toBe('"sync tokens"');
+    expect(parsed.freeText).not.toMatch(/project\s*=|kind\s*=|tag\s*=|agent\s*=/);
+  });
+
+  it("keeps unknown key=value pairs as search terms", () => {
+    const parsed = parseQuery("severity=high crash");
+    expect(parsed.filters).toEqual({ kinds: [], tags: [], project: null, agentId: null });
+    expect(parsed.match).toBe('"severity" OR "high" OR "crash"');
+  });
+
+  it("returns a null match for filter-only queries", () => {
+    const parsed = parseQuery("project=auth-api kind=handoff");
+    expect(parsed.match).toBeNull();
+    expect(parsed.freeText.trim()).toBe("");
   });
 });
 
@@ -72,7 +104,8 @@ describe("MemoryStore", () => {
       changedBy: "cline-1",
     });
     expect(updated.revision).toBe(2);
-    expect(updated.tags).toEqual(["done", "wip"]);
+    // The project name is part of the tag index since 0.3.2.
+    expect(updated.tags).toEqual(["done", "paseo", "wip"]);
 
     const history = store.historyOf(memory.id);
     expect(history).toHaveLength(2);
@@ -117,6 +150,42 @@ describe("MemoryStore", () => {
     expect(results).toHaveLength(1);
     expect(results[0].memory.title).toBe("Port collision");
     expect(results[0].snippet).toBeTruthy();
+  });
+
+  it("finds memories with natural-language queries", () => {
+    store.create({
+      kind: "bugfix",
+      title: "Login fails on auth-api",
+      content: "The bug where login fails with error 500 on auth-api after deploy.",
+      tags: ["login"],
+      project: "auth-api",
+      agentId: null,
+    });
+    const base = { limit: 10, kinds: [], tags: [], project: null, agentId: null, tagMode: "any" as const };
+    expect(store.search({ ...base, query: "the bug where login fails" })).toHaveLength(1);
+    expect(store.search({ ...base, query: "why does the login fail" })).toHaveLength(1);
+  });
+
+  it("treats key=value pairs inside the query as structured filters", () => {
+    store.create({ kind: "handoff", title: "H", content: "c", tags: [], project: "auth-api", agentId: null });
+    store.create({ kind: "decision", title: "D", content: "c", tags: [], project: "payments-api", agentId: null });
+    const base = { limit: 10, kinds: [], tags: [], project: null, agentId: null, tagMode: "any" as const };
+    expect(store.search({ ...base, query: "project=auth-api" })).toHaveLength(1);
+    expect(store.search({ ...base, query: "kind=handoff project=auth-api" })).toHaveLength(1);
+  });
+
+  it("indexes the project name as a tag", () => {
+    const memory = store.create({
+      kind: "bugfix",
+      title: "T",
+      content: "C",
+      tags: ["handoff"],
+      project: "auth-api",
+      agentId: null,
+    });
+    expect(memory.tags).toEqual(["auth-api", "handoff"]);
+    const base = { query: "", limit: 10, kinds: [], tags: ["auth-api"], project: null, agentId: null, tagMode: "any" as const };
+    expect(store.search(base)).toHaveLength(1);
   });
 
   it("filters by kind, tag (any/all), project and agent", () => {
@@ -173,8 +242,10 @@ describe("MemoryStore", () => {
     ]);
     expect(stats.topTags[0]).toEqual({ tag: "x", count: 2 });
     expect(stats.dbSizeBytes).toBeGreaterThan(0);
+    // "p" appears because the project name is indexed as a tag.
     expect(store.allTags()).toEqual([
       { tag: "x", count: 2 },
+      { tag: "p", count: 1 },
       { tag: "y", count: 1 },
     ]);
   });
@@ -195,6 +266,27 @@ describe("MemoryStore", () => {
     expect(reopened.getById(memory.id)?.title).toBe("durable");
     reopened.close();
     // The shared per-test store is already closed; make afterAll a no-op.
+    store = undefined as unknown as MemoryStore;
+  });
+
+  it("backfills project tags when migrating schema v1 to v2", () => {
+    const memory = store.create({
+      kind: "note",
+      title: "old row",
+      content: "created before 0.3.2",
+      tags: ["handoff"],
+      project: "legacy-app",
+      agentId: null,
+    });
+    store.close();
+    // Rewind to the pre-0.3.2 state: schema_version 1 and no project tag.
+    const db = new DatabaseSync(path.join(dir, "memory.db"));
+    db.prepare("UPDATE meta SET value = '1' WHERE key = 'schema_version'").run();
+    db.prepare("DELETE FROM memory_tags WHERE tag = 'legacy-app'").run();
+    db.close();
+    const reopened = new MemoryStore({ dbPath: path.join(dir, "memory.db") });
+    expect(reopened.getById(memory.id)?.tags).toEqual(["handoff", "legacy-app"]);
+    reopened.close();
     store = undefined as unknown as MemoryStore;
   });
 });

@@ -1,7 +1,9 @@
 import {
   mcpSaveInputSchema,
   mcpSearchInputSchema,
+  memoryKindSchema,
   type Memory,
+  type MemoryKind,
   type McpSearchInput,
   type McpSaveInput,
 } from "../shared/memories";
@@ -19,7 +21,7 @@ import type { MemoryStore } from "./store";
 export interface JsonSchemaProperty {
   type?: string;
   description?: string;
-  items?: { type?: string; description?: string };
+  items?: { type?: string; description?: string; enum?: string[] };
   enum?: string[];
   default?: unknown;
 }
@@ -79,11 +81,13 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     description:
       "Full-text search over the shared memory of ALL agents. Use before " +
       "starting work to recall prior decisions, known bugs and procedures. " +
-      "Filters compose: query AND tags AND kind AND project.",
+      "Natural-language queries are fine (terms are ranked by relevance); " +
+      "key=value pairs in the query (project=, kind=, tag=, agent=) act " +
+      "as filters. Filters compose: query AND tags AND kind AND project.",
     inputSchema: {
       type: "object",
       properties: {
-        query: str("Free-text query; empty returns the most recent memories."),
+        query: str("Free-text query; empty returns the most recent memories. Quoted phrases match verbatim; key=value pairs (project=, kind=, tag=, agent=) act as filters."),
         tags: strArray("Filter: memories must carry at least one of these tags."),
         kinds: { type: "array", items: { type: "string" }, description: "Filter by memory kinds." },
         project: str("Filter by project name."),
@@ -136,11 +140,13 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     title: "List memories by tag",
     description:
       "List recent memories carrying a specific tag (e.g. a project name or " +
-      "'handoff'). Handy for picking up a topic without knowing what to search for.",
+      "'handoff'). Handy for picking up a topic without knowing what to search for. " +
+      "Optionally narrow the listing to selected kinds (e.g. handoff and decision).",
     inputSchema: {
       type: "object",
       properties: {
         tag: str("Exact tag (case-insensitive)."),
+        kinds: { type: "array", items: { type: "string", enum: ["decision", "procedure", "handoff", "bugfix", "pattern", "pitfall", "reference", "note"] }, description: KIND_DESCRIPTION },
         limit: num("Max results (default 20)."),
       },
       required: ["tag"],
@@ -281,10 +287,18 @@ export function dispatchMcpTool(name: string, args: unknown, context: McpDispatc
       const tag = String(input.tag ?? "").trim();
       if (tag.length === 0) return error("tag is required.");
       const limit = Math.max(1, Math.min(50, Number(input.limit) || 20));
+      const kinds: MemoryKind[] = [];
+      for (const raw of Array.isArray(input.kinds) ? input.kinds : []) {
+        const parsed = memoryKindSchema.safeParse(raw);
+        if (!parsed.success) {
+          return error(`Invalid kind: ${String(raw)}. ${KIND_DESCRIPTION}`);
+        }
+        kinds.push(parsed.data);
+      }
       const results = store.search({
         query: "",
         tags: [tag],
-        kinds: [],
+        kinds,
         project: null,
         agentId: null,
         tagMode: "any",

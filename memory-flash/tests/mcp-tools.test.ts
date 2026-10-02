@@ -93,12 +93,22 @@ describe("MCP tool surface", () => {
     expect(store.getById(save.id)).toBeNull();
   });
 
-  it("memory_list_by_tag filters by tag", () => {
-    call("memory_save", { title: "A", content: "a", tags: ["deploy"] });
-    call("memory_save", { title: "B", content: "b", tags: ["auth"] });
-    const result = call("memory_list_by_tag", { tag: "deploy" });
-    const payload = JSON.parse(result.content[0].text) as { matches: number };
+  it("memory_list_by_tag filters by tag and optional kinds", () => {
+    call("memory_save", { title: "A", content: "a", tags: ["deploy"], kind: "procedure" });
+    call("memory_save", { title: "B", content: "b", tags: ["deploy"], kind: "decision" });
+    call("memory_save", { title: "C", content: "c", tags: ["auth"] });
+    const all = call("memory_list_by_tag", { tag: "deploy" });
+    expect((JSON.parse(all.content[0].text) as { matches: number }).matches).toBe(2);
+    const filtered = call("memory_list_by_tag", { tag: "deploy", kinds: ["decision"] });
+    const payload = JSON.parse(filtered.content[0].text) as { matches: number };
     expect(payload.matches).toBe(1);
+    const lines = JSON.parse(filtered.content[0].text) as { memories: Array<{ line: string }> };
+    expect(lines.memories[0].line).toContain("[decision]");
+  });
+
+  it("memory_list_by_tag rejects unknown kinds", () => {
+    const result = call("memory_list_by_tag", { tag: "deploy", kinds: ["nope"] });
+    expect(result.isError).toBe(true);
   });
 
   it("memory_handoff creates a handoff with the handoff tag", () => {
