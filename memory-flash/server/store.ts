@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -55,6 +56,48 @@ export interface StoreOptions {
   dbPath?: string;
   /** Max content revisions kept per memory. */
   historyPerMemory?: number;
+}
+
+/** Internal api_keys row (carries the secret hash — never list it). */
+export interface ApiKeyRecord {
+  id: string;
+  label: string;
+  keyHash: string;
+  prefix: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  scopes: ("read" | "read_write")[];
+}
+
+/** Options for generating an API key. */
+export interface ApiKeyOptions {
+  label: string;
+  /** Time-to-live in days; 0 = never expires. */
+  ttlDays?: number;
+  scope?: "read" | "read_write";
+}
+
+/** Result of a successful generation: the record plus the secret (once). */
+export interface GeneratedApiKey {
+  record: ApiKeyRecord;
+  secret: string;
+}
+
+/** Secret prefix marking a memory-flash remote-access key. */
+const API_KEY_SECRET_PREFIX = "mf_live_";
+/** Bytes of CSPRNG entropy in a secret (base64url-encoded after the prefix). */
+const API_KEY_SECRET_BYTES = 32;
+/** Characters of the secret kept in `prefix` for UI recognition. */
+const API_KEY_PREFIX_LENGTH = 12;
+
+function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function randomBase64Url(bytes: number): string {
+  return crypto.randomBytes(bytes).toString("base64url");
 }
 
 const KINDS: readonly MemoryKind[] = [
@@ -123,6 +166,13 @@ export class MemoryStore {
   private stmtHistoryForDelete!: StatementSync;
   private stmtUpdate!: StatementSync;
   private stmtUpdateTags!: StatementSync;
+  private stmtApiKeyInsert!: StatementSync;
+  private stmtApiKeyByHash!: StatementSync;
+  private stmtApiKeyById!: StatementSync;
+  private stmtApiKeyAll!: StatementSync;
+  private stmtApiKeyRevoke!: StatementSync;
+  private stmtApiKeyTouch!: StatementSync;
+  private stmtApiKeyCount!: StatementSync;
 
   constructor(options: StoreOptions = {}) {
     this.dbPath = options.dbPath ?? memoryDbPath();
@@ -189,6 +239,19 @@ export class MemoryStore {
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id           TEXT PRIMARY KEY,
+        label        TEXT NOT NULL,
+        key_hash     TEXT NOT NULL,
+        prefix       TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        expires_at   TEXT,
+        revoked_at   TEXT,
+        last_used_at TEXT,
+        scopes       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
     `);
     // FTS5 index — external content so the main row stays authoritative.
     // Triggers keep the index in sync with plain UPDATE/DELETE too.
@@ -215,7 +278,7 @@ export class MemoryStore {
     const schemaVersion = versionRow ? Number.parseInt(versionRow.value, 10) : 0;
     if (schemaVersion < 1) {
       // Fresh database: start at the current version (nothing to backfill).
-      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '3')").run();
     } else if (schemaVersion < 2) {
       // 0.3.2: the project name became part of the tag index, so searching
       // by the project tag finds memories that only set the `project`
@@ -226,6 +289,11 @@ export class MemoryStore {
         WHERE project IS NOT NULL AND trim(project) <> '';
       `);
       this.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
+    }
+    if (schemaVersion >= 1 && schemaVersion < 3) {
+      // 0.5.0: remote-access API keys. The table itself is created above
+      // (IF NOT EXISTS), so only the version marker moves here.
+      this.db.prepare("UPDATE meta SET value = '3' WHERE key = 'schema_version'").run();
     }
   }
 
@@ -272,6 +340,16 @@ export class MemoryStore {
        WHERE true
        ON CONFLICT(memory_id, tag) DO NOTHING`,
     );
+    this.stmtApiKeyInsert = this.db.prepare(
+      `INSERT INTO api_keys (id, label, key_hash, prefix, created_at, expires_at, revoked_at, last_used_at, scopes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.stmtApiKeyByHash = this.db.prepare("SELECT * FROM api_keys WHERE key_hash = ?");
+    this.stmtApiKeyById = this.db.prepare("SELECT * FROM api_keys WHERE id = ?");
+    this.stmtApiKeyAll = this.db.prepare("SELECT * FROM api_keys ORDER BY created_at DESC, id");
+    this.stmtApiKeyRevoke = this.db.prepare("UPDATE api_keys SET revoked_at = ? WHERE id = ?");
+    this.stmtApiKeyTouch = this.db.prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?");
+    this.stmtApiKeyCount = this.db.prepare("SELECT COUNT(*) AS c FROM api_keys WHERE revoked_at IS NULL");
   }
 
   // -------------------------------------------------------------------------
@@ -772,6 +850,115 @@ export class MemoryStore {
       .all(...params) as Array<{ id: number }>;
     for (const { id } of ids) this.delete(id, "purge");
     return ids.length;
+  }
+
+  // -------------------------------------------------------------------------
+  // Remote access API keys (HTTP transport, 0.5.0). The full secret
+  // exists only during generation: the store keeps its SHA-256 hash.
+  // -------------------------------------------------------------------------
+
+  /** Creates a new API key and returns it together with the secret (shown once). */
+  generateApiKey(options: ApiKeyOptions): GeneratedApiKey {
+    const id = `mfk_${randomBase64Url(12)}`;
+    const secret = `${API_KEY_SECRET_PREFIX}${randomBase64Url(API_KEY_SECRET_BYTES)}`;
+    const now = new Date().toISOString();
+    const ttlDays = options.ttlDays ?? 0;
+    const record: ApiKeyRecord = {
+      id,
+      label: options.label,
+      keyHash: sha256Hex(secret),
+      prefix: secret.slice(0, API_KEY_PREFIX_LENGTH),
+      createdAt: now,
+      expiresAt:
+        ttlDays > 0 ? new Date(Date.now() + ttlDays * 86_400_000).toISOString() : null,
+      revokedAt: null,
+      lastUsedAt: null,
+      scopes: [options.scope ?? "read_write"],
+    };
+    this.withWriteRetry(() => {
+      this.stmtApiKeyInsert.run(
+        record.id,
+        record.label,
+        record.keyHash,
+        record.prefix,
+        record.createdAt,
+        record.expiresAt,
+        record.revokedAt,
+        record.lastUsedAt,
+        JSON.stringify(record.scopes),
+      );
+    });
+    return { record, secret };
+  }
+
+  /**
+   * Authenticates a presented secret: hashes it, looks the row up and
+   * checks the revoked/expired flags. On success the row's `last_used_at`
+   * is refreshed. Returns null on any failure — the caller cannot tell
+   * a missing key from a revoked or expired one.
+   */
+  authenticateApiKey(secret: string): ApiKeyRecord | null {
+    const row = this.stmtApiKeyByHash.get(sha256Hex(secret)) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return null;
+    const record = this.rowToApiKey(row);
+    if (record.revokedAt !== null) return null;
+    if (record.expiresAt !== null && record.expiresAt <= new Date().toISOString()) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    this.withWriteRetry(() => {
+      this.stmtApiKeyTouch.run(now, record.id);
+    });
+    record.lastUsedAt = now;
+    return record;
+  }
+
+  /** Marks a key revoked. Returns false when the id is unknown. */
+  revokeApiKey(id: string): boolean {
+    const result = this.withWriteRetry(() =>
+      this.stmtApiKeyRevoke.run(new Date().toISOString(), id),
+    ) as { changes: number | bigint };
+    return Number(result.changes) > 0;
+  }
+
+  /** All keys (including revoked), newest first, without secret material. */
+  listApiKeys(): ApiKeyRecord[] {
+    const rows = this.stmtApiKeyAll.all() as Array<Record<string, unknown>>;
+    return rows.map((row) => this.rowToApiKey(row));
+  }
+
+  /** Number of non-revoked keys, for the HTTP status indicator. */
+  activeKeyCount(): number {
+    return (this.stmtApiKeyCount.get() as { c: number }).c;
+  }
+
+  private rowToApiKey(row: Record<string, unknown>): ApiKeyRecord {
+    let scopes: ("read" | "read_write")[] = ["read_write"];
+    try {
+      const parsed: unknown = JSON.parse(String(row.scopes));
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter(
+          (scope): scope is "read" | "read_write" =>
+            scope === "read" || scope === "read_write",
+        );
+        if (valid.length > 0) scopes = valid;
+      }
+    } catch {
+      // Unreadable scopes fall back to the default full-access scope.
+    }
+    return {
+      id: String(row.id),
+      label: String(row.label),
+      keyHash: String(row.key_hash),
+      prefix: String(row.prefix),
+      createdAt: String(row.created_at),
+      expiresAt: row.expires_at === null ? null : String(row.expires_at),
+      revokedAt: row.revoked_at === null ? null : String(row.revoked_at),
+      lastUsedAt: row.last_used_at === null ? null : String(row.last_used_at),
+      scopes,
+    };
   }
 
   /** Deletes every memory and history row. Used by the surface with confirm. */

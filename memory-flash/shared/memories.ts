@@ -444,3 +444,85 @@ export const checkRemoteHost = defineRpc({
     remoteDbPath: z.string().nullable(),
   }),
 });
+
+// ---------------------------------------------------------------------------
+// Remote access over HTTP (0.5.0). The HTTP MCP endpoint
+// (`http://<host>:<port>/mcp`) authenticates clients with API keys:
+// the secret is generated here, shown once, and carried by the
+// remote client as `Authorization: Bearer <secret>`. Only the
+// SHA-256 hash of the secret is stored; the full secret is
+// returned by the generate RPC exactly once and never persisted.
+// ---------------------------------------------------------------------------
+
+/** `read` — search/read tools only; `read_write` — the full tool set. */
+export const apiKeyScopeSchema = z.enum(["read", "read_write"]);
+
+export type ApiKeyScope = z.infer<typeof apiKeyScopeSchema>;
+
+/** An API key as listed in the UI — never carries the secret or its hash. */
+export const apiKeySchema = z.object({
+  /** Public key id (`mfk_…`). */
+  id: z.string(),
+  label: z.string(),
+  /** First characters of the secret, for recognizing the key in the UI. */
+  prefix: z.string(),
+  scopes: z.array(apiKeyScopeSchema),
+  createdAt: z.string(),
+  /** ISO timestamp; null = never expires. */
+  expiresAt: z.string().nullable(),
+  /** ISO timestamp; null = active. */
+  revokedAt: z.string().nullable(),
+  lastUsedAt: z.string().nullable(),
+});
+
+export type ApiKey = z.infer<typeof apiKeySchema>;
+
+/** State of the HTTP MCP endpoint, for the settings UI indicator. */
+export const httpStatusSchema = z.object({
+  enabled: z.boolean(),
+  listening: z.boolean(),
+  host: z.string(),
+  port: z.number(),
+  /** `http://<host>:<port>/mcp` when listening, else null. */
+  url: z.string().nullable(),
+  error: z.string().nullable(),
+  keyCount: z.number().int(),
+});
+
+export type HttpStatus = z.infer<typeof httpStatusSchema>;
+
+export const listApiKeys = defineRpc({
+  name: "memory-flash.api-keys",
+  input: z.object({}),
+  output: z.object({ keys: z.array(apiKeySchema) }),
+});
+
+export const generateApiKey = defineRpc({
+  name: "memory-flash.api-key-generate",
+  input: z.object({
+    label: z.string().trim().min(1).max(80),
+    /** Time-to-live in days; 0 (default) = never expires. */
+    ttlDays: z.number().int().min(0).max(3650).default(0),
+    scope: apiKeyScopeSchema.default("read_write"),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    id: z.string().nullable(),
+    /** The full secret — returned once, never stored, never logged. */
+    secret: z.string().nullable(),
+    key: apiKeySchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const revokeApiKey = defineRpc({
+  name: "memory-flash.api-key-revoke",
+  input: z.object({ id: z.string().min(1) }),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const httpStatus = defineRpc({
+  name: "memory-flash.http-status",
+  input: z.object({}),
+  output: httpStatusSchema,
+});

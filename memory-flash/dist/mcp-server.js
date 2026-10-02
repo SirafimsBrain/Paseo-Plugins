@@ -6,6 +6,7 @@ var __export = (target, all) => {
 };
 
 // server/store.ts
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -20034,6 +20035,63 @@ var checkRemoteHost = defineRpc({
     remoteDbPath: external_exports.string().nullable()
   })
 });
+var apiKeyScopeSchema = external_exports.enum(["read", "read_write"]);
+var apiKeySchema = external_exports.object({
+  /** Public key id (`mfk_…`). */
+  id: external_exports.string(),
+  label: external_exports.string(),
+  /** First characters of the secret, for recognizing the key in the UI. */
+  prefix: external_exports.string(),
+  scopes: external_exports.array(apiKeyScopeSchema),
+  createdAt: external_exports.string(),
+  /** ISO timestamp; null = never expires. */
+  expiresAt: external_exports.string().nullable(),
+  /** ISO timestamp; null = active. */
+  revokedAt: external_exports.string().nullable(),
+  lastUsedAt: external_exports.string().nullable()
+});
+var httpStatusSchema = external_exports.object({
+  enabled: external_exports.boolean(),
+  listening: external_exports.boolean(),
+  host: external_exports.string(),
+  port: external_exports.number(),
+  /** `http://<host>:<port>/mcp` when listening, else null. */
+  url: external_exports.string().nullable(),
+  error: external_exports.string().nullable(),
+  keyCount: external_exports.number().int()
+});
+var listApiKeys = defineRpc({
+  name: "memory-flash.api-keys",
+  input: external_exports.object({}),
+  output: external_exports.object({ keys: external_exports.array(apiKeySchema) })
+});
+var generateApiKey = defineRpc({
+  name: "memory-flash.api-key-generate",
+  input: external_exports.object({
+    label: external_exports.string().trim().min(1).max(80),
+    /** Time-to-live in days; 0 (default) = never expires. */
+    ttlDays: external_exports.number().int().min(0).max(3650).default(0),
+    scope: apiKeyScopeSchema.default("read_write")
+  }),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    id: external_exports.string().nullable(),
+    /** The full secret — returned once, never stored, never logged. */
+    secret: external_exports.string().nullable(),
+    key: apiKeySchema.nullable(),
+    error: external_exports.string().nullable()
+  })
+});
+var revokeApiKey = defineRpc({
+  name: "memory-flash.api-key-revoke",
+  input: external_exports.object({ id: external_exports.string().min(1) }),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
+var httpStatus = defineRpc({
+  name: "memory-flash.http-status",
+  input: external_exports.object({}),
+  output: httpStatusSchema
+});
 
 // server/store.ts
 function paseoHome() {
@@ -20042,6 +20100,15 @@ function paseoHome() {
 }
 function memoryDbPath() {
   return path.join(paseoHome(), "plugins", "memory-flash", "memory.db");
+}
+var API_KEY_SECRET_PREFIX = "mf_live_";
+var API_KEY_SECRET_BYTES = 32;
+var API_KEY_PREFIX_LENGTH = 12;
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+function randomBase64Url(bytes) {
+  return crypto.randomBytes(bytes).toString("base64url");
 }
 var DB_BUSY_TIMEOUT_MS = 5e3;
 var WRITE_ATTEMPTS = 3;
@@ -20120,6 +20187,19 @@ var MemoryStore = class {
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id           TEXT PRIMARY KEY,
+        label        TEXT NOT NULL,
+        key_hash     TEXT NOT NULL,
+        prefix       TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        expires_at   TEXT,
+        revoked_at   TEXT,
+        last_used_at TEXT,
+        scopes       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
     `);
     this.db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -20141,7 +20221,7 @@ var MemoryStore = class {
     const versionRow = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
     const schemaVersion = versionRow ? Number.parseInt(versionRow.value, 10) : 0;
     if (schemaVersion < 1) {
-      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '3')").run();
     } else if (schemaVersion < 2) {
       this.db.exec(`
         INSERT OR IGNORE INTO memory_tags (memory_id, tag)
@@ -20149,6 +20229,9 @@ var MemoryStore = class {
         WHERE project IS NOT NULL AND trim(project) <> '';
       `);
       this.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
+    }
+    if (schemaVersion >= 1 && schemaVersion < 3) {
+      this.db.prepare("UPDATE meta SET value = '3' WHERE key = 'schema_version'").run();
     }
   }
   prepareStatements() {
@@ -20194,6 +20277,16 @@ var MemoryStore = class {
        WHERE true
        ON CONFLICT(memory_id, tag) DO NOTHING`
     );
+    this.stmtApiKeyInsert = this.db.prepare(
+      `INSERT INTO api_keys (id, label, key_hash, prefix, created_at, expires_at, revoked_at, last_used_at, scopes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    this.stmtApiKeyByHash = this.db.prepare("SELECT * FROM api_keys WHERE key_hash = ?");
+    this.stmtApiKeyById = this.db.prepare("SELECT * FROM api_keys WHERE id = ?");
+    this.stmtApiKeyAll = this.db.prepare("SELECT * FROM api_keys ORDER BY created_at DESC, id");
+    this.stmtApiKeyRevoke = this.db.prepare("UPDATE api_keys SET revoked_at = ? WHERE id = ?");
+    this.stmtApiKeyTouch = this.db.prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?");
+    this.stmtApiKeyCount = this.db.prepare("SELECT COUNT(*) AS c FROM api_keys WHERE revoked_at IS NULL");
   }
   // -------------------------------------------------------------------------
   // Row mapping
@@ -20605,6 +20698,103 @@ var MemoryStore = class {
     for (const { id } of ids) this.delete(id, "purge");
     return ids.length;
   }
+  // -------------------------------------------------------------------------
+  // Remote access API keys (HTTP transport, 0.5.0). The full secret
+  // exists only during generation: the store keeps its SHA-256 hash.
+  // -------------------------------------------------------------------------
+  /** Creates a new API key and returns it together with the secret (shown once). */
+  generateApiKey(options) {
+    const id = `mfk_${randomBase64Url(12)}`;
+    const secret = `${API_KEY_SECRET_PREFIX}${randomBase64Url(API_KEY_SECRET_BYTES)}`;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const ttlDays = options.ttlDays ?? 0;
+    const record2 = {
+      id,
+      label: options.label,
+      keyHash: sha256Hex(secret),
+      prefix: secret.slice(0, API_KEY_PREFIX_LENGTH),
+      createdAt: now,
+      expiresAt: ttlDays > 0 ? new Date(Date.now() + ttlDays * 864e5).toISOString() : null,
+      revokedAt: null,
+      lastUsedAt: null,
+      scopes: [options.scope ?? "read_write"]
+    };
+    this.withWriteRetry(() => {
+      this.stmtApiKeyInsert.run(
+        record2.id,
+        record2.label,
+        record2.keyHash,
+        record2.prefix,
+        record2.createdAt,
+        record2.expiresAt,
+        record2.revokedAt,
+        record2.lastUsedAt,
+        JSON.stringify(record2.scopes)
+      );
+    });
+    return { record: record2, secret };
+  }
+  /**
+   * Authenticates a presented secret: hashes it, looks the row up and
+   * checks the revoked/expired flags. On success the row's `last_used_at`
+   * is refreshed. Returns null on any failure — the caller cannot tell
+   * a missing key from a revoked or expired one.
+   */
+  authenticateApiKey(secret) {
+    const row = this.stmtApiKeyByHash.get(sha256Hex(secret));
+    if (!row) return null;
+    const record2 = this.rowToApiKey(row);
+    if (record2.revokedAt !== null) return null;
+    if (record2.expiresAt !== null && record2.expiresAt <= (/* @__PURE__ */ new Date()).toISOString()) {
+      return null;
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    this.withWriteRetry(() => {
+      this.stmtApiKeyTouch.run(now, record2.id);
+    });
+    record2.lastUsedAt = now;
+    return record2;
+  }
+  /** Marks a key revoked. Returns false when the id is unknown. */
+  revokeApiKey(id) {
+    const result = this.withWriteRetry(
+      () => this.stmtApiKeyRevoke.run((/* @__PURE__ */ new Date()).toISOString(), id)
+    );
+    return Number(result.changes) > 0;
+  }
+  /** All keys (including revoked), newest first, without secret material. */
+  listApiKeys() {
+    const rows = this.stmtApiKeyAll.all();
+    return rows.map((row) => this.rowToApiKey(row));
+  }
+  /** Number of non-revoked keys, for the HTTP status indicator. */
+  activeKeyCount() {
+    return this.stmtApiKeyCount.get().c;
+  }
+  rowToApiKey(row) {
+    let scopes = ["read_write"];
+    try {
+      const parsed = JSON.parse(String(row.scopes));
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter(
+          (scope) => scope === "read" || scope === "read_write"
+        );
+        if (valid.length > 0) scopes = valid;
+      }
+    } catch {
+    }
+    return {
+      id: String(row.id),
+      label: String(row.label),
+      keyHash: String(row.key_hash),
+      prefix: String(row.prefix),
+      createdAt: String(row.created_at),
+      expiresAt: row.expires_at === null ? null : String(row.expires_at),
+      revokedAt: row.revoked_at === null ? null : String(row.revoked_at),
+      lastUsedAt: row.last_used_at === null ? null : String(row.last_used_at),
+      scopes
+    };
+  }
   /** Deletes every memory and history row. Used by the surface with confirm. */
   reset() {
     return this.withWriteRetry(() => {
@@ -20811,6 +21001,56 @@ function ftsQuery(raw) {
     terms.push(`"${cleaned}"`);
   }
   return terms.length > 0 ? terms.join(" OR ") : null;
+}
+
+// server/settings-file.ts
+import * as fs2 from "node:fs";
+import * as os2 from "node:os";
+import * as path2 from "node:path";
+var DEFAULTS = {
+  mcpServerName: "memory-flash",
+  historyPerMemory: 50,
+  defaultAgentId: "",
+  httpEnabled: false,
+  httpHost: "127.0.0.1",
+  httpPort: 8787
+};
+function settingsFilePath() {
+  const configured = process.env.PASEO_HOME;
+  const home = configured && configured.trim().length > 0 ? configured : path2.join(os2.homedir(), ".paseo");
+  return path2.join(home, "plugins", "memory-flash", "settings.json");
+}
+function parseSettingsFile(filePath = settingsFilePath()) {
+  try {
+    const raw = JSON.parse(fs2.readFileSync(filePath, "utf-8"));
+    if (typeof raw !== "object" || raw === null) return DEFAULTS;
+    const record2 = raw;
+    const values = typeof record2.values === "object" && record2.values !== null ? record2.values : record2;
+    const mcpServerName = typeof values.mcpServerName === "string" && values.mcpServerName.trim().length > 0 ? values.mcpServerName.trim().slice(0, 60) : DEFAULTS.mcpServerName;
+    const historyPerMemory = typeof values.historyPerMemory === "number" && Number.isFinite(values.historyPerMemory) ? Math.max(10, Math.min(200, Math.trunc(values.historyPerMemory))) : DEFAULTS.historyPerMemory;
+    const defaultAgentId = typeof values.defaultAgentId === "string" ? values.defaultAgentId.trim().slice(0, 120) : DEFAULTS.defaultAgentId;
+    const rawHttpHost = typeof values.httpHost === "string" && values.httpHost.trim().length > 0 ? values.httpHost.trim().slice(0, 64) : DEFAULTS.httpHost;
+    const rawHttpPort = typeof values.httpPort === "number" && Number.isFinite(values.httpPort) ? Math.trunc(values.httpPort) : DEFAULTS.httpPort;
+    const parsed = {
+      injectIntoAgents: true,
+      mcpServerName,
+      historyPerMemory,
+      defaultAgentId,
+      httpEnabled: values.httpEnabled === true,
+      httpHost: rawHttpHost,
+      httpPort: Math.max(1, Math.min(65535, rawHttpPort))
+    };
+    return {
+      mcpServerName: parsed.mcpServerName,
+      historyPerMemory: parsed.historyPerMemory,
+      defaultAgentId: parsed.defaultAgentId,
+      httpEnabled: parsed.httpEnabled,
+      httpHost: parsed.httpHost,
+      httpPort: parsed.httpPort
+    };
+  } catch {
+    return DEFAULTS;
+  }
 }
 
 // server/mcp-tools.ts
@@ -21073,49 +21313,59 @@ function dispatchMcpTool(name, args, context) {
   }
 }
 
-// server/settings-file.ts
-import * as fs2 from "node:fs";
-import * as os2 from "node:os";
-import * as path2 from "node:path";
-var DEFAULTS = {
-  mcpServerName: "memory-flash",
-  historyPerMemory: 50,
-  defaultAgentId: ""
-};
-function settingsFilePath() {
-  const configured = process.env.PASEO_HOME;
-  const home = configured && configured.trim().length > 0 ? configured : path2.join(os2.homedir(), ".paseo");
-  return path2.join(home, "plugins", "memory-flash", "settings.json");
-}
-function parseSettingsFile(filePath = settingsFilePath()) {
-  try {
-    const raw = JSON.parse(fs2.readFileSync(filePath, "utf-8"));
-    if (typeof raw !== "object" || raw === null) return DEFAULTS;
-    const record2 = raw;
-    const values = typeof record2.values === "object" && record2.values !== null ? record2.values : record2;
-    const mcpServerName = typeof values.mcpServerName === "string" && values.mcpServerName.trim().length > 0 ? values.mcpServerName.trim().slice(0, 60) : DEFAULTS.mcpServerName;
-    const historyPerMemory = typeof values.historyPerMemory === "number" && Number.isFinite(values.historyPerMemory) ? Math.max(10, Math.min(200, Math.trunc(values.historyPerMemory))) : DEFAULTS.historyPerMemory;
-    const defaultAgentId = typeof values.defaultAgentId === "string" ? values.defaultAgentId.trim().slice(0, 120) : DEFAULTS.defaultAgentId;
-    const parsed = { injectIntoAgents: true, mcpServerName, historyPerMemory, defaultAgentId };
-    return { mcpServerName: parsed.mcpServerName, historyPerMemory: parsed.historyPerMemory, defaultAgentId: parsed.defaultAgentId };
-  } catch {
-    return DEFAULTS;
+// server/mcp-jsonrpc.ts
+var PROTOCOL_VERSION = "2024-11-05";
+var SERVER_VERSION = "0.1.1";
+function handleJsonRpcRequest(request, context, serverInfo, log = () => {
+}) {
+  const id = request.id ?? null;
+  switch (request.method) {
+    case "initialize": {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: { tools: { listChanged: false } },
+          serverInfo
+        }
+      };
+    }
+    case "notifications/initialized":
+    case "initialized":
+      return null;
+    // notification — no response
+    case "ping":
+      return { jsonrpc: "2.0", id, result: {} };
+    case "tools/list":
+      return { jsonrpc: "2.0", id, result: { tools: MCP_TOOLS } };
+    case "tools/call": {
+      const params = request.params ?? {};
+      const name = String(params.name ?? "");
+      try {
+        const result = dispatchMcpTool(name, params.arguments ?? {}, context);
+        return { jsonrpc: "2.0", id, result };
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        log(`[memory-flash] tool ${name} failed: ${message}`);
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: { content: [{ type: "text", text: message }], isError: true }
+        };
+      }
+    }
+    default:
+      if (request.method.startsWith("notifications/")) return null;
+      return {
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: `Method not found: ${request.method}` }
+      };
   }
 }
 
 // server/mcp-server.ts
-var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.1.1";
-function writeMessage(message) {
-  process.stdout.write(`${JSON.stringify(message)}
-`);
-}
-function respond(id, result) {
-  writeMessage({ jsonrpc: "2.0", id, result });
-}
-function respondError(id, code, message) {
-  writeMessage({ jsonrpc: "2.0", id, error: { code, message } });
-}
 function main() {
   const settings = parseSettingsFile();
   const store = new MemoryStore({ historyPerMemory: settings.historyPerMemory });
@@ -21124,8 +21374,14 @@ function main() {
     defaultAgentId: settings.defaultAgentId || process.env.MEMORY_FLASH_AGENT_ID || void 0
   };
   const serverInfo = { name: settings.mcpServerName, version: SERVER_VERSION };
-  process.stderr.write(`[memory-flash] MCP server ready (db: ${store.stats().dbSizeBytes} bytes)
+  process.stderr.write(
+    `[memory-flash] MCP server ready (db: ${store.stats().dbSizeBytes} bytes)
+`
+  );
+  const writeMessage = (message) => {
+    process.stdout.write(`${JSON.stringify(message)}
 `);
+  };
   let buffer = "";
   process.stdin.setEncoding("utf-8");
   process.stdin.on("data", (chunk) => {
@@ -21139,10 +21395,21 @@ function main() {
       try {
         request = JSON.parse(line);
       } catch {
-        respondError(null, -32700, "Parse error");
+        writeMessage({
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32700, message: "Parse error" }
+        });
         continue;
       }
-      handleRequest(request, context, serverInfo);
+      const response = handleJsonRpcRequest(
+        request,
+        context,
+        serverInfo,
+        (message) => process.stderr.write(`${message}
+`)
+      );
+      if (response) writeMessage(response);
     }
   });
   process.stdin.on("end", () => {
@@ -21155,46 +21422,5 @@ function main() {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
-}
-function handleRequest(request, context, serverInfo) {
-  const id = request.id ?? null;
-  switch (request.method) {
-    case "initialize": {
-      respond(id, {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: { tools: { listChanged: false } },
-        serverInfo
-      });
-      return;
-    }
-    case "notifications/initialized":
-    case "initialized":
-      return;
-    // notification — no response
-    case "ping":
-      respond(id, {});
-      return;
-    case "tools/list": {
-      respond(id, { tools: MCP_TOOLS });
-      return;
-    }
-    case "tools/call": {
-      const params = request.params ?? {};
-      const name = String(params.name ?? "");
-      try {
-        const result = dispatchMcpTool(name, params.arguments ?? {}, context);
-        respond(id, result);
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : String(cause);
-        process.stderr.write(`[memory-flash] tool ${name} failed: ${message}
-`);
-        respond(id, { content: [{ type: "text", text: message }], isError: true });
-      }
-      return;
-    }
-    default:
-      if (request.method.startsWith("notifications/")) return;
-      respondError(id, -32601, `Method not found: ${request.method}`);
-  }
 }
 main();

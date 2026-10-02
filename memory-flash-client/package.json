@@ -1,10 +1,8 @@
 {
-  "name": "memory-flash",
+  "name": "memory-flash-client",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.1.0",
   "scripts": {
-    "bundle": "node scripts/bundle-mcp-server.mjs",
-    "pretest": "node scripts/bundle-mcp-server.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -13,7 +11,6 @@
     "@getpaseo/plugin": "0.10.1",
     "@types/node": "^22.0.0",
     "@types/react": "~19.2.0",
-    "esbuild": "^0.25.12",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "typescript": "^5.9.3",

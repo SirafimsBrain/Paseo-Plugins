@@ -16,11 +16,42 @@ Paseo orchestrates agents and passes prompts, but it does not provide durable sh
 - **Management surface inside Paseo** (sidebar item + ⌘K) — browse and filter memories (kind chips, tag chips), full-text search with highlighted snippets, create/edit/delete with a live editor, per-memory revision history with one-click restore, statistics (totals, by kind/agent/project, top tags, database size).
 - **Delegate maintenance to an agent** — the History & tasks tab composes a careful instruction (prefer update over delete, list before deleting, keep changes minimal) and sends it to a running agent picked from the live Paseo agent list; the agent then edits the database through its MCP tools.
 - **Remote hosts** — register remote machines running the Paseo server over the standard Paseo SSH transport and check reachability (the remote memory database path is reported). TCP and relay transports are stubs reserved for future work.
+- **Remote access over HTTP with API keys (0.5.0)** — the same MCP tools are also served over HTTP (Streamable HTTP: `POST http://<bind>:<port>/mcp`, JSON-RPC 2.0), so other machines can read and write the shared memory. Access is by API key only: a key is generated in the UI, shown **once**, and only its SHA-256 hash is stored; every request must carry `Authorization: Bearer <secret>`. Local agents keep using the stdio server and need no key. Keys can be scoped (`read` — search/read tools only, or `read_write` — the full tool set), can expire, and are revoked per machine in one click. Failed authentications are rate-limited per IP, the `Authorization` header is never logged, and the memory host records the connecting client's UUID and host name (advisory identity headers) in its audit log. Bind defaults to `127.0.0.1`; use a Tailscale/LAN address for remote access. The companion [memory-flash-client](../memory-flash-client/README.md) plugin configures the other side.
 - **Export, import and backup of the knowledge base (designed, not implemented yet)** — the design is documented in [__doc.md §8](./__doc.md).
   - *Export* — the database is snapshotted with `VACUUM INTO` (consistent, defragmented, no sidecars) and packed into a single `.mfkb` archive (header + manifest + SHA-256 + compressed payload). *Import* verifies the checksum and then merges rows into the live database inside a single transaction: ids are remapped, tags and revision history follow their memories, and the FTS5 index is updated by the existing triggers, so merging into a base that already has memories cannot collide.
   - *Backup* — takes a direct copy of `memory.db` itself (mandatory `wal_checkpoint(TRUNCATE)` first, otherwise committed rows still living in the WAL are silently lost) into a `.mfb` archive. It is the cheapest snapshot and keeps the exact physical image, so it can only be restored as a whole: the restore verifies checksum, `integrity_check` and schema version, refuses to run while any MCP server holds the file, keeps a `memory.db.pre-restore-<timestamp>` safety copy, and atomically swaps the file.
   - *Compression* — one shared choice for both paths: **Fast** `zstd -3` (~23× smaller, ms), **Balanced** `zstd -9` (~25×, recommended), **Maximum** `zstd -19` (~28×, seconds). Compression is streamed, so memory stays flat regardless of database size.
 - **SQLite everywhere** — single-file database at `$PASEO_HOME/plugins/memory-flash/memory.db` (respects `PASEO_HOME`), WAL mode, FTS5 with porter/unicode61 tokenization, triggers keeping the index in sync, per-memory revision history, atomic settings/hosts files. Safe for parallel writers: a 5 s busy timeout plus automatic write retry, so concurrent agent processes no longer lose writes to `database is locked`.
+
+## Remote access (HTTP + API key)
+
+Memory Flash can serve the very same MCP tools over HTTP so that agents on other machines use the same memory database. The trust model is deliberately simple for a private network or a VPN: **the key is generated here and carried to the client by the user**, with no automatic enrollment and no OAuth.
+
+1. On the memory host, open **Settings → Plugins → Memory Flash → Remote access (HTTP + API key)**.
+2. Turn on **Serve MCP over HTTP** and pick the bind address and port (default `127.0.0.1:8787`). Keep it on loopback for local use, or on a Tailscale/LAN address for remote access.
+3. Press **Generate API key**, give it a name (`laptop-office`, `builder-2`), optionally a lifetime and a scope.
+4. Copy the two lines the UI shows — the secret is displayed **exactly once** and cannot be recovered, only re-issued:
+
+```text
+URL:    http://100.64.0.2:8787/mcp
+Header: Authorization: Bearer mf_live_…
+```
+
+5. Paste URL and secret on the remote machine. The easiest way is the companion [memory-flash-client](../memory-flash-client/README.md) plugin, which stores the key in a private file and injects the HTTP MCP server into every agent created through Paseo. Any other MCP client can use the two lines above directly.
+6. If a machine is lost, press **Revoke** on that key — the client is refused on its next request, without changing the port or touching other keys.
+
+### Security notes
+
+| Measure | Why |
+| ------- | --- |
+| Secret shown once in the UI | The plugin never persists the plaintext secret — only its SHA-256 hash lives in `api_keys` |
+| Revoke per key | A compromised host is cut off without affecting other machines |
+| Bind defaults to loopback | Remote access requires an explicit address (Tailscale/LAN) plus a firewall |
+| `Authorization` never logged | Only key id, label, client identity and source IP appear in the log |
+| 401 rate-limited per IP | Slows down key brute-forcing |
+| Scoped keys | A `read` key can only reach `memory_search`, `memory_get`, `memory_list_by_tag` and `memory_stats` |
+
+The secret is never written to git, agent prompts or agent logs, and it is never issued automatically over the network — a human presses **Generate**.
 
 ## Install
 

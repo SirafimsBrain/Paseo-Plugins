@@ -8,7 +8,14 @@ describe("parseSettingsFile", () => {
   it("returns defaults for a missing file", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mf-settings-"));
     const parsed = parseSettingsFile(path.join(dir, "missing.json"));
-    expect(parsed).toEqual({ mcpServerName: "memory-flash", historyPerMemory: 50, defaultAgentId: "" });
+    expect(parsed).toEqual({
+      mcpServerName: "memory-flash",
+      historyPerMemory: 50,
+      defaultAgentId: "",
+      httpEnabled: false,
+      httpHost: "127.0.0.1",
+      httpPort: 8787,
+    });
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

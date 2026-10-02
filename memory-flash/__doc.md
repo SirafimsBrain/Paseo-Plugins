@@ -152,7 +152,7 @@ The settings screen shows one row per agent (path + state + live check) with Reg
 - **`paseo-ssh` (implemented)** — probes the remote through the standard Paseo CLI transport (`paseo --host ssh://[user@]host[:port] status --json`, 20 s timeout) and reports the remote memory database path (`~/.paseo/plugins/memory-flash/memory.db`). Authentication is whatever the user's SSH config provides — the same prerequisite the Paseo app itself has for remote daemons.
 - **`tcp` / `relay` (stubs)** — stored and displayed, checks return `unsupported` without marking the host broken. The registry and status model are transport-agnostic so a real implementation only adds a `check*` branch (direct `ws://host:port` probe for TCP; relay pairing for Hub).
 
-Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§11).
+Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§12).
 
 ## 8. Export, import and backup of the knowledge base
 
@@ -349,6 +349,10 @@ Shared conventions: export and backup are non-destructive and atomic; import and
 | `memory-flash.codex-mcp-status` / `-register` / `-unregister` | `{}` | same as Cline (no `live`) |
 | `memory-flash.agent-mcp-register-all` | `{}` | `{ results: [{ agent, ok, error }] }` |
 | `memory-flash.hosts` / `hosts-save` / `hosts-delete` / `hosts-check` | host CRUD | registry + probe results |
+| `memory-flash.api-keys` | `{}` | `{ keys: [ApiKey] }` (no secrets, no hashes) |
+| `memory-flash.api-key-generate` | `{ label, ttlDays?, scope? }` | `{ ok, id, secret, key, error }` — `secret` returned once |
+| `memory-flash.api-key-revoke` | `{ id }` | `{ ok, error }` |
+| `memory-flash.http-status` | `{}` | `{ enabled, listening, host, port, url, error, keyCount }` |
 | `memory-flash.export` / `import` / `backup` / `backup-restore` / `archive-info` | see §8.8 | see §8.8 |
 
 ## 10. Compatibility
@@ -377,7 +381,68 @@ ACP payload details (from `@getpaseo/server` `toAcpMcpServers`): stdio servers a
 
 Also verified: `paseo permit allow <agent> <req_id>` approves the MCP tool-call permission that ACP agents raise on first use.
 
-## 11. Limitations and roadmap
+## 11. Remote access over HTTP and API keys (0.5.0)
+
+### 11.1 Scope and trust model
+
+A machine running Memory Flash can act as a **memory host**: the same MCP tool set is additionally served over Streamable HTTP so that agents on other machines read and write the same `memory.db`. The credential is a per-machine API key.
+
+The key is issued **on the memory host, by a human pressing Generate**, and carried to the client out of band (password manager, SSH, by hand). There is no network enrollment and no OAuth: automatic issuance would put the secret into an agent's context and its logs, which is exactly what this design avoids. Bind defaults to `127.0.0.1`; remote use is expected on a VPN (Tailscale), a LAN, or through an SSH tunnel.
+
+### 11.2 Modules
+
+| File | Responsibility |
+| ---- | -------------- |
+| `server/mcp-jsonrpc.ts` | Transport-agnostic MCP handling: `handleJsonRpcRequest(request, context, serverInfo, log)`. Both transports delegate here, so MCP semantics cannot drift between stdio and HTTP. Protocol version `2024-11-05`; tool failures are returned as MCP `isError` results, not JSON-RPC errors, so agents can read them. |
+| `server/http-server.ts` | `McpHttpServer`: Node `http` server, auth middleware, per-IP 401 rate limit, body cap, scope enforcement, identity-header audit log. |
+| `server/store.ts` | `api_keys` table plus `generateApiKey` / `authenticateApiKey` / `revokeApiKey` / `listApiKeys` / `activeKeyCount`. |
+| `index.server.ts` | Starts/stops the endpoint from the `httpEnabled`/`httpHost`/`httpPort` settings and exposes the four RPCs. |
+
+### 11.3 Endpoints
+
+| Route | Auth | Behaviour |
+| ----- | ---- | --------- |
+| `POST /mcp` | required | One JSON-RPC 2.0 message per request (`initialize`, `ping`, `tools/list`, `tools/call`); notifications answer `202` with an empty body. |
+| `GET /healthz` | none | `{"ok":true,"server":"memory-flash-mcp"}` — liveness for connection checks; reveals nothing about the store. |
+| `GET`/`DELETE` `/mcp` | — | `405` (allowed for Streamable HTTP servers that offer no SSE stream). |
+| anything else | — | `404`. |
+
+### 11.4 Key material
+
+| Field | Meaning |
+| ----- | ------- |
+| `id` | public key id, `mfk_<base64url>` |
+| `label` | human name for the machine |
+| `key_hash` | SHA-256 hex of the secret — the only stored form |
+| `prefix` | first 12 characters of the secret, so a key can be recognized in the UI |
+| `created_at`, `expires_at` (`NULL` = never), `revoked_at` (`NULL` = active), `last_used_at` | lifecycle + audit |
+| `scopes` | JSON array: `read` or `read_write` |
+
+Secrets are `mf_live_` + 32 CSPRNG bytes in base64url (256-bit entropy). Generation returns the record *and* the secret; the RPC surfaces the secret exactly once, and nothing else ever holds it.
+
+`authenticateApiKey(secret)` hashes the presented value, looks the row up, rejects revoked and expired rows, and refreshes `last_used_at`. Every failure mode collapses to `null`, so a caller cannot distinguish an unknown key from a revoked or expired one.
+
+### 11.5 Request handling
+
+1. Parse the `Bearer` token; reject `401` (or `429` after 10 failures from one IP within 60 s) with a short, generic body.
+2. Log the audit line — key id, label, source IP and the client's identity headers — never the `Authorization` value.
+3. Read the body with a 1 MiB cap; oversized bodies get `413`, malformed JSON a `-32700` parse error.
+4. For a `read`-scoped key, reject `tools/call` to anything outside `READ_ONLY_TOOLS` (`memory_search`, `memory_get`, `memory_list_by_tag`, `memory_stats`) with `-32000`, and filter `tools/list` to the same set. The check happens **before** dispatch, so a read-only key cannot execute a write tool.
+5. Dispatch through the shared `dispatchMcpTool`, so HTTP and stdio behaviour stay identical.
+
+### 11.6 Client identity (advisory)
+
+`memory-flash-client` announces itself with two headers: `X-Memory-Flash-Client-Id` (a stable UUID) and `X-Memory-Flash-Host`. They grant nothing — the API key is the sole credential — but the memory host writes them into its log so several clients can be told apart in the audit trail. Values are sanitized (printable ASCII only, length-capped) so a crafted header cannot forge log lines.
+
+### 11.7 Settings and lifecycle
+
+`httpEnabled` (default off), `httpHost` (default `127.0.0.1`), `httpPort` (default `8787`). The endpoint follows the settings: a host/port change restarts it, disabling stops it, and a start failure is reported through `memory-flash.http-status` instead of throwing. The `url` getter renders `127.0.0.1` when bound to `0.0.0.0`/`::`, so a wildcard bind is not copied into an MCP config verbatim. Local agents are unaffected: they keep using the stdio server with no key.
+
+### 11.8 Tests
+
+`tests/http-server.test.ts` (14 tests) starts the server on an ephemeral port and drives it with `fetch`: health, handshake, tool call, 401/429, method rules, body cap, scope enforcement, read-only `tools/list` filtering, identity-header sanitizing, wildcard-bind URL rendering. `tests/api-keys.test.ts` covers generation, hashing, revocation, expiry and the store's last-used bookkeeping.
+
+## 12. Limitations and roadmap
 
 Limitations:
 
@@ -388,7 +453,7 @@ Limitations:
 
 Roadmap:
 
-1. **Cross-host memory federation** — query fan-out to enabled `paseo-ssh` hosts over the Paseo CLI, merging results with host labels; write-through to a chosen host.
+1. **Cross-host memory federation** — the HTTP transport and `memory-flash-client` already give every machine a connection to one memory host; what is still missing is fan-out across several hosts from a single client, merging results with host labels and a write-through target.
 2. **Vector recall** — optional `sqlite-vec` table + local embeddings for semantic search alongside FTS5.
 3. **Timeline surfacing** — post a plugin timeline item when a delegated agent finishes memory maintenance (`agent.turn_ended` hook + timeline renderer).
 4. **More transports** — real `tcp` and `relay` implementations behind the existing registry.

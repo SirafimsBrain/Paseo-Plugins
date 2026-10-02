@@ -1,13 +1,16 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { McpStdioServerConfig } from "@getpaseo/protocol/agent-types";
-import { memoryFlashSettings } from "./shared/settings";
+import { memoryFlashSettings, type MemoryFlashSettings } from "./shared/settings";
 import {
   clearHistory,
   delegateTask,
   deleteMemory,
   deleteRemoteHost,
   getMemory,
+  generateApiKey,
+  httpStatus,
   installSkill,
+  listApiKeys,
   listMemories,
   listRemoteHosts,
   listSkillTargets,
@@ -15,6 +18,7 @@ import {
   memoryStats,
   purgeMemories,
   restoreRevision,
+  revokeApiKey,
   saveMemory,
   saveRemoteHost,
   searchMemories,
@@ -33,7 +37,10 @@ import {
   unregisterClineMcp,
   registerAllAgentMcp,
 } from "./shared/memories";
-import { MemoryStore } from "./server/store";
+import type { ApiKey } from "./shared/memories";
+import { MemoryStore, type ApiKeyRecord } from "./server/store";
+import { McpHttpServer } from "./server/http-server";
+import { SERVER_VERSION } from "./server/mcp-jsonrpc";
 import { mcpServerCommand } from "./server/mcp-launch";
 import {
   clineMcpStatus as readClineMcpStatus,
@@ -76,13 +83,74 @@ export default function contribute(server: PluginServerContext) {
 
   const store = new MemoryStore();
   let disposed = false;
+  let currentSettings: MemoryFlashSettings | null = null;
 
-  // Keep the per-memory history cap in sync with settings.
+  // -------------------------------------------------------------------------
+  // HTTP MCP endpoint (remote access, 0.5.0). Started and stopped
+  // with the httpEnabled/httpHost/httpPort settings; local agents
+  // keep using stdio regardless of this setting.
+  // -------------------------------------------------------------------------
+
+  let httpServer: McpHttpServer | null = null;
+  let httpConfig: { host: string; port: number } | null = null;
+  let httpError: string | null = null;
+
+  const syncHttpServer = async (values: MemoryFlashSettings): Promise<void> => {
+    if (disposed) return;
+    if (!values.httpEnabled) {
+      if (httpServer) {
+        await httpServer.stop();
+        httpServer = null;
+      }
+      httpConfig = null;
+      httpError = null;
+      return;
+    }
+    const changed =
+      httpConfig === null ||
+      httpConfig.host !== values.httpHost ||
+      httpConfig.port !== values.httpPort;
+    if (changed && httpServer) {
+      await httpServer.stop();
+      httpServer = null;
+    }
+    if (httpServer === null) {
+      httpConfig = { host: values.httpHost, port: values.httpPort };
+      const server = new McpHttpServer({
+        host: values.httpHost,
+        port: values.httpPort,
+        context: {
+          store,
+          defaultAgentId: values.defaultAgentId || undefined,
+        },
+        serverInfo: { name: values.mcpServerName, version: SERVER_VERSION },
+      });
+      try {
+        await server.start();
+        httpServer = server;
+        httpError = null;
+        console.log(`[memory-flash] HTTP MCP endpoint listening on ${server.url}`);
+      } catch (cause) {
+        httpServer = null;
+        httpError = cause instanceof Error ? cause.message : String(cause);
+        console.error(`[memory-flash] HTTP MCP endpoint failed to start: ${httpError}`);
+      }
+    }
+  };
+
+  // Keep the per-memory history cap and the HTTP endpoint in sync
+  // with settings.
   void settings.read().then((state) => {
-    if (state.status === "ready") store.historyLimitPerMemory = state.values.historyPerMemory;
+    if (state.status !== "ready") return;
+    currentSettings = state.values;
+    store.historyLimitPerMemory = state.values.historyPerMemory;
+    void syncHttpServer(state.values);
   });
   const unsubscribeSettings = settings.subscribe((state) => {
-    if (state.status === "ready") store.historyLimitPerMemory = state.values.historyPerMemory;
+    if (state.status !== "ready") return;
+    currentSettings = state.values;
+    store.historyLimitPerMemory = state.values.historyPerMemory;
+    void syncHttpServer(state.values);
   });
 
   // -------------------------------------------------------------------------
@@ -285,13 +353,64 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(checkRemoteHost, (input) => probeHost(input.id));
 
+  // --- Remote access: API keys for the HTTP MCP endpoint --------
+  // The secret is returned exactly once by the generate RPC and
+  // never persisted — the store keeps only its SHA-256 hash.
+
+  server.handle(listApiKeys, () => ({
+    keys: store.listApiKeys().map(toApiKey),
+  }));
+
+  server.handle(generateApiKey, (input) => {
+    try {
+      const { record, secret } = store.generateApiKey({
+        label: input.label,
+        ttlDays: input.ttlDays,
+        scope: input.scope,
+      });
+      return { ok: true, id: record.id, secret, key: toApiKey(record), error: null };
+    } catch (cause) {
+      return {
+        ok: false,
+        id: null,
+        secret: null,
+        key: null,
+        error: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  });
+
+  server.handle(revokeApiKey, (input) => {
+    try {
+      return { ok: store.revokeApiKey(input.id), error: null };
+    } catch (cause) {
+      return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+    }
+  });
+
+  server.handle(httpStatus, () => ({
+    enabled: currentSettings?.httpEnabled ?? false,
+    listening: httpServer?.listening ?? false,
+    host: currentSettings?.httpHost ?? "127.0.0.1",
+    port: currentSettings?.httpPort ?? 8787,
+    url: httpServer?.url ?? null,
+    error: httpError,
+    keyCount: store.activeKeyCount(),
+  }));
+
   // ---------------------------------------------------------------------------
 
   return () => {
     disposed = true;
-    void disposed;
     removeCreateHook();
     unsubscribeSettings();
+    if (httpServer) void httpServer.stop();
     store.close();
   };
+}
+
+/** UI-facing view of an API key: the secret hash never leaves the store. */
+function toApiKey(record: ApiKeyRecord): ApiKey {
+  const { keyHash: _keyHash, ...key } = record;
+  return key;
 }

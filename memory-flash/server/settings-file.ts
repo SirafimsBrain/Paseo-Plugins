@@ -17,12 +17,18 @@ export interface ParsedSettings {
   mcpServerName: string;
   historyPerMemory: number;
   defaultAgentId: string;
+  httpEnabled: boolean;
+  httpHost: string;
+  httpPort: number;
 }
 
 const DEFAULTS: ParsedSettings = {
   mcpServerName: "memory-flash",
   historyPerMemory: 50,
   defaultAgentId: "",
+  httpEnabled: false,
+  httpHost: "127.0.0.1",
+  httpPort: 8787,
 };
 
 function settingsFilePath(): string {
@@ -47,8 +53,28 @@ export function parseSettingsFile(filePath: string = settingsFilePath()): Parsed
         : DEFAULTS.historyPerMemory;
     const defaultAgentId =
       typeof values.defaultAgentId === "string" ? values.defaultAgentId.trim().slice(0, 120) : DEFAULTS.defaultAgentId;
-    const parsed: MemoryFlashSettings = { injectIntoAgents: true, mcpServerName, historyPerMemory, defaultAgentId };
-    return { mcpServerName: parsed.mcpServerName, historyPerMemory: parsed.historyPerMemory, defaultAgentId: parsed.defaultAgentId };
+    const rawHttpHost =
+      typeof values.httpHost === "string" && values.httpHost.trim().length > 0
+        ? values.httpHost.trim().slice(0, 64)
+        : DEFAULTS.httpHost;
+    const rawHttpPort = typeof values.httpPort === "number" && Number.isFinite(values.httpPort) ? Math.trunc(values.httpPort) : DEFAULTS.httpPort;
+    const parsed: MemoryFlashSettings = {
+      injectIntoAgents: true,
+      mcpServerName,
+      historyPerMemory,
+      defaultAgentId,
+      httpEnabled: values.httpEnabled === true,
+      httpHost: rawHttpHost,
+      httpPort: Math.max(1, Math.min(65535, rawHttpPort)),
+    };
+    return {
+      mcpServerName: parsed.mcpServerName,
+      historyPerMemory: parsed.historyPerMemory,
+      defaultAgentId: parsed.defaultAgentId,
+      httpEnabled: parsed.httpEnabled,
+      httpHost: parsed.httpHost,
+      httpPort: parsed.httpPort,
+    };
   } catch {
     return DEFAULTS;
   }
