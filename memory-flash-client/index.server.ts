@@ -1,5 +1,4 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import type { McpHttpServerConfig } from "@getpaseo/protocol/agent-types";
 import { memoryFlashClientSettings, type MemoryFlashClientSettings } from "./shared/settings";
 import {
   checkConnection,
@@ -127,12 +126,17 @@ export default function contribute(server: PluginServerContext) {
         headers["X-Memory-Flash-Client-Id"] = identity.clientId;
         headers["X-Memory-Flash-Host"] = identity.host;
       }
-      const config: McpHttpServerConfig = {
+      // `as const` instead of a named `McpHttpServerConfig` annotation: the MCP
+      // config types live in @getpaseo/protocol, which is not a host-supplied
+      // specifier, so importing them would make this bundle need node_modules
+      // at install time. Storing into `mcpServers` below checks the literal
+      // against the host's own type, which is a stronger guarantee.
+      const config = {
         type: "http",
         url: connection.url,
         headers,
         alwaysLoad: true,
-      };
+      } as const;
       mcpServers[name] = config;
       // Diagnostic: the endpoint and name are safe to log, the key is not.
       console.log(

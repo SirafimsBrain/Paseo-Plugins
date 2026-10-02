@@ -90,7 +90,9 @@ They are advisory. The memory host authenticates on the API key alone and uses t
 
 ## 6. MCP injection
 
-The `agent.create` before-hook adds one `McpHttpServerConfig` per enabled connection:
+Each enabled connection becomes one HTTP MCP server in the agent config, built as an `as const` literal and type-checked where it is stored into `mcpServers` — the plugin deliberately does not import the MCP config types from `@getpaseo/protocol`, which Paseo does not supply to plugins.
+
+The `agent.create` before-hook adds one HTTP MCP server per enabled connection:
 
 ```ts
 {
@@ -155,11 +157,12 @@ The residual risk is inherent to the design and accepted: a client that stores a
 
 ## 11. Compatibility
 
-Built against Paseo `0.10.x` with `@getpaseo/plugin@0.10.1`:
+Built against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
 - `npm test` — 4 suites, 40 tests, green.
-- Uses: `registerSettings`, `before("agent.create")`, `handle`, and the SDK's `McpHttpServerConfig` (`type: "http"`, `url`, `headers`) from `@getpaseo/protocol`.
+- Uses: `registerSettings`, `before("agent.create")`, `handle`, and the host's own MCP config type (`type: "http"`, `url`, `headers`) reached through `request.config.mcpServers`.
+- Since 0.1.1 the plugin references **no package outside Paseo's host-supplied list**, so it has no install-time build step and installs from a clean checkout (or a plain directory) with `paseo plugin add` alone. Before that it carried a type-only import of `McpHttpServerConfig` from `@getpaseo/protocol/agent-types`, which is not host-supplied and made the host's bundler fail with `Could not resolve type dependency` whenever `node_modules` was absent. See [__doc.md](../command-center/__doc.md#5f-version-051--install-time-resolution-and-the-host-bundler-boundary) in command-center for the host-side rules.
 
 ## 12. Limitations and roadmap
 

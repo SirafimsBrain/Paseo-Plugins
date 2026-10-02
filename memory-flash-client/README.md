@@ -15,6 +15,16 @@ It is the client half of Memory Flash's remote access: the memory host serves MC
 - **Coexistence check with memory-flash** — the plugin detects whether memory-flash itself is installed on this host (from the Paseo config and the plugin data directory) and states explicitly that running both is allowed: memory-flash is the single memory host of this machine, this plugin only adds remote connections, so the two never conflict. The check is computed, not hard-coded, so a genuine overlap later has a place to surface.
 - **Management surface inside Paseo** (sidebar item "Memory Hosts" + ⌘K entry) — the list of memory hosts with status, last check and key prefix, plus the add form (name, URL, secret) with Test and Add; and a settings screen for the identity and injection options.
 
+## Install
+
+```bash
+paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash-client
+```
+
+Requires Paseo ≥ 0.10.0 (verified against 0.10.3) and Memory Flash 0.5.0+ with the HTTP endpoint enabled on the remote host.
+
+Every import in this plugin is supplied by Paseo itself, so it has no install-time build step and no registry access requirement: the command above is the whole installation, from a clean checkout or from a local directory.
+
 ## How to use
 
 1. On the **memory host**, open **Settings → Plugins → Memory Flash → Remote access (HTTP + API key)**, enable the HTTP endpoint, and press **Generate API key**. Copy the URL and secret — the secret is shown once.
