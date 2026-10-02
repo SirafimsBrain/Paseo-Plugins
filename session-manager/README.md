@@ -53,13 +53,22 @@ The server exposes four RPCs (`session-manager.list`,
 `session-manager.export`) implemented in `server/` and consumed by the
 client panel.
 
+## Install
+
+```bash
+paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:session-manager
+```
+
+Every import in this plugin is supplied by Paseo itself, so it has no
+install-time build step and no registry access requirement: the command above is
+the whole installation, from a clean checkout or from a local directory.
+
 ## Requirements
 
 - Paseo `>=0.8.0` (declared in `paseo-plugin.json`).
-- Verified against Paseo `0.9.0` (2026-09-22, SDK `@getpaseo/plugin@0.9.0`):
+- Verified against Paseo `0.10.3` (2026-10-02, SDK `@getpaseo/plugin@0.10.1`):
   `npm run typecheck` and `npm test` (70 tests, 8 suites) pass with no code
-  changes; the 0.9.0 plugin changes are additive for every API this plugin
-  uses (see Compatibility in [`__doc.md`](./__doc.md)).
+  changes; see Compatibility in [`__doc.md`](./__doc.md).
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
   `cline`, `opencode`, `kilo`. Qwen Code and `acpx` are read and written as files
   and need no CLI.

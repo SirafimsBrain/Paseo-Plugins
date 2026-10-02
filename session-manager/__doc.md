@@ -27,6 +27,14 @@ usage in the panel styles; when unset, no `fontFamily` is forced so the host's
 Verified against Paseo `0.10.1` (2026-09-29, SDK `@getpaseo/plugin@0.10.1`):
 no code changes required, and the manifest range `>=0.8.0` already covers it.
 
+### Installation
+
+```bash
+paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:session-manager
+```
+
+Every import in this plugin is supplied by Paseo itself (`@getpaseo/plugin/*`, `zod`, `react`, `react-native`, `@tanstack/react-query`, `@types/node`, Node built-ins), so the manifest declares no `build` step: the plugin bundles from a clean checkout — or from a plain local directory — with that single command and needs no npm-registry access. Verified on 2026-10-02 against Paseo `0.10.3` with a static reproduction of the host's bundler boundary check against a staged copy: no boundary errors in either bundle. The host-side rules this relies on are documented in [command-center's __doc.md](../command-center/__doc.md#5f-version-051--install-time-resolution-and-the-host-bundler-boundary).
+
 ### 0.10.x changes affecting this plugin
 
 Paseo 0.10.0 (2026-09-28) and 0.10.1 (2026-09-29) are **additive** for every API this plugin uses:
