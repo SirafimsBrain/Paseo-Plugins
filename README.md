@@ -13,6 +13,16 @@ All code is written for personal use. The plugins here can be used in the Paseo 
 
 All plugins follow the host Appearance settings (interface font, code font, and interface text size) in their UI: sizes are scaled relative to the app-wide value, and a configured font family is applied to plugin text.
 
+## Versioning and releases
+
+Each plugin is versioned independently with a `MAJOR.MINOR.PATCH` number in its own `package.json`:
+
+- `PATCH` (last digit) — a bugfix or a change to existing functionality,
+- `MINOR` (second digit) — new functionality,
+- `MAJOR` (first digit) — a release requested with the word "release" (the other two digits reset to zero).
+
+Every version bump is marked with an annotated Git tag `<plugin-name>@<version>` on the commit that carries that version, and the tag is pushed to `origin` — for example, `memory-flash@0.4.2`.
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).
