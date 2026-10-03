@@ -352,7 +352,7 @@ Shared conventions: export and backup are non-destructive and atomic; import and
 | `memory-flash.api-keys` | `{}` | `{ keys: [ApiKey] }` (no secrets, no hashes) |
 | `memory-flash.api-key-generate` | `{ label, ttlDays?, scope? }` | `{ ok, id, secret, key, error }` — `secret` returned once |
 | `memory-flash.api-key-revoke` | `{ id }` | `{ ok, error }` |
-| `memory-flash.http-status` | `{}` | `{ enabled, listening, host, port, url, error, keyCount }` |
+| `memory-flash.http-status` | `{}` | `{ enabled, listening, host, port, boundHost, boundPort, wildcard, bindUrl, url, error, keyCount }` |
 | `memory-flash.export` / `import` / `backup` / `backup-restore` / `archive-info` | see §8.8 | see §8.8 |
 
 ## 10. Compatibility
@@ -374,6 +374,8 @@ Paseo's bundler checks every plugin import with the TypeScript resolver and trea
 - `paseo plugin add <directory>` runs no build commands, so the `npm run bundle` step could not work on a freshly cloned checkout (`esbuild` was missing). The manifest build step is now `[["npm", "ci"], ["npm", "run", "bundle"]]`: the daemon installs the dependencies into its managed clone and then rebuilds `dist/mcp-server.js`. Both commands need npm-registry access on the host.
 
 Verified on 2026-10-02 against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1`: `npm run typecheck` clean, `npm test` 11 suites / 98 tests green, and a static reproduction of the host's bundler boundary check against a staged copy (build commands executed first) reports no boundary errors in either bundle.
+
+Verified for 0.5.2 (HTTP bind-address lifecycle, §11.8): `npm run typecheck` clean, `npm test` 12 suites / 110 tests green. The lifecycle suite drives real sockets on loopback and on `0.0.0.0`, and additionally proves reachability over this machine's non-internal IPv4 (`GET /healthz` → `200`) after the wildcard bind.
 
 ### Provider verification matrix (2026-09-30, live daemon)
 
@@ -403,9 +405,10 @@ The key is issued **on the memory host, by a human pressing Generate**, and carr
 | File | Responsibility |
 | ---- | -------------- |
 | `server/mcp-jsonrpc.ts` | Transport-agnostic MCP handling: `handleJsonRpcRequest(request, context, serverInfo, log)`. Both transports delegate here, so MCP semantics cannot drift between stdio and HTTP. Protocol version `2024-11-05`; tool failures are returned as MCP `isError` results, not JSON-RPC errors, so agents can read them. |
-| `server/http-server.ts` | `McpHttpServer`: Node `http` server, auth middleware, per-IP 401 rate limit, body cap, scope enforcement, identity-header audit log. |
+| `server/http-server.ts` | `McpHttpServer`: Node `http` server, auth middleware, per-IP 401 rate limit, body cap, scope enforcement, identity-header audit log. URL getters: `bindUrl` (verbatim bound interface, may be `0.0.0.0`), `url` (dialable, wildcard replaced), plus `isWildcardHost` / `resolveRoutableHost`. |
+| `server/http-lifecycle.ts` | `HttpEndpoint`: owns the socket and applies `httpEnabled`/`httpHost`/`httpPort` changes — debounced (150 ms) and serialised on a promise chain. |
 | `server/store.ts` | `api_keys` table plus `generateApiKey` / `authenticateApiKey` / `revokeApiKey` / `listApiKeys` / `activeKeyCount`. |
-| `index.server.ts` | Starts/stops the endpoint from the `httpEnabled`/`httpHost`/`httpPort` settings and exposes the four RPCs. |
+| `index.server.ts` | Wires the settings to `HttpEndpoint` and exposes the four RPCs. |
 
 ### 11.3 Endpoints
 
@@ -445,11 +448,27 @@ Secrets are `mf_live_` + 32 CSPRNG bytes in base64url (256-bit entropy). Generat
 
 ### 11.7 Settings and lifecycle
 
-`httpEnabled` (default off), `httpHost` (default `127.0.0.1`), `httpPort` (default `8787`). The endpoint follows the settings: a host/port change restarts it, disabling stops it, and a start failure is reported through `memory-flash.http-status` instead of throwing. The `url` getter renders `127.0.0.1` when bound to `0.0.0.0`/`::`, so a wildcard bind is not copied into an MCP config verbatim. Local agents are unaffected: they keep using the stdio server with no key.
+`httpEnabled` (default off), `httpHost` (default `127.0.0.1`), `httpPort` (default `8787`). The endpoint follows the settings: a host/port change restarts it, disabling stops it, and a start failure is reported through `memory-flash.http-status` instead of throwing. Local agents are unaffected: they keep using the stdio server with no key.
 
-### 11.8 Tests
+`HttpEndpoint` (`server/http-lifecycle.ts`) owns that follow-through, and three properties matter:
 
-`tests/http-server.test.ts` (14 tests) starts the server on an ephemeral port and drives it with `fetch`: health, handshake, tool call, 401/429, method rules, body cap, scope enforcement, read-only `tools/list` filtering, identity-header sanitizing, wildcard-bind URL rendering. `tests/api-keys.test.ts` covers generation, hashing, revocation, expiry and the store's last-used bookkeeping.
+- **Serialised.** Settings arrive per keystroke and the subscribe callback is fire-and-forget, so `stop()`/`start()` pairs could interleave: the second change saw no server, started its own listener, and the slower first change then overwrote the reference — the *old* port stayed bound forever while the status reported the new one, and because the recorded config matched the settings no later change ever restarted it. All work now runs on a single promise chain, so a restart always finishes before the next begins.
+- **Debounced (150 ms).** Typing `0.0.0.0` emits `0`, `0.`, `0.0`, `0.0.`, … Only the final value is applied, so the endpoint is not bounced through half-typed (and partly unresolvable) addresses. The settings screen shows `restarting — still on <live URL>` while a change is in flight.
+- **Status from the socket, not from the settings.** `boundHost`/`boundPort` come from `server.address()`, so the status line reports the interface that is really bound. `bindUrl` is that address verbatim (`http://0.0.0.0:8787/mcp`) and exists only for display — nothing can dial a wildcard. The copy block uses `url`, where a wildcard bind is replaced by the first non-internal IPv4 (LAN/Wi-Fi/Tailscale), then a non-internal IPv6, then loopback; the UI states which address was picked.
+
+`defaultAgentId` and the MCP server name are written into the shared dispatch context on every sync, so changing them applies to live HTTP requests without a restart.
+
+### 11.8 Bind-address changes (0.5.2)
+
+Switching the bind address from `127.0.0.1` to `0.0.0.0` was reported as "still listening on `http://127.0.0.1:8787/mcp`" and could leave the old port bound. Three defects, all fixed:
+
+1. **The status line could not show the new address.** `McpHttpServer.url` rendered `127.0.0.1` for a wildcard bind (so a wildcard would never be copied into an MCP config), and that getter was also what the status line displayed. The verbatim bound interface now comes from `server.address()` and is exposed as `bindUrl` (plus `boundHost`/`boundPort`/`wildcard` in `memory-flash.http-status`), while `url` stays dialable for the copy block.
+2. **Overlapping restarts leaked a listener.** The settings subscribe callback fired `syncHttpServer` without awaiting it, so two changes could interleave their `stop()`/`start()` calls and overwrite the server reference. The old socket then stayed bound while the reported config matched the settings, so no later change ever restarted it — permanently serving on a port the user had moved away from. Reproduced with two unawaited syncs before the fix; `tests/http-lifecycle.test.ts` asserts the old port stops accepting connections.
+3. **Half-typed addresses bounced the endpoint.** `SettingsInput` patches on every keystroke, so `0.0.0.0` restarted the listener seven times and briefly bound unresolvable values (`0.`, `0.0.`, …), each a start failure. Restarts are now debounced (150 ms) and serialised, and the status line shows `restarting — still on <live URL>` while a change is pending.
+
+### 11.9 Tests
+
+`tests/http-server.test.ts` starts the server on an ephemeral port and drives it with `fetch`: health, handshake, tool call, 401/429, method rules, body cap, scope enforcement, read-only `tools/list` filtering, identity-header sanitizing, plus the wildcard helpers (`isWildcardHost`, `resolveRoutableHost`, `bindUrl` vs `url`). `tests/http-lifecycle.test.ts` covers the bind-address switch end to end: loopback → `0.0.0.0` reports the wildcard and stays dialable, a port change leaves no second listener, a typed address applies once, back-to-back changes serialise, a failing address is reported and recovers, disabling and `dispose()` really close the socket, and `defaultAgentId` changes apply without a restart. `tests/api-keys.test.ts` covers generation, hashing, revocation, expiry and the store's last-used bookkeeping.
 
 ## 12. Limitations and roadmap
 

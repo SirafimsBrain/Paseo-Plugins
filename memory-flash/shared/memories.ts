@@ -479,11 +479,29 @@ export type ApiKey = z.infer<typeof apiKeySchema>;
 
 /** State of the HTTP MCP endpoint, for the settings UI indicator. */
 export const httpStatusSchema = z.object({
+  /** Enabled in the settings, whatever the socket did. */
   enabled: z.boolean(),
+  /** A socket is bound right now. */
   listening: z.boolean(),
+  /** Configured bind address (what the user typed). */
   host: z.string(),
+  /** Configured port (what the user typed). */
   port: z.number(),
-  /** `http://<host>:<port>/mcp` when listening, else null. */
+  /** Interface the live socket is bound to; null when not listening. */
+  boundHost: z.string().nullable(),
+  /** Port the live socket is bound to; null when not listening. */
+  boundPort: z.number().nullable(),
+  /** True when the live bind is a wildcard (`0.0.0.0` / `::`). */
+  wildcard: z.boolean(),
+  /**
+   * Verbatim bound URL for the status line — may contain a wildcard address
+   * (`http://0.0.0.0:8787/mcp`), which is not dialable.
+   */
+  bindUrl: z.string().nullable(),
+  /**
+   * Dialable URL for the copy block: a wildcard bind is replaced with a
+   * non-internal LAN/Wi-Fi address, falling back to loopback.
+   */
   url: z.string().nullable(),
   error: z.string().nullable(),
   keyCount: z.number().int(),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useSettings, useRpc } from "@getpaseo/plugin/client";
 import { memoryFlashSettings } from "../shared/settings";
@@ -54,6 +54,16 @@ type SkillRow = {
   installed: boolean;
   upToDate: boolean | null;
 };
+
+/**
+ * True while a restart triggered by the host/port inputs is still in flight —
+ * the settings value has moved on, the live socket has not caught up yet.
+ */
+function httpRestartPending(status: HttpStatus): boolean {
+  return (
+    status.boundHost !== status.host.trim() || status.boundPort !== status.port
+  );
+}
 
 type AgentMcpStatus = {
   path: string;
@@ -166,6 +176,25 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
     void apiKeysRpc({}).then((result) => setApiKeys(result.keys)).catch(() => undefined);
     void httpStatusRpc({}).then(setHttp).catch(() => undefined);
   }, [apiKeysRpc, httpStatusRpc]);
+
+  // Host and port are patched per keystroke, so each edit used to queue its own
+  // 400 ms status poll — typing "0.0.0.0" fired seven. One debounced reload
+  // per burst keeps the status line in step with the last value.
+  const remoteAccessTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRemoteAccessReload = useCallback(() => {
+    if (remoteAccessTimer.current !== null) clearTimeout(remoteAccessTimer.current);
+    remoteAccessTimer.current = setTimeout(() => {
+      remoteAccessTimer.current = null;
+      reloadRemoteAccess();
+    }, 400);
+  }, [reloadRemoteAccess]);
+
+  useEffect(
+    () => () => {
+      if (remoteAccessTimer.current !== null) clearTimeout(remoteAccessTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     reloadSkills();
@@ -291,7 +320,11 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
       return;
     }
     setRevealed({
-      url: http?.url ?? `http://${http?.host ?? "127.0.0.1"}:${http?.port ?? 8787}/mcp`,
+      // `url` is already dialable: a wildcard bind was replaced with a real
+      // LAN/Wi-Fi address on the server side.
+      url:
+        http?.url ??
+        `http://${http?.host ?? "127.0.0.1"}:${http?.port ?? 8787}/mcp`,
       secret: result.secret,
       label,
     });
@@ -453,7 +486,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
             value={values.httpEnabled}
             onValueChange={(enabled: boolean) => {
               patch({ httpEnabled: enabled });
-              setTimeout(reloadRemoteAccess, 400);
+              scheduleRemoteAccessReload();
             }}
           />
           <SettingsInput
@@ -462,7 +495,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
             initialValue={values.httpHost}
             onChangeText={(text: string) => {
               patch({ httpHost: text });
-              setTimeout(reloadRemoteAccess, 400);
+              scheduleRemoteAccessReload();
             }}
           />
           <SettingsInput
@@ -473,13 +506,15 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
               const parsed = Number.parseInt(text, 10);
               if (Number.isFinite(parsed) && String(parsed) === text.trim()) {
                 patch({ httpPort: parsed });
-                setTimeout(reloadRemoteAccess, 400);
+                scheduleRemoteAccessReload();
               }
             }}
           />
           <Text style={{ color: http?.listening ? theme.colors.statusSuccess : http?.error ? danger : fgMuted, fontSize: font(12), ...uiFontStyle }}>
             {http?.listening
-              ? `listening on ${http.url}`
+              ? httpRestartPending(http)
+                ? `restarting — still on ${http.bindUrl ?? http.url}`
+                : `listening on ${http.bindUrl ?? http.url}`
               : http?.error
                 ? `not listening — ${http.error}`
                 : values.httpEnabled
@@ -489,6 +524,11 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
           {values.httpHost !== "127.0.0.1" && values.httpHost !== "localhost" ? (
             <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }}>
               The endpoint is reachable from other machines on the network the address belongs to. Keep it on a VPN (e.g. Tailscale) or behind a firewall.
+            </Text>
+          ) : null}
+          {http?.wildcard ? (
+            <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }}>
+              {values.httpHost} is a wildcard: the socket accepts connections on every interface, but it is not an address you can dial. Remote clients use {http.url} — copy that URL, not the one above.
             </Text>
           ) : null}
 

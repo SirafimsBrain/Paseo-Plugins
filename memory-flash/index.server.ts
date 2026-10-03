@@ -38,7 +38,7 @@ import {
 } from "./shared/memories";
 import type { ApiKey } from "./shared/memories";
 import { MemoryStore, type ApiKeyRecord } from "./server/store";
-import { McpHttpServer } from "./server/http-server";
+import { HttpEndpoint } from "./server/http-lifecycle";
 import { SERVER_VERSION } from "./server/mcp-jsonrpc";
 import { mcpServerCommand } from "./server/mcp-launch";
 import {
@@ -82,74 +82,46 @@ export default function contribute(server: PluginServerContext) {
 
   const store = new MemoryStore();
   let disposed = false;
-  let currentSettings: MemoryFlashSettings | null = null;
 
   // -------------------------------------------------------------------------
   // HTTP MCP endpoint (remote access, 0.5.0). Started and stopped
   // with the httpEnabled/httpHost/httpPort settings; local agents
   // keep using stdio regardless of this setting.
+  //
+  // `HttpEndpoint` owns the socket and serialises the restarts: settings
+  // arrive per keystroke, and overlapping start/stop calls used to leave a
+  // stale listener behind and report the wrong address (see the class docs).
   // -------------------------------------------------------------------------
 
-  let httpServer: McpHttpServer | null = null;
-  let httpConfig: { host: string; port: number } | null = null;
-  let httpError: string | null = null;
+  const httpEndpoint = new HttpEndpoint({
+    store,
+    serverInfo: { name: "memory-flash", version: SERVER_VERSION },
+    log: (message) => console.log(message),
+    logError: (message) => console.error(message),
+  });
 
-  const syncHttpServer = async (values: MemoryFlashSettings): Promise<void> => {
+  const syncHttpServer = (values: MemoryFlashSettings): void => {
     if (disposed) return;
-    if (!values.httpEnabled) {
-      if (httpServer) {
-        await httpServer.stop();
-        httpServer = null;
-      }
-      httpConfig = null;
-      httpError = null;
-      return;
-    }
-    const changed =
-      httpConfig === null ||
-      httpConfig.host !== values.httpHost ||
-      httpConfig.port !== values.httpPort;
-    if (changed && httpServer) {
-      await httpServer.stop();
-      httpServer = null;
-    }
-    if (httpServer === null) {
-      httpConfig = { host: values.httpHost, port: values.httpPort };
-      const server = new McpHttpServer({
-        host: values.httpHost,
-        port: values.httpPort,
-        context: {
-          store,
-          defaultAgentId: values.defaultAgentId || undefined,
-        },
-        serverInfo: { name: values.mcpServerName, version: SERVER_VERSION },
-      });
-      try {
-        await server.start();
-        httpServer = server;
-        httpError = null;
-        console.log(`[memory-flash] HTTP MCP endpoint listening on ${server.url}`);
-      } catch (cause) {
-        httpServer = null;
-        httpError = cause instanceof Error ? cause.message : String(cause);
-        console.error(`[memory-flash] HTTP MCP endpoint failed to start: ${httpError}`);
-      }
-    }
+    httpEndpoint.sync({
+      httpEnabled: values.httpEnabled,
+      httpHost: values.httpHost,
+      httpPort: values.httpPort,
+      defaultAgentId: values.defaultAgentId,
+      serverName: values.mcpServerName,
+    });
   };
 
   // Keep the per-memory history cap and the HTTP endpoint in sync
   // with settings.
   void settings.read().then((state) => {
     if (state.status !== "ready") return;
-    currentSettings = state.values;
     store.historyLimitPerMemory = state.values.historyPerMemory;
-    void syncHttpServer(state.values);
+    syncHttpServer(state.values);
   });
   const unsubscribeSettings = settings.subscribe((state) => {
     if (state.status !== "ready") return;
-    currentSettings = state.values;
     store.historyLimitPerMemory = state.values.historyPerMemory;
-    void syncHttpServer(state.values);
+    syncHttpServer(state.values);
   });
 
   // -------------------------------------------------------------------------
@@ -393,12 +365,7 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(httpStatus, () => ({
-    enabled: currentSettings?.httpEnabled ?? false,
-    listening: httpServer?.listening ?? false,
-    host: currentSettings?.httpHost ?? "127.0.0.1",
-    port: currentSettings?.httpPort ?? 8787,
-    url: httpServer?.url ?? null,
-    error: httpError,
+    ...httpEndpoint.status(),
     keyCount: store.activeKeyCount(),
   }));
 
@@ -408,7 +375,7 @@ export default function contribute(server: PluginServerContext) {
     disposed = true;
     removeCreateHook();
     unsubscribeSettings();
-    if (httpServer) void httpServer.stop();
+    void httpEndpoint.dispose();
     store.close();
   };
 }

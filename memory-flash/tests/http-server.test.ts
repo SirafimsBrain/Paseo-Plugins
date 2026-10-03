@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MemoryStore } from "../server/store";
-import { McpHttpServer } from "../server/http-server";
+import {
+  McpHttpServer,
+  isWildcardHost,
+  resolveRoutableHost,
+} from "../server/http-server";
 
 let dir: string;
 let store: MemoryStore;
@@ -204,5 +208,58 @@ describe("McpHttpServer", () => {
     const { record, secret } = store.generateApiKey({ label: "laptop" });
     await postJson("/mcp", { jsonrpc: "2.0", id: 1, method: "ping" }, withAuth(secret));
     expect(store.listApiKeys().find((key) => key.id === record.id)!.lastUsedAt).not.toBeNull();
+  });
+});
+
+describe("wildcard bind addresses", () => {
+  it("recognises every spelling of a wildcard host", () => {
+    for (const host of ["0.0.0.0", "0.0.0.0 ", "::", "[::]", "*", ""]) {
+      expect(isWildcardHost(host)).toBe(true);
+    }
+    for (const host of ["127.0.0.1", "localhost", "100.64.0.2", "::1", "0.0.0.1"]) {
+      expect(isWildcardHost(host)).toBe(false);
+    }
+  });
+
+  it("replaces a wildcard with a dialable address, not the wildcard itself", () => {
+    for (const host of ["0.0.0.0", "::", "*", ""]) {
+      const resolved = resolveRoutableHost(host);
+      expect(isWildcardHost(resolved)).toBe(false);
+      expect(resolved.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps a concrete bind address as-is", () => {
+    expect(resolveRoutableHost("127.0.0.1")).toBe("127.0.0.1");
+    expect(resolveRoutableHost("100.64.0.2")).toBe("100.64.0.2");
+    expect(resolveRoutableHost(" ::1 ")).toBe("::1");
+  });
+
+  it("reports the bound interface verbatim and a dialable copy URL", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mf-wildcard-"));
+    const store = new MemoryStore({ dbPath: path.join(dir, "memory.db") });
+    const server = new McpHttpServer({
+      host: "0.0.0.0",
+      port: 0,
+      context: { store },
+      serverInfo: { name: "memory-flash", version: "0.1.1" },
+    });
+    try {
+      await server.start();
+      // bindUrl is the truth for the status line; url is what gets copied.
+      expect(server.boundHost).toBe("0.0.0.0");
+      expect(server.wildcardBound).toBe(true);
+      expect(server.bindUrl).toBe(`http://0.0.0.0:${server.boundTcpPort}/mcp`);
+      expect(server.url).not.toContain("0.0.0.0");
+      expect(server.url).toBe(
+        `http://${resolveRoutableHost("0.0.0.0")}:${server.boundTcpPort}/mcp`,
+      );
+      const health = await fetch(`${new URL(server.url!).origin}/healthz`);
+      expect(health.status).toBe(200);
+    } finally {
+      await server.stop();
+      store.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

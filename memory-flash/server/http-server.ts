@@ -1,4 +1,5 @@
 import * as http from "node:http";
+import * as os from "node:os";
 import type { ApiKeyRecord } from "./store";
 import {
   handleJsonRpcRequest,
@@ -82,6 +83,48 @@ const READ_ONLY_TOOLS = new Set([
 /** Reject bodies larger than this (bytes). */
 const MAX_BODY_BYTES = 1024 * 1024;
 
+/**
+ * Bind addresses that mean "every interface". Node accepts them, but nothing
+ * can be *dialled* at them, so they must never be pasted into an MCP config.
+ */
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]", "*", ""]);
+
+/** True for `0.0.0.0`, `::`, `*` and the empty string. */
+export function isWildcardHost(host: string): boolean {
+  return WILDCARD_HOSTS.has(host.trim().toLowerCase());
+}
+
+/** Wraps a bare IPv6 literal in brackets so it can sit in a URL host part. */
+function urlHost(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+/**
+ * Picks an address other machines can actually dial.
+ *
+ * A wildcard bind has no address of its own, so the first non-internal IPv4
+ * (LAN/Wi-Fi, Tailscale included) is used, then a non-internal IPv6, and only
+ * as a last resort loopback — correct for the tunnel case, but it does not
+ * reach the network, so callers should show which one was picked.
+ */
+export function resolveRoutableHost(host: string): string {
+  const trimmed = host.trim();
+  if (!isWildcardHost(trimmed)) return trimmed;
+  const addresses: os.NetworkInterfaceInfo[] = [];
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) addresses.push(entry);
+  }
+  // `family` is the string "IPv4" on current Node and the number 4 on older
+  // releases, so both spellings are accepted.
+  const isIpv4 = (entry: os.NetworkInterfaceInfo): boolean =>
+    entry.family === "IPv4" || (entry.family as unknown as number) === 4;
+  const ipv4 = addresses.find((entry) => isIpv4(entry) && !entry.internal);
+  if (ipv4) return ipv4.address;
+  const ipv6 = addresses.find((entry) => !isIpv4(entry) && !entry.internal);
+  if (ipv6) return ipv6.address;
+  return "127.0.0.1";
+}
+
 /** Window for counting failed authentications. */
 const AUTH_FAILURE_WINDOW_MS = 60_000;
 /** Failed authentications per IP within the window before 429. */
@@ -127,6 +170,8 @@ export class McpHttpServer {
   private server: http.Server | null = null;
   /** Actual bound port — differs from the requested one when 0 (ephemeral). */
   private boundPort: number | null = null;
+  /** Actual bound address as reported by the OS (`0.0.0.0`, `127.0.0.1`, …). */
+  private boundAddress: string | null = null;
   private readonly rateLimiter = new AuthFailureRateLimiter();
 
   constructor(options: HttpServerOptions) {
@@ -137,13 +182,43 @@ export class McpHttpServer {
     return this.server !== null && this.server.listening;
   }
 
+  /** Interface the endpoint is actually bound to, verbatim. */
+  get boundHost(): string {
+    return this.boundAddress ?? this.options.host;
+  }
+
+  /** Port the endpoint is actually bound to (differs when 0 was requested). */
+  get boundTcpPort(): number {
+    return this.boundPort ?? this.options.port;
+  }
+
+  /**
+   * URL of the *bound* endpoint, including a wildcard address.
+   *
+   * This is what the settings screen shows as `listening on …`: it reports the
+   * interface the socket really sits on, so switching the bind address is
+   * visible. `http://0.0.0.0:8787/mcp` is not dialable and must not be copied
+   * into an MCP config — use `url` for that.
+   */
+  get bindUrl(): string | null {
+    if (!this.listening) return null;
+    return `http://${urlHost(this.boundHost)}:${this.boundTcpPort}${MCP_HTTP_PATH}`;
+  }
+
+  /**
+   * URL a remote client can be pointed at. A wildcard bind is replaced by the
+   * first non-internal IPv4 (LAN/Wi-Fi/Tailscale), then a non-internal IPv6,
+   * then loopback, so the copy block never contains `0.0.0.0`.
+   */
   get url(): string | null {
     if (!this.listening) return null;
-    const host = this.options.host;
-    const displayHost =
-      host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
-    const port = this.boundPort ?? this.options.port;
-    return `http://${displayHost}:${port}${MCP_HTTP_PATH}`;
+    const host = resolveRoutableHost(this.boundHost);
+    return `http://${urlHost(host)}:${this.boundTcpPort}${MCP_HTTP_PATH}`;
+  }
+
+  /** True when the bound address is a wildcard other than loopback. */
+  get wildcardBound(): boolean {
+    return isWildcardHost(this.boundHost);
   }
 
   start(): Promise<void> {
@@ -163,6 +238,7 @@ export class McpHttpServer {
         const address = server.address();
         if (address && typeof address === "object") {
           this.boundPort = address.port;
+          this.boundAddress = address.address;
         }
         resolve();
       });
