@@ -78,6 +78,18 @@ X-Memory-Flash-Host: studio-laptop
 
 They are advisory. The memory host authenticates on the API key alone and uses the headers only for its audit log. `sendIdentityHeaders: false` omits them for a memory host that does not understand them; the key remains the credential.
 
+### 4.1 Settings schema constraints (since 0.1.2)
+
+`shared/settings.ts` declares `clientId: z.string().trim().max(64).default("").refine(v => v === "" || UUID_RE.test(v))` and `hostname: z.string().trim().max(80).default("")`. Neither field has a minimum length, because the empty string is the documented "use the generated value" state that `resolveIdentity` (see §4) resolves to a fresh UUID and `os.hostname()`.
+
+Before 0.1.2 both fields carried `min(8)` / `min(1)` while defaulting to `""`, which made a fresh install report `status: "invalid"`. The mechanism matters, because it is a general hazard for plugin schemas:
+
+1. The daemon (`plugins/settings/index.js` → `read()`) finds no settings file, parses `{}` and gets the defaults back with `status: "ready"`. In Zod 4 a `.default()` value does not pass through the field's own checks.
+2. The client (`useSettings`) calls `safeParse(state.values)` on those already-expanded values. The keys now exist, `.default()` no longer applies, and `min()` is enforced — so the store flips to `invalid` with `too_small` issues for `clientId` and `hostname`.
+3. `client/settings-screen.tsx` renders `settings.error` verbatim in that state, so the user saw the pretty-printed Zod issue array and had no way to recover: the form, `patch()` and `reset()` are all behind the `status === "ready"` branch, and a `save` would have been rejected by the same schema anyway.
+
+The rule for every plugin schema here: **a default must satisfy its own schema, and a constraint that would reject the default belongs on the value only when it is set** (the `.refine()` above) rather than on the type. `tests/settings-schema.test.ts` pins this down with `schema.parse(schema.parse({}))` plus the daemon→client round trip.
+
 ## 5. Connection check
 
 `probeConnection(url, secret, identity)` in `server/probe.ts` runs the same three steps a real agent performs, each with its own 8 s timeout and `AbortController`, and returns a `ConnectionCheck`:
@@ -153,6 +165,7 @@ The residual risk is inherent to the design and accepted: a client that stores a
 - `tests/connections.test.ts` — CRUD, URL normalization, prefix derivation, secret redaction, 0600 permissions, state preservation on edit, corruption recovery.
 - `tests/probe.test.ts` — a stub memory-flash server: success path, Bearer + identity headers present, 401, missing `/healthz`, broken handshake, unreachable host, health-URL derivation, `host:port` paste.
 - `tests/identity-conflict.test.ts` — conflict detection (config entry, data dir, disabled entry, corrupted config, both plugins present), UUID generation/validation, hostname resolution.
+- `tests/settings-schema.test.ts` — the settings schema contract: defaults expand, `schema.parse(schema.parse({}))` round-trips (the fresh-install regression for §4.1), pinned UUID validation and trimming, upper bounds.
 - `tests/server-contribution.test.ts` — the `agent.create` hook with a fake `PluginServerContext`: injection shape, pinned vs generated UUID, stability across agents, multi-connection naming, disabled/skip/preserve behaviour, identity-header toggle, and the RPC surface (list/save/delete, status counts, missing-connection check, conflict check, UUID regeneration).
 
 ## 11. Compatibility
@@ -160,8 +173,9 @@ The residual risk is inherent to the design and accepted: a client that stores a
 Built against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
-- `npm test` — 4 suites, 40 tests, green.
+- `npm test` — 5 suites, 47 tests, green (40 before the 0.1.2 settings-schema regression suite).
 - Uses: `registerSettings`, `before("agent.create")`, `handle`, and the host's own MCP config type (`type: "http"`, `url`, `headers`) reached through `request.config.mcpServers`.
+- Fix verification for 0.1.2 was done against the same Zod version the host ships (`zod@4.6.5`): the daemon step (`schema.parse({})`) and the client step (`safeParse(expanded)`) were executed directly against `shared/settings.ts` and both succeed, and `tests/settings-schema.test.ts` locks the behaviour in. Host-side re-check: `paseo plugin update memory-flash-client` on the machine where the plugin is installed, then open the settings screen — it must render the form with both identity fields empty instead of a Zod issue list.
 - Since 0.1.1 the plugin references **no package outside Paseo's host-supplied list**, so it has no install-time build step: `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash-client` clones into `~/.paseo/plugins/memory-flash-client/<revision>/checkout/memory-flash-client` and bundles it there with no npm-registry access. Before that it carried a type-only import of `McpHttpServerConfig` from `@getpaseo/protocol/agent-types`, which is not host-supplied and made the host's bundler fail with `Could not resolve type dependency` whenever `node_modules` was absent. See [__doc.md](../command-center/__doc.md#5f-version-051--install-time-resolution-and-the-host-bundler-boundary) in command-center for the host-side rules.
 
 ## 12. Limitations and roadmap

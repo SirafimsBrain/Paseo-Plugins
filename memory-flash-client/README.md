@@ -43,11 +43,13 @@ The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugi
 
 The identity headers grant no access — the memory host authenticates on the API key alone. They exist purely so the memory host can log which client connected.
 
+Both fields accept an empty value on purpose: empty `clientId` means "use the plugin's generated UUID" and empty `Host name` means "use this machine's `os.hostname()`". A pinned `Client UUID` must be a real UUID. (Version 0.1.2: the schema previously required a minimum length on both fields, so a fresh install — where both are empty — reported its settings as invalid and the settings screen showed a raw Zod error instead of the form.)
+
 ## Development
 
 ```bash
 npm install
-npm test         # vitest: connections store, probe, identity/conflict, server contribution (MCP injection)
+npm test         # vitest: connections store, probe, identity/conflict, settings schema, server contribution (MCP injection)
 npm run typecheck
 ```
 

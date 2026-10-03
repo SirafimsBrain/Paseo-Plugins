@@ -16,6 +16,15 @@ import { z } from "zod";
  * user asks; the hostname defaults to `os.hostname()` and can be
  * overridden (e.g. "studio-laptop").
  */
+/**
+ * Canonical client UUID shape. Kept in sync with `isValidClientId` in
+ * `server/identity.ts`; the schema only enforces it for a *pinned*
+ * value, because the empty string is a legal "use the generated UUID"
+ * state (see `resolveIdentity` in `index.server.ts`).
+ */
+const CLIENT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const memoryFlashClientSettings = defineSettings({
   id: "memory-flash-client",
   scope: "host",
@@ -31,13 +40,28 @@ export const memoryFlashClientSettings = defineSettings({
      * Stable client UUID sent as `X-Memory-Flash-Client-Id` on every
      * remote request. Generated once and then kept stable; the identity
      * lets the memory host tell several clients apart in its audit log.
+     *
+     * Empty (the default) means "let the plugin generate and use its own
+     * UUID", so the schema accepts it and only validates a pinned value.
+     * A `min()` here would make the default self-invalidating: the
+     * daemon fills the default in when the settings file is missing and
+     * the client then re-validates the expanded values, so any default
+     * that fails the same constraints reports the store as `invalid`.
      */
-    clientId: z.string().trim().min(8).max(64).default(""),
+    clientId: z
+      .string()
+      .trim()
+      .max(64)
+      .default("")
+      .refine((value) => value === "" || CLIENT_ID_PATTERN.test(value), {
+        message: "Must be a UUID, or empty to use an automatically generated one",
+      }),
     /**
-     * Human-readable host name sent as `X-Memory-Flash-Host`. Defaults
-     * to the machine's `os.hostname()` on first run.
+     * Human-readable host name sent as `X-Memory-Flash-Host`. Empty
+     * (the default) means "use the machine's `os.hostname()`", so no
+     * minimum length is enforced.
      */
-    hostname: z.string().trim().min(1).max(80).default(""),
+    hostname: z.string().trim().max(80).default(""),
     /**
      * MCP server name prefix used when injecting the remote memory
      * servers into agents. With a single connection the name is exactly
