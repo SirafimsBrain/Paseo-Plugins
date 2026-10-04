@@ -192,3 +192,55 @@ export const regenerateClientId = defineRpc({
   input: z.object({}),
   output: z.object({ clientId: z.string() }),
 });
+
+// ---------------------------------------------------------------------------
+// Agent skill
+//
+// Installed on the *client* machine so its agents learn that the memory_*
+// tools reach a shared team base owned by another machine, and use it as
+// intensively as a local memory-flash agent would.
+// ---------------------------------------------------------------------------
+
+export const skillTargetSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  /** Absolute directory that receives the skill folder. */
+  path: z.string(),
+  /** Whether the directory existed on this machine. */
+  detected: z.boolean(),
+});
+
+export type SkillTarget = z.infer<typeof skillTargetSchema>;
+
+export const skillStatusTargetSchema = skillTargetSchema.extend({
+  installed: z.boolean(),
+  /** True when the on-disk copy matches the bundled skill content. */
+  upToDate: z.boolean().nullable(),
+});
+
+export type SkillStatusTarget = z.infer<typeof skillStatusTargetSchema>;
+
+/** The bundled SKILL.md — shown as a preview in the settings screen. */
+export const skillPreview = defineRpc({
+  name: "memory-flash-client.skill-preview",
+  input: z.object({}),
+  output: z.object({ markdown: z.string() }),
+});
+
+export const installSkill = defineRpc({
+  name: "memory-flash-client.skill-install",
+  input: z.object({ targetId: z.string() }),
+  output: z.object({ ok: z.boolean(), path: z.string().nullable(), error: z.string().nullable() }),
+});
+
+export const uninstallSkill = defineRpc({
+  name: "memory-flash-client.skill-uninstall",
+  input: z.object({ targetId: z.string() }),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const skillStatus = defineRpc({
+  name: "memory-flash-client.skill-status",
+  input: z.object({}),
+  output: z.object({ targets: z.array(skillStatusTargetSchema) }),
+});

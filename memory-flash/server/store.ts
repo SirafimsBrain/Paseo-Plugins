@@ -170,7 +170,7 @@ export class MemoryStore {
   private stmtApiKeyByHash!: StatementSync;
   private stmtApiKeyById!: StatementSync;
   private stmtApiKeyAll!: StatementSync;
-  private stmtApiKeyRevoke!: StatementSync;
+  private stmtApiKeyDelete!: StatementSync;
   private stmtApiKeyTouch!: StatementSync;
   private stmtApiKeyCount!: StatementSync;
 
@@ -347,7 +347,7 @@ export class MemoryStore {
     this.stmtApiKeyByHash = this.db.prepare("SELECT * FROM api_keys WHERE key_hash = ?");
     this.stmtApiKeyById = this.db.prepare("SELECT * FROM api_keys WHERE id = ?");
     this.stmtApiKeyAll = this.db.prepare("SELECT * FROM api_keys ORDER BY created_at DESC, id");
-    this.stmtApiKeyRevoke = this.db.prepare("UPDATE api_keys SET revoked_at = ? WHERE id = ?");
+    this.stmtApiKeyDelete = this.db.prepare("DELETE FROM api_keys WHERE id = ?");
     this.stmtApiKeyTouch = this.db.prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?");
     this.stmtApiKeyCount = this.db.prepare("SELECT COUNT(*) AS c FROM api_keys WHERE revoked_at IS NULL");
   }
@@ -915,15 +915,22 @@ export class MemoryStore {
     return record;
   }
 
-  /** Marks a key revoked. Returns false when the id is unknown. */
-  revokeApiKey(id: string): boolean {
+  /**
+   * Deletes a key outright. Returns false when the id is unknown.
+   *
+   * Deletion, not revocation: the row is gone, so the same label can be
+   * re-issued immediately and the list never accumulates dead entries.
+   * A revoked row from an older version stays rejected by
+   * `authenticateApiKey` until it is deleted here.
+   */
+  deleteApiKey(id: string): boolean {
     const result = this.withWriteRetry(() =>
-      this.stmtApiKeyRevoke.run(new Date().toISOString(), id),
+      this.stmtApiKeyDelete.run(id),
     ) as { changes: number | bigint };
     return Number(result.changes) > 0;
   }
 
-  /** All keys (including revoked), newest first, without secret material. */
+  /** All keys, newest first, without secret material. */
   listApiKeys(): ApiKeyRecord[] {
     const rows = this.stmtApiKeyAll.all() as Array<Record<string, unknown>>;
     return rows.map((row) => this.rowToApiKey(row));

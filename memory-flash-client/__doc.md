@@ -90,7 +90,27 @@ Before 0.1.2 both fields carried `min(8)` / `min(1)` while defaulting to `""`, w
 
 The rule for every plugin schema here: **a default must satisfy its own schema, and a constraint that would reject the default belongs on the value only when it is set** (the `.refine()` above) rather than on the type. `tests/settings-schema.test.ts` pins this down with `schema.parse(schema.parse({}))` plus the daemon→client round trip.
 
-## 5. Connection check
+## 5. Agent skill (since 0.2.0)
+
+The plugin ships its own `SKILL.md` — `memory-flash-remote` — installed into the same agent skill directories as the memory-flash skill (`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills`, `~/.kilo/skills`). The settings screen has an **Agent skill** card: *Install into all agents*, one Install/Remove/Update row per target with an `installed · up to date | outdated` state, a message line and a preview of the first lines.
+
+**Why the client needs its own skill.** The injected MCP servers make the `memory_*` tools *available* on the client machine, but availability is not usage. Without instruction, an agent treats them as an optional extra on a machine that "does not have the memory plugin", searches once at most, and writes nothing — which is exactly when the shared base is worth the most: before a task, and right after a fix. Because the two plugins are installed independently (a client machine has no memory-flash at all), memory-flash's own `SKILL.md` is not present there.
+
+**What it says.** The protocol mirrors [memory-flash/__doc.md §5](../memory-flash/__doc.md) — 2–4 differently worded searches before a non-trivial task, `memory_get` instead of trusting a snippet, widen before concluding nothing is known, every bugfix / positive result / user correction written back, search-before-save to avoid duplicates, mandatory project+topic tagging, always a handoff — with three adaptations that only make sense across the network:
+
+| Remote fact | Consequence in the skill |
+| ----------- | ------------------------ |
+| The database belongs to the memory host and is shared with other machines | Write for an agent that has no access to this machine's files; the handoff must be self-contained. |
+| Access is decided by the key's scope | A `read` key exposes only `memory_search`, `memory_get`, `memory_list_by_tag`, `memory_stats`; write tools are refused with an insufficient-scope error, which the agent must report rather than silently skip. |
+| Requests cross the network | Batch related work, but never skip a search because of latency. |
+
+It also warns that several configured hosts expose identically named tools (§13).
+
+Implementation: `server/skill.ts` — `skillMarkdown()` / `skillFiles()` / `skillTargets()` / `skillStatuses()` / `installSkill()` / `uninstallSkill()`, the same shape as memory-flash's module. `REMOTE_TOOL_NAMES` is a literal list rather than an import: this plugin must stay free of non-host dependencies so it installs from a clean checkout with no build step (see §12), and the two plugins are separate checkouts.
+
+---
+
+## 6. Connection check
 
 `probeConnection(url, secret, identity)` in `server/probe.ts` runs the same three steps a real agent performs, each with its own 8 s timeout and `AbortController`, and returns a `ConnectionCheck`:
 
@@ -100,7 +120,7 @@ The rule for every plugin schema here: **a default must satisfy its own schema, 
 
 `checkedAt` and latency are recorded on the connection so the surface can show a status line. The check never logs the secret and never throws — failures come back as `status: "error"` with a readable message (refused, DNS, timeout, non-200, JSON-RPC error). `checkConnectionDraft` runs the same probe for an unsaved URL + key, so the UI can validate before saving.
 
-## 6. MCP injection
+## 7. MCP injection
 
 Each enabled connection becomes one HTTP MCP server in the agent config, built as an `as const` literal and type-checked where it is stored into `mcpServers` — the plugin deliberately does not import the MCP config types from `@getpaseo/protocol`, which Paseo does not supply to plugins.
 
@@ -123,7 +143,7 @@ Naming: a single enabled connection is named exactly `mcpServerName` (default `m
 
 The injection log line (`[memory-flash-client] MCP injected: <name> → <url> (client <host>)`) deliberately omits the key, so plugin logs are safe to paste into an issue.
 
-## 7. Coexistence with memory-flash (conflict check)
+## 8. Coexistence with memory-flash (conflict check)
 
 `server/conflict.ts` answers one question: is memory-flash also installed on this host? It reads `$PASEO_HOME/config.json` (the `plugins` map, honouring `enabled: false`) and checks for `$PASEO_HOME/plugins/memory-flash`, and reports:
 
@@ -134,7 +154,7 @@ The injection log line (`[memory-flash-client] MCP injected: <name> → <url> (c
 
 Detection is filesystem/config-based on purpose: it needs no daemon RPC and works even when the memory-flash plugin is disabled but its data directory still exists.
 
-## 8. RPC surface
+## 9. RPC surface
 
 | Contract | Input | Output |
 | --- | --- | --- |
@@ -146,8 +166,12 @@ Detection is filesystem/config-based on purpose: it needs no daemon RPC and work
 | `memory-flash-client.status` | `{}` | `{ clientId, hostname, identityHost, totalConnections, enabledConnections, okConnections, injectIntoAgents, mcpServerName, connectionsPath }` |
 | `memory-flash-client.conflict-check` | `{}` | `ConflictCheck` |
 | `memory-flash-client.regenerate-id` | `{}` | `{ clientId }` |
+| `memory-flash-client.skill-preview` | `{}` | `{ markdown }` |
+| `memory-flash-client.skill-status` | `{}` | `{ targets: [SkillStatusTarget] }` |
+| `memory-flash-client.skill-install` | `{ targetId }` | `{ ok, path, error }` |
+| `memory-flash-client.skill-uninstall` | `{ targetId }` | `{ ok, error }` |
 
-## 9. Security posture
+## 10. Security posture
 
 | Measure | Where |
 | ------- | ----- |
@@ -160,25 +184,26 @@ Detection is filesystem/config-based on purpose: it needs no daemon RPC and work
 
 The residual risk is inherent to the design and accepted: a client that stores a bearer key locally is a bearer credential, so the file is the trust boundary, and the memory host must be reachable only over a trusted network (VPN/LAN/loopback) or behind HTTPS.
 
-## 10. Tests
+## 11. Tests
 
 - `tests/connections.test.ts` — CRUD, URL normalization, prefix derivation, secret redaction, 0600 permissions, state preservation on edit, corruption recovery.
 - `tests/probe.test.ts` — a stub memory-flash server: success path, Bearer + identity headers present, 401, missing `/healthz`, broken handshake, unreachable host, health-URL derivation, `host:port` paste.
 - `tests/identity-conflict.test.ts` — conflict detection (config entry, data dir, disabled entry, corrupted config, both plugins present), UUID generation/validation, hostname resolution.
+- `tests/skill.test.ts` — the agent skill: frontmatter shape, every remote tool named, the intensive read/write rules present, the remote-specific notes (shared host, key scope, several hosts), and install → status → uninstall against a temporary `HOME` (nothing touches the real agent skill directories).
 - `tests/settings-schema.test.ts` — the settings schema contract: defaults expand, `schema.parse(schema.parse({}))` round-trips (the fresh-install regression for §4.1), pinned UUID validation and trimming, upper bounds.
 - `tests/server-contribution.test.ts` — the `agent.create` hook with a fake `PluginServerContext`: injection shape, pinned vs generated UUID, stability across agents, multi-connection naming, disabled/skip/preserve behaviour, identity-header toggle, and the RPC surface (list/save/delete, status counts, missing-connection check, conflict check, UUID regeneration).
 
-## 11. Compatibility
+## 12. Compatibility
 
 Built against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
-- `npm test` — 5 suites, 47 tests, green (40 before the 0.1.2 settings-schema regression suite).
+- `npm test` — 6 suites, 53 tests, green (47 before the 0.2.0 agent-skill suite).
 - Uses: `registerSettings`, `before("agent.create")`, `handle`, and the host's own MCP config type (`type: "http"`, `url`, `headers`) reached through `request.config.mcpServers`.
 - Fix verification for 0.1.2 was done against the same Zod version the host ships (`zod@4.6.5`): the daemon step (`schema.parse({})`) and the client step (`safeParse(expanded)`) were executed directly against `shared/settings.ts` and both succeed, and `tests/settings-schema.test.ts` locks the behaviour in. Host-side re-check: `paseo plugin update memory-flash-client` on the machine where the plugin is installed, then open the settings screen — it must render the form with both identity fields empty instead of a Zod issue list.
 - Since 0.1.1 the plugin references **no package outside Paseo's host-supplied list**, so it has no install-time build step: `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash-client` clones into `~/.paseo/plugins/memory-flash-client/<revision>/checkout/memory-flash-client` and bundles it there with no npm-registry access. Before that it carried a type-only import of `McpHttpServerConfig` from `@getpaseo/protocol/agent-types`, which is not host-supplied and made the host's bundler fail with `Could not resolve type dependency` whenever `node_modules` was absent. See [__doc.md](../command-center/__doc.md#5f-version-051--install-time-resolution-and-the-host-bundler-boundary) in command-center for the host-side rules.
 
-## 12. Limitations and roadmap
+## 13. Limitations and roadmap
 
 - **One key per connection, no rotation helper.** Rotating means generating a new key on the memory host, editing the connection, then revoking the old key. A "rotate" action that walks both sides would be nicer.
 - **No TLS.** The endpoint is plain HTTP by design; a VPN or an SSH tunnel is the intended front. A future `https` URL is already accepted by the URL normalizer.

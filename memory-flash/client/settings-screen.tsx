@@ -10,10 +10,12 @@ import {
   SettingsSection,
   SettingsSelect,
   SettingsSwitch,
+  type SettingsInputHandle,
 } from "@getpaseo/plugin/client/ui";
 import {
   clineMcpStatus,
   codexMcpStatus,
+  deleteApiKey,
   generateApiKey,
   httpStatus,
   listApiKeys,
@@ -27,7 +29,6 @@ import {
   purgeMemories,
   registerAllAgentMcp,
   registerClineMcp,
-  revokeApiKey,
   skillPreview,
   skillStatus,
   unregisterClineMcp,
@@ -115,7 +116,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
   const registerAllRpc = useRpc(registerAllAgentMcp);
   const apiKeysRpc = useRpc(listApiKeys);
   const generateKeyRpc = useRpc(generateApiKey);
-  const revokeKeyRpc = useRpc(revokeApiKey);
+  const deleteKeyRpc = useRpc(deleteApiKey);
   const httpStatusRpc = useRpc(httpStatus);
 
   const agentMcpAgents: AgentMcpAgent[] = [
@@ -161,6 +162,33 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
   const [remoteMessage, setRemoteMessage] = useState<string | null>(null);
   /** Secret shown exactly once, right after generation. */
   const [revealed, setRevealed] = useState<{ url: string; secret: string; label: string } | null>(null);
+  // `SettingsInput` is uncontrolled: `initialValue` only lands on mount and
+  // `setState` alone never clears what is on screen. Resetting the label
+  // state after a generate therefore left the old name visible while the
+  // state was empty, and the next click failed with a "give the key a name"
+  // error that reads like the field hint — so no new key could be issued.
+  // The handles read the live text and clear the screen in step with state.
+  const keyLabelInput = useRef<SettingsInputHandle | null>(null);
+  const keyTtlInput = useRef<SettingsInputHandle | null>(null);
+
+  /**
+   * Clears an uncontrolled input and its state together. Returns false when
+   * the handle is missing, in which case the visible text cannot be changed
+   * and the state is deliberately left alone so the two never disagree.
+   */
+  const resetKeyField = useCallback(
+    (
+      handle: { current: SettingsInputHandle | null },
+      setState: (value: string) => void,
+      next: string,
+    ): boolean => {
+      if (!handle.current) return false;
+      handle.current.replaceText(next);
+      setState(next);
+      return true;
+    },
+    [],
+  );
 
   const reloadSkills = useCallback(() => {
     void skillStatusRpc({}).then((result) => setSkillRows(result.targets)).catch(() => undefined);
@@ -304,12 +332,14 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
    */
   const generateKey = async () => {
     setRemoteMessage(null);
-    const label = keyLabel.trim();
+    // The inputs are uncontrolled, so the live text is what the user sees —
+    // read the handle first and treat it as the source of truth when present.
+    const label = (keyLabelInput.current?.getText() ?? keyLabel).trim();
     if (label.length === 0) {
-      setRemoteMessage("Give the key a name (e.g. laptop-office) so you can recognize it later.");
+      setRemoteMessage("Type a name for the key (e.g. laptop-office) before generating it.");
       return;
     }
-    const ttl = Number.parseInt(keyTtl, 10);
+    const ttl = Number.parseInt(keyTtlInput.current?.getText() ?? keyTtl, 10);
     const result = await generateKeyRpc({
       label,
       ttlDays: Number.isFinite(ttl) && ttl > 0 ? ttl : 0,
@@ -328,18 +358,20 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
       secret: result.secret,
       label,
     });
-    setKeyLabel("");
-    setKeyTtl("0");
+    // The name stays filled in on purpose: the usual follow-up after deleting a
+    // key is re-issuing one for the same machine with the same name, and that
+    // now takes a single click.
+    resetKeyField(keyTtlInput, setKeyTtl, "0");
     reloadRemoteAccess();
   };
 
-  const revokeKey = async (key: ApiKey) => {
+  const deleteKey = async (key: ApiKey) => {
     setRemoteMessage(null);
-    const result = await revokeKeyRpc({ id: key.id }).catch(() => null);
+    const result = await deleteKeyRpc({ id: key.id }).catch(() => null);
     setRemoteMessage(
       result?.ok
-        ? `Key ${key.label} revoked — clients using it are refused immediately.`
-        : (result?.error ?? "Revoke failed."),
+        ? `Key ${key.label} deleted — clients using it are refused immediately, and the name is free again.`
+        : (result?.error ?? "Delete failed."),
     );
     reloadRemoteAccess();
   };
@@ -565,15 +597,15 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
                   {key.expiresAt ? ` · expires ${key.expiresAt}` : " · never expires"}
                 </Text>
                 {key.revokedAt ? (
-                  <Text style={{ color: danger, fontSize: font(10), ...uiFontStyle }}>revoked {key.revokedAt}</Text>
+                  <Text style={{ color: danger, fontSize: font(10), ...uiFontStyle }}>
+                    revoked {key.revokedAt} · from an earlier version, delete it to free the name
+                  </Text>
                 ) : null}
               </View>
               <View style={styles.skillActions}>
-                {key.revokedAt === null ? (
-                  <Pressable onPress={() => void revokeKey(key)} style={[styles.skillButton, { borderColor: danger }]}>
-                    <Text style={{ color: danger, fontSize: font(11), ...uiFontStyle }}>Revoke</Text>
-                  </Pressable>
-                ) : null}
+                <Pressable onPress={() => void deleteKey(key)} style={[styles.skillButton, { borderColor: danger }]}>
+                  <Text style={{ color: danger, fontSize: font(11), ...uiFontStyle }}>Delete</Text>
+                </Pressable>
               </View>
             </View>
           ))}
@@ -588,6 +620,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
             initialValue={keyLabel}
             placeholder="laptop-office"
             onChangeText={setKeyLabel}
+            ref={keyLabelInput}
           />
           <SettingsInput
             label="New key — lifetime (days)"
@@ -595,6 +628,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
             initialValue={keyTtl}
             placeholder="0"
             onChangeText={setKeyTtl}
+            ref={keyTtlInput}
           />
           <SettingsSelect
             label="New key — scope"

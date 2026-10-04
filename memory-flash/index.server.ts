@@ -17,7 +17,7 @@ import {
   memoryStats,
   purgeMemories,
   restoreRevision,
-  revokeApiKey,
+  deleteApiKey,
   saveMemory,
   saveRemoteHost,
   searchMemories,
@@ -356,9 +356,11 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(revokeApiKey, (input) => {
+  // Deletes the row outright rather than flagging it revoked, so the label
+  // can be reused immediately and dead keys do not pile up in the list.
+  server.handle(deleteApiKey, (input) => {
     try {
-      return { ok: store.revokeApiKey(input.id), error: null };
+      return { ok: store.deleteApiKey(input.id), error: null };
     } catch (cause) {
       return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
     }

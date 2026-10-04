@@ -6,9 +6,13 @@ import {
   clientStatus,
   conflictCheck,
   deleteConnection,
+  installSkill,
   listConnections,
   regenerateClientId,
   saveConnection,
+  skillPreview,
+  skillStatus,
+  uninstallSkill,
 } from "./shared/contracts";
 import {
   connectionsFilePath,
@@ -21,6 +25,12 @@ import {
 } from "./server/connections";
 import { probeConnection } from "./server/probe";
 import { checkConflict } from "./server/conflict";
+import {
+  installSkill as installRemoteSkill,
+  skillMarkdown,
+  skillStatuses,
+  uninstallSkill as uninstallRemoteSkill,
+} from "./server/skill";
 import {
   generateClientId,
   isValidClientId,
@@ -209,6 +219,16 @@ export default function contribute(server: PluginServerContext) {
     fallbackClientId = next;
     return { clientId: next };
   });
+
+  // Agent skill: teaches this machine's agents that the injected remote
+  // servers are a shared team base, and when to search and write.
+  server.handle(skillPreview, () => ({ markdown: skillMarkdown() }));
+
+  server.handle(skillStatus, () => ({ targets: skillStatuses() }));
+
+  server.handle(installSkill, (input) => installRemoteSkill(input.targetId));
+
+  server.handle(uninstallSkill, (input) => uninstallRemoteSkill(input.targetId));
 
   // -------------------------------------------------------------------------
 

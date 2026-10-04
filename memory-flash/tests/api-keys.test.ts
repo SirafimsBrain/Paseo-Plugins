@@ -72,10 +72,36 @@ describe("API keys", () => {
     expect(store.authenticateApiKey("")).toBeNull();
   });
 
-  it("rejects revoked secrets", () => {
+  it("removes a deleted key, so its secret stops authenticating", () => {
     const { record, secret } = store.generateApiKey({ label: "laptop" });
-    expect(store.revokeApiKey(record.id)).toBe(true);
+    expect(store.deleteApiKey(record.id)).toBe(true);
     expect(store.authenticateApiKey(secret)).toBeNull();
+    expect(store.listApiKeys().some((key) => key.id === record.id)).toBe(false);
+  });
+
+  // Keys revoked by an older version stay rejected until they are deleted.
+  it("still rejects a secret whose row is flagged revoked", () => {
+    const { record, secret } = store.generateApiKey({ label: "legacy" });
+    db()
+      .prepare("UPDATE api_keys SET revoked_at = ? WHERE id = ?")
+      .run("2026-01-01T00:00:00.000Z", record.id);
+    expect(store.authenticateApiKey(secret)).toBeNull();
+    expect(store.activeKeyCount()).toBe(0);
+    expect(store.listApiKeys().length).toBe(1);
+    expect(store.deleteApiKey(record.id)).toBe(true);
+    expect(store.listApiKeys()).toEqual([]);
+  });
+
+  // The reported failure: revoking left the row behind and the same label
+  // could not be re-issued. Deletion frees the label immediately.
+  it("frees the label so a new key can be generated after a delete", () => {
+    const first = store.generateApiKey({ label: "zabbix" });
+    expect(store.deleteApiKey(first.record.id)).toBe(true);
+    const second = store.generateApiKey({ label: "zabbix" });
+    expect(second.record.id).not.toBe(first.record.id);
+    expect(second.secret).not.toBe(first.secret);
+    expect(store.authenticateApiKey(second.secret)).not.toBeNull();
+    expect(store.listApiKeys().map((key) => key.label)).toEqual(["zabbix"]);
   });
 
   it("rejects expired keys", () => {
@@ -86,13 +112,13 @@ describe("API keys", () => {
     expect(store.authenticateApiKey(secret)).toBeNull();
   });
 
-  it("revokes by id and counts active keys", () => {
+  it("deletes by id and counts active keys", () => {
     const first = store.generateApiKey({ label: "a" });
     const second = store.generateApiKey({ label: "b" });
     expect(store.activeKeyCount()).toBe(2);
-    expect(store.revokeApiKey(first.record.id)).toBe(true);
+    expect(store.deleteApiKey(first.record.id)).toBe(true);
     expect(store.activeKeyCount()).toBe(1);
-    expect(store.revokeApiKey("mfk_unknown")).toBe(false);
+    expect(store.deleteApiKey("mfk_unknown")).toBe(false);
     expect(store.activeKeyCount()).toBe(1);
     expect(second.record.revokedAt).toBeNull();
   });

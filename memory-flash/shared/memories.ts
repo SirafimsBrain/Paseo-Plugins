@@ -533,8 +533,8 @@ export const generateApiKey = defineRpc({
   }),
 });
 
-export const revokeApiKey = defineRpc({
-  name: "memory-flash.api-key-revoke",
+export const deleteApiKey = defineRpc({
+  name: "memory-flash.api-key-delete",
   input: z.object({ id: z.string().min(1) }),
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });

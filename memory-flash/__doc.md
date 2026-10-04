@@ -121,7 +121,22 @@ Structured filters from the query compose with the explicit `options` filters (d
 
 `SKILL.md` follows the standard skills format (YAML frontmatter `name`/`description`, markdown body) observed on this machine across `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills` and `~/.kilo/skills` — the same layout Paseo itself uses for its bundled skills.
 
-Content covers: when to **read** (before starting a task, before fixing a bug, entering unfamiliar code), when to **write** (kind table: one fact — one memory), **mandatory recording rules** (every bugfix is saved with symptom/root cause/fix/verification — no exceptions; positive results that worked are saved as `pattern`; when functionality changes or a bugfix lands, existing memories describing the old behavior are updated via `memory_update` so the base never contradicts the code), the **English-language rule** (title, content and tags in English for cross-agent unification), **mandatory tagging rules** (project tag + topic tag, lowercase), end-of-session **handoff discipline**, and conservative **housekeeping** (prefer update over delete, list matches first, confirm scope). Installer: per-target Install/Update (re-install when content drifts, `upToDate` flag)/Remove, plus *Install into all agents*. Targets whose directory does not exist are still installable (created on demand) so the button works before the first launch of e.g. Codex.
+The body is written as a **protocol** rather than a description. Memory only pays off when every agent reads before it works and writes while it works; advice phrased as advice gets skipped, so the rules are numbered, mandatory and checkable.
+
+| Section | Rule |
+| ------- | ---- |
+| 1. Read before you work | Never start a non-trivial task with a single search — 2–4 queries with deliberately different vocabulary (user's words, symbol names, literal error text, plain concept) and varied filters. Search before a bugfix, before an unfamiliar area, before touching a file not opened this session, before choosing an approach. |
+| 1. Do not trust a snippet | A hit that looks relevant must be opened with `memory_get` first; the caveat is usually in the truncated part. |
+| 1. Widen before concluding | An empty result is a statement about the query, not the base: re-search with synonyms, drop the `kind`/`tag` filters (they hide rows silently), `memory_list_by_tag` by project, then `memory_stats` to learn the base's real project names, kinds and top tags. If the area really is undocumented, say so in the handoff. |
+| 2. Write while you work | Mandatory: every bugfix (symptom/root cause/fix/verification); positive results as `pattern`; user corrections and stated conventions as `decision`; and `memory_update` for memories describing changed behaviour. |
+| 2. Search before you save | One fact — one memory. A related row is updated, never duplicated: two rows that disagree are worse than none. |
+| 2. Kinds and tags | The kind table (decision/procedure/handoff/bugfix/pattern/pitfall/reference/note) and the mandatory tagging rule — project name plus at least one lowercase topic tag. |
+| 3. Always leave a handoff | Every session that is not trivially complete, successful ones included, ends with a self-contained `memory_handoff`. |
+| Housekeeping | Conservative deletes: prefer updating over deleting, list matches first, confirm scope. |
+
+The **English-language rule** (title, content and tags in English for cross-agent unification) applies to the whole body. Installer: per-target Install/Update (re-install when content drifts, `upToDate` flag)/Remove, plus *Install into all agents*. Targets whose directory does not exist are still installable (created on demand) so the button works before the first launch of e.g. Codex.
+
+The client side carries its own variant of this protocol — see [memory-flash-client/__doc.md](../memory-flash-client/__doc.md) §5 — because the agents there reach the same base over HTTP from another machine.
 
 
 ## 6. Direct MCP registration for Cline, Cursor and Codex CLI (requirement 9)
@@ -351,7 +366,7 @@ Shared conventions: export and backup are non-destructive and atomic; import and
 | `memory-flash.hosts` / `hosts-save` / `hosts-delete` / `hosts-check` | host CRUD | registry + probe results |
 | `memory-flash.api-keys` | `{}` | `{ keys: [ApiKey] }` (no secrets, no hashes) |
 | `memory-flash.api-key-generate` | `{ label, ttlDays?, scope? }` | `{ ok, id, secret, key, error }` — `secret` returned once |
-| `memory-flash.api-key-revoke` | `{ id }` | `{ ok, error }` |
+| `memory-flash.api-key-delete` | `{ id }` | `{ ok, error }` — deletes the row, freeing the label |
 | `memory-flash.http-status` | `{}` | `{ enabled, listening, host, port, boundHost, boundPort, wildcard, bindUrl, url, error, keyCount }` |
 | `memory-flash.export` / `import` / `backup` / `backup-restore` / `archive-info` | see §8.8 | see §8.8 |
 
@@ -407,7 +422,7 @@ The key is issued **on the memory host, by a human pressing Generate**, and carr
 | `server/mcp-jsonrpc.ts` | Transport-agnostic MCP handling: `handleJsonRpcRequest(request, context, serverInfo, log)`. Both transports delegate here, so MCP semantics cannot drift between stdio and HTTP. Protocol version `2024-11-05`; tool failures are returned as MCP `isError` results, not JSON-RPC errors, so agents can read them. |
 | `server/http-server.ts` | `McpHttpServer`: Node `http` server, auth middleware, per-IP 401 rate limit, body cap, scope enforcement, identity-header audit log. URL getters: `bindUrl` (verbatim bound interface, may be `0.0.0.0`), `url` (dialable, wildcard replaced), plus `isWildcardHost` / `resolveRoutableHost`. |
 | `server/http-lifecycle.ts` | `HttpEndpoint`: owns the socket and applies `httpEnabled`/`httpHost`/`httpPort` changes — debounced (150 ms) and serialised on a promise chain. |
-| `server/store.ts` | `api_keys` table plus `generateApiKey` / `authenticateApiKey` / `revokeApiKey` / `listApiKeys` / `activeKeyCount`. |
+| `server/store.ts` | `api_keys` table plus `generateApiKey` / `authenticateApiKey` / `deleteApiKey` / `listApiKeys` / `activeKeyCount`. |
 | `index.server.ts` | Wires the settings to `HttpEndpoint` and exposes the four RPCs. |
 
 ### 11.3 Endpoints
@@ -427,12 +442,14 @@ The key is issued **on the memory host, by a human pressing Generate**, and carr
 | `label` | human name for the machine |
 | `key_hash` | SHA-256 hex of the secret — the only stored form |
 | `prefix` | first 12 characters of the secret, so a key can be recognized in the UI |
-| `created_at`, `expires_at` (`NULL` = never), `revoked_at` (`NULL` = active), `last_used_at` | lifecycle + audit |
+| `created_at`, `expires_at` (`NULL` = never), `revoked_at` (`NULL` = active), `last_used_at` | lifecycle + audit. `revoked_at` is legacy: since 0.5.3 keys are deleted instead of revoked, and the column is kept only so rows written by older versions are still refused. |
 | `scopes` | JSON array: `read` or `read_write` |
 
 Secrets are `mf_live_` + 32 CSPRNG bytes in base64url (256-bit entropy). Generation returns the record *and* the secret; the RPC surfaces the secret exactly once, and nothing else ever holds it.
 
 `authenticateApiKey(secret)` hashes the presented value, looks the row up, rejects revoked and expired rows, and refreshes `last_used_at`. Every failure mode collapses to `null`, so a caller cannot distinguish an unknown key from a revoked or expired one.
+
+`deleteApiKey(id)` removes the row outright rather than setting `revoked_at`. Deleting is what frees the label: `api_keys.label` is not unique in the schema, but a leftover row kept the key list growing and made the UI look like the name was already taken. The plugin UI reads the live text of the two key inputs through their `SettingsInputHandle` refs, because `SettingsInput` is uncontrolled — resetting React state alone left the previous text on screen and the next **Generate API key** click failed with a "give the key a name" message that reads like the field hint.
 
 ### 11.5 Request handling
 

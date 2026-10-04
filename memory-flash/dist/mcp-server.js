@@ -20100,8 +20100,8 @@ var generateApiKey = defineRpc({
     error: external_exports.string().nullable()
   })
 });
-var revokeApiKey = defineRpc({
-  name: "memory-flash.api-key-revoke",
+var deleteApiKey = defineRpc({
+  name: "memory-flash.api-key-delete",
   input: external_exports.object({ id: external_exports.string().min(1) }),
   output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
 });
@@ -20302,7 +20302,7 @@ var MemoryStore = class {
     this.stmtApiKeyByHash = this.db.prepare("SELECT * FROM api_keys WHERE key_hash = ?");
     this.stmtApiKeyById = this.db.prepare("SELECT * FROM api_keys WHERE id = ?");
     this.stmtApiKeyAll = this.db.prepare("SELECT * FROM api_keys ORDER BY created_at DESC, id");
-    this.stmtApiKeyRevoke = this.db.prepare("UPDATE api_keys SET revoked_at = ? WHERE id = ?");
+    this.stmtApiKeyDelete = this.db.prepare("DELETE FROM api_keys WHERE id = ?");
     this.stmtApiKeyTouch = this.db.prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?");
     this.stmtApiKeyCount = this.db.prepare("SELECT COUNT(*) AS c FROM api_keys WHERE revoked_at IS NULL");
   }
@@ -20773,14 +20773,21 @@ var MemoryStore = class {
     record2.lastUsedAt = now;
     return record2;
   }
-  /** Marks a key revoked. Returns false when the id is unknown. */
-  revokeApiKey(id) {
+  /**
+   * Deletes a key outright. Returns false when the id is unknown.
+   *
+   * Deletion, not revocation: the row is gone, so the same label can be
+   * re-issued immediately and the list never accumulates dead entries.
+   * A revoked row from an older version stays rejected by
+   * `authenticateApiKey` until it is deleted here.
+   */
+  deleteApiKey(id) {
     const result = this.withWriteRetry(
-      () => this.stmtApiKeyRevoke.run((/* @__PURE__ */ new Date()).toISOString(), id)
+      () => this.stmtApiKeyDelete.run(id)
     );
     return Number(result.changes) > 0;
   }
-  /** All keys (including revoked), newest first, without secret material. */
+  /** All keys, newest first, without secret material. */
   listApiKeys() {
     const rows = this.stmtApiKeyAll.all();
     return rows.map((row) => this.rowToApiKey(row));

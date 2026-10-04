@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   SettingsAction,
   SettingsCard,
@@ -10,8 +10,20 @@ import {
   SettingsSwitch,
 } from "@getpaseo/plugin/client/ui";
 import { memoryFlashClientSettings } from "../shared/settings";
-import { clientStatus, conflictCheck, regenerateClientId } from "../shared/contracts";
-import type { ClientStatus, ConflictCheck } from "../shared/contracts";
+import {
+  clientStatus,
+  conflictCheck,
+  installSkill,
+  regenerateClientId,
+  skillPreview,
+  skillStatus,
+  uninstallSkill,
+} from "../shared/contracts";
+import type {
+  ClientStatus,
+  ConflictCheck,
+  SkillStatusTarget,
+} from "../shared/contracts";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 
 /**
@@ -42,15 +54,35 @@ export function ConnectionsSettingsScreen({ theme }: PluginSurfaceProps) {
   const statusRpc = useRpc(clientStatus);
   const conflictRpc = useRpc(conflictCheck);
   const regenerateRpc = useRpc(regenerateClientId);
+  const skillStatusRpc = useRpc(skillStatus);
+  const installSkillRpc = useRpc(installSkill);
+  const uninstallSkillRpc = useRpc(uninstallSkill);
+  const skillPreviewRpc = useRpc(skillPreview);
 
   const [status, setStatus] = useState<ClientStatus | null>(null);
   const [conflict, setConflict] = useState<ConflictCheck | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [skillTargets, setSkillTargets] = useState<SkillStatusTarget[]>([]);
+  const [skillMessage, setSkillMessage] = useState<string | null>(null);
+  const [skillDoc, setSkillDoc] = useState<string>("");
+
+  const reloadSkills = useCallback(() => {
+    void skillStatusRpc({})
+      .then((result) => setSkillTargets(result.targets))
+      .catch(() => undefined);
+  }, [skillStatusRpc]);
 
   useEffect(() => {
     void statusRpc({}).then(setStatus).catch(() => undefined);
     void conflictRpc({}).then(setConflict).catch(() => undefined);
   }, [statusRpc, conflictRpc]);
+
+  useEffect(() => {
+    reloadSkills();
+    void skillPreviewRpc({})
+      .then((result) => setSkillDoc(result.markdown))
+      .catch(() => undefined);
+  }, [reloadSkills, skillPreviewRpc]);
 
   if (settings.status === "loading") {
     return (
@@ -154,6 +186,90 @@ export function ConnectionsSettingsScreen({ theme }: PluginSurfaceProps) {
 
       <SettingsCard>
         <SettingsSection
+          title="Agent skill"
+          info="Teaches the agents on this machine that the remote memory_* tools are a shared team base, when to search it and what to write back. Without it agents treat the remote memory as an optional extra and mostly skip it."
+        >
+          <SettingsAction
+            label="Install"
+            actionLabel="Install into all agents"
+            onPress={() => {
+              setSkillMessage(null);
+              void installSkillRpc({ targetId: "agents" })
+                .then((result) => {
+                  setSkillMessage(
+                    result.ok
+                      ? `Installed ${result.path}.`
+                      : (result.error ?? "Install failed."),
+                  );
+                  reloadSkills();
+                })
+                .catch(() => setSkillMessage("Install failed."));
+            }}
+          />
+          {skillTargets.map((row) => (
+            <View key={row.id} style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={{ color: fg, fontSize: font(12), ...uiFontStyle }}>{row.label}</Text>
+                <Text
+                  style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}
+                  numberOfLines={1}
+                >
+                  {row.installed
+                    ? row.upToDate
+                      ? "installed · up to date"
+                      : "installed · outdated"
+                    : row.detected
+                      ? "detected · not installed"
+                      : "not installed"}
+                </Text>
+              </View>
+              <View style={styles.rowActions}>
+                <Pressable
+                  onPress={() => {
+                    setSkillMessage(null);
+                    void (row.installed ? uninstallSkillRpc({ targetId: row.id }) : installSkillRpc({ targetId: row.id }))
+                      .then((result) => {
+                        if ("path" in result && result.ok) setSkillMessage(`Installed ${result.path}.`);
+                        else if (result.ok) setSkillMessage(`Removed the skill from ${row.label}.`);
+                        else setSkillMessage(result.error ?? "Failed.");
+                        reloadSkills();
+                      })
+                      .catch(() => setSkillMessage("Failed."));
+                  }}
+                  style={[
+                    styles.rowButton,
+                    { borderColor: row.installed ? danger : fgMuted },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: row.installed ? danger : fgMuted,
+                      fontSize: font(11),
+                      ...uiFontStyle,
+                    }}
+                  >
+                    {row.installed ? "Remove" : "Install"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+          {skillMessage ? (
+            <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }}>{skillMessage}</Text>
+          ) : null}
+          {skillDoc ? (
+            <Text
+              style={{ color: fgMuted, fontSize: font(11), marginTop: 4, ...uiFontStyle }}
+              numberOfLines={6}
+            >
+              {skillDoc.slice(0, 220)}…
+            </Text>
+          ) : null}
+        </SettingsSection>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingsSection
           title="Coexistence with memory-flash"
           info="memory-flash-client and memory-flash may run on the same host. memory-flash is the single memory host; this plugin only adds remote HTTP connections, so the two never conflict."
         >
@@ -180,4 +296,8 @@ export function ConnectionsSettingsScreen({ theme }: PluginSurfaceProps) {
 
 const styles = StyleSheet.create({
   container: { padding: 12, gap: 8 },
+  row: { flexDirection: "row", alignItems: "center", gap: 8 },
+  rowInfo: { flex: 1 },
+  rowActions: { flexDirection: "row", gap: 6 },
+  rowButton: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 },
 });
