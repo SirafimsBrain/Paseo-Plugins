@@ -44,7 +44,7 @@ memory-flash/
 ├── scripts/
 │   └── bundle-mcp-server.mjs  # esbuild → dist/mcp-server.js (standalone stdio server)
 ├── skill/                     # (reserved for extra skill assets; SKILL.md is generated)
-└── tests/                     # vitest: 9 suites, 74 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 13 suites, 143 tests (incl. real-process stdio e2e)
 ```
 
 ### Data flow
@@ -104,6 +104,77 @@ Re-measured after the fix: 10/10 concurrent writer processes succeed, 10/10 rows
 
 Structured filters from the query compose with the explicit `options` filters (deduplicated, `options` winning for `project`/`agentId`).
 
+### Rank fusion over several FTS5 views (0.7.0)
+
+**The problem it addresses.** Measured on a 5000-row corpus of homogeneous
+memories (same template, one distinguishing fact per record) with 20 paraphrased
+queries: `hit@10` was 14/20, and for every miss the correct record sat at rank
+501, 1001, 1501 or 2001 — absent from the candidate pool, not low in it. An
+OR-joined query matched 3200 of 5000 records, so bm25 was ordering thousands of
+near-identical documents. A cross-encoder reranker was then measured at **exactly
+zero** improvement, because reordering a pool cannot conjure a document recall
+never retrieved. See [ROADMAP.md](./ROADMAP.md).
+
+**What changed.** For a text query, `search()` now:
+
+1. ranks a pool of `max(limit, CANDIDATE_POOL=50)` rows per view — wider than the
+   requested `limit`, so ordering has room to work with;
+2. builds the views with `ftsViews()` — full-text OR (primary), title-only,
+   content-only, quoted-phrase, short-document (`ORDER BY length(content)`), and
+   a strict AND view for multi-term queries;
+3. fuses them with Reciprocal Rank Fusion (`server/rrf.ts`, `k = 60`);
+4. cuts to `limit`.
+
+Structured filters are applied inside **every** view, so filtering is unchanged.
+
+**Why ranks and not scores.** bm25 values are only comparable within one MATCH
+expression; two different expressions over the same table produce scores on
+unrelated scales, so a weighted sum of raw scores is meaningless. RRF consumes
+ranks only. The `score` field of `SearchResult` still carries the best (lowest)
+bm25 seen for the row, keeping its original meaning for callers.
+
+**Why the weights.** With equal weights the narrow views (title-only, short-document)
+voted as peers and dragged strong matches below the cut — measured as a real
+regression (case 2 in `scripts/measure-search.mjs`: 15/20 → 14/20). The full-text
+view therefore carries weight 3, the AND view 2, the rest 1: narrow views are
+tie-breakers, not peers. After the fix the same case measures 15/20 = baseline,
+with no regression. The acceptance script fails the build if the fused ranking
+ever scores below the previous single-query bm25.
+
+**Views are not a fix for a vocabulary gap.** If the query shares no words with
+the record, no view can retrieve it. That failure mode is handled by the write
+protocol (skill §2 "Write so the next agent can find it") and reported by the
+diagnostics below.
+
+### Search diagnostics (0.7.0)
+
+`server/diagnose.ts` runs a control set through the real search and reports, per
+query, the 1-based rank of the first expected id (or `null`) plus the aggregate
+recall@1/@5/@10/@50. Its purpose is to separate two failures that look identical
+to a user:
+
+| Failure | Meaning | Correct fix |
+| --- | --- | --- |
+| `not-retrieved` | the answer never entered the candidate pool | widen retrieval, or fix how the memory was written |
+| `ranked-too-low` | retrieved but below the cutoff | re-rank |
+
+Plus `retrievalFailures`, `rankingFailures`, `poolCeiling` (the worst rank at
+which an answer was still found) and a `misses` work list sorted worst-first.
+Read-only — it calls `search()` and writes nothing; a test asserts the row count
+is unchanged.
+
+Exposed twice, both read-only:
+
+- MCP tool **`memory_diagnose`** (`queries: [{ query, expectedIds }]`), added to
+  `READ_ONLY_TOOLS` in `server/http-server.ts` so a `read`-scoped API key can use
+  it;
+- RPC **`memory-flash.search-diagnose`**.
+
+**Standing rule:** a change to search ships with a `memory_diagnose` run before
+and after. `scripts/measure-search.mjs` does this automatically on a synthetic
+corpus (`node scripts/measure-search.mjs`, override size with `ROWS=`) and exits
+non-zero on regression.
+
 `decision`, `procedure`, `handoff`, `bugfix`, `pattern`, `pitfall`, `reference`, `note` — the handoff-oriented vocabulary from the requirements, mapped 1:1 to the skill guidance ("one fact — one memory").
 
 ## 4. Paseo integration points (SDK 0.10.x)
@@ -131,6 +202,8 @@ The body is written as a **protocol** rather than a description. Memory only pay
 | 2. Write while you work | Mandatory: every bugfix (symptom/root cause/fix/verification); positive results as `pattern`; user corrections and stated conventions as `decision`; and `memory_update` for memories describing changed behaviour. |
 | 2. Search before you save | One fact — one memory. A related row is updated, never duplicated: two rows that disagree are worse than none. |
 | 2. Kinds and tags | The kind table (decision/procedure/handoff/bugfix/pattern/pitfall/reference/note) and the mandatory tagging rule — project name plus at least one lowercase topic tag. |
+| 2. Write so the next agent can find it (0.7.0) | The symptom is written the way a human reports it (not only the way the code reads), the literal error string is pasted in, the file/symbol/command is named, and plain-language synonyms go into tags. Not a style rule: the measured dominant failure is a *vocabulary gap*, and no ranking system can bridge a query that shares no words with the record. |
+| 2. Measure the base when search looks wrong (0.7.0) | `memory_diagnose` with control queries + expected ids reports recall@k and, per miss, whether the answer was never retrieved or only ranked too low — which decides whether to fix retrieval or ordering. |
 | 3. Always leave a handoff | Every session that is not trivially complete, successful ones included, ends with a self-contained `memory_handoff`. |
 | Housekeeping | Conservative deletes: prefer updating over deleting, list matches first, confirm scope. |
 
@@ -343,6 +416,7 @@ Shared conventions: export and backup are non-destructive and atomic; import and
 | --- | --- | --- |
 | `memory-flash.list` | search options + `offset` | `{ memories, total }` |
 | `memory-flash.search` | search options (query/tags/kinds/project/agent/limit) | `{ results: [{memory, score, snippet}] }` |
+| `memory-flash.search-diagnose` | `{ queries: [{ query, expectedIds }] }` | `{ summary, recallAt, hitsAt, total, poolCeiling, retrievalFailures, rankingFailures, misses, skipped }` |
 | `memory-flash.save` | `{ id?, input }` | `{ ok, id, error }` |
 | `memory-flash.delete` | `{ id }` | `{ ok, error }` |
 | `memory-flash.get` | `{ id }` | `{ memory, history }` |
@@ -486,6 +560,8 @@ Switching the bind address from `127.0.0.1` to `0.0.0.0` was reported as "still 
 ### 11.9 Tests
 
 `tests/http-server.test.ts` starts the server on an ephemeral port and drives it with `fetch`: health, handshake, tool call, 401/429, method rules, body cap, scope enforcement, read-only `tools/list` filtering, identity-header sanitizing, plus the wildcard helpers (`isWildcardHost`, `resolveRoutableHost`, `bindUrl` vs `url`). `tests/http-lifecycle.test.ts` covers the bind-address switch end to end: loopback → `0.0.0.0` reports the wildcard and stays dialable, a port change leaves no second listener, a typed address applies once, back-to-back changes serialise, a failing address is reported and recovers, disabling and `dispose()` really close the socket, and `defaultAgentId` changes apply without a restart. `tests/api-keys.test.ts` covers generation, hashing, revocation, expiry and the store's last-used bookkeeping.
+
+`tests/rrf.test.ts` (29 tests, added in 0.7.0) covers the fusion and the diagnostics: RRF arithmetic (consensus beats a single high rank, no invented ranks, per-view de-duplication, determinism, weighting), that every generated `ftsViews()` MATCH expression is actually accepted by SQLite, that the fused search keeps snippets, structured filters, tag filters and the requested `limit`, and that it rescues a distinguishing title term that homogeneous content buries. `diagnose()` is tested for perfect recall, retrieval-vs-ranking classification, worst-first miss ordering, several expected ids per query, unusable entries, writing nothing, and surviving a store reopen. `scripts/measure-search.mjs` is the acceptance gate: it builds 5000 homogeneous records twice — once with a distinct symptom per record and once with vocabulary deliberately diluted — compares the shipped ranking against the pre-0.7.0 single-query bm25, prints per-query ranks, and exits non-zero on any regression.
 
 ## 12. Limitations and roadmap
 

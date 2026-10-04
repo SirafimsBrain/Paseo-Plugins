@@ -14,6 +14,7 @@ import {
   type SearchResult,
   type SearchOptions,
 } from "../shared/memories";
+import { rrfTop, type WeightedList, CANDIDATE_POOL } from "./rrf";
 
 /** Shape of the `memory-flash.stats` RPC output (defined here, re-used there). */
 export interface StatsSnapshot {
@@ -635,6 +636,11 @@ export class MemoryStore {
    * inside a text query rank (OR), so natural-language queries with
    * extra words still match. `key=value` pairs in the query
    * (project=, kind=, tag=, agent=) act as structured filters.
+   *
+   * Text queries rank a pool of {@link CANDIDATE_POOL} rows and fuse several
+   * independent FTS5 views with Reciprocal Rank Fusion before cutting to
+   * `limit`. This widens recall without a second index or a new dependency —
+   * see ROADMAP.md for the measurements behind it.
    */
   search(options: SearchOptions): SearchResult[] {
     const limit = Math.max(1, Math.min(100, options.limit));
@@ -649,25 +655,8 @@ export class MemoryStore {
 
     const ftsMatch = parsed.match;
     const useFts = ftsMatch !== null;
-    let sql: string;
-    if (useFts) {
-      sql = `SELECT m.*, bm25(memories_fts) AS score`;
-      where.push("memories_fts MATCH ?");
-      params.push(ftsMatch);
-      sql += " FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id";
-    } else if (parsed.freeText.trim().length > 0) {
-      // Query had free text but no indexable terms (punctuation or stop
-      // words only) — fall back to LIKE so the user still sees something.
-      sql = `SELECT m.*, 0 AS score`;
-      where.push("(m.title LIKE ? OR m.content LIKE ?)");
-      const like = `%${parsed.freeText.trim()}%`;
-      params.push(like, like);
-    } else {
-      // No free text (empty query or pure key=value filters):
-      // plain structured listing, newest first.
-      sql = "SELECT m.*, 0 AS score FROM memories m";
-    }
 
+    // Structured filters are shared by every view, so build them once.
     if (kinds.length > 0) {
       where.push(`m.kind IN (${kinds.map(() => "?").join(",")})`);
       params.push(...kinds);
@@ -697,22 +686,97 @@ export class MemoryStore {
     }
 
     const whereSql = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
-    const orderSql = useFts ? " ORDER BY score LIMIT ?" : " ORDER BY m.updated_at DESC LIMIT ?";
-    params.push(limit);
+    const filtersSql = where.length > 0 ? ` AND ${where.join(" AND ")}` : "";
 
-    const rows = this.db
-      .prepare(`${sql}${whereSql}${orderSql}`)
-      .all(...params) as Record<string, unknown>[];
+    if (!useFts) {
+      // No indexable terms: free-text LIKE fallback, else plain structured
+      // listing. Neither benefits from ranking, so the old single query stays.
+      const freeText = parsed.freeText.trim();
+      // `params` already holds the structured-filter values, and the LIKE
+      // placeholders must precede them to match the clause order below.
+      const listParams: Array<string | number> = [];
+      const listWhere: string[] = [];
+      if (freeText.length > 0) {
+        // Query had free text but no indexable terms (punctuation or stop
+        // words only) — fall back to LIKE so the user still sees something.
+        const like = `%${freeText}%`;
+        listWhere.push("(m.title LIKE ? OR m.content LIKE ?)");
+        listParams.push(like, like);
+      }
+      listWhere.push(...where);
+      listParams.push(...params);
+      const listWhereSql = listWhere.length > 0 ? ` WHERE ${listWhere.join(" AND ")}` : "";
+      listParams.push(limit);
+
+      const rows = this.db
+        .prepare(
+          `SELECT m.*, 0 AS score FROM memories m${listWhereSql} ORDER BY m.updated_at DESC, m.id DESC LIMIT ?`,
+        )
+        .all(...listParams) as Record<string, unknown>[];
+      const results: SearchResult[] = [];
+      for (const row of rows.slice(0, limit)) {
+        const memory = this.memoryWithTags(row);
+        if (!memory) continue;
+        results.push({ memory, score: 0, snippet: null });
+      }
+      return results;
+    }
+
+    // --- FTS5 path: rank a pool, fuse independent views, cut to `limit` ---
+    // The pool is wider than `limit` on purpose: the measured failure mode is
+    // recall, not precision (ROADMAP.md), so ordering has room to work with.
+    const pool = Math.max(limit, CANDIDATE_POOL);
+    const views = ftsViews(ftsMatch);
+
+    const stmt = this.db.prepare(
+      `SELECT m.id AS id, bm25(memories_fts) AS score
+       FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id
+       WHERE memories_fts MATCH ?${filtersSql}
+       ORDER BY score LIMIT ?`,
+    );
+    const stmtPadded = this.db.prepare(
+      `SELECT m.id AS id, bm25(memories_fts) AS score
+       FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id
+       WHERE memories_fts MATCH ?${filtersSql}
+       ORDER BY length(m.content) ASC, score LIMIT ?`,
+    );
+
+    // Best (lowest) bm25 seen per id, so `score` keeps its original meaning
+    // (lower is better) instead of exposing a fused RRF value to callers.
+    const bestScore = new Map<number, number>();
+    const lists: WeightedList[] = [];
+    for (const view of views) {
+      const run = view.padded ? stmtPadded : stmt;
+      let rows: Array<{ id: number; score: number }>;
+      try {
+        rows = run.all(view.match, ...params, pool) as Array<{ id: number; score: number }>;
+      } catch {
+        continue;
+      }
+      if (rows.length === 0) continue;
+      lists.push({ list: rows.map((r) => Number(r.id)), weight: view.weight });
+      for (const r of rows) {
+        const id = Number(r.id);
+        const score = Number(r.score);
+        const prev = bestScore.get(id);
+        if (prev === undefined || score < prev) bestScore.set(id, score);
+      }
+    }
+
+    if (lists.length === 0) return [];
+
+    const fused = lists.length === 1 ? lists[0].list.slice(0, limit) : rrfTop(lists, limit);
 
     const results: SearchResult[] = [];
-    for (const row of rows.slice(0, limit)) {
+    for (const id of fused) {
+      const row = this.stmtById.get(id) as Record<string, unknown> | undefined;
+      if (!row) continue;
       const memory = this.memoryWithTags(row);
       if (!memory) continue;
-      const score = Number(row.score ?? 0);
       results.push({
         memory,
-        score,
-        snippet: useFts ? this.snippetFor(memory.id, ftsMatch) : null,
+        score: bestScore.get(id) ?? 0,
+        snippet: this.snippetFor(memory.id, ftsMatch),
       });
     }
     return results;
@@ -1095,6 +1159,79 @@ export function parseQuery(raw: string): ParsedQuery {
  * matches first) after dropping stop words and very short tokens.
  * Returns null when nothing indexable remains.
  */
+export interface FtsView {
+  /** MATCH expression for this view. */
+  match: string;
+  /**
+   * Order short documents first instead of pure bm25. Homogeneous memories
+   * have near-identical term statistics, so document length is the only signal
+   * left to separate them.
+   */
+  padded: boolean;
+  /**
+   * Fusion weight. The full-text view dominates: measured with equal weights,
+   * the narrow views dragged a strong match below the cut (a real regression,
+   * caught by scripts/measure-search.mjs). Narrow views are tie-breakers.
+   */
+  weight: number;
+}
+
+/**
+ * Builds the independent retrieval views fused by {@link rrf}.
+ *
+ * Each view is a different MATCH expression over the same FTS5 table, so they
+ * fail in different ways: a title-only view finds a record whose title matches
+ * while the content is long and noisy, a content-only view finds the opposite,
+ * and the phrase view rewards adjacency. bm25 scores are not comparable across
+ * these expressions, which is exactly why fusion runs on ranks.
+ *
+ * Each view drops the "OR"-joined term list of the others so that a record
+ * matching the rare term in any one view can surface.
+ */
+export function ftsViews(match: string): FtsView[] {
+  // Split the OR-joined list produced by ftsQuery() into individual terms.
+  const terms = match
+    .split(" OR ")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  if (terms.length === 0) return [{ match, padded: false, weight: 1 }];
+
+  // Primary view: the plain OR-joined bm25 over title+content. It carries the
+  // dominant weight because it is the one the plugin has always used, so the
+  // fused order cannot drift far from a known-good ranking.
+  const views: FtsView[] = [{ match, padded: false, weight: 3 }];
+
+  const titleAll = terms.map((t) => `title : ${t}`).join(" OR ");
+  views.push({ match: titleAll, padded: false, weight: 1 });
+
+  const contentAll = terms.map((t) => `content : ${t}`).join(" OR ");
+  views.push({ match: contentAll, padded: false, weight: 1 });
+
+  // Phrase view: terms that survive as multi-word quoted phrases are kept
+  // verbatim (an agent quoting an error message gets an adjacency boost).
+  const phrases = terms
+    .map((t) => t.replace(/^"|"$/g, ""))
+    .filter((t) => t.includes(" "));
+  if (phrases.length > 0) {
+    views.push({
+      match: phrases.map((p) => `"${p.replace(/"/g, '""')}"`).join(" OR "),
+      padded: false,
+      weight: 1,
+    });
+  }
+
+  // Short-document view.
+  views.push({ match, padded: true, weight: 1 });
+
+  // Multi-term AND view: strict, but when it matches anything it is almost
+  // certainly the record the agent meant.
+  if (terms.length > 1) {
+    views.push({ match: terms.join(" AND "), padded: false, weight: 2 });
+  }
+
+  return views;
+}
+
 export function ftsQuery(raw: string): string | null {
   const terms: string[] = [];
   const phraseRegex = /"([^"]+)"/g;

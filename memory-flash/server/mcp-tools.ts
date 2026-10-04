@@ -8,6 +8,7 @@ import {
   type McpSaveInput,
 } from "../shared/memories";
 import type { MemoryStore } from "./store";
+import { diagnose, formatReport, type ControlQuery } from "./diagnose";
 
 /**
  * MCP tool definitions and dispatch for the memory-flash server.
@@ -150,6 +151,31 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         limit: num("Max results (default 20)."),
       },
       required: ["tag"],
+    },
+  },
+  {
+    name: "memory_diagnose",
+    title: "Measure search quality",
+    description:
+      "Measure whether search actually finds the right memories. Pass control " +
+      "queries together with the ids that answer them, and get back recall@1/" +
+      "@5/@10/@50 plus, for every miss, WHETHER the answer was never retrieved " +
+      "or merely ranked too low. Use this before and after changing search " +
+      "behaviour: a 'not-retrieved' miss is a recall problem that no reordering " +
+      "can fix, so it tells you whether to widen retrieval or only re-rank. " +
+      "Read-only: it writes nothing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        queries: {
+          type: "array",
+          description:
+            "Control set: [{ \"query\": \"<what an agent would type>\", \"expectedIds\": [<memory id>] }]. " +
+            "Several ids are allowed when any of them answers the question.",
+          items: { type: "object" },
+        },
+      },
+      required: ["queries"],
     },
   },
   {
@@ -333,6 +359,40 @@ export function dispatchMcpTool(name: string, args: unknown, context: McpDispatc
         agentId ?? "mcp",
       );
       return text({ saved: true, id: memory.id, kind: memory.kind });
+    }
+
+    case "memory_diagnose": {
+      const raw = Array.isArray(input.queries) ? input.queries : [];
+      const control: ControlQuery[] = [];
+      for (const entry of raw) {
+        if (entry === null || typeof entry !== "object") continue;
+        const item = entry as Record<string, unknown>;
+        const query = typeof item.query === "string" ? item.query : "";
+        const expectedIds = Array.isArray(item.expectedIds)
+          ? item.expectedIds.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0)
+          : [];
+        control.push({ query, expectedIds });
+      }
+      const skipped = control.filter((c) => c.query.trim().length === 0 || c.expectedIds.length === 0).length;
+      const report = diagnose(store, control);
+      if (report.total === 0) {
+        return error(
+          "No usable control queries. Each entry needs { \"query\": \"...\", \"expectedIds\": [<memory id>] } " +
+            "— first find the id with memory_search, then record the query you would have typed.",
+        );
+      }
+      return text({
+        summary: formatReport(report),
+        recallAt: report.recallAt,
+        hitsAt: report.hitsAt,
+        total: report.total,
+        poolCeiling: report.poolCeiling,
+        retrievalFailures: report.retrievalFailures,
+        rankingFailures: report.rankingFailures,
+        misses: report.misses,
+        skipped,
+        queries: report.queries,
+      });
     }
 
     case "memory_stats": {

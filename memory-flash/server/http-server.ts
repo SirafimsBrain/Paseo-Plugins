@@ -78,6 +78,8 @@ const READ_ONLY_TOOLS = new Set([
   "memory_get",
   "memory_list_by_tag",
   "memory_stats",
+  // Measures search quality over control queries; writes nothing.
+  "memory_diagnose",
 ]);
 
 /** Reject bodies larger than this (bytes). */

@@ -38,6 +38,7 @@ describe("MCP tool surface", () => {
     expect(names).toContain("memory_list_by_tag");
     expect(names).toContain("memory_handoff");
     expect(names).toContain("memory_stats");
+    expect(names).toContain("memory_diagnose");
     for (const tool of MCP_TOOLS) {
       expect(tool.inputSchema.type).toBe("object");
       expect(tool.description.length).toBeGreaterThan(10);
@@ -131,5 +132,34 @@ describe("MCP tool surface", () => {
     const result = call("memory_stats", {});
     const payload = JSON.parse(result.content[0].text) as { total: number };
     expect(payload.total).toBe(1);
+  });
+
+  it("memory_diagnose reports recall over control queries", () => {
+    const saved = call("memory_save", { title: "Unique zebra marker", content: "content about zebras" });
+    const { id } = JSON.parse(saved.content[0].text) as { id: number };
+    const result = call("memory_diagnose", {
+      queries: [
+        { query: "unique zebra marker", expectedIds: [id] },
+        { query: "completely absent vocabulary", expectedIds: [99999] },
+      ],
+    });
+    expect(result.isError).toBeUndefined();
+    const report = JSON.parse(result.content[0].text) as {
+      recallAt: Record<string, number>;
+      retrievalFailures: number;
+      misses: Array<{ rank: number | null }>;
+      summary: string;
+    };
+    expect(report.recallAt["10"]).toBe(0.5);
+    expect(report.retrievalFailures).toBe(1);
+    expect(report.misses).toHaveLength(1);
+    expect(report.misses[0].rank).toBeNull();
+    expect(report.summary).toContain("recall");
+  });
+
+  it("memory_diagnose explains itself when given no usable query", () => {
+    const result = call("memory_diagnose", { queries: [{ query: "", expectedIds: [] }] });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("expectedIds");
   });
 });

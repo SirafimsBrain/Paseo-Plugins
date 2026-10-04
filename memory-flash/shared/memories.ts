@@ -152,6 +152,53 @@ export const searchMemories = defineRpc({
   output: z.object({ results: z.array(searchResultSchema) }),
 });
 
+// ---------------------------------------------------------------------------
+// Search diagnostics (since 0.7.0)
+//
+// Makes recall measurable: a control set of queries with known answers is run
+// through the real search, and the report says per query whether a miss was a
+// retrieval failure (answer never in the pool — a recall problem no reordering
+// can fix) or a ranking failure. See ROADMAP.md.
+// ---------------------------------------------------------------------------
+
+export const controlQuerySchema = z.object({
+  /** The free-text query exactly as an agent would send it. */
+  query: z.string().min(1),
+  /** Ids that count as correct; several allowed for equivalent records. */
+  expectedIds: z.array(z.number().int().positive()).min(1),
+});
+
+export type ControlQueryInput = z.infer<typeof controlQuerySchema>;
+
+export const searchDiagnoseInputSchema = z.object({
+  queries: z.array(controlQuerySchema),
+});
+
+export type SearchDiagnoseInput = z.infer<typeof searchDiagnoseInputSchema>;
+
+export const searchDiagnoseSchema = defineRpc({
+  name: "memory-flash.search-diagnose",
+  input: searchDiagnoseInputSchema,
+  output: z.object({
+    /** One-line human summary, e.g. "recall @10 17/20 (85%) — …". */
+    summary: z.string(),
+    /** Share of queries whose answer appeared within each cutoff. */
+    recallAt: z.record(z.string(), z.number()),
+    /** Raw counts per cutoff. */
+    hitsAt: z.record(z.string(), z.number()),
+    total: z.number(),
+    /** Worst rank at which an answer was still found — the pool ceiling. */
+    poolCeiling: z.number(),
+    /** Misses caused by the answer never entering the candidate pool. */
+    retrievalFailures: z.number(),
+    /** Misses caused by the answer being retrieved but ranked too low. */
+    rankingFailures: z.number(),
+    misses: z.array(z.object({ query: z.string(), rank: z.number().nullable() })),
+    /** Control entries rejected as unusable (empty query or no ids). */
+    skipped: z.number(),
+  }),
+});
+
 export const saveMemory = defineRpc({
   name: "memory-flash.save",
   input: z.object({

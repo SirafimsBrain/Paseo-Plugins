@@ -21,6 +21,7 @@ import {
   saveMemory,
   saveRemoteHost,
   searchMemories,
+  searchDiagnoseSchema,
   skillStatus,
   skillPreview,
   uninstallSkill,
@@ -38,6 +39,7 @@ import {
 } from "./shared/memories";
 import type { ApiKey } from "./shared/memories";
 import { MemoryStore, type ApiKeyRecord } from "./server/store";
+import { diagnose, formatReport } from "./server/diagnose";
 import { HttpEndpoint } from "./server/http-lifecycle";
 import { SERVER_VERSION } from "./server/mcp-jsonrpc";
 import { mcpServerCommand } from "./server/mcp-launch";
@@ -178,6 +180,23 @@ export default function contribute(server: PluginServerContext) {
   server.handle(searchMemories, (input) => {
     const results = store.search(input);
     return { results };
+  });
+
+  server.handle(searchDiagnoseSchema, (input) => {
+    const control = input.queries.map((q) => ({ query: q.query, expectedIds: q.expectedIds }));
+    const report = diagnose(store, control);
+    const skipped = control.filter((c) => c.query.trim().length === 0 || c.expectedIds.length === 0).length;
+    return {
+      summary: formatReport(report),
+      recallAt: report.recallAt,
+      hitsAt: report.hitsAt,
+      total: report.total,
+      poolCeiling: report.poolCeiling,
+      retrievalFailures: report.retrievalFailures,
+      rankingFailures: report.rankingFailures,
+      misses: report.misses,
+      skipped,
+    };
   });
 
   server.handle(saveMemory, (input) => {

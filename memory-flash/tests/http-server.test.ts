@@ -143,10 +143,13 @@ describe("McpHttpServer", () => {
     const res = await postJson("/mcp", { jsonrpc: "2.0", id: 1, method: "tools/list" }, withAuth(secret));
     const body = await res.json();
     const names = body.result.tools.map((tool: { name: string }) => tool.name);
+    // memory_diagnose joined this set in 0.7.0: it only measures search over
+    // control queries and writes nothing.
     expect(names).toEqual([
       "memory_search",
       "memory_get",
       "memory_list_by_tag",
+      "memory_diagnose",
       "memory_stats",
     ]);
   });

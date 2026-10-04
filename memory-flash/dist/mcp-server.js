@@ -19808,6 +19808,37 @@ var searchMemories = defineRpc({
   input: searchOptionsSchema,
   output: external_exports.object({ results: external_exports.array(searchResultSchema) })
 });
+var controlQuerySchema = external_exports.object({
+  /** The free-text query exactly as an agent would send it. */
+  query: external_exports.string().min(1),
+  /** Ids that count as correct; several allowed for equivalent records. */
+  expectedIds: external_exports.array(external_exports.number().int().positive()).min(1)
+});
+var searchDiagnoseInputSchema = external_exports.object({
+  queries: external_exports.array(controlQuerySchema)
+});
+var searchDiagnoseSchema = defineRpc({
+  name: "memory-flash.search-diagnose",
+  input: searchDiagnoseInputSchema,
+  output: external_exports.object({
+    /** One-line human summary, e.g. "recall @10 17/20 (85%) — …". */
+    summary: external_exports.string(),
+    /** Share of queries whose answer appeared within each cutoff. */
+    recallAt: external_exports.record(external_exports.string(), external_exports.number()),
+    /** Raw counts per cutoff. */
+    hitsAt: external_exports.record(external_exports.string(), external_exports.number()),
+    total: external_exports.number(),
+    /** Worst rank at which an answer was still found — the pool ceiling. */
+    poolCeiling: external_exports.number(),
+    /** Misses caused by the answer never entering the candidate pool. */
+    retrievalFailures: external_exports.number(),
+    /** Misses caused by the answer being retrieved but ranked too low. */
+    rankingFailures: external_exports.number(),
+    misses: external_exports.array(external_exports.object({ query: external_exports.string(), rank: external_exports.number().nullable() })),
+    /** Control entries rejected as unusable (empty query or no ids). */
+    skipped: external_exports.number()
+  })
+});
 var saveMemory = defineRpc({
   name: "memory-flash.save",
   input: external_exports.object({
@@ -20110,6 +20141,32 @@ var httpStatus = defineRpc({
   input: external_exports.object({}),
   output: httpStatusSchema
 });
+
+// server/rrf.ts
+var RRF_K = 60;
+function rrf(lists, k = RRF_K) {
+  const weighted = lists.map(
+    (entry) => Array.isArray(entry) ? { list: entry, weight: 1 } : entry
+  );
+  const scores = /* @__PURE__ */ new Map();
+  for (const entry of weighted) {
+    const weight = entry.weight ?? 1;
+    const seen = /* @__PURE__ */ new Set();
+    let rank = 0;
+    for (const id of entry.list) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      rank += 1;
+      scores.set(id, (scores.get(id) ?? 0) + weight / (k + rank));
+    }
+  }
+  return [...scores.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([id]) => id);
+}
+function rrfTop(lists, limit, k = RRF_K) {
+  const fused = lists[0] !== void 0 && !Array.isArray(lists[0]) ? rrf(lists, k) : rrf(lists, k);
+  return fused.slice(0, Math.max(0, limit));
+}
+var CANDIDATE_POOL = 50;
 
 // server/store.ts
 function paseoHome() {
@@ -20545,6 +20602,11 @@ var MemoryStore = class {
    * inside a text query rank (OR), so natural-language queries with
    * extra words still match. `key=value` pairs in the query
    * (project=, kind=, tag=, agent=) act as structured filters.
+   *
+   * Text queries rank a pool of {@link CANDIDATE_POOL} rows and fuse several
+   * independent FTS5 views with Reciprocal Rank Fusion before cutting to
+   * `limit`. This widens recall without a second index or a new dependency —
+   * see ROADMAP.md for the measurements behind it.
    */
   search(options) {
     const limit = Math.max(1, Math.min(100, options.limit));
@@ -20557,20 +20619,6 @@ var MemoryStore = class {
     const params = [];
     const ftsMatch = parsed.match;
     const useFts = ftsMatch !== null;
-    let sql;
-    if (useFts) {
-      sql = `SELECT m.*, bm25(memories_fts) AS score`;
-      where.push("memories_fts MATCH ?");
-      params.push(ftsMatch);
-      sql += " FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id";
-    } else if (parsed.freeText.trim().length > 0) {
-      sql = `SELECT m.*, 0 AS score`;
-      where.push("(m.title LIKE ? OR m.content LIKE ?)");
-      const like = `%${parsed.freeText.trim()}%`;
-      params.push(like, like);
-    } else {
-      sql = "SELECT m.*, 0 AS score FROM memories m";
-    }
     if (kinds.length > 0) {
       where.push(`m.kind IN (${kinds.map(() => "?").join(",")})`);
       params.push(...kinds);
@@ -20599,18 +20647,76 @@ var MemoryStore = class {
       }
     }
     const whereSql = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
-    const orderSql = useFts ? " ORDER BY score LIMIT ?" : " ORDER BY m.updated_at DESC LIMIT ?";
-    params.push(limit);
-    const rows = this.db.prepare(`${sql}${whereSql}${orderSql}`).all(...params);
+    const filtersSql = where.length > 0 ? ` AND ${where.join(" AND ")}` : "";
+    if (!useFts) {
+      const freeText = parsed.freeText.trim();
+      const listParams = [];
+      const listWhere = [];
+      if (freeText.length > 0) {
+        const like = `%${freeText}%`;
+        listWhere.push("(m.title LIKE ? OR m.content LIKE ?)");
+        listParams.push(like, like);
+      }
+      listWhere.push(...where);
+      listParams.push(...params);
+      const listWhereSql = listWhere.length > 0 ? ` WHERE ${listWhere.join(" AND ")}` : "";
+      listParams.push(limit);
+      const rows = this.db.prepare(
+        `SELECT m.*, 0 AS score FROM memories m${listWhereSql} ORDER BY m.updated_at DESC, m.id DESC LIMIT ?`
+      ).all(...listParams);
+      const results2 = [];
+      for (const row of rows.slice(0, limit)) {
+        const memory = this.memoryWithTags(row);
+        if (!memory) continue;
+        results2.push({ memory, score: 0, snippet: null });
+      }
+      return results2;
+    }
+    const pool = Math.max(limit, CANDIDATE_POOL);
+    const views = ftsViews(ftsMatch);
+    const stmt = this.db.prepare(
+      `SELECT m.id AS id, bm25(memories_fts) AS score
+       FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id
+       WHERE memories_fts MATCH ?${filtersSql}
+       ORDER BY score LIMIT ?`
+    );
+    const stmtPadded = this.db.prepare(
+      `SELECT m.id AS id, bm25(memories_fts) AS score
+       FROM memories m JOIN memories_fts ON memories_fts.rowid = m.id
+       WHERE memories_fts MATCH ?${filtersSql}
+       ORDER BY length(m.content) ASC, score LIMIT ?`
+    );
+    const bestScore = /* @__PURE__ */ new Map();
+    const lists = [];
+    for (const view of views) {
+      const run = view.padded ? stmtPadded : stmt;
+      let rows;
+      try {
+        rows = run.all(view.match, ...params, pool);
+      } catch {
+        continue;
+      }
+      if (rows.length === 0) continue;
+      lists.push({ list: rows.map((r) => Number(r.id)), weight: view.weight });
+      for (const r of rows) {
+        const id = Number(r.id);
+        const score = Number(r.score);
+        const prev = bestScore.get(id);
+        if (prev === void 0 || score < prev) bestScore.set(id, score);
+      }
+    }
+    if (lists.length === 0) return [];
+    const fused = lists.length === 1 ? lists[0].list.slice(0, limit) : rrfTop(lists, limit);
     const results = [];
-    for (const row of rows.slice(0, limit)) {
+    for (const id of fused) {
+      const row = this.stmtById.get(id);
+      if (!row) continue;
       const memory = this.memoryWithTags(row);
       if (!memory) continue;
-      const score = Number(row.score ?? 0);
       results.push({
         memory,
-        score,
-        snippet: useFts ? this.snippetFor(memory.id, ftsMatch) : null
+        score: bestScore.get(id) ?? 0,
+        snippet: this.snippetFor(memory.id, ftsMatch)
       });
     }
     return results;
@@ -21010,6 +21116,28 @@ function parseQuery(raw) {
   }
   return { match: ftsQuery(freeText), freeText, filters };
 }
+function ftsViews(match) {
+  const terms = match.split(" OR ").map((t) => t.trim()).filter((t) => t.length > 0);
+  if (terms.length === 0) return [{ match, padded: false, weight: 1 }];
+  const views = [{ match, padded: false, weight: 3 }];
+  const titleAll = terms.map((t) => `title : ${t}`).join(" OR ");
+  views.push({ match: titleAll, padded: false, weight: 1 });
+  const contentAll = terms.map((t) => `content : ${t}`).join(" OR ");
+  views.push({ match: contentAll, padded: false, weight: 1 });
+  const phrases = terms.map((t) => t.replace(/^"|"$/g, "")).filter((t) => t.includes(" "));
+  if (phrases.length > 0) {
+    views.push({
+      match: phrases.map((p) => `"${p.replace(/"/g, '""')}"`).join(" OR "),
+      padded: false,
+      weight: 1
+    });
+  }
+  views.push({ match, padded: true, weight: 1 });
+  if (terms.length > 1) {
+    views.push({ match: terms.join(" AND "), padded: false, weight: 2 });
+  }
+  return views;
+}
 function ftsQuery(raw) {
   const terms = [];
   const phraseRegex = /"([^"]+)"/g;
@@ -21076,6 +21204,71 @@ function parseSettingsFile(filePath = settingsFilePath()) {
   } catch {
     return DEFAULTS;
   }
+}
+
+// server/diagnose.ts
+var DEFAULT_CUTOFFS = [1, 5, 10, 50];
+function diagnose(store, control, options = {}) {
+  const cutoffs = [...options.cutoffs ?? DEFAULT_CUTOFFS].sort((a, b) => a - b);
+  const limit = options.limit ?? Math.max(...cutoffs);
+  const valid = control.filter((q) => q.query.trim().length > 0 && q.expectedIds.length > 0);
+  const queries = [];
+  for (const item of valid) {
+    const results = store.search({
+      query: item.query,
+      tags: options.tags ?? [],
+      kinds: options.kinds ?? [],
+      project: options.project ?? null,
+      agentId: null,
+      tagMode: "any",
+      limit
+    });
+    const expected = new Set(item.expectedIds);
+    const ids = results.map((r) => r.memory.id);
+    let rank = null;
+    for (let i = 0; i < ids.length; i++) {
+      if (expected.has(ids[i])) {
+        rank = i + 1;
+        break;
+      }
+    }
+    let topWrongRank = null;
+    for (let i = 0; i < ids.length; i++) {
+      if (!expected.has(ids[i])) {
+        topWrongRank = i + 1;
+        break;
+      }
+    }
+    const failure2 = rank === null ? "not-retrieved" : rank > cutoffs[cutoffs.length - 1] ? "ranked-too-low" : "none";
+    queries.push({ query: item.query, rank, topWrongRank, considered: ids.length, failure: failure2 });
+  }
+  const recallAt = {};
+  const hitsAt = {};
+  for (const k of cutoffs) {
+    const hits = queries.filter((q) => q.rank !== null && q.rank <= k).length;
+    hitsAt[String(k)] = hits;
+    recallAt[String(k)] = queries.length === 0 ? 0 : Number((hits / queries.length).toFixed(4));
+  }
+  const retrievalFailures = queries.filter((q) => q.failure === "not-retrieved").length;
+  const topCut = cutoffs[cutoffs.length - 1];
+  const rankingFailures = queries.filter((q) => q.rank !== null && q.rank > topCut).length;
+  const reachable = queries.filter((q) => q.rank !== null);
+  const poolCeiling = reachable.length === 0 ? 0 : Math.max(...reachable.map((q) => q.rank));
+  return {
+    queries,
+    recallAt,
+    hitsAt,
+    total: queries.length,
+    poolCeiling,
+    retrievalFailures,
+    rankingFailures,
+    misses: queries.filter((q) => q.rank === null || q.rank > topCut).map((q) => ({ query: q.query, rank: q.rank })).sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER))
+  };
+}
+function formatReport(report) {
+  if (report.total === 0) return "No usable control queries (each needs a query and at least one expected id).";
+  const parts = Object.keys(report.recallAt).sort((a, b) => Number(a) - Number(b)).map((k) => `@${k} ${report.hitsAt[k]}/${report.total} (${Math.round(report.recallAt[k] * 100)}%)`);
+  return `recall ${parts.join(", ")} \u2014 retrieval failures ${report.retrievalFailures}, ranking failures ${report.rankingFailures}, pool ceiling rank ${report.poolCeiling}`;
 }
 
 // server/mcp-tools.ts
@@ -21172,6 +21365,22 @@ var MCP_TOOLS = [
         limit: num("Max results (default 20).")
       },
       required: ["tag"]
+    }
+  },
+  {
+    name: "memory_diagnose",
+    title: "Measure search quality",
+    description: "Measure whether search actually finds the right memories. Pass control queries together with the ids that answer them, and get back recall@1/@5/@10/@50 plus, for every miss, WHETHER the answer was never retrieved or merely ranked too low. Use this before and after changing search behaviour: a 'not-retrieved' miss is a recall problem that no reordering can fix, so it tells you whether to widen retrieval or only re-rank. Read-only: it writes nothing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        queries: {
+          type: "array",
+          description: 'Control set: [{ "query": "<what an agent would type>", "expectedIds": [<memory id>] }]. Several ids are allowed when any of them answers the question.',
+          items: { type: "object" }
+        }
+      },
+      required: ["queries"]
     }
   },
   {
@@ -21329,6 +21538,36 @@ function dispatchMcpTool(name, args, context) {
         agentId ?? "mcp"
       );
       return text({ saved: true, id: memory.id, kind: memory.kind });
+    }
+    case "memory_diagnose": {
+      const raw = Array.isArray(input2.queries) ? input2.queries : [];
+      const control = [];
+      for (const entry of raw) {
+        if (entry === null || typeof entry !== "object") continue;
+        const item = entry;
+        const query = typeof item.query === "string" ? item.query : "";
+        const expectedIds = Array.isArray(item.expectedIds) ? item.expectedIds.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0) : [];
+        control.push({ query, expectedIds });
+      }
+      const skipped = control.filter((c) => c.query.trim().length === 0 || c.expectedIds.length === 0).length;
+      const report = diagnose(store, control);
+      if (report.total === 0) {
+        return error62(
+          'No usable control queries. Each entry needs { "query": "...", "expectedIds": [<memory id>] } \u2014 first find the id with memory_search, then record the query you would have typed.'
+        );
+      }
+      return text({
+        summary: formatReport(report),
+        recallAt: report.recallAt,
+        hitsAt: report.hitsAt,
+        total: report.total,
+        poolCeiling: report.poolCeiling,
+        retrievalFailures: report.retrievalFailures,
+        rankingFailures: report.rankingFailures,
+        misses: report.misses,
+        skipped,
+        queries: report.queries
+      });
     }
     case "memory_stats": {
       return text(store.stats());

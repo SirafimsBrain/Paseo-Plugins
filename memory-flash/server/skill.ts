@@ -161,6 +161,46 @@ memory_save { "kind": "bugfix", "title": "Fix WAL checkpoint stall", "content": 
 at least one topic tag, lowercase. Tags are the cross-agent index — an
 untagged memory is lost memory.
 
+### Write so the next agent can find it
+
+This is not style advice. Measured on a 5000-row base, search failed because
+the query shared **no words** with the stored memory: someone hit a bug and
+wrote “retry loop had no backoff”, then three weeks later a different agent
+searched “repeated failures hammer the service”. No ranking system can bridge
+a gap of zero shared words — the record was never retrieved, not retrieved too
+low. Reranking was measured at exactly zero improvement for this reason.
+
+So the \`Symptom\` line is a search index, not a description:
+
+1. **Write the symptom the way a human reports it**, not the way the code
+   reads. Both, in one memory: \`Symptom: users see old data until they
+   refresh (stale response served after a write).\`
+2. **Paste the literal error string** somewhere in the content. It is the
+   single highest-value string in the memory — users paste errors verbatim.
+3. **Name the file, the symbol, the command.** \`Fix: raised busy_timeout in
+   store.ts\` finds it; \`Fix: increased the timeout\` does not.
+4. **Put the plain-language words in tags.** Tags are matched before content:
+   \`["paseo-plugins", "sqlite", "stale-data", "cache-invalidation"]\`.
+5. **When a fact is genuinely worth finding twice**, save it under the wording
+   a colleague would use, not only your own.
+
+If you cannot say how someone else would search for it, the memory is not
+finished yet.
+
+### Measure the base when something looks wrong
+
+If search repeatedly returns the wrong records, do not guess at the cause —
+measure it. \`memory_diagnose\` takes control queries plus the ids that answer
+them and reports recall@k and, per miss, whether the answer was **never
+retrieved** or only **ranked too low**. That single distinction decides the
+fix: a never-retrieved miss means the wording on disk does not match the
+question being asked, which is a writing problem, not a ranking one.
+
+\`\`\`
+memory_search { "query": "stale data after write" }
+memory_diagnose { "queries": [{ "query": "stale data after write", "expectedIds": [<id>] }] }
+\`\`\`
+
 ---
 
 ## 3. Always leave a handoff
