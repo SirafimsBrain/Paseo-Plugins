@@ -42,9 +42,11 @@ memory-flash/
 │   ├── settings-screen.tsx    # Settings → Plugins screen with skill install buttons
 │   └── use-host-typography.ts # host font scale/family hook (copied from command-center)
 ├── scripts/
-│   └── bundle-mcp-server.mjs  # esbuild → dist/mcp-server.js (standalone stdio server)
+│   ├── bundle-mcp-server.mjs  # esbuild → dist/mcp-server.js (standalone stdio server)
+│   ├── e2e-entry-resolution.mjs  # entry-path e2e across a simulated plugin update
+│   └── entry-probe.ts         # bundled by the e2e above to read the real launch config
 ├── skill/                     # (reserved for extra skill assets; SKILL.md is generated)
-└── tests/                     # vitest: 13 suites, 143 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 14 suites, 149 tests (incl. real-process stdio e2e)
 ```
 
 ### Data flow
@@ -181,7 +183,13 @@ non-zero on regression.
 
 - **`server.before("agent.create")`** — injects `config.mcpServers["memory-flash"] = { type: "stdio", command, args: [<dist/mcp-server.js>], alwaysLoad: true }` when the `injectIntoAgents` setting is on. The hook is `async` (the SDK awaits before-hooks) — it reads settings first and returns the mutated request, so the injection is guaranteed to be applied before the agent is created; a settings-read failure leaves agent creation untouched. A diagnostic line (`[memory-flash] MCP injected: <command> <args…>`) is printed to `paseo plugin logs memory-flash` on every injection. Both resolutions live in `server/mcp-launch.ts` and are shared with the Cline registration below, so every integration path launches the identical command.
 - **Command resolution (`resolveNodeCommand`)** — the MCP server is spawned by the *agent* process, not the plugin host, and the plugin host binary is an Electron binary running with `ELECTRON_RUN_AS_NODE=1`, which agents do not inherit. The plugin therefore resolves a real Node.js binary: `process.execPath` when it already is `node`, then a sibling `node` binary, then a PATH scan (result is an absolute path so the agent's own PATH never matters), with plain `node` as the last resort. Verified on this machine: the injected command resolves to `~/.nvm/versions/node/v24.20.0/bin/node`.
-- **Entry resolution (`resolveMcpEntry`)** — the plugin host bundles this module somewhere internal, so `__dirname` does not point at the plugin source directory (it can resolve to `$PASEO_HOME/plugins/memory-flash/`, the settings/data directory, which produced a `Connection closed` MCP error until fixed). The authoritative location of a directory plugin is `plugins.<id>.path` in `$PASEO_HOME/config.json`; `__dirname`/`import.meta.url` and `$PASEO_HOME/plugins/<id>` are fallbacks, first existing `mcp-server.js` wins.
+- **Entry resolution (`resolveMcpEntry`) and the published entry (0.7.1)** — two separate problems live here, both of which surface as the same `Connection closed`.
+
+  1. *Where the bundle is.* The plugin host bundles this module somewhere internal, so `__dirname` does not point at the plugin source directory (it can resolve to `$PASEO_HOME/plugins/memory-flash/`, the settings/data directory, which produced a `Connection closed` MCP error until fixed). The authoritative location of a directory plugin is `plugins.<id>.path` in `$PASEO_HOME/config.json`; `__dirname`/`import.meta.url` are fallbacks, first existing `mcp-server.js` wins.
+  2. *Which path is handed to the agent (fixed in 0.7.1).* The install directory carries a per-revision uuid — `plugins/<id>/<uuid>/checkout/<plugin>` — and the daemon **deletes** the old one on every `paseo plugin update`. The entry path is baked into an agent's config at `agent.create` and re-spawned on every later turn, so the first update after an agent was created leaves it pointing at a deleted file: node exits with `MODULE_NOT_FOUND` before the handshake and the provider reports `Failed to add OpenCode MCP server 'memory-flash': MCP error -32000: Connection closed` on **every** turn, with nothing wrong in the agent or in the server. Measured on this machine: agent `180074aa…` (created `2026-10-04T13:42:18Z`) held revision `6c0d0b0b…`, which the 21:39 update replaced with `3ede828f…`; `bunny-search` in the same session kept working purely because its revision directory still existed — the same config, the same spawn path, one surviving uuid.
+     `resolveMcpEntry()` therefore no longer returns the revision path. It resolves the bundle inside the current install and **publishes** it at `$PASEO_HOME/plugins/memory-flash/mcp-server.js`, a revision-independent path in the plugin's data directory (alongside `memory.db`), and returns that. The data directory is the right home: it survives updates and is removed only when the plugin itself is removed, and the bundle is a single self-contained file that needs no `node_modules` beside it. The swap goes through `symlink` into a temporary name plus `rename`, so a server spawned mid-update reads either the old or the new target and never a missing file; a plain copy is the fallback where symlinks are unavailable. Republishing is idempotent (`realpath` comparison) and happens on every resolution, which includes plugin load — the entry must be current before the first turn of the day, not only when an agent is created.
+     **Every integration path benefits at once**: `mcpServerCommand()` is the single source for `agent.create` injection *and* the Cline/Cursor/Codex settings-file registrations, so all of them now write the stable path.
+  3. *Known limitation.* A path already stored in an existing agent's config is not rewritten by the host — the daemon keeps that config in memory and re-registers it verbatim on each turn. Agents created **before** this fix keep the dead revision path and must be recreated (or their record repaired) once; agents created after any update are immune.
 - **`paseo-plugin.json` `build`** — optional build steps run by the daemon before the plugin loads. The schema is strict `string[][]` (each step is an argv array, `command[0]` + arguments), *not* an array of shell strings: `"build": [["npm", "run", "bundle"]]`. A flat `"build": ["npm run bundle"]` fails manifest validation (`expected array, received string` at `build[0]`) and the plugin shows as `failed`. The build step regenerates `dist/mcp-server.js` on every plugin load, so MCP-server source edits reach agents without a manual rebundle. Note: `paseo plugin reload <id>` currently errors with this same validation on the daemon side; `paseo plugin disable <id> && paseo plugin enable <id>` works as a reload.
 - **`server.registerSettings`** — host-scoped settings (`injectIntoAgents`, `mcpServerName`, `defaultAgentId`, `historyPerMemory`), edited in Settings → Plugins → Memory Flash. The spawned MCP server cannot receive settings through the SDK and reads the host-written `settings.json` instead (`server/settings-file.ts` accepts both the host layout `{revision, values}` and a flat object; clamps out-of-range values).
 - **`client.addSurface` / `addSidebarItem` / `addCommandCenterItem` / `addSettingsScreen`** — the management UI.
@@ -472,7 +480,7 @@ Each provider was verified by creating a real agent via `paseo run` and asking i
 
 | Provider | Injection | MCP connected | Tool call verified | Notes |
 | -------- | --------- | ------------- | ------------------ | ----- |
-| OpenCode | `agent.create` hook → `opencode-agent.js` registers MCP before the first turn | yes | yes (registration error surfaced loudly pre-fix) | Fails fast with `MCP error -32000` if the entry path is wrong — this is how the `resolveMcpEntry` bug was found. |
+| OpenCode | `agent.create` hook → `opencode-agent.js` registers MCP before the first turn | yes | yes (registration error surfaced loudly pre-fix) | Fails fast with `MCP error -32000` if the entry path is wrong — this is how both entry bugs were found: first `resolveMcpEntry` returning the data directory, then (0.7.1) the per-revision install path being deleted by a plugin update under an already-created agent. |
 | Qwen Code | ACP `session/new` → `toAcpMcpServers` | yes (server owned by `qwen-code/cli.js`) | yes — `mcp__memory-flash__memory_stats` returned real JSON | Qwen defers MCP tools behind `tool_search`; the model finds them on demand. Permission prompts appear via Paseo (`paseo permit allow`). |
 | Kilo | ACP `session/new` | yes (server owned by `.kilo acp`) | connection only | Kilo's configured model requires sign-in (`You need to sign in to use this model`), so the model round-trip could not be completed; the MCP side is healthy. |
 | Cline | ACP `session/new` — payload **accepted** but stdio server **never spawned** | via own config only | yes — after the plugin registered it in `~/.cline/data/settings/cline_mcp_settings.json` | Cline 3.0.66 validates ACP `mcpServers` (requires explicit `type`; `env` as `[{name,value}]` array) but does not connect stdio servers from the ACP session — remote http/sse only. The plugin's skill DOES work in Cline (`skills: memory-flash …`). Since 0.2.0 the plugin registers itself in Cline's own settings file via the **Register in Cline** button (`{transport:{type:"stdio",command,args}}`, other servers preserved, atomic write); Cline then spawns the server and returns real tool JSON. Registration was verified end-to-end against the live config (register → unregister → re-register, file byte-identical afterwards). |
@@ -561,9 +569,35 @@ Switching the bind address from `127.0.0.1` to `0.0.0.0` was reported as "still 
 
 `tests/http-server.test.ts` starts the server on an ephemeral port and drives it with `fetch`: health, handshake, tool call, 401/429, method rules, body cap, scope enforcement, read-only `tools/list` filtering, identity-header sanitizing, plus the wildcard helpers (`isWildcardHost`, `resolveRoutableHost`, `bindUrl` vs `url`). `tests/http-lifecycle.test.ts` covers the bind-address switch end to end: loopback → `0.0.0.0` reports the wildcard and stays dialable, a port change leaves no second listener, a typed address applies once, back-to-back changes serialise, a failing address is reported and recovers, disabling and `dispose()` really close the socket, and `defaultAgentId` changes apply without a restart. `tests/api-keys.test.ts` covers generation, hashing, revocation, expiry and the store's last-used bookkeeping.
 
+`tests/mcp-launch.test.ts` (6 tests, added in 0.7.1) covers entry resolution against a throwaway plugin home: publication happens on the first resolution and is idempotent with no staging leftovers, the returned path is the revision-independent one, **the path an agent already captured still resolves and spawns after its install revision is deleted and replaced**, a dangling link from a removed install is republished instead of trusted, and a missing build returns the expected path rather than a published lie.
+
 `tests/rrf.test.ts` (29 tests, added in 0.7.0) covers the fusion and the diagnostics: RRF arithmetic (consensus beats a single high rank, no invented ranks, per-view de-duplication, determinism, weighting), that every generated `ftsViews()` MATCH expression is actually accepted by SQLite, that the fused search keeps snippets, structured filters, tag filters and the requested `limit`, and that it rescues a distinguishing title term that homogeneous content buries. `diagnose()` is tested for perfect recall, retrieval-vs-ranking classification, worst-first miss ordering, several expected ids per query, unusable entries, writing nothing, and surviving a store reopen. `scripts/measure-search.mjs` is the acceptance gate: it builds 5000 homogeneous records twice — once with a distinct symptom per record and once with vocabulary deliberately diluted — compares the shipped ranking against the pre-0.7.0 single-query bm25, prints per-query ranks, and exits non-zero on any regression.
 
-## 12. Limitations and roadmap
+## 12. Troubleshooting: `MCP error -32000: Connection closed`
+
+The provider-level message (`Failed to add <provider> MCP server 'memory-flash'`) means the stdio server process died **before** answering `initialize`. It says nothing about the memory database or about the agent. The server itself is the thing to test, and it is testable without a provider:
+
+```bash
+# 1. Does the entry the agents actually spawn still exist?
+ls -l ~/.paseo/plugins/memory-flash/mcp-server.js
+
+# 2. Does it answer the handshake?
+node ~/.paseo/plugins/memory-flash/mcp-server.js   # expects JSON-RPC on stdin, logs to stderr
+
+# 3. What did the plugin resolve, and did it publish?
+paseo plugin logs memory-flash | grep "MCP entry\|MCP injected"
+```
+
+Two distinct causes have produced this exact message on this machine:
+
+| Cause | Signature | Fix |
+| ----- | --------- | --- |
+| Entry resolved to the data directory instead of the install (pre-0.5.x) | `MCP injected:` line names `~/.paseo/plugins/memory-flash/mcp-server.js` as a *missing* file; the path has no `dist/` in it | fixed by `resolveMcpEntry` reading `plugins.<id>.path` from `config.json` |
+| Entry pointed into a per-revision install directory that a plugin update deleted (0.6.0 → 0.7.0) | the agent's stored `mcpServers["memory-flash"].args[0]` contains a `<uuid>` that no longer exists in `~/.paseo/plugins/memory-flash/`; node exits with `Cannot find module …` before the handshake | fixed in 0.7.1 by publishing a revision-independent entry path; agents created *before* the fix must be recreated once |
+
+`scripts/e2e-entry-resolution.mjs` automates exactly this: it installs a revision, resolves the entry through the real `server/mcp-launch.ts`, completes a full JSON-RPC handshake, then deletes the revision, installs another one, and re-runs the handshake **against the path the first resolution produced** — the agent's situation. Run against the pre-0.7.1 resolver it fails with `Cannot find module …/rev-a/.../mcp-server.js`, which is the production error.
+
+## 13. Limitations and roadmap
 
 Limitations:
 
@@ -571,6 +605,7 @@ Limitations:
 - **No embeddings/vector search.** FTS5 (porter + unicode61) covers lexical recall well for code-adjacent memories; a vector column + local embedding model is the known upgrade path (sqlite-vec) and is deliberately deferred until a local embedding source is chosen.
 - **Attribution is cooperative.** `agent_id`/`changed_by` are set from the MCP caller (or the default setting); MCP does not authenticate callers, so attribution is a convention, not an enforcement boundary.
 - **Skill installation is filesystem-level.** It copies `SKILL.md` into well-known directories; agents that keep skills elsewhere need a manual path (visible in the settings screen status list).
+- **An agent created before 0.7.1 keeps its old entry path** until it is recreated (see §12). The host does not re-resolve an existing agent's MCP config, so the plugin cannot repair it from inside.
 
 Roadmap:
 

@@ -42,7 +42,7 @@ import { MemoryStore, type ApiKeyRecord } from "./server/store";
 import { diagnose, formatReport } from "./server/diagnose";
 import { HttpEndpoint } from "./server/http-lifecycle";
 import { SERVER_VERSION } from "./server/mcp-jsonrpc";
-import { mcpServerCommand } from "./server/mcp-launch";
+import { mcpServerCommand, isExecutableFile, publishedMcpEntry } from "./server/mcp-launch";
 import {
   clineMcpStatus as readClineMcpStatus,
   registerClineMcp as registerClineMcpOnDisk,
@@ -130,6 +130,19 @@ export default function contribute(server: PluginServerContext) {
   // MCP injection (requirement: all agents share one memory through MCP)
   // -------------------------------------------------------------------------
 
+  // Publish the bundle at its revision-independent path on every load, not
+  // only when an agent is created: agents created before an update hold that
+  // path in their config and re-spawn from it on every turn, so it has to be
+  // current before the first turn of the day. Visible in
+  // `paseo plugin logs memory-flash` as `[memory-flash] MCP entry: …`.
+  {
+    const launch = mcpServerCommand();
+    const entry = launch.args[0] ?? "";
+    console.log(
+      `[memory-flash] MCP entry: ${entry} (${isExecutableFile(entry) ? "exists" : "MISSING"})`,
+    );
+  }
+
   const removeCreateHook = server.before("agent.create", async ({ request }) => {
     // Async hooks are awaited by the host before the request proceeds, so the
     // mutation below is guaranteed to be applied to agent creation.
@@ -153,8 +166,11 @@ export default function contribute(server: PluginServerContext) {
     };
     // Diagnostic: visible in `paseo plugin logs memory-flash` — helps to
     // troubleshoot MCP spawn failures on the agent side.
+    const entry = args[0] ?? "";
     console.log(
-      `[memory-flash] MCP injected: ${command} ${args.join(" ")}`,
+      `[memory-flash] MCP injected: ${command} ${args.join(" ")} ` +
+        `(${isExecutableFile(entry) ? "entry exists" : "entry MISSING"}; ` +
+        `stable path ${publishedMcpEntry()})`,
     );
     return request;
   });
