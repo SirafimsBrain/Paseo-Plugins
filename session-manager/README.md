@@ -78,4 +78,24 @@ installation. Updates: `paseo plugin update session-manager`.
   the tests build throwaway stores under the OS temp directory and never touch
   the real home stores.
 
+## Planned improvements with Paseo 0.11.0
+
+Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
+with this plugin as-is: typecheck, the test suite, the real host bundler and a
+live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged, and
+the SDK diff `0.10.1 → 0.11.0-beta.5` is purely additive. The new APIs relevant
+to this plugin:
+
+- **`spawnProcess` / `execCommand` / `terminateProcess`**
+  (`@getpaseo/plugin/server`) — host-managed replacement for the plugin's own
+  `node:child_process` calls in `server/exec.ts`, with correct Windows
+  `.cmd`/`.bat` launching.
+- **`agent.closed` lifecycle event** — invalidate the listing cache and refresh
+  the "due for cleanup" hint as soon as an agent closes, instead of waiting for
+  the cache TTL.
+- **New sidebar contributions** (`addSidebarFooterItem`, multi-row `SidebarRow`)
+  — an extra persistent entry point beside the existing Command Center item.
+
+Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+
 For the full technical description see [`__doc.md`](./__doc.md).

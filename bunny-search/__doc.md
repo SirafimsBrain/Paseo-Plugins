@@ -136,3 +136,42 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 - Register the MCP server directly in Cline/Cursor/Codex config files (as memory-flash does) for agents that ignore session stdio servers.
 - Optional response caching and per-project category presets.
 - More providers behind the same adapter interface.
+
+## 10. Planned improvements with Paseo 0.11.0
+
+Compatibility with the 0.11.0 prerelease (`v0.11.0-beta.5`, verified 2026-10-06)
+is established: the SDK diff `@getpaseo/plugin@0.10.1 → 0.11.0-beta.5` is purely
+additive for every API this plugin uses; `npm run typecheck` and `npm test`
+(7 suites, 65 tests) pass against the 0.11.0 SDK; the real host compiler
+(`compilePlugin` from 0.11.0-beta.5) bundles the plugin with SDK 0.11.0, with
+the faithful 0.10.1 lockfile, and with host-supplied imports only; the manifest's
+`requirements.paseo >=0.10.0` passes `assertPluginCompatibility` for a
+0.11.0-beta.5 daemon and app; and a live Git install on an isolated
+0.11.0-beta.5 daemon reached status `running`, with the `agent.create` hook
+logging `MCP injected` and `bunny-search.status` answering over the wire. No
+code changes are required for 0.11.0.
+
+The following new 0.11.0 capabilities are relevant to this plugin. **They are
+planned for implementation after the stable Paseo 0.11.0 release, on request:**
+
+1. **Host-managed process execution** — `spawnProcess`, `execCommand` and
+   `terminateProcess` from `@getpaseo/plugin/server` (new in 0.11.0) replace the
+   `node:child_process` usage in `server/probe.ts` (the live service probe and
+   the MCP spawn/initialize handshake check behind the *Test connection*
+   button), moving process lifecycle under the host and adding correct launching
+   of Windows `.cmd`/`.bat` commands.
+2. **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
+   `addSidebarItem` / `openSurface` (used in `index.client.tsx`) to `addScreen` /
+   `addSidebarHeaderItem` / `openScreen`; the host's compatibility shims are
+   scheduled for removal after **2027-03-29**. `PluginScreenProps.params` would
+   let a deep link open the sidebar surface with a prefilled quick-search query
+   (e.g. from a Command Center item or a slash command), `PluginScreenTitle`
+   can derive the header from it, and `SidebarRow` / `SidebarSeparator` /
+   `addSidebarFooterItem` give the status block and actions a host-native
+   multi-row layout.
+3. **Usage reporting** — `server.registerUsageSource({ id, label, icon?, input,
+   discover(scope), fetch(input) })` (new in 0.11.0) with the client-side
+   `listUsageReports()` / `supportsUsageReports()`: a quota-limited backend such
+   as Brave Search could publish its remaining-quota window directly into
+   Paseo's usage reports. Candidate — depends on the backend exposing usage
+   data through its API.

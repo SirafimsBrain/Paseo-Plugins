@@ -100,4 +100,29 @@ $PASEO_HOME/plugins/memory-flash/
 
 Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
 
+## Planned improvements with Paseo 0.11.0
+
+Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
+with this plugin as-is: typecheck, the test suite, the real host bundler and a
+live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
+0.11.0 APIs relevant to this plugin:
+
+- **`spawnProcess` / `execCommand` / `terminateProcess`**
+  (`@getpaseo/plugin/server`) — replace the `node:child_process` probes in
+  `server/mcp-probe.ts` (live spawn/initialize check) and
+  `server/remote-hosts.ts` with host-managed processes, including Windows
+  `.cmd`/`.bat` launching.
+- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
+  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
+  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
+  group the kind/tag chip rows with `SidebarRow`/`SidebarSeparator`, add an
+  `addSidebarFooterItem` quick entry, and open the surface on a single memory
+  via screen URL params (`PluginScreenProps.params`).
+- **`agent.closed` lifecycle event** — the skill demands a handoff at the end of
+  every session; the hook lets the plugin trigger or record that handoff when an
+  agent closes, and it is the foundation for the "timeline surfacing" roadmap
+  item.
+
+Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+
 Technical details, design decisions, alternatives considered, limitations and the roadmap: see [__doc.md](./__doc.md).

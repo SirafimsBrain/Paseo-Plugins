@@ -349,3 +349,54 @@ Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger a
 7. **Usage analytics** — aggregate `useCount`/history into a "most used" section; data already exists.
 8. **Composer pills / timeline run cards** — blocked today (§5e); revisit when the SDK gains global pill registration or plugin-attributed timeline items.
 9. **Web dashboard** — deferred (§5e); revisit if the host adds a remote-access surface plugins can attach to.
+
+## 9. Planned improvements with Paseo 0.11.0
+
+Compatibility with the 0.11.0 prerelease (`v0.11.0-beta.5`, verified 2026-10-06)
+is established: the SDK diffs `@getpaseo/plugin@0.10.1 → 0.11.0-beta.5` and
+`@getpaseo/client@0.10.1 → 0.11.0-beta.5` are purely additive for every API this
+plugin uses; `npm run typecheck` and `npx vitest run` (9 suites, 98 tests) pass
+against the 0.11.0 SDKs; the real host compiler (`compilePlugin` from
+0.11.0-beta.5) bundles the plugin both with SDK 0.11.0 and with the faithful
+0.10.1 lockfile; the manifest's `requirements.paseo >=0.8.0` passes
+`assertPluginCompatibility` for a 0.11.0-beta.5 daemon and app; a live Git install
+on an isolated 0.11.0-beta.5 daemon reached status `running` with `Plugin ready`;
+and a wire test drove the full schedule lifecycle (create, inspect, pause,
+resume, update, logs, delete, list) plus `command-center.save` through the old
+0.10.1 `@getpaseo/client` against the 0.11.0-beta.5 daemon — 11/11 passed. No
+code changes are required for 0.11.0.
+
+The following new 0.11.0 capabilities are relevant to this plugin. **They are
+planned for implementation after the stable Paseo 0.11.0 release, on request:**
+
+1. **Audible run feedback** — `client.playAudio({ base64, mimeType })` on
+   `PluginClientContext` (new in 0.11.0, resolves when playback ends). Scheduled
+   runs and automation hooks (§5d) execute unattended; a completion/failure chime
+   would make their outcome perceptible without watching the history tab.
+2. **Screen and sidebar modernization** — migrate the deprecated `addSurface` /
+   `addSidebarItem` / `openSurface` (used in `index.client.tsx`) to `addScreen` /
+   `addSidebarHeaderItem` / `openScreen`. The host ships compatibility shims
+   (COMPAT markers in `evaluate.ts`) that are scheduled for removal after
+   **2027-03-29**, so the migration must land before then. The new API is more
+   than a rename: `PluginScreenProps.params` carries URL parameters into the
+   surface (a deep link could open the library on an exact command, or the
+   schedules tab on an exact schedule, from history, `/cc` or Command Center
+   items), `PluginScreenTitle` can derive the header from those params, the
+   multi-row `SidebarRow` / `SidebarSeparator` components organize header and
+   footer rows host-natively, and `addSidebarFooterItem` adds a footer slot.
+3. **Provider launch diagnostics** — `ProviderRegistration` gained
+   `command?: readonly [string, ...string[]]` (override the launch command of a
+   plugin-provided provider) and `status?(request: ProviderStatusRequest): Promise<ProviderStatus>`,
+   backed by the new `ProviderLaunchSchema` / `ProviderStatusSchema`. The run
+   dialog's provider/model picker could surface a live "why this provider cannot
+   start" status instead of failing at dispatch time.
+4. **Turn-aware prompt dispatch** — `activeTurnBehavior` in `SendMessageOptions`
+   (`@getpaseo/client` 0.11, exposed via `PaseoAgentSendOptions`) lets a prompt
+   command decide explicitly what happens when its target agent is mid-turn
+   (queue vs. interrupt) instead of inheriting the daemon default — relevant to
+   single-target runs against an existing agent.
+5. **Usage reporting** — `server.registerUsageSource({ id, label, icon?, input,
+   discover(scope), fetch(input) })` plus the client-side `listUsageReports()` /
+   `supportsUsageReports()` (new protocol messages `usage.list_reports.*`).
+   Command Center could aggregate its own run counts into Paseo's usage reports,
+   complementing the existing "most used" analytics idea (roadmap item 7).

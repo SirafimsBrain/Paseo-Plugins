@@ -86,4 +86,23 @@ $PASEO_HOME/plugins/memory-flash-client/
 
 Requires Paseo ≥ 0.10.0 (uses the plugin SDK 0.10 settings, lifecycle hooks and `McpHttpServerConfig`).
 
+## Planned improvements with Paseo 0.11.0
+
+Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
+with this plugin as-is: typecheck, the test suite, the real host bundler and a
+live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
+0.11.0 APIs relevant to this plugin:
+
+- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
+  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
+  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
+  lay the host list out with `SidebarRow`/`SidebarSeparator`, add an
+  `addSidebarFooterItem` entry, and deep-link to a specific connection through
+  screen URL params (`PluginScreenProps.params`).
+- **`agent.closed` lifecycle event** — release per-agent state of the injected
+  HTTP MCP connections and record which connections are actually used
+  (last-used stats) when an agent closes.
+
+Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+
 See [__doc.md](./__doc.md) for the technical details: contracts, the probe sequence, the injection shape and the coexistence check.

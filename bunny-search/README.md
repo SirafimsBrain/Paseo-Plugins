@@ -58,4 +58,28 @@ $PASEO_HOME/plugins/bunny-search/
 
 The host keeps the authoritative settings in its own store (exposed to the plugin via the `settings.bunny-search.read` RPC and change subscription); the JSON file above is a mirror for the MCP server process, which is spawned by agent providers outside the plugin host and therefore cannot use the plugin API.
 
+## Planned improvements with Paseo 0.11.0
+
+Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
+with this plugin as-is: typecheck, the test suite, the real host bundler and a
+live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
+0.11.0 APIs relevant to this plugin:
+
+- **`spawnProcess` / `execCommand` / `terminateProcess`**
+  (`@getpaseo/plugin/server`) — replace the `node:child_process` probe in
+  `server/probe.ts` (service test + MCP spawn/initialize check) with
+  host-managed processes, including Windows `.cmd`/`.bat` launching.
+- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
+  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
+  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
+  deep-link the surface with a prefilled quick-search query via screen URL
+  params (`PluginScreenProps.params`), and use `SidebarRow` /
+  `addSidebarFooterItem` for a host-native layout.
+- **`server.registerUsageSource()`** — publish the configured search backend's
+  quota/utilization (e.g. Brave API limits) as a usage source, readable through
+  `listUsageReports()` in the Paseo usage reports (candidate: depends on the
+  backend exposing usage data).
+
+Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+
 Technical details, design decisions, alternatives considered, limitations and the roadmap: see [__doc.md](./__doc.md).

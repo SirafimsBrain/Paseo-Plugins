@@ -58,4 +58,28 @@ $PASEO_HOME/plugins/command-center/
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
 
+## Planned improvements with Paseo 0.11.0
+
+Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
+with this plugin as-is: typecheck, the test suite, the real host bundler and a
+live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
+0.11.0 APIs relevant to this plugin:
+
+- **`client.playAudio({ base64, mimeType })`** — audible feedback when a
+  scheduled or automated run finishes or fails (those run unattended today).
+- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
+  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
+  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
+  adopt the multi-row `SidebarRow`/`SidebarSeparator` and `addSidebarFooterItem`,
+  and use screen URL params (`PluginScreenProps.params`) so history, schedules
+  and `/cc` can deep-link straight to an exact command or schedule.
+- **Provider launch diagnostics** — `ProviderRegistration.command`/`status` with
+  the `ProviderLaunch`/`ProviderStatus` schemas: per-provider launch command/env
+  overrides and a reported reason when a provider cannot start, surfaced in the
+  run dialog.
+- **`activeTurnBehavior`** (new in `@getpaseo/client` 0.11) — declare whether a
+  prompt command queues or interrupts when its target agent is mid-turn.
+
+Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+
 Technical details, design decisions, limitations and the roadmap: see [__doc.md](./__doc.md).

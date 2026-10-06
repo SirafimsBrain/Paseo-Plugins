@@ -210,3 +210,34 @@ Built against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1`:
 - **No fan-out.** Each agent gets the tools of every enabled connection, which means the same tool names (`memory_search`, …) can appear more than once when several hosts are enabled. A future release could namespace tools per connection.
 - **The generated UUID is per-process until pinned.** Restarting the daemon yields a new generated identity unless the user pins one; the memory host therefore sees a new client id after each restart. Pinning is one click in the settings screen.
 - **Git source only.** The plugin must be installed with `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash-client` so it runs from `~/.paseo/plugins/memory-flash-client/<revision>/checkout/memory-flash-client`. A local-directory source is not supported: it executes the plugin from the working copy instead of the Paseo home. Updates go through `paseo plugin update memory-flash-client`. The machine that *serves* the memory needs no plugin at all — an HTTP MCP URL plus an API key are sufficient.
+
+## 14. Planned improvements with Paseo 0.11.0
+
+Compatibility with the 0.11.0 prerelease (`v0.11.0-beta.5`, verified 2026-10-06)
+is established: the SDK diff `@getpaseo/plugin@0.10.1 → 0.11.0-beta.5` is purely
+additive for every API this plugin uses; `npm run typecheck` and `npm test`
+(6 suites, 53 tests) pass against the 0.11.0 SDK; the real host compiler
+(`compilePlugin` from 0.11.0-beta.5) bundles the plugin with SDK 0.11.0 and with
+host-supplied imports only (this plugin has no install-time build); the
+manifest's `requirements.paseo >=0.10.0` passes `assertPluginCompatibility` for
+a 0.11.0-beta.5 daemon and app; and a live Git install on an isolated
+0.11.0-beta.5 daemon reached status `running`, with `memory-flash-client.status`
+answering over the wire. No code changes are required for 0.11.0.
+
+The following new 0.11.0 capabilities are relevant to this plugin. **They are
+planned for implementation after the stable Paseo 0.11.0 release, on request:**
+
+1. **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
+   `addSidebarItem` / `openSurface` (used in `index.client.tsx`) to `addScreen` /
+   `addSidebarHeaderItem` / `openScreen`; the host's compatibility shims are
+   scheduled for removal after **2027-03-29**. `PluginScreenProps.params` would
+   let a deep link open the Memory Hosts surface on an exact connection (e.g.
+   from a Command Center item), `PluginScreenTitle` can derive the header from
+   it, and `SidebarRow` / `SidebarSeparator` / `addSidebarFooterItem` give the
+   connection list and add form a host-native multi-row layout.
+2. **`agent.closed` lifecycle event** — new hook payload
+   (`"agent.closed": { agent: PluginHookAgent }`), a counterpart to the
+   `agent.create` before-hook the injection already uses (§7). The plugin could
+   release per-agent state for the injected HTTP MCP connections and record
+   last-used statistics per connection when an agent closes — data the memory
+   host's audit log cannot attribute, since it only sees the shared API key.

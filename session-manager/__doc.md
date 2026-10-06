@@ -342,3 +342,39 @@ paseo plugin logs session-manager
   that. It only protects them from accidental transcript deletion.
 - Exports land under `$PASEO_HOME/session-manager-exports`; they are plain
   copies the plugin never cleans up by itself.
+
+## Planned improvements with Paseo 0.11.0
+
+Compatibility with the 0.11.0 prerelease (`v0.11.0-beta.5`, verified 2026-10-06)
+is established: the SDK diff `@getpaseo/plugin@0.10.1 → 0.11.0-beta.5` is purely
+additive for every API this plugin uses; `npm run typecheck` and `npm test`
+(8 suites, 70 tests) pass against the 0.11.0 SDK; the real host compiler
+(`compilePlugin` from 0.11.0-beta.5) bundles the plugin with SDK 0.11.0, with
+the faithful 0.10.1 lockfile, and with host-supplied imports only; the manifest's
+`requirements.paseo >=0.8.0` passes `assertPluginCompatibility` for a
+0.11.0-beta.5 daemon and app; and a live Git install on an isolated
+0.11.0-beta.5 daemon reached status `running` with `Plugin ready` in the logs.
+No code changes are required for 0.11.0.
+
+The following new 0.11.0 capabilities are relevant to this plugin. **They are
+planned for implementation after the stable Paseo 0.11.0 release, on request:**
+
+1. **Host-managed process execution** — `spawnProcess`, `execCommand` and
+   `terminateProcess` from `@getpaseo/plugin/server` (new in 0.11.0) are the
+   SDK-native replacement for the plugin's own `node:child_process` usage in
+   `server/exec.ts` (the CLI discovery/deletion path used by the Cline, OpenCode
+   and Kilo adapters). Beyond moving process lifecycle under the host's
+   management, they add correct launching of Windows `.cmd`/`.bat` commands,
+   which the current hand-rolled spawn does not handle.
+2. **`agent.closed` lifecycle event** — new hook payload
+   (`"agent.closed": { agent: PluginHookAgent }`). The plugin could invalidate
+   its 30-second listing cache and re-evaluate the "due for cleanup" hint the
+   moment an agent closes, instead of waiting for TTL expiry or a manual
+   Rescan.
+3. **Sidebar contributions** — `addSidebarFooterItem` (new footer slot) and the
+   multi-row `SidebarRow` / `SidebarSeparator` components from `client/ui`
+   provide additional entry points for the panel. Note for the future migration:
+   this plugin does **not** use the deprecated `addSurface` / `addSidebarItem` /
+   `openSurface` API (it contributes a workspace panel, a settings screen and a
+   Command Center item), so there is nothing to migrate before the compatibility
+   shims are removed after 2027-03-29 — only optional new surfaces to adopt.

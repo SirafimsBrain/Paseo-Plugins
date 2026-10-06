@@ -613,3 +613,43 @@ Roadmap:
 2. **Vector recall** — optional `sqlite-vec` table + local embeddings for semantic search alongside FTS5.
 3. **Timeline surfacing** — post a plugin timeline item when a delegated agent finishes memory maintenance (`agent.turn_ended` hook + timeline renderer).
 4. **More transports** — real `tcp` and `relay` implementations behind the existing registry.
+
+## 14. Planned improvements with Paseo 0.11.0
+
+Compatibility with the 0.11.0 prerelease (`v0.11.0-beta.5`, verified 2026-10-06)
+is established: the SDK diff `@getpaseo/plugin@0.10.1 → 0.11.0-beta.5` is purely
+additive for every API this plugin uses; `npm run typecheck` and `npm test`
+(14 suites, 149 tests) pass against the 0.11.0 SDK; the real host compiler
+(`compilePlugin` from 0.11.0-beta.5) bundles the plugin with SDK 0.11.0 and with
+the faithful 0.10.1 lockfile; the manifest's `requirements.paseo >=0.10.0`
+passes `assertPluginCompatibility` for a 0.11.0-beta.5 daemon and app; a live Git
+install on an isolated 0.11.0-beta.5 daemon reached status `running`, the
+`agent.create` hook logged `MCP injected`, `paseo plugin update --all` reported
+`current`, a reload kept the stable MCP entry path valid (§12), and
+`memory-flash.stats` answered over the wire. No code changes are required for
+0.11.0.
+
+The following new 0.11.0 capabilities are relevant to this plugin. **They are
+planned for implementation after the stable Paseo 0.11.0 release, on request:**
+
+1. **Host-managed process execution** — `spawnProcess`, `execCommand` and
+   `terminateProcess` from `@getpaseo/plugin/server` (new in 0.11.0) replace the
+   `node:child_process` usage in `server/mcp-probe.ts` (the live spawn/initialize
+   probe behind the Cline status check) and `server/remote-hosts.ts`, moving
+   process lifecycle under the host and adding correct launching of Windows
+   `.cmd`/`.bat` commands.
+2. **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
+   `addSidebarItem` / `openSurface` (used in `index.client.tsx`) to `addScreen` /
+   `addSidebarHeaderItem` / `openScreen`; the host's compatibility shims are
+   scheduled for removal after **2027-03-29**. `PluginScreenProps.params` would
+   let a deep link open the management surface on an exact memory (from search
+   results, the history tab or a Command Center item), `PluginScreenTitle` can
+   derive the header from it, and `SidebarRow` / `SidebarSeparator` /
+   `addSidebarFooterItem` reorganize the kind/tag chip rows into host-native
+   multi-row headers and footers.
+3. **`agent.closed` lifecycle event** — new hook payload
+   (`"agent.closed": { agent: PluginHookAgent }`). The agent skill mandates
+   "always a handoff at the end of a session"; the hook gives the plugin a
+   deterministic moment to trigger or record that handoff when an agent closes,
+   and it is the natural foundation for roadmap item 3 (timeline surfacing of
+   maintenance results).
