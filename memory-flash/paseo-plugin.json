@@ -13,5 +13,8 @@
       "run",
       "bundle"
     ]
-  ]
+  ],
+  "mcp": {
+    "entry": "dist/mcp-server.js"
+  }
 }
