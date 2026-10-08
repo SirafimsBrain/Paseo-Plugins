@@ -19,6 +19,7 @@ bunny-search/
 │   ├── settings.ts            # host-scoped settings definition (defineSettings)
 │   └── host-fonts.ts          # host Appearance settings parsing (client-safe)
 ├── server/
+│   ├── cjs-globals.ts         # __dirname/__filename globals for the host bundle evaluator
 │   ├── providers.ts           # provider adapters (duckduckjs / searxng / duckduckgo /
 │   │                          # brave / custom-json), HTTP helpers, result formatting
 │   ├── mcp-server.ts          # standalone stdio MCP server (JSON-RPC 2.0)
@@ -269,6 +270,13 @@ performs live queries against search services.
 - `scripts/bundle-mcp-server.mjs`: the ESM banner gained `__filename` /
   `__dirname` shims — `@deno/shim-deno` (pulled in by the library) uses them
   and otherwise crashes a `format: esm` bundle at load time.
+- `server/cjs-globals.ts` + the first import of `index.server.ts`: defines
+  `__dirname`/`__filename` on `globalThis` **before any bundled dependency
+  evaluates** — the host compiles the server entry to `format: "cjs"` and
+  runs it via `globalThis.eval` in a wrapper that supplies only
+  `require`/`module`/`exports`, so `@deno/shim-deno`'s module-scope
+  `__dirname` crashed plugin load with `__dirname is not defined` (release
+  blocker of the first 0.3.0 rollout; see §11.4).
 - `package.json`: `dependencies` on `@overclockedsenku/duckduckjs` +
   `undici` (both compiled into `dist/mcp-server.js`; agents still need no
   `node_modules`); bundle size 24 KB → ~3.3 MB.
@@ -280,7 +288,8 @@ performs live queries against search services.
   SearXNG) were updated for the new default. 7 suites / 76 tests, typecheck
   clean.
 - Version `0.2.1` → `0.3.0` (new functionality → second digit), annotated tag
-  `bunny-search@0.3.0`.
+  `bunny-search@0.3.0`; hotfix `0.3.0` → `0.3.1` (third digit) for the
+  host-evaluator load crash, tag `bunny-search@0.3.1`.
 
 ### 11.3 The typecheck split: `@types/node` vs `react-native` ambient globals
 
@@ -315,3 +324,39 @@ type-assertion casts around the fetch call, or dropping request abortion —
 were rejected as suppressions/behavior regressions. Note: no single command
 type-checks the *entire* plugin anymore; that combination is exactly the
 uncheckable one.
+
+### 11.4 The 0.3.0 load crash and the host evaluator contract
+
+The first rollout of 0.3.0 failed at `paseo plugin update` with
+`Plugin failed to load: __dirname is not defined` and rolled back to the
+previous revision. Root cause (read out of the app bundle's
+`@getpaseo/server` plugin compiler):
+
+- The host compiles the plugin **server** entry with esbuild
+  `bundle: true, format: "cjs", platform: "node", target: "node20"`,
+  externalizing only the plugin SDK specifiers and `zod`
+  (`SERVER_HOST_MODULES`); **all other npm dependencies are bundled into
+  the plugin process** (git installs satisfy the boundary checks because
+  the manifest build ran `npm ci` inside the checkout).
+- The output is wrapped as `(function(require) { const module = …; const
+  exports = …; <code> })` and evaluated with indirect `globalThis.eval`,
+  so the only injected CommonJS binding is `require` — `__dirname` and
+  `__filename` are undefined free variables in that scope.
+- Until DuckDuckJS the plugin had zero bundled CommonJS dependencies, so
+  the gap was invisible. `@deno/shim-deno` reads `__dirname` at module
+  scope (`…/stable/variables/mainModule.js`) and threw during bundle
+  evaluation — i.e. at plugin load, before any plugin code ran.
+
+Fix: `server/cjs-globals.ts` assigns `globalThis.__dirname/__filename`
+(`??=` so real values win) and `index.server.ts` imports it **first** —
+ESM import evaluation order is declaration order, so the globals exist
+before the bundled `@deno/shim-deno` factory executes. The values are
+only ever read to build informational shim paths.
+
+Verification: a local replica of the exact host pipeline (same esbuild
+options, wrapper, indirect eval, `factory(runtimeRequire)`, mock
+`PluginServerContext`) loads the bundle, registers all three RPC
+handlers and serves `bunny-search.status` with `provider: "duckduckjs"`;
+the same replica **without** the shim reproduces the crash at the
+identical `mainModule.js` line (control run), and the real
+`paseo plugin update` then reached status `running`.

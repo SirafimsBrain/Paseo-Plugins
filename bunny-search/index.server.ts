@@ -1,3 +1,9 @@
+// MUST stay the first import: this module defines the CommonJS
+// `__dirname`/`__filename` globals that Paseo's plugin bundle
+// evaluator omits, and evaluation order of ESM imports is declaration
+// order — bundled dependencies (see server/cjs-globals.ts) must not
+// evaluate before it runs.
+import "./server/cjs-globals";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { bunnySearchSettings } from "./shared/settings";
 import type { BunnySearchSettings } from "./shared/settings";
