@@ -38,7 +38,9 @@ bunny-search/
 │   └── use-host-typography.ts # host font scale/family hook
 ├── scripts/
 │   └── bundle-mcp-server.mjs  # esbuild → dist/mcp-server.js (standalone stdio server)
-└── tests/                     # vitest: 9 suites, 95 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 9 hermetic suites, 95 tests (incl. real-process stdio e2e)
+                               # + live-ddgs.test.ts — live smoke (real Python/PyPI ddgs/network),
+                               #   skipped by default; run with BUNNY_LIVE=1
 ```
 
 Typechecking is split into three project references because server and client
@@ -134,7 +136,7 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 | SDK | `@getpaseo/plugin@0.10.1` (0.11.0 verified for the SDK as a build/test target, see §10) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`); vitest 9 suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors; stable-0.11.0 checks in §10.1 |
+| Verification | typecheck clean (three-project `tsc -b`); vitest 9 hermetic suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors; stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0) |
 
 ## 8. Alternatives considered
 

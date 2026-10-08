@@ -64,7 +64,8 @@ The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugi
 ```bash
 npm install
 npm run bundle   # dist/mcp-server.js — standalone stdio server (esbuild)
-npm test         # vitest: 9 suites / 95 tests (providers, discovery, settings, probe, tools, stdio e2e)
+npm test         # vitest: 9 hermetic suites / 95 tests (providers, discovery, settings, probe, tools, stdio e2e)
+BUNNY_LIVE=1 npx vitest run tests/live-ddgs.test.ts   # live smoke: real Python + PyPI ddgs + network
 npm run typecheck   # tsc -b: three projects — server, client (react-native), tests
 ```
 
