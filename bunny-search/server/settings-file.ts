@@ -19,7 +19,9 @@ import type { RuntimeSettings } from "../shared/contracts";
  */
 
 const DEFAULTS: RuntimeSettings = {
-  searchService: "searxng",
+  searchService: "duckduckjs",
+  duckduckjsEngine: "auto",
+  proxyUrl: "",
   searxngBaseUrl: "http://127.0.0.1:8888/search",
   customBaseUrl: "",
   apiKey: "",
@@ -28,6 +30,20 @@ const DEFAULTS: RuntimeSettings = {
   categories: "general,web",
   language: "",
 };
+
+/** The search service ids accepted in the file and in the environment. */
+const SERVICES = ["duckduckjs", "searxng", "duckduckgo", "brave", "custom-json"] as const;
+
+/** The DuckDuckJS engine ids accepted in the file and in the environment. */
+const DUCKDUCKJS_ENGINES = ["auto", "duckduckgo", "brave", "google", "mojeek", "yahoo"] as const;
+
+function parseService(value: unknown): RuntimeSettings["searchService"] | undefined {
+  return SERVICES.find((service) => service === value);
+}
+
+function parseEngine(value: unknown): RuntimeSettings["duckduckjsEngine"] | undefined {
+  return DUCKDUCKJS_ENGINES.find((engine) => engine === value);
+}
 
 function settingsFilePath(): string {
   const configured = process.env.PASEO_HOME;
@@ -56,10 +72,11 @@ function parseFile(filePath: string): Partial<RuntimeSettings> {
         ? (record.values as Record<string, unknown>)
         : record;
     const parsed: Partial<RuntimeSettings> = {};
-    const searchService = optionalString(values.searchService);
-    if (searchService === "searxng" || searchService === "duckduckgo" || searchService === "brave" || searchService === "custom-json") {
-      parsed.searchService = searchService;
-    }
+    const searchService = parseService(values.searchService);
+    if (searchService) parsed.searchService = searchService;
+    const duckduckjsEngine = parseEngine(values.duckduckjsEngine);
+    if (duckduckjsEngine) parsed.duckduckjsEngine = duckduckjsEngine;
+    if (typeof values.proxyUrl === "string") parsed.proxyUrl = values.proxyUrl.trim().slice(0, 512);
     const searxngBaseUrl = optionalString(values.searxngBaseUrl);
     if (searxngBaseUrl) parsed.searxngBaseUrl = searxngBaseUrl.slice(0, 512);
     const customBaseUrl = optionalString(values.customBaseUrl);
@@ -85,9 +102,13 @@ function parseEnv(): Partial<RuntimeSettings> {
   const baseUrl = optionalString(process.env.BUNNY_SEARCH_BASE_URL) ?? optionalString(process.env.SEARXNG_BASE_URL);
   if (baseUrl) parsed.searxngBaseUrl = baseUrl;
   const service = optionalString(process.env.BUNNY_SEARCH_PROVIDER);
-  if (service === "searxng" || service === "duckduckgo" || service === "brave" || service === "custom-json") {
-    parsed.searchService = service;
-  }
+  const parsedService = parseService(service);
+  if (parsedService) parsed.searchService = parsedService;
+  const engine = optionalString(process.env.BUNNY_SEARCH_DUCKDUCKJS_ENGINE);
+  const parsedEngine = parseEngine(engine);
+  if (parsedEngine) parsed.duckduckjsEngine = parsedEngine;
+  const proxyUrl = optionalString(process.env.BUNNY_SEARCH_PROXY_URL);
+  if (proxyUrl) parsed.proxyUrl = proxyUrl.slice(0, 512);
   const customUrl = optionalString(process.env.BUNNY_SEARCH_CUSTOM_URL);
   if (customUrl) parsed.customBaseUrl = customUrl;
   const apiKey = optionalString(process.env.BUNNY_SEARCH_API_KEY);

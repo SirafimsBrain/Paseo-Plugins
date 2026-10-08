@@ -5,6 +5,8 @@ import type { RuntimeSettings } from "../shared/contracts";
 function settings(overrides: Partial<RuntimeSettings> = {}): RuntimeSettings {
   return {
     searchService: "searxng",
+    duckduckjsEngine: "auto",
+    proxyUrl: "",
     searxngBaseUrl: "http://searxng.test/search",
     customBaseUrl: "",
     apiKey: "",

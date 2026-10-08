@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   USER_AGENT,
   SearchServiceError,
+  applyProxyUrl,
   checkSearchService,
   formatSearchResponse,
   getProvider,
@@ -10,9 +11,43 @@ import {
 } from "../server/providers";
 import type { RuntimeSettings } from "../shared/contracts";
 
+// ---------------------------------------------------------------------------
+// DuckDuckJS mock — the real library performs live network requests; the
+// adapter tests below exercise engine selection, normalization and errors
+// with scripted engines instead (search itself is verified by the user).
+// ---------------------------------------------------------------------------
+
+const duckduckjsMock = vi.hoisted(() => ({
+  calls: [] as Array<{ engine: string; query: string; options?: unknown }>,
+  results: new Map<string, Array<Record<string, unknown>>>(),
+  failures: new Set<string>(),
+}));
+
+vi.mock("@overclockedsenku/duckduckjs", () => {
+  function makeEngine(id: string, name: string) {
+    return class {
+      readonly name = name;
+      async search(query: string, options?: unknown): Promise<Array<Record<string, unknown>>> {
+        duckduckjsMock.calls.push({ engine: id, query, options });
+        if (duckduckjsMock.failures.has(id)) throw new Error(`[${name}] HTTP 429`);
+        return duckduckjsMock.results.get(id) ?? [];
+      }
+    };
+  }
+  return {
+    DuckDuckGoEngine: makeEngine("duckduckgo", "DuckDuckGo"),
+    BraveEngine: makeEngine("brave", "Brave"),
+    GoogleEngine: makeEngine("google", "Google"),
+    MojeekEngine: makeEngine("mojeek", "Mojeek"),
+    YahooEngine: makeEngine("yahoo", "Yahoo"),
+  };
+});
+
 function settings(overrides: Partial<RuntimeSettings> = {}): RuntimeSettings {
   return {
     searchService: "searxng",
+    duckduckjsEngine: "auto",
+    proxyUrl: "",
     searxngBaseUrl: "http://searxng.test/search",
     customBaseUrl: "",
     apiKey: "",
@@ -318,6 +353,156 @@ describe("brave provider", () => {
 });
 
 // ---------------------------------------------------------------------------
+// DuckDuckJS adapter (default provider — engines mocked above)
+// ---------------------------------------------------------------------------
+
+describe("duckduckjs provider", () => {
+  beforeEach(() => {
+    duckduckjsMock.calls.length = 0;
+    duckduckjsMock.results.clear();
+    duckduckjsMock.failures.clear();
+    // Reset the proxy dispatcher between tests.
+    applyProxyUrl("");
+  });
+
+  afterEach(() => {
+    applyProxyUrl("");
+  });
+
+  const textResult = (title: string, href: string, body: string) => ({
+    type: "text",
+    title,
+    href,
+    body,
+  });
+
+  it("auto mode falls through failing engines and maps the first answer", async () => {
+    duckduckjsMock.failures.add("duckduckgo");
+    duckduckjsMock.results.set("brave", [
+      textResult("  Brave hit ", "https://example.com/a", "snip  pet   pet"),
+    ]);
+    const response = await searchWeb(
+      { query: "cats", maxResults: 5 },
+      settings({ searchService: "duckduckjs" }),
+    );
+    expect(duckduckjsMock.calls.map((call) => call.engine)).toEqual(["duckduckgo", "brave"]);
+    expect(response.results).toEqual([
+      {
+        title: "Brave hit",
+        url: "https://example.com/a",
+        content: "snip pet pet",
+        engines: ["Brave"],
+      },
+    ]);
+  });
+
+  it("auto mode skips empty engines and returns an empty answer without errors", async () => {
+    duckduckjsMock.results.set("yahoo", [textResult("Last", "https://example.com/y", "y")]);
+    const response = await searchWeb(
+      { query: "cats", maxResults: 5 },
+      settings({ searchService: "duckduckjs" }),
+    );
+    // duckduckgo..mojeek answered nothing, yahoo returned the result.
+    expect(duckduckjsMock.calls.map((call) => call.engine)).toEqual([
+      "duckduckgo",
+      "brave",
+      "google",
+      "mojeek",
+      "yahoo",
+    ]);
+    expect(response.results).toHaveLength(1);
+    expect(response.results[0]?.engines).toEqual(["Yahoo"]);
+  });
+
+  it("auto mode reports every engine failure when all fail", async () => {
+    for (const id of ["duckduckgo", "brave", "google", "mojeek", "yahoo"]) {
+      duckduckjsMock.failures.add(id);
+    }
+    await expect(
+      searchWeb({ query: "cats", maxResults: 5 }, settings({ searchService: "duckduckjs" })),
+    ).rejects.toThrow(/all engines failed/);
+  });
+
+  it("auto mode returns an empty response when every engine answers with nothing", async () => {
+    const response = await searchWeb(
+      { query: "cats", maxResults: 5 },
+      settings({ searchService: "duckduckjs" }),
+    );
+    expect(response.results).toEqual([]);
+  });
+
+  it("a pinned engine is used exclusively and surfaces its error", async () => {
+    duckduckjsMock.failures.add("google");
+    await expect(
+      searchWeb(
+        { query: "cats", maxResults: 5 },
+        settings({ searchService: "duckduckjs", duckduckjsEngine: "google" }),
+      ),
+    ).rejects.toThrow(/DuckDuckJS \(Google\) failed: \[Google\] HTTP 429/);
+    expect(duckduckjsMock.calls.map((call) => call.engine)).toEqual(["google"]);
+  });
+
+  it("maps the language setting to a region and clamps results", async () => {
+    duckduckjsMock.results.set("duckduckgo", [
+      textResult("1", "https://example.com/1", "one"),
+      textResult("2", "https://example.com/2", "two"),
+      textResult("3", "https://example.com/3", "three"),
+    ]);
+    const response = await searchWeb(
+      { query: "cats", maxResults: 2, language: "ru" },
+      settings({ searchService: "duckduckjs", language: "en" }),
+    );
+    expect(duckduckjsMock.calls[0]?.options).toEqual({ region: "ru-ru" });
+    expect(response.results).toHaveLength(2);
+  });
+
+  it("omits the region when no language is configured", async () => {
+    await searchWeb(
+      { query: "cats", maxResults: 5 },
+      settings({ searchService: "duckduckjs" }),
+    );
+    expect(duckduckjsMock.calls[0]?.options).toBeUndefined();
+  });
+
+  it("rejects an invalid or non-http proxy URL", async () => {
+    await expect(
+      searchWeb(
+        { query: "cats", maxResults: 5 },
+        settings({ searchService: "duckduckjs", proxyUrl: "not a url" }),
+      ),
+    ).rejects.toThrow(/Invalid proxy URL/);
+    await expect(
+      searchWeb(
+        { query: "cats", maxResults: 5 },
+        settings({ searchService: "duckduckjs", proxyUrl: "socks5://127.0.0.1:1080" }),
+      ),
+    ).rejects.toThrow(/Unsupported proxy protocol/);
+    expect(duckduckjsMock.calls).toHaveLength(0);
+  });
+
+  it("accepts a valid http proxy and still runs the search", async () => {
+    duckduckjsMock.results.set("duckduckgo", [textResult("Hit", "https://example.com/p", "p")]);
+    const response = await searchWeb(
+      { query: "cats", maxResults: 5 },
+      settings({ searchService: "duckduckjs", proxyUrl: "http://127.0.0.1:8080" }),
+    );
+    expect(response.results).toHaveLength(1);
+  });
+
+  it("check() succeeds on results and reports the rate-limit case", async () => {
+    const okSettings = settings({ searchService: "duckduckjs" });
+    duckduckjsMock.results.set("duckduckgo", [textResult("Hit", "https://example.com/p", "p")]);
+    await expect(checkSearchService(okSettings)).resolves.toMatchObject({ ok: true });
+
+    duckduckjsMock.results.clear();
+    await expect(checkSearchService(okSettings)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/rate-limiting/),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Custom JSON endpoint adapter
 // ---------------------------------------------------------------------------
 
@@ -392,13 +577,14 @@ describe("custom-json provider", () => {
 
 describe("registry and helpers", () => {
   it("resolves every provider by id", () => {
-    for (const id of ["searxng", "duckduckgo", "brave", "custom-json"] as const) {
+    for (const id of ["duckduckjs", "searxng", "duckduckgo", "brave", "custom-json"] as const) {
       expect(getProvider(settings({ searchService: id })).id).toBe(id);
     }
   });
 
   it("reports the service base URL per provider", () => {
     expect(providerBaseUrl(settings())).toBe("http://searxng.test/search");
+    expect(providerBaseUrl(settings({ searchService: "duckduckjs" }))).toBeNull();
     expect(providerBaseUrl(settings({ searchService: "duckduckgo" }))).toBe(
       "https://html.duckduckgo.com/html/",
     );

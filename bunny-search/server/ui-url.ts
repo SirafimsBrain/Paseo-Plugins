@@ -44,6 +44,9 @@ export function searchInterfaceUrl(values: InterfaceUrlInput): string | null {
       return PROVIDER_INTERFACES.duckduckgo;
     case "brave":
       return PROVIDER_INTERFACES.brave;
+    case "duckduckjs":
+      // Multi-engine provider: open the primary engine's interface.
+      return PROVIDER_INTERFACES.duckduckgo;
   }
 }
 

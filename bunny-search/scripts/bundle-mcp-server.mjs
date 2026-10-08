@@ -33,8 +33,17 @@ await build({
   outfile: join(root, "dist", "mcp-server.js"),
   define: { __BUNNY_SEARCH_VERSION__: JSON.stringify(version) },
   banner: {
-    // ESM shims for CJS built-ins under `esbuild`'s platform=node.
-    js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);",
+    // ESM shims for CJS built-ins under `esbuild`'s platform=node:
+    // `require` for bundled CJS deps, `__dirname`/`__filename` for
+    // `@deno/shim-deno` (pulled in by @overclockedsenku/duckduckjs).
+    js: [
+      "import { createRequire as __cr } from 'node:module';",
+      "import { fileURLToPath as __ftp } from 'node:url';",
+      "import { dirname as __dp } from 'node:path';",
+      "const require = __cr(import.meta.url);",
+      "const __filename = __ftp(import.meta.url);",
+      "const __dirname = __dp(__filename);",
+    ].join("\n"),
   },
   external: ["node:*"],
   sourcemap: false,

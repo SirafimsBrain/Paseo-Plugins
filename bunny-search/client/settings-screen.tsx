@@ -5,10 +5,12 @@ import { openSearchInterfaceUrl } from "./open-search-ui";
 import { bunnySearchSettings } from "../shared/settings";
 import {
   SEARCH_SERVICE_LABELS,
+  DUCKDUCKJS_ENGINE_LABELS,
   connectionStatus,
   connectionTest,
   type ConnectionStatus,
   type ConnectionTestResult,
+  type DuckduckjsEngine,
 } from "../shared/contracts";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
@@ -156,6 +158,10 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
     label: SEARCH_SERVICE_LABELS[id],
     value: id,
   }));
+  const engineOptions = (Object.keys(DUCKDUCKJS_ENGINE_LABELS) as DuckduckjsEngine[]).map((id) => ({
+    label: DUCKDUCKJS_ENGINE_LABELS[id],
+    value: id,
+  }));
 
   return (
     <ScrollView style={styles.container}>
@@ -220,15 +226,33 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
       <SettingsCard>
         <SettingsSection
           title="Search provider"
-          info="Which service the web_search tool uses. SearXNG (self-hosted, private, no key) is the default."
+          info="Which service the web_search tool uses. DuckDuckJS (multi-engine: DuckDuckGo, Brave, Google, Mojeek, Yahoo; no API key) is the default."
         >
           <SettingsSelect
             label="Search service"
-            hint="SearXNG is the default and needs no API key."
+            hint="DuckDuckJS is the default and needs no API key. SearXNG stays available for self-hosted setups."
             value={values.searchService}
             options={serviceOptions}
             onValueChange={(service: SearchService) => patch({ searchService: service })}
           />
+          {values.searchService === "duckduckjs" ? (
+            <>
+              <SettingsSelect
+                label="DuckDuckJS engine"
+                hint="Auto tries DuckDuckGo, Brave, Google, Mojeek and Yahoo in order until one returns results."
+                value={values.duckduckjsEngine}
+                options={engineOptions}
+                onValueChange={(engine: DuckduckjsEngine) => patch({ duckduckjsEngine: engine })}
+              />
+              <SettingsInput
+                label="Proxy URL"
+                hint="Optional http(s) proxy for DuckDuckJS requests, e.g. http://127.0.0.1:8080. Empty = direct connection."
+                initialValue={values.proxyUrl}
+                placeholder="(direct)"
+                onChangeText={(text: string) => patch({ proxyUrl: text })}
+              />
+            </>
+          ) : null}
           {values.searchService === "searxng" ? (
             <SettingsInput
               label="SearXNG URL"

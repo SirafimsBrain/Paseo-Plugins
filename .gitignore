@@ -110,3 +110,6 @@ Documentations/Reference\ Guides/
 
 
 gha-creds-*.json
+
+# TypeScript incremental build info (bunny-search solution tsconfigs)
+*.tsbuildinfo

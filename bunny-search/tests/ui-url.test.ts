@@ -49,6 +49,14 @@ describe("searchInterfaceUrl", () => {
   it("falls back to provider front pages", () => {
     expect(
       searchInterfaceUrl({
+        searchService: "duckduckjs",
+        searxngBaseUrl: "",
+        customBaseUrl: "",
+        searchUiUrl: "",
+      }),
+    ).toBe("https://duckduckgo.com");
+    expect(
+      searchInterfaceUrl({
         searchService: "duckduckgo",
         searxngBaseUrl: "",
         customBaseUrl: "",

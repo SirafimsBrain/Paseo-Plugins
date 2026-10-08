@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true
+  },
+  "include": [
+    "server/**/*.ts",
+    "shared/**/*.ts",
+    "index.server.ts"
+  ],
+  "references": []
+}

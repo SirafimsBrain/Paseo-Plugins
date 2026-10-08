@@ -1,4 +1,17 @@
 import type { RuntimeSettings, SearchRequest, SearchResponse, WebResult } from "../shared/contracts";
+import {
+  BraveEngine,
+  DuckDuckGoEngine,
+  GoogleEngine,
+  MojeekEngine,
+  YahooEngine,
+} from "@overclockedsenku/duckduckjs";
+import type {
+  BaseSearchEngine,
+  SearchOptions,
+  SearchResult,
+} from "@overclockedsenku/duckduckjs";
+import { Agent, ProxyAgent, setGlobalDispatcher } from "undici";
 
 /**
  * Search provider adapters for the bunny-search MCP server.
@@ -35,6 +48,9 @@ export function providerBaseUrl(settings: RuntimeSettings): string | null {
       return "https://api.search.brave.com/res/v1/web/search";
     case "custom-json":
       return settings.customBaseUrl.length > 0 ? settings.customBaseUrl : null;
+    case "duckduckjs":
+      // Multi-engine: there is no single base URL to report.
+      return null;
   }
 }
 
@@ -75,11 +91,14 @@ async function timedGet(
   serviceLabel: string,
 ): Promise<FetchOutcome<Response>> {
   const startedAt = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
+  // `AbortSignal.timeout` hands fetch an abort signal typed as the
+  // global AbortSignal, so the call stays valid regardless of which
+  // ambient declaration (@types/node / react-native) wins the merge
+  // in this mixed client+server type program.
+  const signal = AbortSignal.timeout(settings.timeoutMs);
   try {
     const response = await fetch(url, {
-      signal: controller.signal,
+      signal,
       headers,
       redirect: "follow",
     });
@@ -93,8 +112,6 @@ async function timedGet(
       value: null,
       error: friendlyNetworkError(cause, serviceLabel, url),
     };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -125,6 +142,8 @@ function serviceLabel(settings: RuntimeSettings): string {
       return "Brave Search";
     case "custom-json":
       return "the custom search endpoint";
+    case "duckduckjs":
+      return "DuckDuckJS";
   }
 }
 
@@ -509,10 +528,197 @@ function checkCustomJson(settings: RuntimeSettings): Promise<CheckResult> {
 }
 
 // ---------------------------------------------------------------------------
+// DuckDuckJS (default provider — multi-engine meta-search library)
+// ---------------------------------------------------------------------------
+
+/** Engine ids accepted by the `duckduckjsEngine` setting. */
+type DuckduckjsEngineId = RuntimeSettings["duckduckjsEngine"];
+
+/** Concrete DuckDuckJS engines (the "auto" mode walks this order). */
+const DUCKDUCKJS_ENGINES: Record<Exclude<DuckduckjsEngineId, "auto">, () => BaseSearchEngine> = {
+  duckduckgo: () => new DuckDuckGoEngine(),
+  brave: () => new BraveEngine(),
+  google: () => new GoogleEngine(),
+  mojeek: () => new MojeekEngine(),
+  yahoo: () => new YahooEngine(),
+};
+
+/** Fallback order for "auto": first engine with results wins. */
+const DUCKDUCKJS_AUTO_ORDER: Array<Exclude<DuckduckjsEngineId, "auto">> = [
+  "duckduckgo",
+  "brave",
+  "google",
+  "mojeek",
+  "yahoo",
+];
+
+/**
+ * Proxy routing for DuckDuckJS requests. The engines call undici's
+ * `fetch`, so the proxy is applied through undici's global dispatcher —
+ * a process-wide switch. The last applied value is remembered so a
+ * cleared setting restores a direct connection on the next search.
+ */
+let appliedProxyUrl: string | null = null;
+
+export function applyProxyUrl(proxyUrl: string): void {
+  const proxy = proxyUrl.trim();
+  if (proxy === (appliedProxyUrl ?? "")) return;
+  if (proxy.length === 0) {
+    setGlobalDispatcher(new Agent());
+    appliedProxyUrl = null;
+    return;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(proxy);
+  } catch {
+    throw new SearchServiceError(
+      `Invalid proxy URL "${proxy}": expected an absolute URL like http://127.0.0.1:8080.`,
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new SearchServiceError(
+      `Unsupported proxy protocol "${parsed.protocol}" in "${proxy}": DuckDuckJS accepts http(s) proxies only.`,
+    );
+  }
+  setGlobalDispatcher(new ProxyAgent(proxy));
+  appliedProxyUrl = proxy;
+}
+
+/** Maps the language setting ("ru", "uk-UA", …) to a DuckDuckJS region ("ru-ru", "uk-ua"). */
+function duckduckjsRegion(request: SearchRequest, settings: RuntimeSettings): string | undefined {
+  const language = (request.language ?? settings.language).trim();
+  if (language.length === 0) return undefined;
+  if (/^[a-z]{2}$/i.test(language)) {
+    const lower = language.toLowerCase();
+    return `${lower}-${lower}`;
+  }
+  return language.toLowerCase();
+}
+
+/**
+ * Races a DuckDuckJS engine call against the configured timeout.
+ * The library has no abort support, so a timed-out request is
+ * abandoned (its late settlement is ignored by the race).
+ */
+function withEngineTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () =>
+        reject(
+          new SearchServiceError(
+            `${label} did not respond within the configured timeout (see the timeout setting).`,
+          ),
+        ),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (cause: unknown) => {
+        clearTimeout(timer);
+        reject(cause);
+      },
+    );
+  });
+}
+
+/** Normalizes DuckDuckJS text results into the shared result shape. */
+function normalizeDuckduckjs(
+  results: SearchResult[],
+  engineName: string,
+  maxResults: number,
+): WebResult[] {
+  return results
+    .filter((entry): entry is Extract<SearchResult, { type: "text" }> => entry.type === "text")
+    .slice(0, clampMaxResults(maxResults))
+    .map((entry) => ({
+      title: entry.title.trim().length > 0 ? entry.title.trim() : "(no title)",
+      url: entry.href,
+      content: entry.body.trim().replace(/\s+/g, " "),
+      engines: [engineName],
+    }));
+}
+
+/**
+ * Searches through the DuckDuckJS library (default provider).
+ *
+ * "auto" walks the engine order and returns the first non-empty
+ * answer, collecting per-engine failures so a rate-limited engine
+ * does not fail the whole search; a pinned engine returns whatever
+ * it produces and surfaces its error directly.
+ */
+async function searchDuckduckjs(
+  request: SearchRequest,
+  settings: RuntimeSettings,
+): Promise<SearchResponse> {
+  applyProxyUrl(settings.proxyUrl);
+  const pinned = settings.duckduckjsEngine !== "auto";
+  const order: Array<Exclude<DuckduckjsEngineId, "auto">> = pinned
+    ? [settings.duckduckjsEngine as Exclude<DuckduckjsEngineId, "auto">]
+    : DUCKDUCKJS_AUTO_ORDER;
+  const region = duckduckjsRegion(request, settings);
+  const options: SearchOptions | undefined = region ? { region } : undefined;
+  const failures: string[] = [];
+
+  for (const id of order) {
+    const label = `DuckDuckJS (${DUCKDUCKJS_ENGINES[id]().name})`;
+    try {
+      const engine = DUCKDUCKJS_ENGINES[id]();
+      const raw = await withEngineTimeout(
+        engine.search(request.query, options),
+        settings.timeoutMs,
+        label,
+      );
+      const results = normalizeDuckduckjs(raw, engine.name, request.maxResults);
+      if (results.length > 0 || pinned) {
+        return { query: request.query, results };
+      }
+      // "auto" + empty answer: try the next engine.
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (pinned) throw new SearchServiceError(`${label} failed: ${message}`);
+      failures.push(`${label}: ${message}`);
+    }
+  }
+
+  if (failures.length >= order.length) {
+    throw new SearchServiceError(`DuckDuckJS: all engines failed — ${failures.join("; ")}`);
+  }
+  return { query: request.query, results: [] };
+}
+
+function checkDuckduckjs(settings: RuntimeSettings): Promise<CheckResult> {
+  return searchDuckduckjs({ query: "bunny-search connection test", maxResults: 3 }, settings)
+    .then((response) =>
+      response.results.length > 0
+        ? { ok: true, latencyMs: null, error: null }
+        : {
+            ok: false,
+            latencyMs: null,
+            error:
+              "DuckDuckJS engines answered but returned no results — the search services may be rate-limiting anonymous requests.",
+          },
+    )
+    .catch((cause: unknown) => ({
+      ok: false,
+      latencyMs: null,
+      error: cause instanceof Error ? cause.message : String(cause),
+    }));
+}
+
+// ---------------------------------------------------------------------------
 // Registry + result formatting
 // ---------------------------------------------------------------------------
 
 const PROVIDERS: Record<RuntimeSettings["searchService"], SearchProvider> = {
+  duckduckjs: { id: "duckduckjs", search: searchDuckduckjs, check: checkDuckduckjs },
   searxng: { id: "searxng", search: searchSearxng, check: checkSearxng },
   duckduckgo: { id: "duckduckgo", search: searchDuckDuckGo, check: checkDuckDuckGo },
   brave: { id: "brave", search: searchBrave, check: checkBrave },

@@ -50,10 +50,11 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     title: "Search the web",
     description:
       "Search the web through the configured search service " +
-      "(default: SearXNG). Returns formatted results: title, URL, " +
-      "content snippet and source engines. Use when you need " +
-      "current information, documentation, news or any content " +
-      "that is not in the local codebase.",
+      "(default: DuckDuckJS multi-engine, no API key). Returns " +
+      "formatted results: title, URL, content snippet and source " +
+      "engines. Use when you need current information, " +
+      "documentation, news or any content that is not in the local " +
+      "codebase.",
     inputSchema: {
       type: "object",
       properties: {
@@ -74,7 +75,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "search_status",
     title: "Search service status",
     description:
-      "Reports which search service is configured (SearXNG by " +
+      "Reports which search service is configured (DuckDuckJS by " +
       "default), its base URL and the default result settings. " +
       "Use to check that the web search MCP is connected before " +
       "relying on it.",

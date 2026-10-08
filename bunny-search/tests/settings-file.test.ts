@@ -9,6 +9,8 @@ const SETTINGS_ENV_KEYS = [
   "BUNNY_SEARCH_BASE_URL",
   "SEARXNG_BASE_URL",
   "BUNNY_SEARCH_PROVIDER",
+  "BUNNY_SEARCH_DUCKDUCKJS_ENGINE",
+  "BUNNY_SEARCH_PROXY_URL",
   "BUNNY_SEARCH_CUSTOM_URL",
   "BUNNY_SEARCH_API_KEY",
   "BUNNY_SEARCH_TIMEOUT_MS",
@@ -47,7 +49,9 @@ describe("parseSettingsFile", () => {
   it("returns defaults when the file is missing", () => {
     const settings = parseSettingsFile("/nonexistent/bunny-search/settings.json");
     expect(settings).toEqual({
-      searchService: "searxng",
+      searchService: "duckduckjs",
+      duckduckjsEngine: "auto",
+      proxyUrl: "",
       searxngBaseUrl: "http://127.0.0.1:8888/search",
       customBaseUrl: "",
       apiKey: "",
@@ -56,6 +60,26 @@ describe("parseSettingsFile", () => {
       categories: "general,web",
       language: "",
     });
+  });
+
+  it("reads the duckduckjs engine and proxy from the file and environment", () => {
+    const filePath = tempSettingsFile(
+      JSON.stringify({
+        searchService: "duckduckjs",
+        duckduckjsEngine: "mojeek",
+        proxyUrl: "http://127.0.0.1:8080",
+      }),
+    );
+    const fromFile = parseSettingsFile(filePath);
+    expect(fromFile.searchService).toBe("duckduckjs");
+    expect(fromFile.duckduckjsEngine).toBe("mojeek");
+    expect(fromFile.proxyUrl).toBe("http://127.0.0.1:8080");
+
+    process.env.BUNNY_SEARCH_DUCKDUCKJS_ENGINE = "yahoo";
+    process.env.BUNNY_SEARCH_PROXY_URL = "http://proxy.test:3128";
+    const fromEnv = parseSettingsFile(filePath);
+    expect(fromEnv.duckduckjsEngine).toBe("yahoo");
+    expect(fromEnv.proxyUrl).toBe("http://proxy.test:3128");
   });
 
   it("reads the host layout {revision, values}", () => {
@@ -93,7 +117,7 @@ describe("parseSettingsFile", () => {
   it("falls back to defaults on invalid JSON", () => {
     const filePath = tempSettingsFile("{not json");
     const settings = parseSettingsFile(filePath);
-    expect(settings.searchService).toBe("searxng");
+    expect(settings.searchService).toBe("duckduckjs");
     expect(settings.maxResults).toBe(10);
   });
 
@@ -106,7 +130,7 @@ describe("parseSettingsFile", () => {
       }),
     );
     const settings = parseSettingsFile(filePath);
-    expect(settings.searchService).toBe("searxng");
+    expect(settings.searchService).toBe("duckduckjs");
     expect(settings.maxResults).toBe(30);
     expect(settings.timeoutMs).toBe(60000);
   });
@@ -128,9 +152,11 @@ describe("parseSettingsFile", () => {
 
   it("ignores malformed environment values", () => {
     process.env.BUNNY_SEARCH_PROVIDER = "nope";
+    process.env.BUNNY_SEARCH_DUCKDUCKJS_ENGINE = "nope";
     process.env.BUNNY_SEARCH_MAX_RESULTS = "abc";
     const settings = parseSettingsFile("/nonexistent/settings.json");
-    expect(settings.searchService).toBe("searxng");
+    expect(settings.searchService).toBe("duckduckjs");
+    expect(settings.duckduckjsEngine).toBe("auto");
     expect(settings.maxResults).toBe(10);
   });
 

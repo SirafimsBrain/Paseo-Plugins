@@ -22,12 +22,32 @@ export const bunnySearchSettings = defineSettings({
     /** Server name reported in the MCP `initialize` result. */
     mcpServerName: z.string().trim().min(1).max(60).default("bunny-search"),
     /**
-     * Search service used by the MCP tools. "searxng" (the default) talks
-     * to any SearXNG instance's JSON API; "duckduckgo" and "brave" are
-     * built-in alternatives; "custom-json" points at any JSON search
-     * endpoint the user configures.
+     * Search service used by the MCP tools. "duckduckjs" (the default)
+     * is the DuckDuckJS meta-search library (DuckDuckGo, Brave, Google,
+     * Mojeek, Yahoo — no API key); "searxng" talks to any SearXNG
+     * instance's JSON API; "duckduckgo" and "brave" are built-in
+     * single-engine alternatives; "custom-json" points at any JSON
+     * search endpoint the user configures.
      */
-    searchService: z.enum(["searxng", "duckduckgo", "brave", "custom-json"]).default("searxng"),
+    searchService: z
+      .enum(["duckduckjs", "searxng", "duckduckgo", "brave", "custom-json"])
+      .default("duckduckjs"),
+    /**
+     * Which DuckDuckJS engine the default provider queries. "auto"
+     * tries DuckDuckGo, Brave, Google, Mojeek and Yahoo in order until
+     * one returns results (resilient against per-engine rate limits);
+     * a concrete id pins a single engine.
+     */
+    duckduckjsEngine: z
+      .enum(["auto", "duckduckgo", "brave", "google", "mojeek", "yahoo"])
+      .default("auto"),
+    /**
+     * Optional http(s) proxy for DuckDuckJS requests (e.g.
+     * "http://127.0.0.1:8080"). Empty means a direct connection.
+     * Applied through undici's global dispatcher, which is what the
+     * DuckDuckJS engines use for HTTP.
+     */
+    proxyUrl: z.string().trim().max(512).default(""),
     /** Base URL of the SearXNG instance (its `/search` endpoint). */
     searxngBaseUrl: z
       .string()

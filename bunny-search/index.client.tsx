@@ -19,7 +19,7 @@ export default function contribute(client: PluginClientContext) {
     id: "open-bunny-search",
     title: "Bunny Search settings (web search MCP)",
     icon: "Globe",
-    keywords: ["bunny", "search", "searxng", "web", "mcp", "internet"],
+    keywords: ["bunny", "search", "duckduckjs", "searxng", "web", "mcp", "internet"],
     context: "global",
     onSelect({ openSurface }) {
       openSurface(SURFACE_ID);

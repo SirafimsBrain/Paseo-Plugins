@@ -80,6 +80,9 @@ beforeAll(async () => {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
+      // The default provider is DuckDuckJS now; this e2e backs the
+      // search endpoint with a fake SearXNG, so pin the provider.
+      BUNNY_SEARCH_PROVIDER: "searxng",
       BUNNY_SEARCH_BASE_URL: fakeSearxngUrl,
       BUNNY_SEARCH_MAX_RESULTS: "5",
     },

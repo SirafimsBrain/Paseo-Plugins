@@ -8,7 +8,7 @@ import {
   type ConnectionTestResult,
   type RuntimeSettings,
 } from "./shared/contracts";
-import { checkSearchService, formatSearchResponse, searchWeb } from "./server/providers";
+import { checkSearchService, formatSearchResponse, providerBaseUrl, searchWeb } from "./server/providers";
 import { mcpServerCommand } from "./server/mcp-launch";
 import { probeMcpServer } from "./server/probe";
 import { parseSettingsFile } from "./server/settings-file";
@@ -55,6 +55,8 @@ export default function contribute(server: PluginServerContext) {
     if (state.status !== "ready") return parseSettingsFile();
     return {
       searchService: state.values.searchService,
+      duckduckjsEngine: state.values.duckduckjsEngine,
+      proxyUrl: state.values.proxyUrl,
       searxngBaseUrl: state.values.searxngBaseUrl,
       customBaseUrl: state.values.customBaseUrl,
       apiKey: state.values.apiKey,
@@ -143,7 +145,7 @@ export default function contribute(server: PluginServerContext) {
    * Two checks are combined, because "search works" means both
    * halves are healthy:
    * 1. A real probe request against the configured provider
-   *    (SearXNG by default) with the configured timeout.
+   *    (DuckDuckJS by default) with the configured timeout.
    * 2. A live MCP handshake: the bundled server is spawned the
    *    way an agent would spawn it and must answer `initialize`.
    */
@@ -177,14 +179,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(connectionStatus, async () => {
     const runtime = await readRuntimeSettings();
     const full = await readFullSettings();
-    const baseUrl =
-      runtime.searchService === "searxng"
-        ? runtime.searxngBaseUrl
-        : runtime.searchService === "custom-json"
-          ? runtime.customBaseUrl || null
-          : runtime.searchService === "duckduckgo"
-            ? "https://html.duckduckgo.com/html/"
-            : "https://api.search.brave.com/res/v1/web/search";
+    const baseUrl = providerBaseUrl(runtime);
     const uiUrl = full ? searchInterfaceUrl(full) : null;
     return { provider: runtime.searchService, baseUrl, uiUrl, lastCheck };
   });

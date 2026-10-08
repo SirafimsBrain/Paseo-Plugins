@@ -8,16 +8,36 @@ import type { BunnySearchSettings } from "./settings";
  */
 
 /** Search service ids, mirroring the settings enum. */
-export const searchServiceSchema = z.enum(["searxng", "duckduckgo", "brave", "custom-json"]);
+export const searchServiceSchema = z.enum([
+  "duckduckjs",
+  "searxng",
+  "duckduckgo",
+  "brave",
+  "custom-json",
+]);
 
 export type SearchService = z.infer<typeof searchServiceSchema>;
 
 /** Human-readable labels for the settings screen dropdown. */
 export const SEARCH_SERVICE_LABELS: Record<SearchService, string> = {
+  duckduckjs: "DuckDuckJS (multi-engine, no key)",
   searxng: "SearXNG (self-hosted JSON API)",
   duckduckgo: "DuckDuckGo (HTML, no key)",
   brave: "Brave Search (API key)",
   "custom-json": "Custom JSON endpoint",
+};
+
+/** DuckDuckJS engine ids, mirroring the settings enum. */
+export type DuckduckjsEngine = BunnySearchSettings["duckduckjsEngine"];
+
+/** Human-readable labels for the DuckDuckJS engine dropdown. */
+export const DUCKDUCKJS_ENGINE_LABELS: Record<DuckduckjsEngine, string> = {
+  auto: "Auto (try engines in order)",
+  duckduckgo: "DuckDuckGo",
+  brave: "Brave",
+  google: "Google",
+  mojeek: "Mojeek",
+  yahoo: "Yahoo",
 };
 
 /** One formatted web result, as returned by every provider adapter. */
@@ -52,6 +72,8 @@ export interface SearchRequest {
 /** Runtime view of the settings the MCP server process actually uses. */
 export interface RuntimeSettings {
   searchService: BunnySearchSettings["searchService"];
+  duckduckjsEngine: BunnySearchSettings["duckduckjsEngine"];
+  proxyUrl: string;
   searxngBaseUrl: string;
   customBaseUrl: string;
   apiKey: string;

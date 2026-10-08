@@ -1,13 +1,17 @@
 {
   "name": "bunny-search",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "scripts": {
     "bundle": "node scripts/bundle-mcp-server.mjs",
     "pretest": "node scripts/bundle-mcp-server.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc -b tsconfig.json"
+  },
+  "dependencies": {
+    "@overclockedsenku/duckduckjs": "26.1.0",
+    "undici": "^6.29.0"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.10.1",

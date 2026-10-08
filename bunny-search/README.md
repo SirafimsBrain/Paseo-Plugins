@@ -2,14 +2,15 @@
 
 Web search for coding agents on [Paseo](https://paseo.sh/): a bundled stdio MCP server that gives every agent (Cline, OpenCode, Kilo, Qwen Code, Codex, …) a `web_search` tool, with a pluggable choice of search backends and a live connection indicator inside Paseo.
 
-Paseo orchestrates agents but has no built-in web search. Bunny Search closes that gap: agents ask one tool, the plugin routes the request to the configured search service (SearXNG by default), and the answer comes back as plain formatted text — title, URL, content snippet and source engines — modeled on the proven [SearXNG MCP server](https://github.com/searxng/searxng) reference implementation.
+Paseo orchestrates agents but has no built-in web search. Bunny Search closes that gap: agents ask one tool, the plugin routes the request to the configured search service (DuckDuckJS multi-engine by default), and the answer comes back as plain formatted text — title, URL, content snippet and source engines — modeled on the proven [SearXNG MCP server](https://github.com/searxng/searxng) reference implementation.
 
 ## What it does
 
-- **Local MCP server (stdio)** — implements the MCP protocol (`initialize`, `tools/list`, `tools/call`) over newline-delimited JSON on stdin/stdout. Spawned by each agent process; zero runtime npm dependencies (Node built-ins only).
+- **Local MCP server (stdio)** — implements the MCP protocol (`initialize`, `tools/list`, `tools/call`) over newline-delimited JSON on stdin/stdout. Spawned by each agent process; shipped as one self-contained esbuild bundle (dependencies compiled in — agents only need Node ≥ 18, no `npm install`).
 - **MCP tools** — `web_search` (query, `max_results` 1–30, SearXNG `categories`, `language`) and `search_status` (configured provider, base URL, defaults). Output follows the reference MCP layout: query line, instant answer, numbered results with URL, snippet (≤ 300 chars) and engines, plus a "did you mean" suggestion when the service offers one.
 - **User-selectable search services** — pick the backend in settings:
-  - **SearXNG** (default) — self-hosted JSON API (`format=json`), categories, language, instant answers and engine attribution;
+  - **DuckDuckJS** (default) — the [DuckDuckJS](https://www.npmjs.com/package/@overclockedsenku/duckduckjs) meta-search library, no API key: queries DuckDuckGo, Brave, Google, Mojeek and Yahoo — the engine selector defaults to **Auto**, which walks that order until one engine returns results (each engine can also be pinned). Optional `Proxy URL` routes the library's requests through an http(s) proxy (undici dispatcher; empty = direct). The language setting maps to the engine region (`ru` → `ru-ru`);
+  - **SearXNG** — self-hosted JSON API (`format=json`), categories, language, instant answers and engine attribution;
   - **DuckDuckGo** — HTML endpoint, no API key, redirect links unwrapped;
   - **Brave Search** — official REST API with `X-Subscription-Token`;
   - **Custom JSON** — any JSON search endpoint: `{query}` placeholder in the URL (or `?q=`), heuristic field mapping (`title`/`name`/`heading`, `url`/`link`/`href`, `content`/`snippet`/`description`/`body`/`text`), array or nested `results`/`data`/`items`/`web` payloads.
@@ -25,9 +26,9 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.10.0 (verified against 0.10.3; uses the plugin SDK 0.10 settings screens and lifecycle hooks). Node ≥ 18 on the daemon host (global `fetch`).
+Requires Paseo ≥ 0.10.0 (verified against 0.10.3 and the stable 0.11.0 release; uses the plugin SDK settings screens and lifecycle hooks). Node ≥ 18 on the daemon host (global `fetch`).
 
-After install: open **Settings → Plugins → Bunny Search**, pick the search service, configure its URL/key, and press **Test connection**. For SearXNG, point `SearXNG base URL` at your instance's JSON endpoint (e.g. `http://127.0.0.1:8888/search` — the same default as the reference MCP). Optionally set `Search interface URL` to the human-facing page of your instance (defaults to the API URL's origin) and use **Open in browser** to browse it. New agents get the `web_search` tool automatically.
+After install: open **Settings → Plugins → Bunny Search** — the default **DuckDuckJS** provider works out of the box (no API key, no self-hosted service). To use another backend, pick the search service and configure its URL/key, then press **Test connection**. For SearXNG, point `SearXNG base URL` at your instance's JSON endpoint (e.g. `http://127.0.0.1:8888/search` — the same default as the reference MCP). Optionally set `Search interface URL` to the human-facing page of your instance (defaults to the API URL's origin) and use **Open in browser** to browse it. New agents get the `web_search` tool automatically.
 
 Settings changed in the UI take effect immediately for the connection test and quick search (the plugin reads the host settings store live) and are mirrored to `$PASEO_HOME/plugins/bunny-search/settings.json` for the spawned MCP server — every newly created agent picks them up on spawn.
 
@@ -39,14 +40,21 @@ The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugi
 npm install
 npm run bundle   # dist/mcp-server.js — standalone stdio server (esbuild)
 npm test         # vitest: providers, settings layering, probe, tools, stdio e2e
-npm run typecheck
+npm run typecheck   # tsc -b: three projects — server, client (react-native), tests
 ```
+
+The typecheck is split on purpose: react-native's and `@types/node`'s ambient
+`fetch`/`AbortSignal` declarations conflict when server and client code share
+one `tsc` program (the merge is order-dependent), so each runtime typechecks in
+its own project and the root `tsconfig.json` is a solution file referencing
+them.
 
 Working with an installed plugin:
 
 ```bash
 paseo plugin logs bunny-search                 # includes the `[bunny-search] MCP injected: …` diagnostic
-paseo plugin disable bunny-search && paseo plugin enable bunny-search   # reload (`paseo plugin reload` currently fails manifest validation on the daemon side)
+paseo plugin reload bunny-search   # works on Paseo 0.11.0 (verified: exit 0, plugin restarts)
+paseo plugin disable bunny-search && paseo plugin enable bunny-search   # equivalent reload on older daemons
 ```
 
 Storage layout on the daemon host:
@@ -58,28 +66,39 @@ $PASEO_HOME/plugins/bunny-search/
 
 The host keeps the authoritative settings in its own store (exposed to the plugin via the `settings.bunny-search.read` RPC and change subscription); the JSON file above is a mirror for the MCP server process, which is spawned by agent providers outside the plugin host and therefore cannot use the plugin API.
 
-## Planned improvements with Paseo 0.11.0
+## Paseo 0.11.0 compatibility and improvement plan
 
-Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
-with this plugin as-is: typecheck, the test suite, the real host bundler and a
-live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
-0.11.0 APIs relevant to this plugin:
+Verified against the **stable Paseo 0.11.0** release (2026-10-07), no code
+changes needed to run:
 
-- **`spawnProcess` / `execCommand` / `terminateProcess`**
-  (`@getpaseo/plugin/server`) — replace the `node:child_process` probe in
-  `server/probe.ts` (service test + MCP spawn/initialize check) with
-  host-managed processes, including Windows `.cmd`/`.bat` launching.
-- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
-  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
-  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
-  deep-link the surface with a prefilled quick-search query via screen URL
-  params (`PluginScreenProps.params`), and use `SidebarRow` /
-  `addSidebarFooterItem` for a host-native layout.
-- **`server.registerUsageSource()`** — publish the configured search backend's
-  quota/utilization (e.g. Brave API limits) as a usage source, readable through
-  `listUsageReports()` in the Paseo usage reports (candidate: depends on the
-  backend exposing usage data).
+- Typecheck and the test suite (7 suites, 65 tests) pass against
+  `@getpaseo/plugin@0.11.0`; the 0.11.0 SDK diff over 0.10.1 is additive for
+  every API this plugin uses (nothing removed).
+- A fresh Git install on an isolated 0.11.0 daemon completed the manifest
+  build (`npm ci` + `npm run bundle`), reached status `running` and logged
+  `Plugin ready`; `paseo plugin reload` works on 0.11.0.
+- The install command above keeps working: 0.11.0 added a plugin registry
+  (`paseo plugin add owner/slug`), while explicit Git URLs still install
+  directly.
 
-Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+Improvement plan against the new 0.11.0 APIs (implementation on request):
+
+1. **Host-managed processes** — replace `node:child_process` in the connection
+   probe (`server/probe.ts`) with `spawnProcess()` / `terminateProcess()`,
+   gaining correct Windows `.cmd`/`.bat` launching and descendant cleanup.
+2. **Screens and sidebar** — migrate the deprecated `addSurface` /
+   `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
+   `addSidebarFooterItem` / `openScreen`, deep-link the quick search with a
+   prefilled query through screen URL params, and render the connection status
+   with host-native `SidebarRow` / `SidebarSeparator`.
+3. **Registry readiness** — add `name` / `icon` / `media` to
+   `paseo-plugin.json` and an `OVERVIEW.md` (per the `paseo plugin init`
+   template) so the plugin can be listed in the Paseo plugin registry.
+4. **Usage source** — deferred: no in-scope backend exposes quota data and the
+   account-based `registerUsageSource()` model fits poorly (see [__doc.md](./__doc.md)).
+
+Adopting items 1–2 raises `requirements.paseo` from `>=0.10.0` to `>=0.11.0`,
+because the plugin SDK is supplied by the host at runtime. Full evidence and
+the file-level implementation plan: [__doc.md](./__doc.md) §10.
 
 Technical details, design decisions, alternatives considered, limitations and the roadmap: see [__doc.md](./__doc.md).

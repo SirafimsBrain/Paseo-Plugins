@@ -106,7 +106,7 @@ export function BunnySearchSurface(props: PluginSurfaceProps) {
           <View style={[styles.statusDot, { backgroundColor: stateColor }]} />
           <View style={styles.statusInfo}>
             <Text style={{ color: fg, fontSize: font(13), fontWeight: "600", ...uiFontStyle }}>
-              {SEARCH_SERVICE_LABELS[(status?.provider ?? "searxng") as SearchService]}
+              {SEARCH_SERVICE_LABELS[(status?.provider ?? "duckduckjs") as SearchService]}
             </Text>
             <Text style={{ color: stateColor, fontSize: font(11), ...uiFontStyle }} numberOfLines={3}>
               {stateText}
