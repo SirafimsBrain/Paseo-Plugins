@@ -10,6 +10,7 @@ import type { BunnySearchSettings } from "./settings";
 /** Search service ids, mirroring the settings enum. */
 export const searchServiceSchema = z.enum([
   "duckduckjs",
+  "ddgs",
   "searxng",
   "duckduckgo",
   "brave",
@@ -21,6 +22,7 @@ export type SearchService = z.infer<typeof searchServiceSchema>;
 /** Human-readable labels for the settings screen dropdown. */
 export const SEARCH_SERVICE_LABELS: Record<SearchService, string> = {
   duckduckjs: "DuckDuckJS (multi-engine, no key)",
+  ddgs: "DDGS Python (user-installed library)",
   searxng: "SearXNG (self-hosted JSON API)",
   duckduckgo: "DuckDuckGo (HTML, no key)",
   brave: "Brave Search (API key)",
@@ -74,6 +76,7 @@ export interface RuntimeSettings {
   searchService: BunnySearchSettings["searchService"];
   duckduckjsEngine: BunnySearchSettings["duckduckjsEngine"];
   proxyUrl: string;
+  ddgsPythonPath: string;
   searxngBaseUrl: string;
   customBaseUrl: string;
   apiKey: string;

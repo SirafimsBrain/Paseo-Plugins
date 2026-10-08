@@ -226,7 +226,7 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
       <SettingsCard>
         <SettingsSection
           title="Search provider"
-          info="Which service the web_search tool uses. DuckDuckJS (multi-engine: DuckDuckGo, Brave, Google, Mojeek, Yahoo; no API key) is the default."
+          info="Which service the web_search tool uses. DuckDuckJS (multi-engine: DuckDuckGo, Brave, Google, Mojeek, Yahoo; no API key) is the default; DDGS Python runs the user-installed ddgs library in a subprocess."
         >
           <SettingsSelect
             label="Search service"
@@ -236,22 +236,35 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
             onValueChange={(service: SearchService) => patch({ searchService: service })}
           />
           {values.searchService === "duckduckjs" ? (
-            <>
-              <SettingsSelect
-                label="DuckDuckJS engine"
-                hint="Auto tries DuckDuckGo, Brave, Google, Mojeek and Yahoo in order until one returns results."
-                value={values.duckduckjsEngine}
-                options={engineOptions}
-                onValueChange={(engine: DuckduckjsEngine) => patch({ duckduckjsEngine: engine })}
-              />
-              <SettingsInput
-                label="Proxy URL"
-                hint="Optional http(s) proxy for DuckDuckJS requests, e.g. http://127.0.0.1:8080. Empty = direct connection."
-                initialValue={values.proxyUrl}
-                placeholder="(direct)"
-                onChangeText={(text: string) => patch({ proxyUrl: text })}
-              />
-            </>
+            <SettingsSelect
+              label="DuckDuckJS engine"
+              hint="Auto tries DuckDuckGo, Brave, Google, Mojeek and Yahoo in order until one returns results."
+              value={values.duckduckjsEngine}
+              options={engineOptions}
+              onValueChange={(engine: DuckduckjsEngine) => patch({ duckduckjsEngine: engine })}
+            />
+          ) : null}
+          {values.searchService === "ddgs" ? (
+            <SettingsInput
+              label="Python path"
+              hint="Interpreter with the ddgs library. Empty = auto-discovery: BUNNY_SEARCH_PYTHON, VIRTUAL_ENV, CONDA_PREFIX, PATH, then ~/.venv, ~/venv, ~/.virtualenvs. The library itself is installed by you (pip install ddgs) — the plugin only checks availability."
+              initialValue={values.ddgsPythonPath}
+              placeholder="(auto-discover)"
+              onChangeText={(text: string) => patch({ ddgsPythonPath: text })}
+            />
+          ) : null}
+          {values.searchService === "duckduckjs" || values.searchService === "ddgs" ? (
+            <SettingsInput
+              label="Proxy URL"
+              hint={
+                values.searchService === "ddgs"
+                  ? "Optional http(s)/socks5 proxy for DDGS Python requests, e.g. http://127.0.0.1:8080. Empty = direct connection."
+                  : "Optional http(s) proxy for DuckDuckJS requests, e.g. http://127.0.0.1:8080. Empty = direct connection."
+              }
+              initialValue={values.proxyUrl}
+              placeholder="(direct)"
+              onChangeText={(text: string) => patch({ proxyUrl: text })}
+            />
           ) : null}
           {values.searchService === "searxng" ? (
             <SettingsInput

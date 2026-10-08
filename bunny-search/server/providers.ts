@@ -12,6 +12,7 @@ import type {
   SearchResult,
 } from "@overclockedsenku/duckduckjs";
 import { Agent, ProxyAgent, setGlobalDispatcher } from "undici";
+import { checkDdgsAvailability, ddgsTextSearch } from "./ddgs-python";
 
 /**
  * Search provider adapters for the bunny-search MCP server.
@@ -50,6 +51,9 @@ export function providerBaseUrl(settings: RuntimeSettings): string | null {
       return settings.customBaseUrl.length > 0 ? settings.customBaseUrl : null;
     case "duckduckjs":
       // Multi-engine: there is no single base URL to report.
+      return null;
+    case "ddgs":
+      // A local Python interpreter, not a URL.
       return null;
   }
 }
@@ -144,6 +148,8 @@ function serviceLabel(settings: RuntimeSettings): string {
       return "the custom search endpoint";
     case "duckduckjs":
       return "DuckDuckJS";
+    case "ddgs":
+      return "DDGS Python";
   }
 }
 
@@ -585,8 +591,12 @@ export function applyProxyUrl(proxyUrl: string): void {
   appliedProxyUrl = proxy;
 }
 
-/** Maps the language setting ("ru", "uk-UA", …) to a DuckDuckJS region ("ru-ru", "uk-ua"). */
-function duckduckjsRegion(request: SearchRequest, settings: RuntimeSettings): string | undefined {
+/**
+ * Maps the language setting ("ru", "uk-UA", …) to the `ll-ll` region
+ * convention shared by DuckDuckJS and the Python ddgs library
+ * ("ru-ru", "uk-ua").
+ */
+function languageToRegion(request: SearchRequest, settings: RuntimeSettings): string | undefined {
   const language = (request.language ?? settings.language).trim();
   if (language.length === 0) return undefined;
   if (/^[a-z]{2}$/i.test(language)) {
@@ -663,7 +673,7 @@ async function searchDuckduckjs(
   const order: Array<Exclude<DuckduckjsEngineId, "auto">> = pinned
     ? [settings.duckduckjsEngine as Exclude<DuckduckjsEngineId, "auto">]
     : DUCKDUCKJS_AUTO_ORDER;
-  const region = duckduckjsRegion(request, settings);
+  const region = languageToRegion(request, settings);
   const options: SearchOptions | undefined = region ? { region } : undefined;
   const failures: string[] = [];
 
@@ -714,11 +724,85 @@ function checkDuckduckjs(settings: RuntimeSettings): Promise<CheckResult> {
 }
 
 // ---------------------------------------------------------------------------
+// DDGS Python (stage 2 — user-installed PyPI ddgs library, subprocess)
+// ---------------------------------------------------------------------------
+
+/** Normalizes ddgs `text()` records ({title, href, body}) into the shared shape. */
+function normalizeDdgs(
+  raw: Array<{ title?: unknown; href?: unknown; body?: unknown }>,
+  maxResults: number,
+): WebResult[] {
+  return raw
+    .slice(0, clampMaxResults(maxResults))
+    .map((entry) => ({
+      title:
+        typeof entry.title === "string" && entry.title.trim().length > 0
+          ? entry.title.trim()
+          : "(no title)",
+      url: typeof entry.href === "string" ? entry.href : "",
+      content: typeof entry.body === "string" ? entry.body.trim().replace(/\s+/g, " ") : "",
+    }));
+}
+
+async function searchDdgs(
+  request: SearchRequest,
+  settings: RuntimeSettings,
+): Promise<SearchResponse> {
+  const region = languageToRegion(request, settings) ?? "";
+  try {
+    const raw = await ddgsTextSearch(
+      {
+        query: request.query,
+        maxResults: clampMaxResults(request.maxResults),
+        region,
+        proxy: settings.proxyUrl.trim(),
+        timeoutMs: settings.timeoutMs,
+      },
+      settings.ddgsPythonPath,
+    );
+    return { query: request.query, results: normalizeDdgs(raw, request.maxResults) };
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new SearchServiceError(message);
+  }
+}
+
+async function checkDdgs(settings: RuntimeSettings): Promise<CheckResult> {
+  // Availability first: a missing library must produce the actionable
+  // "install it yourself" error rather than a confusing search failure.
+  const availability = await checkDdgsAvailability(settings.ddgsPythonPath);
+  if (!availability.ok) {
+    return { ok: false, latencyMs: null, error: availability.error };
+  }
+  const result = await searchDdgs(
+    { query: "bunny-search connection test", maxResults: 3 },
+    settings,
+  )
+    .then((response) =>
+      response.results.length > 0
+        ? { ok: true, latencyMs: null, error: null }
+        : {
+            ok: false,
+            latencyMs: null,
+            error:
+              "DDGS Python answered but returned no results — the search services may be rate-limiting anonymous requests.",
+          },
+    )
+    .catch((cause: unknown) => ({
+      ok: false,
+      latencyMs: null,
+      error: cause instanceof Error ? cause.message : String(cause),
+    }));
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Registry + result formatting
 // ---------------------------------------------------------------------------
 
 const PROVIDERS: Record<RuntimeSettings["searchService"], SearchProvider> = {
   duckduckjs: { id: "duckduckjs", search: searchDuckduckjs, check: checkDuckduckjs },
+  ddgs: { id: "ddgs", search: searchDdgs, check: checkDdgs },
   searxng: { id: "searxng", search: searchSearxng, check: checkSearxng },
   duckduckgo: { id: "duckduckgo", search: searchDuckDuckGo, check: checkDuckDuckGo },
   brave: { id: "brave", search: searchBrave, check: checkBrave },

@@ -7,6 +7,7 @@ function settings(overrides: Partial<RuntimeSettings> = {}): RuntimeSettings {
     searchService: "searxng",
     duckduckjsEngine: "auto",
     proxyUrl: "",
+    ddgsPythonPath: "",
     searxngBaseUrl: "http://searxng.test/search",
     customBaseUrl: "",
     apiKey: "",

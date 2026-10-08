@@ -11,6 +11,7 @@ const SETTINGS_ENV_KEYS = [
   "BUNNY_SEARCH_PROVIDER",
   "BUNNY_SEARCH_DUCKDUCKJS_ENGINE",
   "BUNNY_SEARCH_PROXY_URL",
+  "BUNNY_SEARCH_PYTHON",
   "BUNNY_SEARCH_CUSTOM_URL",
   "BUNNY_SEARCH_API_KEY",
   "BUNNY_SEARCH_TIMEOUT_MS",
@@ -52,6 +53,7 @@ describe("parseSettingsFile", () => {
       searchService: "duckduckjs",
       duckduckjsEngine: "auto",
       proxyUrl: "",
+      ddgsPythonPath: "",
       searxngBaseUrl: "http://127.0.0.1:8888/search",
       customBaseUrl: "",
       apiKey: "",
@@ -60,6 +62,19 @@ describe("parseSettingsFile", () => {
       categories: "general,web",
       language: "",
     });
+  });
+
+  it("reads the ddgs python path from the file and environment", () => {
+    const filePath = tempSettingsFile(
+      JSON.stringify({ searchService: "ddgs", ddgsPythonPath: "/opt/venv/bin/python" }),
+    );
+    const fromFile = parseSettingsFile(filePath);
+    expect(fromFile.searchService).toBe("ddgs");
+    expect(fromFile.ddgsPythonPath).toBe("/opt/venv/bin/python");
+
+    process.env.BUNNY_SEARCH_PYTHON = "/env/bin/python";
+    const fromEnv = parseSettingsFile(filePath);
+    expect(fromEnv.ddgsPythonPath).toBe("/env/bin/python");
   });
 
   it("reads the duckduckjs engine and proxy from the file and environment", () => {

@@ -10,6 +10,7 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 - **MCP tools** — `web_search` (query, `max_results` 1–30, SearXNG `categories`, `language`) and `search_status` (configured provider, base URL, defaults). Output follows the reference MCP layout: query line, instant answer, numbered results with URL, snippet (≤ 300 chars) and engines, plus a "did you mean" suggestion when the service offers one.
 - **User-selectable search services** — pick the backend in settings:
   - **DuckDuckJS** (default) — the [DuckDuckJS](https://www.npmjs.com/package/@overclockedsenku/duckduckjs) meta-search library, no API key: queries DuckDuckGo, Brave, Google, Mojeek and Yahoo — the engine selector defaults to **Auto**, which walks that order until one engine returns results (each engine can also be pinned). Optional `Proxy URL` routes the library's requests through an http(s) proxy (undici dispatcher; empty = direct). The language setting maps to the engine region (`ru` → `ru-ru`);
+  - **DDGS Python** — the [PyPI `ddgs`](https://pypi.org/project/ddgs/) metasearch library (bing, brave, duckduckgo, google, mojeek, startpage, yandex, yahoo, …) run in a `python3` subprocess, with http(s)/socks5 proxy support. The library is a **user-installed requirement** — the plugin only *checks* availability and never installs Python packages (see "Python requirement" below);
   - **SearXNG** — self-hosted JSON API (`format=json`), categories, language, instant answers and engine attribution;
   - **DuckDuckGo** — HTML endpoint, no API key, redirect links unwrapped;
   - **Brave Search** — official REST API with `X-Subscription-Token`;
@@ -28,6 +29,30 @@ paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 
 Requires Paseo ≥ 0.10.0 (verified against 0.10.3 and the stable 0.11.0 release; uses the plugin SDK settings screens and lifecycle hooks). Node ≥ 18 on the daemon host (global `fetch`).
 
+### Python requirement (for the DDGS Python service)
+
+The DDGS Python provider needs **Python ≥ 3.10 with the `ddgs` library
+installed — you install it yourself**:
+
+```bash
+pip install ddgs          # or: pipx install ddgs, uv tool install ddgs
+```
+
+The plugin never installs Python packages: it only *checks* availability
+(`import ddgs`) and reports an actionable error when the library is missing.
+It finds the interpreter in this order and uses the first one that can
+import `ddgs`:
+
+1. the `Python path` field in the plugin settings (explicit override);
+2. environment variables: `BUNNY_SEARCH_PYTHON`, `VIRTUAL_ENV`, `CONDA_PREFIX`;
+3. every `python3` / `python` on `PATH` (in `PATH` order);
+4. well-known virtualenv directories: `~/.venv`, `~/venv`,
+   `~/.virtualenvs/*`, `~/.local/share/virtualenvs/*`.
+
+Candidates without the library are skipped (a system Python without `ddgs`
+first on `PATH` is no problem), and the resolved interpreter is cached for
+the process lifetime.
+
 After install: open **Settings → Plugins → Bunny Search** — the default **DuckDuckJS** provider works out of the box (no API key, no self-hosted service). To use another backend, pick the search service and configure its URL/key, then press **Test connection**. For SearXNG, point `SearXNG base URL` at your instance's JSON endpoint (e.g. `http://127.0.0.1:8888/search` — the same default as the reference MCP). Optionally set `Search interface URL` to the human-facing page of your instance (defaults to the API URL's origin) and use **Open in browser** to browse it. New agents get the `web_search` tool automatically.
 
 Settings changed in the UI take effect immediately for the connection test and quick search (the plugin reads the host settings store live) and are mirrored to `$PASEO_HOME/plugins/bunny-search/settings.json` for the spawned MCP server — every newly created agent picks them up on spawn.
@@ -39,7 +64,7 @@ The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugi
 ```bash
 npm install
 npm run bundle   # dist/mcp-server.js — standalone stdio server (esbuild)
-npm test         # vitest: providers, settings layering, probe, tools, stdio e2e
+npm test         # vitest: 9 suites / 95 tests (providers, discovery, settings, probe, tools, stdio e2e)
 npm run typecheck   # tsc -b: three projects — server, client (react-native), tests
 ```
 

@@ -48,6 +48,7 @@ function settings(overrides: Partial<RuntimeSettings> = {}): RuntimeSettings {
     searchService: "searxng",
     duckduckjsEngine: "auto",
     proxyUrl: "",
+    ddgsPythonPath: "",
     searxngBaseUrl: "http://searxng.test/search",
     customBaseUrl: "",
     apiKey: "",
@@ -577,7 +578,7 @@ describe("custom-json provider", () => {
 
 describe("registry and helpers", () => {
   it("resolves every provider by id", () => {
-    for (const id of ["duckduckjs", "searxng", "duckduckgo", "brave", "custom-json"] as const) {
+    for (const id of ["duckduckjs", "ddgs", "searxng", "duckduckgo", "brave", "custom-json"] as const) {
       expect(getProvider(settings({ searchService: id })).id).toBe(id);
     }
   });
@@ -585,6 +586,7 @@ describe("registry and helpers", () => {
   it("reports the service base URL per provider", () => {
     expect(providerBaseUrl(settings())).toBe("http://searxng.test/search");
     expect(providerBaseUrl(settings({ searchService: "duckduckjs" }))).toBeNull();
+    expect(providerBaseUrl(settings({ searchService: "ddgs" }))).toBeNull();
     expect(providerBaseUrl(settings({ searchService: "duckduckgo" }))).toBe(
       "https://html.duckduckgo.com/html/",
     );

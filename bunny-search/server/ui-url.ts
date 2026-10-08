@@ -47,6 +47,9 @@ export function searchInterfaceUrl(values: InterfaceUrlInput): string | null {
     case "duckduckjs":
       // Multi-engine provider: open the primary engine's interface.
       return PROVIDER_INTERFACES.duckduckgo;
+    case "ddgs":
+      // A Python subprocess against many engines — no single interface.
+      return null;
   }
 }
 

@@ -20,7 +20,8 @@ bunny-search/
 │   └── host-fonts.ts          # host Appearance settings parsing (client-safe)
 ├── server/
 │   ├── cjs-globals.ts         # __dirname/__filename globals for the host bundle evaluator
-│   ├── providers.ts           # provider adapters (duckduckjs / searxng / duckduckgo /
+│   ├── ddgs-python.ts         # stage 2: PyPI ddgs subprocess (interpreter discovery + JSON calls)
+│   ├── providers.ts           # provider adapters (duckduckjs / ddgs / searxng / duckduckgo /
 │   │                          # brave / custom-json), HTTP helpers, result formatting
 │   ├── mcp-server.ts          # standalone stdio MCP server (JSON-RPC 2.0)
 │   ├── mcp-tools.ts           # tool definitions + transport-independent dispatch
@@ -37,7 +38,7 @@ bunny-search/
 │   └── use-host-typography.ts # host font scale/family hook
 ├── scripts/
 │   └── bundle-mcp-server.mjs  # esbuild → dist/mcp-server.js (standalone stdio server)
-└── tests/                     # vitest: 7 suites, 76 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 9 suites, 95 tests (incl. real-process stdio e2e)
 ```
 
 Typechecking is split into three project references because server and client
@@ -77,6 +78,7 @@ interface SearchProvider {
 | Adapter | Endpoint | Auth | Notes |
 | --- | --- | --- | --- |
 | `duckduckjs` (default, 0.3.0) | `@overclockedsenku/duckduckjs` library (DuckDuckGo HTML, Brave/Google/Mojeek/Yahoo internal endpoints) | none | `duckduckjsEngine` = `auto` walks DuckDuckGo → Brave → Google → Mojeek → Yahoo and returns the first non-empty answer, collecting per-engine failures (an aggregate error only when every engine fails); a concrete engine id pins one engine. `language` maps to `region` (`ru` → `ru-ru`); `proxyUrl` sets an undici `ProxyAgent` as the global dispatcher (http(s) only) because the library fetches through undici. `check()` additionally treats "all engines answered but zero results" as a failure (rate-limit signature). |
+| `ddgs` (0.4.0) | `python3 -c <script>` subprocess running the user-installed PyPI `ddgs` library (`DDGS().text()`) | none (library is a user requirement) | Interpreter discovery in `server/ddgs-python.ts` (settings → `BUNNY_SEARCH_PYTHON` → `VIRTUAL_ENV` → `CONDA_PREFIX` → `PATH` → `~/.venv`/`~/venv`/`~/.virtualenvs`), first candidate that passes `import ddgs` wins, cached per process; `language` → `region` (same `ll-ll` mapping); `proxyUrl` passed as the library's `proxy` argument (http(s)/socks5); subprocess killed at `timeoutMs`; JSON array on stdout is normalized to `title`/`href`/`body`. `check()` runs the availability probe first so a missing library yields the "install it yourself" error, then a real search probe. |
 | `searxng` | `{searxngBaseUrl}?q=…&format=json&categories=…&language=…` | none | Ported from the reference MCP: same UA (`bunny-search-mcp/1.0 (+searxng)`), clamped `max_results` 1–30, instant `answers`, `suggestion`/`suggestions`/`corrections`, per-result `engines` |
 | `duckduckgo` | `https://html.duckduckgo.com/html/?q=…` | none | Browser UA (HTML endpoint rejects tool UAs), regex-parses `result__a`/`result__snippet`, unwraps `uddg` redirect links, decodes HTML entities |
 | `brave` | `https://api.search.brave.com/res/v1/web/search?q=…&count=…` | `X-Subscription-Token` (settings `apiKey`) | 401/403 mapped to an actionable "check the key" error |
@@ -90,11 +92,11 @@ Shared plumbing:
 
 ## 4. Settings and configuration
 
-**Host settings** (`shared/settings.ts`, `defineSettings`, scope `host`): `injectIntoAgents` (bool, default true), `mcpServerName` (default `bunny-search`), `searchService` (enum, default `duckduckjs` since 0.3.0; `searxng`, `duckduckgo`, `brave`, `custom-json` remain), `duckduckjsEngine` (enum `auto`/`duckduckgo`/`brave`/`google`/`mojeek`/`yahoo`, default `auto`), `proxyUrl` (optional http(s) proxy for DuckDuckJS, empty = direct), `searxngBaseUrl` (default `http://127.0.0.1:8888/search` — the reference MCP default), `customBaseUrl`, `searchUiUrl` (web interface URL; empty = derive from the API base URL's origin), `apiKey`, `timeoutMs` (1000–60000, default 20000), `maxResults` (1–30, default 10), `categories` (default `general,web`), `language` (default auto). The settings screen shows the engine selector and proxy field only when DuckDuckJS is the selected service. Existing installs keep their stored `searchService`; the new default applies to fresh configurations.
+**Host settings** (`shared/settings.ts`, `defineSettings`, scope `host`): `injectIntoAgents` (bool, default true), `mcpServerName` (default `bunny-search`), `searchService` (enum, default `duckduckjs` since 0.3.0; `ddgs`, `searxng`, `duckduckgo`, `brave`, `custom-json` remain), `duckduckjsEngine` (enum `auto`/`duckduckgo`/`brave`/`google`/`mojeek`/`yahoo`, default `auto`), `proxyUrl` (optional proxy for DuckDuckJS — http(s), and for DDGS Python — http(s)/socks5; empty = direct), `ddgsPythonPath` (explicit interpreter for the `ddgs` service; empty = auto-discovery), `searxngBaseUrl` (default `http://127.0.0.1:8888/search` — the reference MCP default), `customBaseUrl`, `searchUiUrl` (web interface URL; empty = derive from the API base URL's origin), `apiKey`, `timeoutMs` (1000–60000, default 20000), `maxResults` (1–30, default 10), `categories` (default `general,web`), `language` (default auto). The settings screen shows the engine selector and proxy field only when DuckDuckJS is the selected service, and the Python-path and proxy fields when DDGS Python is. Existing installs keep their stored `searchService`; the new default applies to fresh configurations.
 
 **Interface URL derivation** (`server/ui-url.ts`): explicit `searchUiUrl` wins; otherwise the origin of `searxngBaseUrl` / `customBaseUrl` (API `http://omnirouter/search` → interface `http://omnirouter`, port preserved); DuckDuckGo and Brave fall back to their public front pages (`https://duckduckgo.com`, `https://search.brave.com`). `bunny-search.status` reports the derived `uiUrl` (never a secret) to the UI.
 
-**Runtime settings** — the MCP server is spawned by agent processes outside the plugin host, so it cannot receive settings through the SDK. `server/settings-file.ts` layers: schema defaults ← `$PASEO_HOME/plugins/bunny-search/settings.json` (accepts both the host `{revision, values}` layout and a flat object; out-of-range values fall back) ← environment variables (`BUNNY_SEARCH_BASE_URL`, `BUNNY_SEARCH_PROVIDER`, `BUNNY_SEARCH_DUCKDUCKJS_ENGINE`, `BUNNY_SEARCH_PROXY_URL`, `BUNNY_SEARCH_CUSTOM_URL`, `BUNNY_SEARCH_API_KEY`, `BUNNY_SEARCH_TIMEOUT_MS`, `BUNNY_SEARCH_MAX_RESULTS`, `BUNNY_SEARCH_CATEGORIES`, `BUNNY_SEARCH_LANGUAGE`; `SEARXNG_BASE_URL` is honored for drop-in compatibility with the reference MCP). This keeps the server usable standalone with any MCP client.
+**Runtime settings** — the MCP server is spawned by agent processes outside the plugin host, so it cannot receive settings through the SDK. `server/settings-file.ts` layers: schema defaults ← `$PASEO_HOME/plugins/bunny-search/settings.json` (accepts both the host `{revision, values}` layout and a flat object; out-of-range values fall back) ← environment variables (`BUNNY_SEARCH_BASE_URL`, `BUNNY_SEARCH_PROVIDER`, `BUNNY_SEARCH_DUCKDUCKJS_ENGINE`, `BUNNY_SEARCH_PROXY_URL`, `BUNNY_SEARCH_PYTHON`, `BUNNY_SEARCH_CUSTOM_URL`, `BUNNY_SEARCH_API_KEY`, `BUNNY_SEARCH_TIMEOUT_MS`, `BUNNY_SEARCH_MAX_RESULTS`, `BUNNY_SEARCH_CATEGORIES`, `BUNNY_SEARCH_LANGUAGE`; `SEARXNG_BASE_URL` is honored for drop-in compatibility with the reference MCP). This keeps the server usable standalone with any MCP client.
 
 ## 5. Connection test and connected indicator
 
@@ -132,7 +134,7 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 | SDK | `@getpaseo/plugin@0.10.1` (0.11.0 verified for the SDK as a build/test target, see §10) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`); vitest 7 suites / 76 tests (providers with stubbed fetch + mocked DuckDuckJS engines, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors; stable-0.11.0 checks in §10.1 |
+| Verification | typecheck clean (three-project `tsc -b`); vitest 9 suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors; stable-0.11.0 checks in §10.1 |
 
 ## 8. Alternatives considered
 
@@ -144,10 +146,10 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 ## 9. Roadmap
 
-- **Stage 2 (on request): Python `ddgs` backend** — a `python3` subprocess provider using the user-installed `ddgs` library (runtime availability check with an actionable error; the plugin never installs it), bringing bing/google/startpage/yandex and a per-request `proxy` argument (http/https/socks5).
 - Register the MCP server directly in Cline/Cursor/Codex config files (as memory-flash does) for agents that ignore session stdio servers.
 - Optional response caching and per-project category presets.
 - More providers behind the same adapter interface.
+- ~~**Stage 2: Python `ddgs` backend**~~ — implemented in 0.4.0, see §12.
 
 ## 10. Paseo 0.11.0 — verified compatibility and improvement plan
 
@@ -360,3 +362,74 @@ handlers and serves `bunny-search.status` with `provider: "duckduckjs"`;
 the same replica **without** the shim reproduces the crash at the
 identical `mainModule.js` line (control run), and the real
 `paseo plugin update` then reached status `running`.
+
+## 12. Version 0.4.0 — DDGS Python backend (stage 2)
+
+### 12.1 Requirement boundary: the user installs the library
+
+The PyPI `ddgs` library is documented as a **user-installed requirement**
+(README "Python requirement": `pip install ddgs` / pipx / uv). The plugin
+contains **no installer**: `server/ddgs-python.ts` only *verifies*
+availability with `import ddgs` and reports an actionable error
+("user requirement — install it yourself … pip install ddgs") that also
+lists every interpreter it searched. This satisfies the stage-2 contract:
+check and use, never install.
+
+### 12.2 Interpreter discovery (environment variables first)
+
+Ordered candidate walk, first one that both executes and imports `ddgs`
+wins (candidates without the library are skipped — this machine's
+`/usr/bin/python3` has no ddgs while `~/venv` does):
+
+1. `ddgsPythonPath` plugin setting (explicit override);
+2. environment variables — `BUNNY_SEARCH_PYTHON`, `VIRTUAL_ENV`,
+   `CONDA_PREFIX` (then every `python3`/`python` on `PATH` in `PATH`
+   order, itself an environment-based tier);
+3. well-known directories: `~/.venv`, `~/venv`, `~/.virtualenvs/*`,
+   `~/.local/share/virtualenvs/*`.
+
+The requested order ("start with environment variables, then the venv
+directories") is therefore literal: settings override → env vars → PATH →
+directories. The resolved interpreter is cached for the process lifetime;
+if a verified interpreter later fails to import the library, the cache is
+dropped and discovery runs once more before the error is surfaced.
+`BUNNY_SEARCH_PYTHON` also works as a settings-file environment override.
+
+### 12.3 Subprocess protocol
+
+`spawn(python, ["-c", <script>, query, max_results, region, proxy,
+timeout_s], …)` — no shell, arguments passed as argv. The script runs
+`DDGS(timeout=…, proxy=…)` (constructor takes http(s)/socks5 proxy) and
+`client.text(query, max_results=…, region=…)`, printing a JSON array on
+stdout; errors go to stderr with a non-zero exit and are surfaced as the
+last meaningful line. The child is killed at `timeoutMs` (same
+"did not respond within the configured timeout" wording as the other
+providers). `language` maps to the `ll-ll` region convention shared with
+DuckDuckJS (`ru` → `ru-ru`) via the common `languageToRegion()` helper.
+Because the module uses only Node built-ins (`node:child_process`,
+`node:fs`, `node:os`, `node:path`), it adds no npm dependencies and is
+safe inside both bundles (host CJS evaluator and the MCP ESM bundle).
+
+### 12.4 UI, checks and verification
+
+- Settings screen: for the `ddgs` service — a `Python path` override
+  field (with the discovery order in its hint) and the shared `Proxy URL`
+  field; `search_status`/`providerBaseUrl` report no base URL and
+  `searchInterfaceUrl` returns `null` (a subprocess has no web UI).
+- `check()` runs the availability probe **first** (missing library → the
+  install-yourself error, never a confusing search failure), then a real
+  search probe; "answered but zero results" maps to the shared
+  rate-limit message.
+- Tests: `python-discovery.test.ts` (real fs, fake `python` shell
+  scripts — ordering, skipping interpreters without the library,
+  actionable search trail, cache behavior) and `ddgs-provider.test.ts`
+  (scripted `spawn` mock — normalization, region/proxy/timeout argv,
+  clamping, error mapping, timeout kill, rediscovery after the library
+  disappears, all three `check()` branches). 9 suites / 95 tests green;
+  three-project typecheck green.
+- Real-machine smoke (availability only, **no search performed** — live
+  queries are tested by the user): discovery skipped `/usr/bin/python3`
+  (no ddgs) and resolved `/home/sirafim/venv/bin/python3`
+  (`ddgs 9.16.0`, Python 3.13.5) from `PATH`.
+- Version `0.3.1` → `0.4.0` (new functionality → second digit), annotated
+  tag `bunny-search@0.4.0`.

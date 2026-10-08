@@ -63,6 +63,7 @@ export default function contribute(server: PluginServerContext) {
       searchService: state.values.searchService,
       duckduckjsEngine: state.values.duckduckjsEngine,
       proxyUrl: state.values.proxyUrl,
+      ddgsPythonPath: state.values.ddgsPythonPath,
       searxngBaseUrl: state.values.searxngBaseUrl,
       customBaseUrl: state.values.customBaseUrl,
       apiKey: state.values.apiKey,

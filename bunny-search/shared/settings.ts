@@ -24,13 +24,15 @@ export const bunnySearchSettings = defineSettings({
     /**
      * Search service used by the MCP tools. "duckduckjs" (the default)
      * is the DuckDuckJS meta-search library (DuckDuckGo, Brave, Google,
-     * Mojeek, Yahoo — no API key); "searxng" talks to any SearXNG
+     * Mojeek, Yahoo — no API key); "ddgs" runs the user-installed
+     * PyPI `ddgs` library in a Python subprocess (availability is
+     * checked, never installed); "searxng" talks to any SearXNG
      * instance's JSON API; "duckduckgo" and "brave" are built-in
      * single-engine alternatives; "custom-json" points at any JSON
      * search endpoint the user configures.
      */
     searchService: z
-      .enum(["duckduckjs", "searxng", "duckduckgo", "brave", "custom-json"])
+      .enum(["duckduckjs", "ddgs", "searxng", "duckduckgo", "brave", "custom-json"])
       .default("duckduckjs"),
     /**
      * Which DuckDuckJS engine the default provider queries. "auto"
@@ -42,12 +44,20 @@ export const bunnySearchSettings = defineSettings({
       .enum(["auto", "duckduckgo", "brave", "google", "mojeek", "yahoo"])
       .default("auto"),
     /**
-     * Optional http(s) proxy for DuckDuckJS requests (e.g.
-     * "http://127.0.0.1:8080"). Empty means a direct connection.
-     * Applied through undici's global dispatcher, which is what the
-     * DuckDuckJS engines use for HTTP.
+     * Optional http(s) proxy for DuckDuckJS requests and http(s)/socks5
+     * proxy for DDGS Python requests (e.g. "http://127.0.0.1:8080").
+     * Empty means a direct connection. DuckDuckJS applies it through
+     * undici's global dispatcher; DDGS Python receives it as the
+     * library's `proxy` constructor argument.
      */
     proxyUrl: z.string().trim().max(512).default(""),
+    /**
+     * Explicit Python interpreter for the "ddgs" service (e.g.
+     * "/home/user/venv/bin/python"). Empty = automatic discovery:
+     * BUNNY_SEARCH_PYTHON, VIRTUAL_ENV, CONDA_PREFIX, PATH, then
+     * ~/.venv, ~/venv and other well-known virtualenv locations.
+     */
+    ddgsPythonPath: z.string().trim().max(512).default(""),
     /** Base URL of the SearXNG instance (its `/search` endpoint). */
     searxngBaseUrl: z
       .string()

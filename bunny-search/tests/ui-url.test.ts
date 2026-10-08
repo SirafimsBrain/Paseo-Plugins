@@ -73,6 +73,17 @@ describe("searchInterfaceUrl", () => {
     ).toBe("https://search.brave.com");
   });
 
+  it("returns null for the ddgs subprocess provider", () => {
+    expect(
+      searchInterfaceUrl({
+        searchService: "ddgs",
+        searxngBaseUrl: "",
+        customBaseUrl: "",
+        searchUiUrl: "",
+      }),
+    ).toBeNull();
+  });
+
   it("returns null when nothing can be derived", () => {
     expect(
       searchInterfaceUrl({

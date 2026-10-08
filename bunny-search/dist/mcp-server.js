@@ -198,9 +198,9 @@ var require_stat = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.stat = exports.denoifyFileInfo = void 0;
     var promises_1 = __require("node:fs/promises");
-    var os2 = __importStar(__require("node:os"));
+    var os3 = __importStar(__require("node:os"));
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var isWindows = os2.platform() === "win32";
+    var isWindows = os3.platform() === "win32";
     function denoifyFileInfo(s) {
       return {
         atime: s.atime,
@@ -226,9 +226,9 @@ var require_stat = __commonJS({
       };
     }
     exports.denoifyFileInfo = denoifyFileInfo;
-    var stat = async (path2) => {
+    var stat = async (path3) => {
       try {
-        return denoifyFileInfo(await (0, promises_1.stat)(path2));
+        return denoifyFileInfo(await (0, promises_1.stat)(path3));
       } catch (e) {
         throw (0, errorMap_js_1.default)(e);
       }
@@ -273,11 +273,11 @@ var require_fstat = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.fstat = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var util_1 = __require("util");
     var stat_js_1 = require_stat();
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var nodeFstat = (0, util_1.promisify)(fs2.fstat);
+    var nodeFstat = (0, util_1.promisify)(fs3.fstat);
     var fstat = async function(fd) {
       try {
         return (0, stat_js_1.denoifyFileInfo)(await nodeFstat(fd));
@@ -416,9 +416,9 @@ var require_readSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.readSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var readSync = (fd, buffer) => {
-      const bytesRead = fs2.readSync(fd, buffer);
+      const bytesRead = fs3.readSync(fd, buffer);
       return bytesRead === 0 ? null : bytesRead;
     };
     exports.readSync = readSync;
@@ -458,9 +458,9 @@ var require_write = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.write = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var util_1 = __require("util");
-    var nodeWrite = (0, util_1.promisify)(fs2.write);
+    var nodeWrite = (0, util_1.promisify)(fs3.write);
     var write = async (fd, data2) => {
       const { bytesWritten } = await nodeWrite(fd, data2);
       return bytesWritten;
@@ -502,8 +502,8 @@ var require_writeSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.writeSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    exports.writeSync = fs2.writeSync;
+    var fs3 = __importStar(__require("fs"));
+    exports.writeSync = fs3.writeSync;
   }
 });
 
@@ -558,7 +558,7 @@ var require_FsFile = __commonJS({
     var _FsFile_writableStream;
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.File = exports.FsFile = void 0;
-    var fs2 = __importStar(__require("node:fs"));
+    var fs3 = __importStar(__require("node:fs"));
     var stream = __importStar(__require("node:stream"));
     var fstat_js_1 = require_fstat();
     var fstatSync_js_1 = require_fstatSync();
@@ -634,11 +634,11 @@ var require_FsFile = __commonJS({
       }
       close() {
         __classPrivateFieldSet(this, _FsFile_closed, true, "f");
-        fs2.closeSync(this.rid);
+        fs3.closeSync(this.rid);
       }
       get readable() {
         if (__classPrivateFieldGet(this, _FsFile_readableStream, "f") == null) {
-          const nodeStream = fs2.createReadStream(null, {
+          const nodeStream = fs3.createReadStream(null, {
             fd: this.rid,
             autoClose: false
           });
@@ -648,7 +648,7 @@ var require_FsFile = __commonJS({
       }
       get writable() {
         if (__classPrivateFieldGet(this, _FsFile_writableStream, "f") == null) {
-          const nodeStream = fs2.createWriteStream(null, {
+          const nodeStream = fs3.createWriteStream(null, {
             fd: this.rid,
             autoClose: false
           });
@@ -802,12 +802,12 @@ var require_build = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.build = void 0;
-    var os2 = __importStar(__require("os"));
+    var os3 = __importStar(__require("os"));
     exports.build = {
       arch: "x86_64",
-      os: /* @__PURE__ */ ((p) => p === "win32" ? "windows" : p === "darwin" ? "darwin" : "linux")(os2.platform()),
+      os: /* @__PURE__ */ ((p) => p === "win32" ? "windows" : p === "darwin" ? "darwin" : "linux")(os3.platform()),
       vendor: "pc",
-      target: /* @__PURE__ */ ((p) => p === "win32" ? "x86_64-pc-windows-msvc" : p === "darwin" ? "x86_64-apple-darwin" : "x86_64-unknown-linux-gnu")(os2.platform())
+      target: /* @__PURE__ */ ((p) => p === "win32" ? "x86_64-pc-windows-msvc" : p === "darwin" ? "x86_64-apple-darwin" : "x86_64-unknown-linux-gnu")(os3.platform())
     };
   }
 });
@@ -1250,12 +1250,12 @@ var require_chdir = __commonJS({
     var url_1 = __require("url");
     var errorMap_js_1 = __importDefault(require_errorMap());
     var variables_js_1 = require_variables();
-    var chdir = function(path2) {
+    var chdir = function(path3) {
       try {
-        return process.chdir(path2 instanceof URL ? (0, url_1.fileURLToPath)(path2) : path2);
+        return process.chdir(path3 instanceof URL ? (0, url_1.fileURLToPath)(path3) : path3);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "ENOENT") {
-          throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), chdir '${path2}'`);
+          throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), chdir '${path3}'`);
         }
         throw (0, errorMap_js_1.default)(error2);
       }
@@ -1297,8 +1297,8 @@ var require_chmod = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.chmod = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
-    exports.chmod = fs2.chmod;
+    var fs3 = __importStar(__require("fs/promises"));
+    exports.chmod = fs3.chmod;
   }
 });
 
@@ -1335,8 +1335,8 @@ var require_chmodSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.chmodSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    exports.chmodSync = fs2.chmodSync;
+    var fs3 = __importStar(__require("fs"));
+    exports.chmodSync = fs3.chmodSync;
   }
 });
 
@@ -1373,8 +1373,8 @@ var require_chown = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.chown = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
-    var chown = async (path2, uid, gid) => await fs2.chown(path2, uid !== null && uid !== void 0 ? uid : -1, gid !== null && gid !== void 0 ? gid : -1);
+    var fs3 = __importStar(__require("fs/promises"));
+    var chown = async (path3, uid, gid) => await fs3.chown(path3, uid !== null && uid !== void 0 ? uid : -1, gid !== null && gid !== void 0 ? gid : -1);
     exports.chown = chown;
   }
 });
@@ -1412,8 +1412,8 @@ var require_chownSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.chownSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    var chownSync = (path2, uid, gid) => fs2.chownSync(path2, uid !== null && uid !== void 0 ? uid : -1, gid !== null && gid !== void 0 ? gid : -1);
+    var fs3 = __importStar(__require("fs"));
+    var chownSync = (path3, uid, gid) => fs3.chownSync(path3, uid !== null && uid !== void 0 ? uid : -1, gid !== null && gid !== void 0 ? gid : -1);
     exports.chownSync = chownSync;
   }
 });
@@ -1451,8 +1451,8 @@ var require_close = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.close = void 0;
-    var fs2 = __importStar(__require("fs"));
-    exports.close = fs2.closeSync;
+    var fs3 = __importStar(__require("fs"));
+    exports.close = fs3.closeSync;
   }
 });
 
@@ -1569,9 +1569,9 @@ var require_readTextFile = __commonJS({
     exports.readTextFile = void 0;
     var promises_1 = __require("fs/promises");
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var readTextFile = async (path2, { signal } = {}) => {
+    var readTextFile = async (path3, { signal } = {}) => {
       try {
-        return await (0, promises_1.readFile)(path2, { encoding: "utf8", signal });
+        return await (0, promises_1.readFile)(path3, { encoding: "utf8", signal });
       } catch (e) {
         throw (0, errorMap_js_1.default)(e);
       }
@@ -1712,12 +1712,12 @@ var require_copyFile = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.copyFile = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
+    var fs3 = __importStar(__require("fs/promises"));
     var errorMap_js_1 = __importDefault(require_errorMap());
     var errors2 = __importStar(require_errors());
     var copyFile = async (src, dest) => {
       try {
-        await fs2.copyFile(src, dest);
+        await fs3.copyFile(src, dest);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "ENOENT") {
           throw new errors2.NotFound(`File not found, copy '${src}' -> '${dest}'`);
@@ -1765,12 +1765,12 @@ var require_copyFileSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.copyFileSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var errorMap_js_1 = __importDefault(require_errorMap());
     var errors2 = __importStar(require_errors());
     var copyFileSync = (src, dest) => {
       try {
-        fs2.copyFileSync(src, dest);
+        fs3.copyFileSync(src, dest);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "ENOENT") {
           throw new errors2.NotFound(`File not found, copy '${src}' -> '${dest}'`);
@@ -1891,7 +1891,7 @@ var require_open = __commonJS({
     var fs_flags_js_1 = require_fs_flags();
     var errorMap_js_1 = __importDefault(require_errorMap());
     var nodeOpen = (0, util_1.promisify)(fs_1.open);
-    var open = async function open2(path2, { read, write, append: append3, truncate, create, createNew, mode = 438 } = {
+    var open = async function open2(path3, { read, write, append: append3, truncate, create, createNew, mode = 438 } = {
       read: true
     }) {
       const flagMode = (0, fs_flags_js_1.getFsFlag)({
@@ -1903,7 +1903,7 @@ var require_open = __commonJS({
         createNew
       });
       try {
-        const fd = await nodeOpen(path2, flagMode, mode);
+        const fd = await nodeOpen(path3, flagMode, mode);
         return new FsFile_js_1.File(fd);
       } catch (err) {
         throw (0, errorMap_js_1.default)(err);
@@ -1920,8 +1920,8 @@ var require_create = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.create = void 0;
     var open_js_1 = require_open();
-    var create = async function create2(path2) {
-      return await (0, open_js_1.open)(path2, { write: true, create: true, truncate: true });
+    var create = async function create2(path3) {
+      return await (0, open_js_1.open)(path3, { write: true, create: true, truncate: true });
     };
     exports.create = create;
   }
@@ -1940,7 +1940,7 @@ var require_openSync = __commonJS({
     var FsFile_js_1 = require_FsFile();
     var fs_flags_js_1 = require_fs_flags();
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var openSync = function openSync2(path2, { read, write, append: append3, truncate, create, createNew, mode = 438 } = {
+    var openSync = function openSync2(path3, { read, write, append: append3, truncate, create, createNew, mode = 438 } = {
       read: true
     }) {
       const flagMode = (0, fs_flags_js_1.getFsFlag)({
@@ -1952,7 +1952,7 @@ var require_openSync = __commonJS({
         createNew
       });
       try {
-        const fd = (0, fs_1.openSync)(path2, flagMode, mode);
+        const fd = (0, fs_1.openSync)(path3, flagMode, mode);
         return new FsFile_js_1.File(fd);
       } catch (err) {
         throw (0, errorMap_js_1.default)(err);
@@ -1969,8 +1969,8 @@ var require_createSync = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createSync = void 0;
     var openSync_js_1 = require_openSync();
-    var createSync = function createSync2(path2) {
-      return (0, openSync_js_1.openSync)(path2, {
+    var createSync = function createSync2(path3) {
+      return (0, openSync_js_1.openSync)(path3, {
         create: true,
         truncate: true,
         read: true,
@@ -2119,7 +2119,7 @@ var require_index_min = __commonJS({
 var require_lib = __commonJS({
   "node_modules/which/lib/index.js"(exports, module) {
     var { isexe, sync: isexeSync } = require_index_min();
-    var { join: join2, delimiter, sep, posix } = __require("path");
+    var { join: join3, delimiter: delimiter2, sep, posix } = __require("path");
     var isWindows = process.platform === "win32";
     var rSlash = new RegExp(`[${posix.sep}${sep === posix.sep ? "" : sep}]`.replace(/(\\)/g, "\\$1"));
     var rRel = new RegExp(`^\\.${rSlash.source}`);
@@ -2127,7 +2127,7 @@ var require_lib = __commonJS({
     var getPathInfo = (cmd, {
       path: optPath = process.env.PATH,
       pathExt: optPathExt = process.env.PATHEXT,
-      delimiter: optDelimiter = delimiter
+      delimiter: optDelimiter = delimiter2
     }) => {
       const pathEnv = cmd.match(rSlash) ? [""] : [
         // windows always checks the cwd first
@@ -2148,7 +2148,7 @@ var require_lib = __commonJS({
     var getPathPart = (raw, cmd) => {
       const pathPart = /^".*"$/.test(raw) ? raw.slice(1, -1) : raw;
       const prefix = !pathPart && rRel.test(cmd) ? cmd.slice(0, 2) : "";
-      return prefix + join2(pathPart, cmd);
+      return prefix + join3(pathPart, cmd);
     };
     var which = async (cmd, opt = {}) => {
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
@@ -2308,9 +2308,9 @@ var require_hostname = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.hostname = void 0;
-    var os2 = __importStar(__require("os"));
+    var os3 = __importStar(__require("os"));
     var hostname = function hostname2() {
-      return os2.hostname();
+      return os3.hostname();
     };
     exports.hostname = hostname;
   }
@@ -2409,8 +2409,8 @@ var require_link = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.link = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
-    exports.link = fs2.link;
+    var fs3 = __importStar(__require("fs/promises"));
+    exports.link = fs3.link;
   }
 });
 
@@ -2447,8 +2447,8 @@ var require_linkSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.linkSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    exports.linkSync = fs2.linkSync;
+    var fs3 = __importStar(__require("fs"));
+    exports.linkSync = fs3.linkSync;
   }
 });
 
@@ -2643,11 +2643,11 @@ var require_readTextFileSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.readTextFileSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var readTextFileSync = function(path2) {
+    var readTextFileSync = function(path3) {
       try {
-        return fs2.readFileSync(path2, "utf8");
+        return fs3.readFileSync(path3, "utf8");
       } catch (e) {
         throw (0, errorMap_js_1.default)(e);
       }
@@ -2742,9 +2742,9 @@ var require_loadavg = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.loadavg = void 0;
-    var os2 = __importStar(__require("os"));
+    var os3 = __importStar(__require("os"));
     var loadavg = function loadavg2() {
-      return os2.loadavg();
+      return os3.loadavg();
     };
     exports.loadavg = loadavg;
   }
@@ -2786,12 +2786,12 @@ var require_lstat = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.lstat = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
+    var fs3 = __importStar(__require("fs/promises"));
     var stat_js_1 = require_stat();
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var lstat = async (path2) => {
+    var lstat = async (path3) => {
       try {
-        return (0, stat_js_1.denoifyFileInfo)(await fs2.lstat(path2));
+        return (0, stat_js_1.denoifyFileInfo)(await fs3.lstat(path3));
       } catch (e) {
         throw (0, errorMap_js_1.default)(e);
       }
@@ -2836,12 +2836,12 @@ var require_lstatSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.lstatSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var stat_js_1 = require_stat();
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var lstatSync = (path2) => {
+    var lstatSync = (path3) => {
       try {
-        return (0, stat_js_1.denoifyFileInfo)(fs2.lstatSync(path2));
+        return (0, stat_js_1.denoifyFileInfo)(fs3.lstatSync(path3));
       } catch (err) {
         throw (0, errorMap_js_1.default)(err);
       }
@@ -2932,10 +2932,10 @@ var require_writeTextFile = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.writeTextFile = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
+    var fs3 = __importStar(__require("fs/promises"));
     var errorMap_js_1 = __importDefault(require_errorMap());
     var fs_flags_js_1 = require_fs_flags();
-    var writeTextFile = async function writeTextFile2(path2, data2, { append: append3 = false, create = true, createNew = false, mode, signal } = {}) {
+    var writeTextFile = async function writeTextFile2(path3, data2, { append: append3 = false, create = true, createNew = false, mode, signal } = {}) {
       const truncate = create && !append3;
       const flag = (0, fs_flags_js_1.getFsFlag)({
         append: append3,
@@ -2945,9 +2945,9 @@ var require_writeTextFile = __commonJS({
         write: true
       });
       try {
-        await fs2.writeFile(path2, data2, { flag, mode, signal });
+        await fs3.writeFile(path3, data2, { flag, mode, signal });
         if (mode !== void 0)
-          await fs2.chmod(path2, mode);
+          await fs3.chmod(path3, mode);
       } catch (error2) {
         throw (0, errorMap_js_1.default)(error2);
       }
@@ -3011,14 +3011,14 @@ var require_writeTextFileSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.writeTextFileSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var writeTextFileSync = (path2, data2, { append: append3 = false, create = true, mode } = {}) => {
+    var writeTextFileSync = (path3, data2, { append: append3 = false, create = true, mode } = {}) => {
       const flag = create ? append3 ? "a" : "w" : "r+";
       try {
-        fs2.writeFileSync(path2, data2, { flag, mode });
+        fs3.writeFileSync(path3, data2, { flag, mode });
         if (mode !== void 0)
-          fs2.chmodSync(path2, mode);
+          fs3.chmodSync(path3, mode);
       } catch (error2) {
         throw (0, errorMap_js_1.default)(error2);
       }
@@ -3068,12 +3068,12 @@ var require_mkdir = __commonJS({
     var promises_1 = __require("fs/promises");
     var errorMap_js_1 = __importDefault(require_errorMap());
     var variables_js_1 = require_variables();
-    var mkdir = async function mkdir2(path2, options) {
+    var mkdir = async function mkdir2(path3, options) {
       try {
-        await (0, promises_1.mkdir)(path2, options);
+        await (0, promises_1.mkdir)(path3, options);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "EEXIST") {
-          throw new variables_js_1.errors.AlreadyExists(`File exists (os error 17), mkdir '${path2}'`);
+          throw new variables_js_1.errors.AlreadyExists(`File exists (os error 17), mkdir '${path3}'`);
         }
         throw (0, errorMap_js_1.default)(error2);
       }
@@ -3118,15 +3118,15 @@ var require_mkdirSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.mkdirSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var errorMap_js_1 = __importDefault(require_errorMap());
     var variables_js_1 = require_variables();
-    var mkdirSync = (path2, options) => {
+    var mkdirSync = (path3, options) => {
       try {
-        fs2.mkdirSync(path2, options);
+        fs3.mkdirSync(path3, options);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "EEXIST") {
-          throw new variables_js_1.errors.AlreadyExists(`File exists (os error 17), mkdir '${path2}'`);
+          throw new variables_js_1.errors.AlreadyExists(`File exists (os error 17), mkdir '${path3}'`);
         }
         throw (0, errorMap_js_1.default)(error2);
       }
@@ -3174,9 +3174,9 @@ var require_readDir = __commonJS({
     exports.readDir = void 0;
     var promises_1 = __require("fs/promises");
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var readDir = async function* readDir2(path2) {
+    var readDir = async function* readDir2(path3) {
       try {
-        for await (const e of await (0, promises_1.opendir)(String(path2))) {
+        for await (const e of await (0, promises_1.opendir)(String(path3))) {
           const ent = {
             name: e.name,
             isFile: e.isFile(),
@@ -3204,9 +3204,9 @@ var require_readDirSync = __commonJS({
     exports.readDirSync = void 0;
     var fs_1 = __require("fs");
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var readDirSync = function* readDir(path2) {
+    var readDirSync = function* readDir(path3) {
       try {
-        for (const e of (0, fs_1.readdirSync)(String(path2), { withFileTypes: true })) {
+        for (const e of (0, fs_1.readdirSync)(String(path3), { withFileTypes: true })) {
           const ent = {
             name: e.name,
             isFile: e.isFile(),
@@ -3234,9 +3234,9 @@ var require_readFile = __commonJS({
     exports.readFile = void 0;
     var promises_1 = __require("fs/promises");
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var readFile = async function readFile2(path2, { signal } = {}) {
+    var readFile = async function readFile2(path3, { signal } = {}) {
       try {
-        const buf = await (0, promises_1.readFile)(path2, { signal });
+        const buf = await (0, promises_1.readFile)(path3, { signal });
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
       } catch (e) {
         throw (0, errorMap_js_1.default)(e);
@@ -3257,9 +3257,9 @@ var require_readFileSync = __commonJS({
     exports.readFileSync = void 0;
     var fs_1 = __require("fs");
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var readFileSync2 = function readFileSync3(path2) {
+    var readFileSync2 = function readFileSync3(path3) {
       try {
-        const buf = (0, fs_1.readFileSync)(path2);
+        const buf = (0, fs_1.readFileSync)(path3);
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
       } catch (e) {
         throw (0, errorMap_js_1.default)(e);
@@ -3302,8 +3302,8 @@ var require_readLink = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.readLink = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
-    exports.readLink = fs2.readlink;
+    var fs3 = __importStar(__require("fs/promises"));
+    exports.readLink = fs3.readlink;
   }
 });
 
@@ -3340,8 +3340,8 @@ var require_readLinkSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.readLinkSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    exports.readLinkSync = fs2.readlinkSync;
+    var fs3 = __importStar(__require("fs"));
+    exports.readLinkSync = fs3.readlinkSync;
   }
 });
 
@@ -3378,8 +3378,8 @@ var require_realPath = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.realPath = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
-    exports.realPath = fs2.realpath;
+    var fs3 = __importStar(__require("fs/promises"));
+    exports.realPath = fs3.realpath;
   }
 });
 
@@ -3416,8 +3416,8 @@ var require_realPathSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.realPathSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    exports.realPathSync = fs2.realpathSync;
+    var fs3 = __importStar(__require("fs"));
+    exports.realPathSync = fs3.realpathSync;
   }
 });
 
@@ -3428,13 +3428,13 @@ var require_remove = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.remove = void 0;
     var promises_1 = __require("fs/promises");
-    var remove2 = async function remove3(path2, options = {}) {
+    var remove2 = async function remove3(path3, options = {}) {
       const innerOptions = options.recursive ? { recursive: true, force: true } : {};
       try {
-        return await (0, promises_1.rm)(path2, innerOptions);
+        return await (0, promises_1.rm)(path3, innerOptions);
       } catch (err) {
         if (err.code === "ERR_FS_EISDIR") {
-          return await (0, promises_1.rmdir)(path2, innerOptions);
+          return await (0, promises_1.rmdir)(path3, innerOptions);
         } else {
           throw err;
         }
@@ -3494,14 +3494,14 @@ var require_removeSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.removeSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    var removeSync = (path2, options = {}) => {
+    var fs3 = __importStar(__require("fs"));
+    var removeSync = (path3, options = {}) => {
       const innerOptions = options.recursive ? { recursive: true, force: true } : {};
       try {
-        fs2.rmSync(path2, innerOptions);
+        fs3.rmSync(path3, innerOptions);
       } catch (err) {
         if (err.code === "ERR_FS_EISDIR") {
-          fs2.rmdirSync(path2, innerOptions);
+          fs3.rmdirSync(path3, innerOptions);
         } else {
           throw err;
         }
@@ -3558,8 +3558,8 @@ var require_renameSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.renameSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    exports.renameSync = fs2.renameSync;
+    var fs3 = __importStar(__require("fs"));
+    exports.renameSync = fs3.renameSync;
   }
 });
 
@@ -4055,12 +4055,12 @@ var require_statSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.statSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var stat_js_1 = require_stat();
     var errorMap_js_1 = __importDefault(require_errorMap());
-    var statSync = (path2) => {
+    var statSync = (path3) => {
       try {
-        return (0, stat_js_1.denoifyFileInfo)(fs2.statSync(path2));
+        return (0, stat_js_1.denoifyFileInfo)(fs3.statSync(path3));
       } catch (err) {
         throw (0, errorMap_js_1.default)(err);
       }
@@ -4102,8 +4102,8 @@ var require_symlink = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.symlink = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
-    var symlink = async (oldpath, newpath, options) => await fs2.symlink(oldpath, newpath, options === null || options === void 0 ? void 0 : options.type);
+    var fs3 = __importStar(__require("fs/promises"));
+    var symlink = async (oldpath, newpath, options) => await fs3.symlink(oldpath, newpath, options === null || options === void 0 ? void 0 : options.type);
     exports.symlink = symlink;
   }
 });
@@ -4141,8 +4141,8 @@ var require_symlinkSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.symlinkSync = void 0;
-    var fs2 = __importStar(__require("fs"));
-    var symlinkSync = (oldpath, newpath, options) => fs2.symlinkSync(oldpath, newpath, options === null || options === void 0 ? void 0 : options.type);
+    var fs3 = __importStar(__require("fs"));
+    var symlinkSync = (oldpath, newpath, options) => fs3.symlinkSync(oldpath, newpath, options === null || options === void 0 ? void 0 : options.type);
     exports.symlinkSync = symlinkSync;
   }
 });
@@ -4320,12 +4320,12 @@ var require_truncate = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.truncate = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
+    var fs3 = __importStar(__require("fs/promises"));
     var errorMap_js_1 = __importDefault(require_errorMap());
     var variables_js_1 = require_variables();
     var truncate = async (name, len) => {
       try {
-        return await fs2.truncate(name, len);
+        return await fs3.truncate(name, len);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "ENOENT") {
           throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), truncate '${name}'`);
@@ -4373,12 +4373,12 @@ var require_truncateSync = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.truncateSync = void 0;
-    var fs2 = __importStar(__require("fs"));
+    var fs3 = __importStar(__require("fs"));
     var errorMap_js_1 = __importDefault(require_errorMap());
     var variables_js_1 = require_variables();
     var truncateSync = (name, len) => {
       try {
-        return fs2.truncateSync(name, len);
+        return fs3.truncateSync(name, len);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "ENOENT") {
           throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), truncate '${name}'`);
@@ -4461,9 +4461,9 @@ var require_watchFs = __commonJS({
       const ac = new AbortController();
       const { signal } = ac;
       const rid = -1;
-      const masterWatcher = (0, iterutil_js_1.merge)(paths.map((path2) => (0, iterutil_js_1.mapAsync)((0, iterutil_js_1.filterAsync)((0, promises_1.watch)(path2, { recursive: options === null || options === void 0 ? void 0 : options.recursive, signal }), (info) => info.filename != null), (info) => ({
+      const masterWatcher = (0, iterutil_js_1.merge)(paths.map((path3) => (0, iterutil_js_1.mapAsync)((0, iterutil_js_1.filterAsync)((0, promises_1.watch)(path3, { recursive: options === null || options === void 0 ? void 0 : options.recursive, signal }), (info) => info.filename != null), (info) => ({
         kind: "modify",
-        paths: [(0, path_1.resolve)(path2, info.filename)]
+        paths: [(0, path_1.resolve)(path3, info.filename)]
       }))));
       function close() {
         ac.abort();
@@ -4514,16 +4514,16 @@ var require_writeFile = __commonJS({
     };
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.writeFile = void 0;
-    var fs2 = __importStar(__require("fs/promises"));
+    var fs3 = __importStar(__require("fs/promises"));
     var errorMap_js_1 = __importDefault(require_errorMap());
     var fs_flags_js_1 = require_fs_flags();
-    var writeFile = async function writeFile2(path2, data2, { append: append3 = false, create = true, createNew = false, mode, signal } = {}) {
+    var writeFile = async function writeFile2(path3, data2, { append: append3 = false, create = true, createNew = false, mode, signal } = {}) {
       const truncate = create && !append3;
       const flag = (0, fs_flags_js_1.getFsFlag)({ append: append3, create, createNew, truncate, write: true });
       try {
-        await fs2.writeFile(path2, data2, { flag, signal });
+        await fs3.writeFile(path3, data2, { flag, signal });
         if (mode != null)
-          await fs2.chmod(path2, mode);
+          await fs3.chmod(path3, mode);
       } catch (error2) {
         throw (0, errorMap_js_1.default)(error2);
       }
@@ -4546,12 +4546,12 @@ var require_writeFileSync = __commonJS({
     var errorMap_js_1 = __importDefault(require_errorMap());
     var statSync_js_1 = require_statSync();
     var chmodSync_js_1 = require_chmodSync();
-    var writeFileSync = function writeFileSync2(path2, data2, options = {}) {
+    var writeFileSync = function writeFileSync2(path3, data2, options = {}) {
       try {
         if (options.create !== void 0) {
           const create = !!options.create;
           if (!create) {
-            (0, statSync_js_1.statSync)(path2);
+            (0, statSync_js_1.statSync)(path3);
           }
         }
         const openOptions = {
@@ -4561,9 +4561,9 @@ var require_writeFileSync = __commonJS({
           append: !!options.append,
           truncate: !options.append
         };
-        const file = (0, openSync_js_1.openSync)(path2, openOptions);
+        const file = (0, openSync_js_1.openSync)(path3, openOptions);
         if (options.mode !== void 0 && options.mode !== null && (0, os_1.platform)() !== "win32") {
-          (0, chmodSync_js_1.chmodSync)(path2, options.mode);
+          (0, chmodSync_js_1.chmodSync)(path3, options.mode);
         }
         let nwritten = 0;
         while (nwritten < data2.length) {
@@ -4968,23 +4968,23 @@ var require_functions = __commonJS({
       }
     };
     exports.futimeSync = futimeSync;
-    var utime = async function(path2, atime, mtime) {
+    var utime = async function(path3, atime, mtime) {
       try {
-        await fs_1.default.promises.utimes(path2, atime, mtime);
+        await fs_1.default.promises.utimes(path3, atime, mtime);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "ENOENT") {
-          throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), utime '${path2}'`);
+          throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), utime '${path3}'`);
         }
         throw (0, errorMap_js_1.default)(error2);
       }
     };
     exports.utime = utime;
-    var utimeSync = function(path2, atime, mtime) {
+    var utimeSync = function(path3, atime, mtime) {
       try {
-        fs_1.default.utimesSync(path2, atime, mtime);
+        fs_1.default.utimesSync(path3, atime, mtime);
       } catch (error2) {
         if ((error2 === null || error2 === void 0 ? void 0 : error2.code) === "ENOENT") {
-          throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), utime '${path2}'`);
+          throw new variables_js_1.errors.NotFound(`No such file or directory (os error 2), utime '${path3}'`);
         }
         throw (0, errorMap_js_1.default)(error2);
       }
@@ -5894,14 +5894,14 @@ var require_util = __commonJS({
         }
         const port = url.port != null ? url.port : url.protocol === "https:" ? 443 : 80;
         let origin = url.origin != null ? url.origin : `${url.protocol || ""}//${url.hostname || ""}:${port}`;
-        let path2 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
+        let path3 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
         if (origin[origin.length - 1] === "/") {
           origin = origin.slice(0, origin.length - 1);
         }
-        if (path2 && path2[0] !== "/") {
-          path2 = `/${path2}`;
+        if (path3 && path3[0] !== "/") {
+          path3 = `/${path3}`;
         }
-        return new URL(`${origin}${path2}`);
+        return new URL(`${origin}${path3}`);
       }
       if (!isHttpOrHttpsPrefixed(url.origin || url.protocol)) {
         throw new InvalidArgumentError("Invalid URL protocol: the URL must start with `http:` or `https:`.");
@@ -6352,39 +6352,39 @@ var require_diagnostics = __commonJS({
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
         const {
-          request: { method, path: path2, origin }
+          request: { method, path: path3, origin }
         } = evt;
-        debuglog("sending request to %s %s/%s", method, origin, path2);
+        debuglog("sending request to %s %s/%s", method, origin, path3);
       });
       diagnosticsChannel.channel("undici:request:headers").subscribe((evt) => {
         const {
-          request: { method, path: path2, origin },
+          request: { method, path: path3, origin },
           response: { statusCode }
         } = evt;
         debuglog(
           "received response to %s %s/%s - HTTP %d",
           method,
           origin,
-          path2,
+          path3,
           statusCode
         );
       });
       diagnosticsChannel.channel("undici:request:trailers").subscribe((evt) => {
         const {
-          request: { method, path: path2, origin }
+          request: { method, path: path3, origin }
         } = evt;
-        debuglog("trailers received from %s %s/%s", method, origin, path2);
+        debuglog("trailers received from %s %s/%s", method, origin, path3);
       });
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
-          request: { method, path: path2, origin },
+          request: { method, path: path3, origin },
           error: error2
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
-          path2,
+          path3,
           error2.message
         );
       });
@@ -6433,9 +6433,9 @@ var require_diagnostics = __commonJS({
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
           const {
-            request: { method, path: path2, origin }
+            request: { method, path: path3, origin }
           } = evt;
-          debuglog("sending request to %s %s/%s", method, origin, path2);
+          debuglog("sending request to %s %s/%s", method, origin, path3);
         });
       }
       diagnosticsChannel.channel("undici:websocket:open").subscribe((evt) => {
@@ -6498,7 +6498,7 @@ var require_request = __commonJS({
     var kHandler = Symbol("handler");
     var Request3 = class {
       constructor(origin, {
-        path: path2,
+        path: path3,
         method,
         body,
         headers,
@@ -6513,11 +6513,11 @@ var require_request = __commonJS({
         expectContinue,
         servername
       }, handler) {
-        if (typeof path2 !== "string") {
+        if (typeof path3 !== "string") {
           throw new InvalidArgumentError("path must be a string");
-        } else if (path2[0] !== "/" && !(path2.startsWith("http://") || path2.startsWith("https://")) && method !== "CONNECT") {
+        } else if (path3[0] !== "/" && !(path3.startsWith("http://") || path3.startsWith("https://")) && method !== "CONNECT") {
           throw new InvalidArgumentError("path must be an absolute URL or start with a slash");
-        } else if (invalidPathRegex.test(path2)) {
+        } else if (invalidPathRegex.test(path3)) {
           throw new InvalidArgumentError("invalid request path");
         }
         if (typeof method !== "string") {
@@ -6583,7 +6583,7 @@ var require_request = __commonJS({
         this.completed = false;
         this.aborted = false;
         this.upgrade = upgrade || null;
-        this.path = query ? buildURL(path2, query) : path2;
+        this.path = query ? buildURL(path3, query) : path3;
         this.origin = origin;
         this.idempotent = idempotent == null ? method === "HEAD" || method === "GET" : idempotent;
         this.blocking = blocking == null ? false : blocking;
@@ -10597,7 +10597,7 @@ var require_client_h1 = __commonJS({
       kResume,
       kHTTPContext
     } = require_symbols();
-    var constants = require_constants2();
+    var constants2 = require_constants2();
     var EMPTY_BUF = Buffer.alloc(0);
     var FastBuffer = Buffer[Symbol.species];
     var addListener = util.addListener;
@@ -10672,7 +10672,7 @@ var require_client_h1 = __commonJS({
       constructor(client, socket, { exports: exports2 }) {
         assert(Number.isFinite(client[kMaxHeadersSize]) && client[kMaxHeadersSize] > 0);
         this.llhttp = exports2;
-        this.ptr = this.llhttp.llhttp_alloc(constants.TYPE.RESPONSE);
+        this.ptr = this.llhttp.llhttp_alloc(constants2.TYPE.RESPONSE);
         this.client = client;
         this.socket = socket;
         this.timeout = null;
@@ -10767,11 +10767,11 @@ var require_client_h1 = __commonJS({
             currentBufferRef = null;
           }
           const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
-          if (ret !== constants.ERROR.OK) {
+          if (ret !== constants2.ERROR.OK) {
             const body = data2.subarray(offset);
-            if (ret === constants.ERROR.PAUSED_UPGRADE) {
+            if (ret === constants2.ERROR.PAUSED_UPGRADE) {
               this.onUpgrade(body);
-            } else if (ret === constants.ERROR.PAUSED) {
+            } else if (ret === constants2.ERROR.PAUSED) {
               this.paused = true;
               socket.unshift(body);
             } else {
@@ -10794,10 +10794,10 @@ var require_client_h1 = __commonJS({
         } finally {
           currentParser = null;
         }
-        if (ret === constants.ERROR.OK) {
+        if (ret === constants2.ERROR.OK) {
           return null;
         }
-        if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+        if (ret === constants2.ERROR.PAUSED || ret === constants2.ERROR.PAUSED_UPGRADE) {
           this.paused = true;
           return null;
         }
@@ -10814,7 +10814,7 @@ var require_client_h1 = __commonJS({
           const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
           message = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
         }
-        return new HTTPParserError(message, constants.ERROR[ret], data2);
+        return new HTTPParserError(message, constants2.ERROR[ret], data2);
       }
       destroy() {
         assert(this.ptr != null);
@@ -10994,7 +10994,7 @@ var require_client_h1 = __commonJS({
           socket[kBlocking] = false;
           client[kResume]();
         }
-        return pause ? constants.ERROR.PAUSED : 0;
+        return pause ? constants2.ERROR.PAUSED : 0;
       }
       onBody(buf) {
         const { client, socket, statusCode, maxResponseSize } = this;
@@ -11016,7 +11016,7 @@ var require_client_h1 = __commonJS({
         }
         this.bytesRead += buf.length;
         if (request.onData(buf) === false) {
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         }
       }
       onMessageComplete() {
@@ -11052,13 +11052,13 @@ var require_client_h1 = __commonJS({
         if (socket[kWriting]) {
           assert(client[kRunning] === 0);
           util.destroy(socket, new InformationalError("reset"));
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         } else if (!shouldKeepAlive) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         } else if (socket[kReset] && client[kRunning] === 0) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         } else if (client[kPipelining] == null || client[kPipelining] === 1) {
           setImmediate(() => client[kResume]());
         } else {
@@ -11269,7 +11269,7 @@ var require_client_h1 = __commonJS({
       return method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && method !== "TRACE" && method !== "CONNECT";
     }
     function writeH1(client, request) {
-      const { method, path: path2, host, upgrade, blocking, reset } = request;
+      const { method, path: path3, host, upgrade, blocking, reset } = request;
       let { body, headers, contentLength } = request;
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH" || method === "QUERY" || method === "PROPFIND" || method === "PROPPATCH";
       if (util.isFormDataLike(body)) {
@@ -11350,7 +11350,7 @@ var require_client_h1 = __commonJS({
       if (blocking) {
         socket[kBlocking] = true;
       }
-      let header = `${method} ${path2} HTTP/1.1\r
+      let header = `${method} ${path3} HTTP/1.1\r
 `;
       if (typeof host === "string") {
         header += `host: ${host}\r
@@ -11881,7 +11881,7 @@ var require_client_h2 = __commonJS({
     }
     function writeH2(client, request) {
       const session = client[kHTTP2Session];
-      const { method, path: path2, host, upgrade, expectContinue, signal, headers: reqHeaders } = request;
+      const { method, path: path3, host, upgrade, expectContinue, signal, headers: reqHeaders } = request;
       let { body } = request;
       if (upgrade) {
         util.errorRequest(client, request, new Error("Upgrade not supported for H2"));
@@ -11978,7 +11978,7 @@ var require_client_h2 = __commonJS({
         });
         return true;
       }
-      headers[HTTP2_HEADER_PATH] = path2;
+      headers[HTTP2_HEADER_PATH] = path3;
       headers[HTTP2_HEADER_SCHEME] = "https";
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH";
       if (body && typeof body.read === "function") {
@@ -12331,9 +12331,9 @@ var require_redirect_handler = __commonJS({
           return this.handler.onHeaders(statusCode, headers, resume, statusText);
         }
         const { origin, pathname, search } = util.parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
-        const path2 = search ? `${pathname}${search}` : pathname;
+        const path3 = search ? `${pathname}${search}` : pathname;
         this.opts.headers = cleanRequestHeaders(this.opts.headers, statusCode === 303, this.opts.origin !== origin);
-        this.opts.path = path2;
+        this.opts.path = path3;
         this.opts.origin = origin;
         this.opts.maxRedirections = 0;
         this.opts.query = null;
@@ -13568,10 +13568,10 @@ var require_proxy_agent = __commonJS({
         };
         const {
           origin,
-          path: path2 = "/",
+          path: path3 = "/",
           headers = {}
         } = opts;
-        opts.path = origin + path2;
+        opts.path = origin + path3;
         if (!("host" in headers) && !("Host" in headers)) {
           const { host } = new URL2(origin);
           headers.host = host;
@@ -15543,20 +15543,20 @@ var require_mock_utils = __commonJS({
       }
       return true;
     }
-    function safeUrl(path2) {
-      if (typeof path2 !== "string") {
-        return path2;
+    function safeUrl(path3) {
+      if (typeof path3 !== "string") {
+        return path3;
       }
-      const pathSegments = path2.split("?");
+      const pathSegments = path3.split("?");
       if (pathSegments.length !== 2) {
-        return path2;
+        return path3;
       }
       const qp = new URLSearchParams(pathSegments.pop());
       qp.sort();
       return [...pathSegments, qp.toString()].join("?");
     }
-    function matchKey(mockDispatch2, { path: path2, method, body, headers }) {
-      const pathMatch = matchValue(mockDispatch2.path, path2);
+    function matchKey(mockDispatch2, { path: path3, method, body, headers }) {
+      const pathMatch = matchValue(mockDispatch2.path, path3);
       const methodMatch = matchValue(mockDispatch2.method, method);
       const bodyMatch = typeof mockDispatch2.body !== "undefined" ? matchValue(mockDispatch2.body, body) : true;
       const headersMatch = matchHeaders(mockDispatch2, headers);
@@ -15578,7 +15578,7 @@ var require_mock_utils = __commonJS({
     function getMockDispatch(mockDispatches, key) {
       const basePath = key.query ? buildURL(key.path, key.query) : key.path;
       const resolvedPath = typeof basePath === "string" ? safeUrl(basePath) : basePath;
-      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path2 }) => matchValue(safeUrl(path2), resolvedPath));
+      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path3 }) => matchValue(safeUrl(path3), resolvedPath));
       if (matchedMockDispatches.length === 0) {
         throw new MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
       }
@@ -15616,9 +15616,9 @@ var require_mock_utils = __commonJS({
       }
     }
     function buildKey(opts) {
-      const { path: path2, method, body, headers, query } = opts;
+      const { path: path3, method, body, headers, query } = opts;
       return {
-        path: path2,
+        path: path3,
         method,
         body,
         headers,
@@ -16081,10 +16081,10 @@ var require_pending_interceptors_formatter = __commonJS({
       }
       format(pendingInterceptors) {
         const withPrettyHeaders = pendingInterceptors.map(
-          ({ method, path: path2, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
+          ({ method, path: path3, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
             Method: method,
             Origin: origin,
-            Path: path2,
+            Path: path3,
             "Status code": statusCode,
             Persistent: persist ? PERSISTENT : NOT_PERSISTENT,
             Invocations: timesInvoked,
@@ -16847,10 +16847,10 @@ var require_headers = __commonJS({
         const lowercaseName = isLowerCase ? name : name.toLowerCase();
         const exists = this[kHeadersMap].get(lowercaseName);
         if (exists) {
-          const delimiter = lowercaseName === "cookie" ? "; " : ", ";
+          const delimiter2 = lowercaseName === "cookie" ? "; " : ", ";
           this[kHeadersMap].set(lowercaseName, {
             name: exists.name,
-            value: `${exists.value}${delimiter}${value}`
+            value: `${exists.value}${delimiter2}${value}`
           });
         } else {
           this[kHeadersMap].set(lowercaseName, { name, value });
@@ -20965,9 +20965,9 @@ var require_util6 = __commonJS({
         }
       }
     }
-    function validateCookiePath(path2) {
-      for (let i = 0; i < path2.length; ++i) {
-        const code = path2.charCodeAt(i);
+    function validateCookiePath(path3) {
+      for (let i = 0; i < path3.length; ++i) {
+        const code = path3.charCodeAt(i);
         if (code < 32 || // exclude CTLs (0-31)
         code > 126 || // exclude DEL and non-ascii
         code === 59) {
@@ -23809,11 +23809,11 @@ var require_undici = __commonJS({
           if (typeof opts.path !== "string") {
             throw new InvalidArgumentError("invalid opts.path");
           }
-          let path2 = opts.path;
+          let path3 = opts.path;
           if (!opts.path.startsWith("/")) {
-            path2 = `/${path2}`;
+            path3 = `/${path3}`;
           }
-          url = new URL(util.parseOrigin(url).origin + path2);
+          url = new URL(util.parseOrigin(url).origin + path3);
         } else {
           if (!opts) {
             opts = typeof url === "object" ? url : {};
@@ -29515,14 +29515,14 @@ var require_util9 = __commonJS({
         }
         const port = url.port != null ? url.port : url.protocol === "https:" ? 443 : 80;
         let origin = url.origin != null ? url.origin : `${url.protocol || ""}//${url.hostname || ""}:${port}`;
-        let path2 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
+        let path3 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
         if (origin[origin.length - 1] === "/") {
           origin = origin.slice(0, origin.length - 1);
         }
-        if (path2 && path2[0] !== "/") {
-          path2 = `/${path2}`;
+        if (path3 && path3[0] !== "/") {
+          path3 = `/${path3}`;
         }
-        return new URL(`${origin}${path2}`);
+        return new URL(`${origin}${path3}`);
       }
       if (!isHttpOrHttpsPrefixed(url.origin || url.protocol)) {
         throw new InvalidArgumentError("Invalid URL protocol: the URL must start with `http:` or `https:`.");
@@ -30343,9 +30343,9 @@ var require_diagnostics2 = __commonJS({
         "undici:client:sendHeaders",
         (evt) => {
           const {
-            request: { method, path: path2, origin }
+            request: { method, path: path3, origin }
           } = evt;
-          debugLog("sending request to %s %s%s", method, origin, path2);
+          debugLog("sending request to %s %s%s", method, origin, path3);
         }
       );
     }
@@ -30363,14 +30363,14 @@ var require_diagnostics2 = __commonJS({
         "undici:request:headers",
         (evt) => {
           const {
-            request: { method, path: path2, origin },
+            request: { method, path: path3, origin },
             response: { statusCode }
           } = evt;
           debugLog(
             "received response to %s %s%s - HTTP %d",
             method,
             origin,
-            path2,
+            path3,
             statusCode
           );
         }
@@ -30379,23 +30379,23 @@ var require_diagnostics2 = __commonJS({
         "undici:request:trailers",
         (evt) => {
           const {
-            request: { method, path: path2, origin }
+            request: { method, path: path3, origin }
           } = evt;
-          debugLog("trailers received from %s %s%s", method, origin, path2);
+          debugLog("trailers received from %s %s%s", method, origin, path3);
         }
       );
       diagnosticsChannel.subscribe(
         "undici:request:error",
         (evt) => {
           const {
-            request: { method, path: path2, origin },
+            request: { method, path: path3, origin },
             error: error2
           } = evt;
           debugLog(
             "request to %s %s%s errored - %s",
             method,
             origin,
-            path2,
+            path3,
             error2.message
           );
         }
@@ -30510,7 +30510,7 @@ var require_request3 = __commonJS({
     var kHandler = Symbol("handler");
     var Request3 = class {
       constructor(origin, {
-        path: path2,
+        path: path3,
         method,
         body,
         headers,
@@ -30527,11 +30527,11 @@ var require_request3 = __commonJS({
         maxRedirections,
         typeOfService
       }, handler) {
-        if (typeof path2 !== "string") {
+        if (typeof path3 !== "string") {
           throw new InvalidArgumentError("path must be a string");
-        } else if (path2[0] !== "/" && !(path2.startsWith("http://") || path2.startsWith("https://")) && method !== "CONNECT") {
+        } else if (path3[0] !== "/" && !(path3.startsWith("http://") || path3.startsWith("https://")) && method !== "CONNECT") {
           throw new InvalidArgumentError("path must be an absolute URL or start with a slash");
-        } else if (invalidPathRegex.test(path2)) {
+        } else if (invalidPathRegex.test(path3)) {
           throw new InvalidArgumentError("invalid request path");
         }
         if (typeof method !== "string") {
@@ -30606,7 +30606,7 @@ var require_request3 = __commonJS({
         this.completed = false;
         this.aborted = false;
         this.upgrade = upgrade || null;
-        this.path = query ? serializePathWithQuery(path2, query) : path2;
+        this.path = query ? serializePathWithQuery(path3, query) : path3;
         this.origin = origin;
         this.protocol = getProtocolFromUrlString(origin);
         this.idempotent = idempotent == null ? method === "HEAD" || method === "GET" : idempotent;
@@ -35016,7 +35016,7 @@ var require_client_h12 = __commonJS({
       kHTTPContext,
       kClosed
     } = require_symbols6();
-    var constants = require_constants7();
+    var constants2 = require_constants7();
     var EMPTY_BUF = Buffer.alloc(0);
     var FastBuffer = Buffer[Symbol.species];
     var removeAllListeners = util.removeAllListeners;
@@ -35151,7 +35151,7 @@ var require_client_h12 = __commonJS({
          */
       constructor(client, socket, { exports: exports2 }) {
         this.llhttp = exports2;
-        this.ptr = this.llhttp.llhttp_alloc(constants.TYPE.RESPONSE);
+        this.ptr = this.llhttp.llhttp_alloc(constants2.TYPE.RESPONSE);
         this.client = client;
         this.socket = socket;
         this.timeout = null;
@@ -35247,11 +35247,11 @@ var require_client_h12 = __commonJS({
             currentParser = null;
             currentBufferRef = null;
           }
-          if (ret !== constants.ERROR.OK) {
+          if (ret !== constants2.ERROR.OK) {
             const data2 = chunk.subarray(llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr);
-            if (ret === constants.ERROR.PAUSED_UPGRADE) {
+            if (ret === constants2.ERROR.PAUSED_UPGRADE) {
               this.onUpgrade(data2);
-            } else if (ret === constants.ERROR.PAUSED) {
+            } else if (ret === constants2.ERROR.PAUSED) {
               this.paused = true;
               socket.unshift(data2);
             } else {
@@ -35274,10 +35274,10 @@ var require_client_h12 = __commonJS({
         } finally {
           currentParser = null;
         }
-        if (ret === constants.ERROR.OK) {
+        if (ret === constants2.ERROR.OK) {
           return null;
         }
-        if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+        if (ret === constants2.ERROR.PAUSED || ret === constants2.ERROR.PAUSED_UPGRADE) {
           this.paused = true;
           return null;
         }
@@ -35294,7 +35294,7 @@ var require_client_h12 = __commonJS({
           const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
           message = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
         }
-        return new HTTPParserError(message, constants.ERROR[ret], data2);
+        return new HTTPParserError(message, constants2.ERROR[ret], data2);
       }
       destroy() {
         assert(currentParser === null);
@@ -35505,7 +35505,7 @@ var require_client_h12 = __commonJS({
           socket[kBlocking] = false;
           client[kResume]();
         }
-        return pause ? constants.ERROR.PAUSED : 0;
+        return pause ? constants2.ERROR.PAUSED : 0;
       }
       /**
        * @param {Buffer} buf
@@ -35531,7 +35531,7 @@ var require_client_h12 = __commonJS({
         }
         this.bytesRead += buf.length;
         if (request.onData(buf) === false) {
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         }
         return 0;
       }
@@ -35571,13 +35571,13 @@ var require_client_h12 = __commonJS({
         if (socket[kWriting]) {
           assert(client[kRunning] === 0);
           util.destroy(socket, new InformationalError("reset"));
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         } else if (!shouldKeepAlive) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         } else if (socket[kReset] && client[kRunning] === 0) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants.ERROR.PAUSED;
+          return constants2.ERROR.PAUSED;
         } else if (client[kPipelining] == null || client[kPipelining] === 1) {
           setImmediate(client[kResume]);
         } else {
@@ -35812,7 +35812,7 @@ var require_client_h12 = __commonJS({
       return method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && method !== "TRACE" && method !== "CONNECT";
     }
     function writeH1(client, request) {
-      const { method, path: path2, host, upgrade, blocking, reset } = request;
+      const { method, path: path3, host, upgrade, blocking, reset } = request;
       let { body, headers, contentLength } = request;
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH" || method === "QUERY" || method === "PROPFIND" || method === "PROPPATCH";
       if (util.isFormDataLike(body)) {
@@ -35890,7 +35890,7 @@ var require_client_h12 = __commonJS({
       if (socket.setTypeOfService) {
         socket.setTypeOfService(request.typeOfService);
       }
-      let header = `${method} ${path2} HTTP/1.1\r
+      let header = `${method} ${path3} HTTP/1.1\r
 `;
       if (typeof host === "string") {
         header += `host: ${host}\r
@@ -36569,7 +36569,7 @@ var require_client_h22 = __commonJS({
       const headersTimeout = request.headersTimeout ?? client[kHeadersTimeout];
       const bodyTimeout = request.bodyTimeout ?? client[kBodyTimeout];
       const session = client[kHTTP2Session];
-      const { method, path: path2, host, upgrade, expectContinue, signal, protocol, headers: reqHeaders } = request;
+      const { method, path: path3, host, upgrade, expectContinue, signal, protocol, headers: reqHeaders } = request;
       let { body } = request;
       if (upgrade != null && upgrade !== "websocket") {
         util.errorRequest(client, request, new InvalidArgumentError(`Custom upgrade "${upgrade}" not supported over HTTP/2`));
@@ -36638,7 +36638,7 @@ var require_client_h22 = __commonJS({
           }
           headers[HTTP2_HEADER_METHOD] = "CONNECT";
           headers[HTTP2_HEADER_PROTOCOL] = "websocket";
-          headers[HTTP2_HEADER_PATH] = path2;
+          headers[HTTP2_HEADER_PATH] = path3;
           if (protocol === "ws:" || protocol === "wss:") {
             headers[HTTP2_HEADER_SCHEME] = protocol === "ws:" ? "http" : "https";
           } else {
@@ -36690,7 +36690,7 @@ var require_client_h22 = __commonJS({
         stream.setTimeout(headersTimeout);
         return true;
       }
-      headers[HTTP2_HEADER_PATH] = path2;
+      headers[HTTP2_HEADER_PATH] = path3;
       headers[HTTP2_HEADER_SCHEME] = protocol === "http:" ? "http" : "https";
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH";
       if (body && typeof body.read === "function") {
@@ -39042,10 +39042,10 @@ var require_proxy_agent2 = __commonJS({
         };
         const {
           origin,
-          path: path2 = "/",
+          path: path3 = "/",
           headers = {}
         } = opts;
-        opts.path = origin + path2;
+        opts.path = origin + path3;
         if (!("host" in headers) && !("Host" in headers)) {
           const { host } = new URL(origin);
           headers.host = host;
@@ -41205,20 +41205,20 @@ var require_mock_utils2 = __commonJS({
       }
       return normalizedQp;
     }
-    function safeUrl(path2) {
-      if (typeof path2 !== "string") {
-        return path2;
+    function safeUrl(path3) {
+      if (typeof path3 !== "string") {
+        return path3;
       }
-      const pathSegments = path2.split("?", 3);
+      const pathSegments = path3.split("?", 3);
       if (pathSegments.length !== 2) {
-        return path2;
+        return path3;
       }
       const qp = new URLSearchParams(pathSegments.pop());
       qp.sort();
       return [...pathSegments, qp.toString()].join("?");
     }
-    function matchKey(mockDispatch2, { path: path2, method, body, headers }) {
-      const pathMatch = matchValue(mockDispatch2.path, path2);
+    function matchKey(mockDispatch2, { path: path3, method, body, headers }) {
+      const pathMatch = matchValue(mockDispatch2.path, path3);
       const methodMatch = matchValue(mockDispatch2.method, method);
       const bodyMatch = typeof mockDispatch2.body !== "undefined" ? matchValue(mockDispatch2.body, body) : true;
       const headersMatch = matchHeaders(mockDispatch2, headers);
@@ -41243,8 +41243,8 @@ var require_mock_utils2 = __commonJS({
       const basePath = key.query ? serializePathWithQuery(key.path, key.query) : key.path;
       const resolvedPath = typeof basePath === "string" ? safeUrl(basePath) : basePath;
       const resolvedPathWithoutTrailingSlash = removeTrailingSlash(resolvedPath);
-      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path2, ignoreTrailingSlash }) => {
-        return ignoreTrailingSlash ? matchValue(removeTrailingSlash(safeUrl(path2)), resolvedPathWithoutTrailingSlash) : matchValue(safeUrl(path2), resolvedPath);
+      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path3, ignoreTrailingSlash }) => {
+        return ignoreTrailingSlash ? matchValue(removeTrailingSlash(safeUrl(path3)), resolvedPathWithoutTrailingSlash) : matchValue(safeUrl(path3), resolvedPath);
       });
       if (matchedMockDispatches.length === 0) {
         throw new MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
@@ -41283,19 +41283,19 @@ var require_mock_utils2 = __commonJS({
         mockDispatches.splice(index2, 1);
       }
     }
-    function removeTrailingSlash(path2) {
-      while (path2.endsWith("/")) {
-        path2 = path2.slice(0, -1);
+    function removeTrailingSlash(path3) {
+      while (path3.endsWith("/")) {
+        path3 = path3.slice(0, -1);
       }
-      if (path2.length === 0) {
-        path2 = "/";
+      if (path3.length === 0) {
+        path3 = "/";
       }
-      return path2;
+      return path3;
     }
     function buildKey(opts) {
-      const { path: path2, method, body, headers, query } = opts;
+      const { path: path3, method, body, headers, query } = opts;
       return {
-        path: path2,
+        path: path3,
         method,
         body,
         headers,
@@ -41985,10 +41985,10 @@ var require_pending_interceptors_formatter2 = __commonJS({
       }
       format(pendingInterceptors) {
         const withPrettyHeaders = pendingInterceptors.map(
-          ({ method, path: path2, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
+          ({ method, path: path3, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
             Method: method,
             Origin: origin,
-            Path: path2,
+            Path: path3,
             "Status code": statusCode,
             Persistent: persist ? PERSISTENT : NOT_PERSISTENT,
             Invocations: timesInvoked,
@@ -42070,9 +42070,9 @@ var require_mock_agent2 = __commonJS({
         const acceptNonStandardSearchParameters = this[kMockAgentAcceptsNonStandardSearchParameters];
         const dispatchOpts = { ...opts };
         if (acceptNonStandardSearchParameters && dispatchOpts.path) {
-          const [path2, searchParams] = dispatchOpts.path.split("?");
+          const [path3, searchParams] = dispatchOpts.path.split("?");
           const normalizedSearchParams = normalizeSearchParams(searchParams, acceptNonStandardSearchParameters);
-          dispatchOpts.path = `${path2}?${normalizedSearchParams}`;
+          dispatchOpts.path = `${path3}?${normalizedSearchParams}`;
         }
         return this[kAgent].dispatch(dispatchOpts, handler);
       }
@@ -42473,12 +42473,12 @@ var require_snapshot_recorder = __commonJS({
        * @return {Promise<void>} - Resolves when snapshots are loaded
        */
       async loadSnapshots(filePath) {
-        const path2 = filePath || this.#snapshotPath;
-        if (!path2) {
+        const path3 = filePath || this.#snapshotPath;
+        if (!path3) {
           throw new InvalidArgumentError("Snapshot path is required");
         }
         try {
-          const data2 = await readFile(resolve(path2), "utf8");
+          const data2 = await readFile(resolve(path3), "utf8");
           const parsed = JSON.parse(data2);
           if (Array.isArray(parsed)) {
             this.#snapshots.clear();
@@ -42492,7 +42492,7 @@ var require_snapshot_recorder = __commonJS({
           if (error2.code === "ENOENT") {
             this.#snapshots.clear();
           } else {
-            throw new UndiciError(`Failed to load snapshots from ${path2}`, { cause: error2 });
+            throw new UndiciError(`Failed to load snapshots from ${path3}`, { cause: error2 });
           }
         }
       }
@@ -42503,11 +42503,11 @@ var require_snapshot_recorder = __commonJS({
        * @returns {Promise<void>} - Resolves when snapshots are saved
        */
       async saveSnapshots(filePath) {
-        const path2 = filePath || this.#snapshotPath;
-        if (!path2) {
+        const path3 = filePath || this.#snapshotPath;
+        if (!path3) {
           throw new InvalidArgumentError("Snapshot path is required");
         }
-        const resolvedPath = resolve(path2);
+        const resolvedPath = resolve(path3);
         await mkdir(dirname(resolvedPath), { recursive: true });
         const data2 = Array.from(this.#snapshots.entries()).map(([hash, snapshot]) => ({
           hash,
@@ -43139,15 +43139,15 @@ var require_redirect_handler2 = __commonJS({
           return;
         }
         const { origin, pathname, search } = util.parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
-        const path2 = search ? `${pathname}${search}` : pathname;
-        const redirectUrlString = `${origin}${path2}`;
+        const path3 = search ? `${pathname}${search}` : pathname;
+        const redirectUrlString = `${origin}${path3}`;
         for (const historyUrl of this.history) {
           if (historyUrl.toString() === redirectUrlString) {
             throw new InvalidArgumentError(`Redirect loop detected. Cannot redirect to ${origin}. This typically happens when using a Client or Pool with cross-origin redirects. Use an Agent for cross-origin redirects.`);
           }
         }
         this.opts.headers = cleanRequestHeaders(this.opts.headers, statusCode === 303, this.opts.origin !== origin);
-        this.opts.path = path2;
+        this.opts.path = path3;
         this.opts.origin = origin;
         this.opts.query = null;
       }
@@ -44907,10 +44907,10 @@ var require_cache_handler = __commonJS({
       }
       return locationUrl.pathname + locationUrl.search;
     }
-    function deleteCachedUri(store, cacheKey, path2) {
+    function deleteCachedUri(store, cacheKey, path3) {
       deleteCachedValue(store, {
         ...cacheKey,
-        path: path2
+        path: path3
       });
       for (let i = 0; i < util.safeHTTPMethods.length; i++) {
         const method = util.safeHTTPMethods[i];
@@ -44918,7 +44918,7 @@ var require_cache_handler = __commonJS({
           deleteCachedValue(store, {
             ...cacheKey,
             method,
-            path: path2
+            path: path3
           });
         }
       }
@@ -44929,9 +44929,9 @@ var require_cache_handler = __commonJS({
       }
       const values = Array.isArray(headerValue) ? headerValue : [headerValue];
       for (let i = 0; i < values.length; i++) {
-        const path2 = getSameOriginPath(cacheKey, values[i]);
-        if (path2 !== void 0) {
-          deleteCachedUri(store, cacheKey, path2);
+        const path3 = getSameOriginPath(cacheKey, values[i]);
+        if (path3 !== void 0) {
+          deleteCachedUri(store, cacheKey, path3);
         }
       }
     }
@@ -47481,10 +47481,10 @@ var require_headers2 = __commonJS({
         const lowercaseName = isLowerCase ? name : name.toLowerCase();
         const exists = this.headersMap.get(lowercaseName);
         if (exists) {
-          const delimiter = lowercaseName === "cookie" ? "; " : ", ";
+          const delimiter2 = lowercaseName === "cookie" ? "; " : ", ";
           this.headersMap.set(lowercaseName, {
             name: exists.name,
-            value: `${exists.value}${delimiter}${value}`
+            value: `${exists.value}${delimiter2}${value}`
           });
         } else {
           this.headersMap.set(lowercaseName, { name, value });
@@ -50078,11 +50078,11 @@ var require_fetch2 = __commonJS({
       function dispatch({ body }) {
         const url = requestCurrentURL(request);
         const agent = fetchParams.controller.dispatcher;
-        const path2 = url.pathname + url.search;
+        const path3 = url.pathname + url.search;
         const hasTrailingQuestionMark = url.search.length === 0 && url.href[url.href.length - url.hash.length - 1] === "?";
         return new Promise((resolve, reject) => agent.dispatch(
           {
-            path: hasTrailingQuestionMark ? `${path2}?` : path2,
+            path: hasTrailingQuestionMark ? `${path3}?` : path3,
             origin: url.origin,
             method: request.method,
             body: agent.isMockActive ? request.body && (request.body.source || request.body.stream) : body,
@@ -51029,9 +51029,9 @@ var require_util12 = __commonJS({
         }
       }
     }
-    function validateCookiePath(path2) {
-      for (let i = 0; i < path2.length; ++i) {
-        const code = path2.charCodeAt(i);
+    function validateCookiePath(path3) {
+      for (let i = 0; i < path3.length; ++i) {
+        const code = path3.charCodeAt(i);
         if (code < 32 || // exclude CTLs (0-31)
         code > 126 || // exclude DEL and non-ascii
         code === 59) {
@@ -54385,11 +54385,11 @@ var require_undici2 = __commonJS({
           if (typeof opts.path !== "string") {
             throw new InvalidArgumentError("invalid opts.path");
           }
-          let path2 = opts.path;
+          let path3 = opts.path;
           if (!opts.path.startsWith("/")) {
-            path2 = `/${path2}`;
+            path3 = `/${path3}`;
           }
-          url = new URL(util.parseOrigin(url).origin + path2);
+          url = new URL(util.parseOrigin(url).origin + path3);
         } else {
           if (!opts) {
             opts = typeof url === "object" ? url : {};
@@ -69942,6 +69942,276 @@ var YahooEngine = class extends BaseSearchEngine {
 
 // server/providers.ts
 var import_undici3 = __toESM(require_undici());
+
+// server/ddgs-python.ts
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+function isResolved(value) {
+  return value.executable !== null;
+}
+function envCandidates(env) {
+  const candidates = [];
+  const push = (value, source) => {
+    if (value && value.trim().length > 0) {
+      candidates.push({ executable: value.trim(), source });
+    }
+  };
+  push(env.BUNNY_SEARCH_PYTHON, "BUNNY_SEARCH_PYTHON");
+  const venvBin = process.platform === "win32" ? "Scripts" : "bin";
+  const venvPython = process.platform === "win32" ? "python.exe" : "python";
+  if (env.VIRTUAL_ENV) {
+    push(path.join(env.VIRTUAL_ENV, venvBin, venvPython), "VIRTUAL_ENV");
+  }
+  if (env.CONDA_PREFIX) {
+    push(path.join(env.CONDA_PREFIX, venvBin, venvPython), "CONDA_PREFIX");
+  }
+  return candidates;
+}
+function pathCandidates(env) {
+  const candidates = [];
+  const entries = (env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const names = process.platform === "win32" ? ["python3.exe", "python.exe"] : ["python3", "python"];
+  for (const dir of entries) {
+    for (const name of names) {
+      const executable = path.join(dir, name);
+      try {
+        fs.accessSync(executable, fs.constants.X_OK);
+        candidates.push({ executable, source: `PATH (${executable})` });
+      } catch {
+      }
+    }
+  }
+  return candidates;
+}
+function dirCandidates(homeDir) {
+  const bin = process.platform === "win32" ? "Scripts" : "bin";
+  const python = process.platform === "win32" ? "python.exe" : "python";
+  const python3 = process.platform === "win32" ? "python3.exe" : "python3";
+  const candidates = [];
+  const add2 = (dir) => {
+    candidates.push({ executable: path.join(dir, python), source: dir });
+    candidates.push({ executable: path.join(dir, python3), source: dir });
+  };
+  add2(path.join(homeDir, ".venv", bin));
+  add2(path.join(homeDir, "venv", bin));
+  for (const parent2 of [
+    path.join(homeDir, ".virtualenvs"),
+    path.join(homeDir, ".local", "share", "virtualenvs")
+  ]) {
+    try {
+      for (const entry of fs.readdirSync(parent2)) {
+        add2(path.join(parent2, entry, bin));
+      }
+    } catch {
+    }
+  }
+  return candidates;
+}
+function pythonCandidates(explicitPath, env = process.env, homeDir = os.homedir()) {
+  const candidates = [];
+  const explicit = explicitPath.trim();
+  if (explicit.length > 0) {
+    candidates.push({ executable: explicit, source: "settings (Python path)" });
+  }
+  candidates.push(...envCandidates(env), ...pathCandidates(env), ...dirCandidates(homeDir));
+  const seen = /* @__PURE__ */ new Set();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.executable)) return false;
+    seen.add(candidate.executable);
+    return true;
+  });
+}
+function runPythonCheck(executable, code, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => {
+      if (!settled) {
+        settled = true;
+        resolve(result);
+      }
+    };
+    let child;
+    try {
+      child = spawn(executable, ["-c", code], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+      });
+    } catch (cause) {
+      done({ ok: false, stderr: cause instanceof Error ? cause.message : String(cause) });
+      return;
+    }
+    let stderr = "";
+    child.stderr?.setEncoding("utf-8");
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.stdout?.resume();
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      done({ ok: false, stderr: `timed out after ${timeoutMs} ms` });
+    }, timeoutMs);
+    child.on("error", (cause) => {
+      clearTimeout(timer);
+      done({ ok: false, stderr: cause.message });
+    });
+    child.on("close", (code2) => {
+      clearTimeout(timer);
+      done({ ok: code2 === 0, stderr });
+    });
+  });
+}
+var cached = null;
+var reimportFailure = false;
+function resetPythonCache() {
+  cached = null;
+  reimportFailure = false;
+}
+var IMPORT_CHECK = "import ddgs";
+function failure(searched) {
+  return { executable: null, searched };
+}
+async function discover(explicitPath, env, homeDir, timeoutMs) {
+  if (cached && !reimportFailure) return cached;
+  const searched = [];
+  for (const candidate of pythonCandidates(explicitPath, env, homeDir)) {
+    searched.push(`${candidate.source}: ${candidate.executable}`);
+    const probe = await runPythonCheck(candidate.executable, IMPORT_CHECK, timeoutMs);
+    if (probe.ok) {
+      cached = { executable: candidate.executable, source: candidate.source };
+      reimportFailure = false;
+      return cached;
+    }
+  }
+  return failure(searched);
+}
+async function checkDdgsAvailability(explicitPath, env = process.env, homeDir = os.homedir()) {
+  const resolved = await discover(explicitPath, env, homeDir, 15e3);
+  if (isResolved(resolved)) return { ok: true, resolved, error: null };
+  const detail = resolved.searched.length ? `Searched:
+${resolved.searched.map((line) => `  - ${line}`).join("\n")}` : "No interpreter candidates found.";
+  return {
+    ok: false,
+    resolved: null,
+    error: "Python with the 'ddgs' library was not found. The ddgs library is a user requirement \u2014 install it yourself (e.g. `pip install ddgs`) or set the Python path in Bunny Search settings / BUNNY_SEARCH_PYTHON. " + detail
+  };
+}
+var SEARCH_SCRIPT = [
+  "import json, sys",
+  "from ddgs import DDGS",
+  "query, mx, region, proxy, timeout = (sys.argv[1], int(sys.argv[2]),",
+  "                                    sys.argv[3], sys.argv[4], float(sys.argv[5]))",
+  "kwargs = {}",
+  "if proxy:",
+  "    kwargs['proxy'] = proxy",
+  "client = DDGS(timeout=timeout, **kwargs)",
+  "text_kwargs = {'max_results': mx}",
+  "if region:",
+  "    text_kwargs['region'] = region",
+  "print(json.dumps(client.text(query, **text_kwargs), ensure_ascii=False))"
+].join("\n");
+function lastMeaningfulLine(stderr) {
+  const lines = stderr.split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines[lines.length - 1] ?? "";
+}
+async function ddgsTextSearch(call, explicitPath, env = process.env, homeDir = os.homedir()) {
+  const attempt = async () => runSearchOnce(call, explicitPath, env, homeDir);
+  try {
+    return await attempt();
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    if (/No module named 'ddgs'|ModuleNotFoundError/.test(message)) {
+      resetPythonCache();
+      return attempt();
+    }
+    throw cause;
+  }
+}
+async function runSearchOnce(call, explicitPath, env, homeDir) {
+  const discovered = await discover(explicitPath, env, homeDir, 15e3);
+  if (!isResolved(discovered)) {
+    const availability = await checkDdgsAvailability(explicitPath, env, homeDir);
+    throw new Error(availability.error ?? "Python with ddgs was not found.");
+  }
+  const timeoutSeconds = Math.max(1, Math.ceil(call.timeoutMs / 1e3));
+  const args = [
+    "-c",
+    SEARCH_SCRIPT,
+    call.query,
+    String(Math.max(1, Math.min(100, Math.trunc(call.maxResults) || 10))),
+    call.region,
+    call.proxy,
+    String(timeoutSeconds)
+  ];
+  const result = await new Promise(
+    (resolve) => {
+      let child;
+      try {
+        child = spawn(discovered.executable, args, {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...env, PYTHONIOENCODING: "utf-8" }
+        });
+      } catch (cause) {
+        resolve({
+          code: null,
+          stdout: "",
+          stderr: cause instanceof Error ? cause.message : String(cause),
+          timedOut: false
+        });
+        return;
+      }
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.setEncoding("utf-8");
+      child.stderr?.setEncoding("utf-8");
+      child.stdout?.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr?.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, call.timeoutMs);
+      child.on("error", (cause) => {
+        clearTimeout(timer);
+        resolve({ code: null, stdout, stderr: cause.message, timedOut });
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr, timedOut });
+      });
+    }
+  );
+  if (result.timedOut) {
+    throw new Error(
+      `DDGS Python did not respond within the configured timeout (${call.timeoutMs} ms).`
+    );
+  }
+  if (result.code !== 0) {
+    const detail = lastMeaningfulLine(result.stderr) || `exit code ${String(result.code)}`;
+    throw new Error(`DDGS Python search failed: ${detail}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(
+      `DDGS Python returned unreadable output: ${result.stdout.trim().slice(0, 200) || "(empty)"}`
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("DDGS Python returned an unexpected payload (expected a JSON array).");
+  }
+  return parsed.filter(
+    (entry) => typeof entry === "object" && entry !== null
+  );
+}
+
+// server/providers.ts
 var USER_AGENT = "bunny-search-mcp/1.0 (+searxng)";
 var BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 var SearchServiceError = class extends Error {
@@ -69957,6 +70227,8 @@ function providerBaseUrl(settings) {
     case "custom-json":
       return settings.customBaseUrl.length > 0 ? settings.customBaseUrl : null;
     case "duckduckjs":
+      return null;
+    case "ddgs":
       return null;
   }
 }
@@ -70006,6 +70278,8 @@ function serviceLabel(settings) {
       return "the custom search endpoint";
     case "duckduckjs":
       return "DuckDuckJS";
+    case "ddgs":
+      return "DDGS Python";
   }
 }
 function withQuery(base, params) {
@@ -70320,7 +70594,7 @@ function applyProxyUrl(proxyUrl) {
   (0, import_undici3.setGlobalDispatcher)(new import_undici3.ProxyAgent(proxy));
   appliedProxyUrl = proxy;
 }
-function duckduckjsRegion(request, settings) {
+function languageToRegion(request, settings) {
   const language = (request.language ?? settings.language).trim();
   if (language.length === 0) return void 0;
   if (/^[a-z]{2}$/i.test(language)) {
@@ -70363,7 +70637,7 @@ async function searchDuckduckjs(request, settings) {
   applyProxyUrl(settings.proxyUrl);
   const pinned = settings.duckduckjsEngine !== "auto";
   const order = pinned ? [settings.duckduckjsEngine] : DUCKDUCKJS_AUTO_ORDER;
-  const region = duckduckjsRegion(request, settings);
+  const region = languageToRegion(request, settings);
   const options = region ? { region } : void 0;
   const failures = [];
   for (const id of order) {
@@ -70403,8 +70677,56 @@ function checkDuckduckjs(settings) {
     error: cause instanceof Error ? cause.message : String(cause)
   }));
 }
+function normalizeDdgs(raw, maxResults) {
+  return raw.slice(0, clampMaxResults(maxResults)).map((entry) => ({
+    title: typeof entry.title === "string" && entry.title.trim().length > 0 ? entry.title.trim() : "(no title)",
+    url: typeof entry.href === "string" ? entry.href : "",
+    content: typeof entry.body === "string" ? entry.body.trim().replace(/\s+/g, " ") : ""
+  }));
+}
+async function searchDdgs(request, settings) {
+  const region = languageToRegion(request, settings) ?? "";
+  try {
+    const raw = await ddgsTextSearch(
+      {
+        query: request.query,
+        maxResults: clampMaxResults(request.maxResults),
+        region,
+        proxy: settings.proxyUrl.trim(),
+        timeoutMs: settings.timeoutMs
+      },
+      settings.ddgsPythonPath
+    );
+    return { query: request.query, results: normalizeDdgs(raw, request.maxResults) };
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new SearchServiceError(message);
+  }
+}
+async function checkDdgs(settings) {
+  const availability = await checkDdgsAvailability(settings.ddgsPythonPath);
+  if (!availability.ok) {
+    return { ok: false, latencyMs: null, error: availability.error };
+  }
+  const result = await searchDdgs(
+    { query: "bunny-search connection test", maxResults: 3 },
+    settings
+  ).then(
+    (response) => response.results.length > 0 ? { ok: true, latencyMs: null, error: null } : {
+      ok: false,
+      latencyMs: null,
+      error: "DDGS Python answered but returned no results \u2014 the search services may be rate-limiting anonymous requests."
+    }
+  ).catch((cause) => ({
+    ok: false,
+    latencyMs: null,
+    error: cause instanceof Error ? cause.message : String(cause)
+  }));
+  return result;
+}
 var PROVIDERS = {
   duckduckjs: { id: "duckduckjs", search: searchDuckduckjs, check: checkDuckduckjs },
+  ddgs: { id: "ddgs", search: searchDdgs, check: checkDdgs },
   searxng: { id: "searxng", search: searchSearxng, check: checkSearxng },
   duckduckgo: { id: "duckduckgo", search: searchDuckDuckGo, check: checkDuckDuckGo },
   brave: { id: "brave", search: searchBrave, check: checkBrave },
@@ -70521,13 +70843,14 @@ function dispatchMcpTool(name, args, context) {
 }
 
 // server/settings-file.ts
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import * as fs2 from "node:fs";
+import * as os2 from "node:os";
+import * as path2 from "node:path";
 var DEFAULTS = {
   searchService: "duckduckjs",
   duckduckjsEngine: "auto",
   proxyUrl: "",
+  ddgsPythonPath: "",
   searxngBaseUrl: "http://127.0.0.1:8888/search",
   customBaseUrl: "",
   apiKey: "",
@@ -70536,7 +70859,7 @@ var DEFAULTS = {
   categories: "general,web",
   language: ""
 };
-var SERVICES = ["duckduckjs", "searxng", "duckduckgo", "brave", "custom-json"];
+var SERVICES = ["duckduckjs", "ddgs", "searxng", "duckduckgo", "brave", "custom-json"];
 var DUCKDUCKJS_ENGINES2 = ["auto", "duckduckgo", "brave", "google", "mojeek", "yahoo"];
 function parseService(value) {
   return SERVICES.find((service) => service === value);
@@ -70546,8 +70869,8 @@ function parseEngine(value) {
 }
 function settingsFilePath() {
   const configured = process.env.PASEO_HOME;
-  const home = configured && configured.trim().length > 0 ? configured : path.join(os.homedir(), ".paseo");
-  return path.join(home, "plugins", "bunny-search", "settings.json");
+  const home = configured && configured.trim().length > 0 ? configured : path2.join(os2.homedir(), ".paseo");
+  return path2.join(home, "plugins", "bunny-search", "settings.json");
 }
 function optionalString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
@@ -70558,7 +70881,7 @@ function optionalInt(value, min, max) {
 }
 function parseFile(filePath) {
   try {
-    const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const raw = JSON.parse(fs2.readFileSync(filePath, "utf-8"));
     if (typeof raw !== "object" || raw === null) return {};
     const record = raw;
     const values = typeof record.values === "object" && record.values !== null ? record.values : record;
@@ -70568,6 +70891,9 @@ function parseFile(filePath) {
     const duckduckjsEngine = parseEngine(values.duckduckjsEngine);
     if (duckduckjsEngine) parsed.duckduckjsEngine = duckduckjsEngine;
     if (typeof values.proxyUrl === "string") parsed.proxyUrl = values.proxyUrl.trim().slice(0, 512);
+    if (typeof values.ddgsPythonPath === "string") {
+      parsed.ddgsPythonPath = values.ddgsPythonPath.trim().slice(0, 512);
+    }
     const searxngBaseUrl = optionalString(values.searxngBaseUrl);
     if (searxngBaseUrl) parsed.searxngBaseUrl = searxngBaseUrl.slice(0, 512);
     const customBaseUrl = optionalString(values.customBaseUrl);
@@ -70597,6 +70923,8 @@ function parseEnv() {
   if (parsedEngine) parsed.duckduckjsEngine = parsedEngine;
   const proxyUrl = optionalString(process.env.BUNNY_SEARCH_PROXY_URL);
   if (proxyUrl) parsed.proxyUrl = proxyUrl.slice(0, 512);
+  const pythonPath = optionalString(process.env.BUNNY_SEARCH_PYTHON);
+  if (pythonPath) parsed.ddgsPythonPath = pythonPath.slice(0, 512);
   const customUrl2 = optionalString(process.env.BUNNY_SEARCH_CUSTOM_URL);
   if (customUrl2) parsed.customBaseUrl = customUrl2;
   const apiKey = optionalString(process.env.BUNNY_SEARCH_API_KEY);
@@ -70621,7 +70949,7 @@ function parseSettingsFile(filePath = settingsFilePath()) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.3.1";
+var SERVER_VERSION = "0.4.0";
 function writeMessage(message) {
   process.stdout.write(`${JSON.stringify(message)}
 `);
