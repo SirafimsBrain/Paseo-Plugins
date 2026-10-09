@@ -423,6 +423,49 @@ export const unregisterCodexMcp = defineRpc({
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });
 
+// OpenCode and Kilo read MCP servers from their own `mcp` config object
+// (`~/.config/opencode/opencode.json`, `~/.config/kilo/kilo.jsonc`). A
+// server registered there is re-created whenever OpenCode boots an idle
+// directory, while a server Paseo registers at runtime disappears with
+// that directory's evicted services — and with it every memory-flash tool
+// of a long-lived agent. See server/opencode-mcp.ts for the full story.
+
+export const opencodeMcpStatus = defineRpc({
+  name: "memory-flash.opencode-mcp-status",
+  input: z.object({}),
+  output: agentMcpStatusSchema,
+});
+
+export const registerOpencodeMcp = defineRpc({
+  name: "memory-flash.opencode-mcp-register",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const unregisterOpencodeMcp = defineRpc({
+  name: "memory-flash.opencode-mcp-unregister",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const kiloMcpStatus = defineRpc({
+  name: "memory-flash.kilo-mcp-status",
+  input: z.object({}),
+  output: agentMcpStatusSchema,
+});
+
+export const registerKiloMcp = defineRpc({
+  name: "memory-flash.kilo-mcp-register",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const unregisterKiloMcp = defineRpc({
+  name: "memory-flash.kilo-mcp-unregister",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
 /** Result of registering memory-flash in one agent's MCP config. */
 export const agentMcpRegistrationResultSchema = z.object({
   /** Human-readable agent label ("Cline", "Cursor", "Codex CLI"). */

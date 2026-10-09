@@ -18,9 +18,15 @@ import {
   deleteApiKey,
   generateApiKey,
   httpStatus,
+  kiloMcpStatus,
   listApiKeys,
+  opencodeMcpStatus,
   registerCodexMcp,
+  registerKiloMcp,
+  registerOpencodeMcp,
   unregisterCodexMcp,
+  unregisterKiloMcp,
+  unregisterOpencodeMcp,
   cursorMcpStatus,
   registerCursorMcp,
   unregisterCursorMcp,
@@ -113,6 +119,12 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
   const codexStatusRpc = useRpc(codexMcpStatus);
   const codexRegisterRpc = useRpc(registerCodexMcp);
   const codexUnregisterRpc = useRpc(unregisterCodexMcp);
+  const opencodeStatusRpc = useRpc(opencodeMcpStatus);
+  const opencodeRegisterRpc = useRpc(registerOpencodeMcp);
+  const opencodeUnregisterRpc = useRpc(unregisterOpencodeMcp);
+  const kiloStatusRpc = useRpc(kiloMcpStatus);
+  const kiloRegisterRpc = useRpc(registerKiloMcp);
+  const kiloUnregisterRpc = useRpc(unregisterKiloMcp);
   const registerAllRpc = useRpc(registerAllAgentMcp);
   const apiKeysRpc = useRpc(listApiKeys);
   const generateKeyRpc = useRpc(generateApiKey);
@@ -137,6 +149,18 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
       label: "Codex CLI",
       register: codexRegisterRpc,
       unregister: codexUnregisterRpc,
+    },
+    {
+      id: "opencode",
+      label: "OpenCode",
+      register: opencodeRegisterRpc,
+      unregister: opencodeUnregisterRpc,
+    },
+    {
+      id: "kilo",
+      label: "Kilo",
+      register: kiloRegisterRpc,
+      unregister: kiloUnregisterRpc,
     },
   ];
 
@@ -195,10 +219,16 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
   }, [skillStatusRpc]);
 
   const reloadAgentMcps = useCallback(() => {
-    void Promise.all([clineStatusRpc({}), cursorStatusRpc({}), codexStatusRpc({})])
-      .then(([cline, cursor, codex]) => setAgentMcps({ cline, cursor, codex }))
+    void Promise.all([
+      clineStatusRpc({}),
+      cursorStatusRpc({}),
+      codexStatusRpc({}),
+      opencodeStatusRpc({}),
+      kiloStatusRpc({}),
+    ])
+      .then(([cline, cursor, codex, opencode, kilo]) => setAgentMcps({ cline, cursor, codex, opencode, kilo }))
       .catch(() => undefined);
-  }, [clineStatusRpc, cursorStatusRpc, codexStatusRpc]);
+  }, [clineStatusRpc, cursorStatusRpc, codexStatusRpc, opencodeStatusRpc, kiloStatusRpc]);
 
   const reloadRemoteAccess = useCallback(() => {
     void apiKeysRpc({}).then((result) => setApiKeys(result.keys)).catch(() => undefined);
@@ -457,7 +487,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
       <SettingsCard>
         <SettingsSection
           title="Agent MCP registration"
-          info="Cline, Cursor and Codex CLI ignore stdio MCP servers delivered through the agent session and read them from their own config files — register the server there directly (other servers in each file are preserved).">
+          info="Register the server in an agent's own config file (other servers in each file are preserved). Cline, Cursor and Codex CLI ignore stdio MCP servers delivered through the agent session, so they need this. OpenCode and Kilo drop a session-injected server whenever OpenCode evicts an idle directory — a config-file entry is re-created on every directory boot, so the memory tools no longer vanish mid-session.">
           <SettingsAction
             label="Register"
             actionLabel="Register for all local agent configs"

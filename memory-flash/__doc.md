@@ -46,7 +46,7 @@ memory-flash/
 │   ├── e2e-entry-resolution.mjs  # entry-path e2e across a simulated plugin update
 │   └── entry-probe.ts         # bundled by the e2e above to read the real launch config
 ├── skill/                     # (reserved for extra skill assets; SKILL.md is generated)
-└── tests/                     # vitest: 14 suites, 149 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 15 suites, 160 tests (incl. real-process stdio e2e)
 ```
 
 ### Data flow
@@ -221,15 +221,20 @@ The **English-language rule** (title, content and tags in English for cross-agen
 The client side carries its own variant of this protocol — see [memory-flash-client/__doc.md](../memory-flash-client/__doc.md) §5 — because the agents there reach the same base over HTTP from another machine.
 
 
-## 6. Direct MCP registration for Cline, Cursor and Codex CLI (requirement 9)
+## 6. Direct MCP registration for Cline, Cursor, Codex CLI, OpenCode and Kilo (requirement 9)
 
-These agents ignore stdio MCP servers delivered through an orchestrator's agent session and read them from their own global config files instead:
+These agents read stdio MCP servers from their own global config files. For Cline the
+session payload is ignored outright; for OpenCode/Kilo a session-injected server works
+but is destroyed by OpenCode's per-directory eviction (see §13), so a config-file entry
+is the only registration that stays valid for the lifetime of a long-lived agent:
 
 | Agent | Config file | Entry shape |
 | ----- | ----------- | ----------- |
 | Cline | `~/.cline/data/settings/cline_mcp_settings.json` | `{ mcpServers: { <name>: { transport: { type, command, args } } } }` (the file its own UI manages; verified live: the ACP payload is accepted but no stdio server is ever spawned) |
 | Cursor | `~/.cursor/mcp.json` | flat `{ mcpServers: { <name>: { command, args } } }` |
 | Codex CLI | `~/.codex/config.toml` | TOML table `[mcp_servers.<name>]` with `command`/`args` keys |
+| OpenCode | `~/.config/opencode/opencode.json` (or an existing `opencode.jsonc`) | `{ mcp: { <name>: { type: "local", command: [<node>, <entry>], enabled: true, timeout: 15000 } } }` |
+| Kilo | `~/.config/kilo/kilo.jsonc` (or `kilo.json` when none exists) | same `mcp` shape as OpenCode |
 
 - **JSON agents (Cline, Cursor)** share `server/agent-mcp-json.ts`: load → merge the `memory-flash` entry → atomic write (temp file + rename, same pattern as `hosts.json`). Only the entry shape differs (Cline nests under `transport`); callers provide `isEntry`/`fromEntry`/`toEntry` adapters. A corrupted (unparseable) file is never overwritten — register/unregister fail with a clear error instead.
 - **Codex CLI** (`server/codex-mcp.ts`) edits the TOML as text: only the `[mcp_servers.memory-flash]` table (bare or quoted key) is replaced, everything else — other tables, keys, comments — is preserved byte-for-byte. Register appends the table when absent; unregister removes the table plus one separator blank line. This minimal parser covers flat `command`/`args` lines (single- or multi-line arrays); exotic TOML (inline tables, dotted keys inside the table) is not rewritten, only detected.
@@ -237,7 +242,8 @@ These agents ignore stdio MCP servers delivered through an orchestrator's agent 
 - `register*Mcp()` — merges the entry, preserving every other server (verified against configs that also carry `websearch`).
 - `unregister*Mcp()` — removes only the `memory-flash` entry; a no-op (still `ok`) when nothing is registered.
 - **Live spawn check** (`server/mcp-probe.ts`) — file status answers "is the entry present", not "does it work". The Cline status RPC additionally spawns the registered command exactly as the agent would, sends an MCP `initialize` request and waits for the JSON-RPC response (`withLiveSpawn`, 4 s budget). The Cline row in the settings screen shows a red warning when the registered command does not answer the handshake. Nothing is written to the database by the probe (the handshake alone calls no tool).
-- **Register for all local agent configs** — one RPC (`memory-flash.agent-mcp-register-all`) and one settings button run all three registrations and report per-agent results, mirroring *Install into all agents* for the skill.
+- **OpenCode and Kilo** (`server/opencode-mcp.ts`) share one implementation because the format is the same: a top-level `mcp` object whose entries are `{type: "local", command: [<node>, <entry>], enabled: true}`. The command is a single array (not `command`+`args`), and the entry carries `timeout: 15000` — OpenCode's default tool-fetch timeout is 5 s, which a slow start can exceed, and a timeout there costs the agent all of its memory tools. Both agents accept `opencode.json`/`opencode.jsonc` and `kilo.json`/`kilo.jsonc`; the plugin registers into the first existing file that parses as plain JSON, and creates `opencode.json`/`kilo.jsonc` when neither exists. A file carrying `//` comments is skipped, never rewritten (a JSON writer cannot round-trip comments) and the error lists the exact path — the plugin has no other legitimate way to preserve it.
+- **Register for all local agent configs** — one RPC (`memory-flash.agent-mcp-register-all`) and one settings button run all five registrations and report per-agent results, mirroring *Install into all agents* for the skill.
 
 The settings screen shows one row per agent (path + state + live check) with Register/Re-register/Remove buttons next to the skill installers. The Cline write format was verified end-to-end against a live Cline agent: after registration Cline spawns the server as its own child process and `memory_stats` returns real JSON.
 
@@ -249,7 +255,7 @@ The settings screen shows one row per agent (path + state + live check) with Reg
 - **`paseo-ssh` (implemented)** — probes the remote through the standard Paseo CLI transport (`paseo --host ssh://[user@]host[:port] status --json`, 20 s timeout) and reports the remote memory database path (`~/.paseo/plugins/memory-flash/memory.db`). Authentication is whatever the user's SSH config provides — the same prerequisite the Paseo app itself has for remote daemons.
 - **`tcp` / `relay` (stubs)** — stored and displayed, checks return `unsupported` without marking the host broken. The registry and status model are transport-agnostic so a real implementation only adds a `check*` branch (direct `ws://host:port` probe for TCP; relay pairing for Hub).
 
-Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§12).
+Remote hosts today provide reachability and the remote DB path; live cross-host query federation is roadmap (§14).
 
 ## 8. Export, import and backup of the knowledge base
 
@@ -598,7 +604,51 @@ Two distinct causes have produced this exact message on this machine:
 
 `scripts/e2e-entry-resolution.mjs` automates exactly this: it installs a revision, resolves the entry through the real `server/mcp-launch.ts`, completes a full JSON-RPC handshake, then deletes the revision, installs another one, and re-runs the handshake **against the path the first resolution produced** — the agent's situation. Run against the pre-0.7.1 resolver it fails with `Cannot find module …/rev-a/.../mcp-server.js`, which is the production error.
 
-## 13. Limitations and roadmap
+## 13. Troubleshooting: `No tool named "memory-flash_memory_save" is currently available` (0.8.0)
+
+Symptom: an agent that used `memory-flash_*` tools earlier in the same session suddenly
+reports, for every one of them:
+
+```text
+No tool named "memory-flash_memory_save" is currently available. Please use a tool from the available tool list.
+```
+
+That sentence is OpenCode's own tool-call validation (it appears verbatim in the
+`opencode` binary), and it means the tool was **absent from the tool set of that
+request** — not that the MCP server answered badly. The server is healthy in this case:
+its `tools/list` still returns all nine tools.
+
+Root cause (measured on this machine, 2026-10-09): Paseo injects MCP servers into an
+OpenCode agent's session through OpenCode's runtime API (`PUT /api/experimental/mcp/:server`),
+and that registration belongs to OpenCode's in-memory, per-directory *location services*.
+OpenCode evicts an idle location, which drops the runtime-registered server and its
+tools; Paseo re-registers only while a session is being created, so an agent that is
+still open across the eviction never gets them back. Evidence trail:
+
+| Time (UTC) | Evidence |
+| ---------- | -------- |
+| 10:08:05 | OpenCode log: `location services evicted directory=/DISK1/projects/centurion` |
+| 10:30:54 | `location services booted` for the same directory — with an empty runtime MCP set |
+| 10:36:39 | Session `ses_ee4e983e7ffe…`: tool `memory-flash_memory_save`, status `error`, the message above |
+| 11:50 (measured during the 0.8.0 investigation) | `GET /api/mcp?location[directory]=/DISK1/projects/centurion` answered `{"data": []}` — the registry is empty, not failed, and no `memory-flash` MCP process existed for that directory any more |
+
+The same eviction also explains the mirrored behaviour of the previous day, where the
+tools failed and then came back: a *new* session boots the location again and Paseo
+re-adds the server on creation.
+
+Fix: register the server in the agent's **config file** (§6). OpenCode re-reads project
+and global config every time a location boots, so a config-file entry — and its tools —
+come back by themselves after an eviction, and the failure cannot recur. Verified live:
+with the exact file the plugin writes (`server/opencode-mcp.ts` output), a freshly booted
+location logged `mcp connected server=memory-flash tools=9` and `GET /api/mcp` reported
+`{"status":"connected"}` with no runtime registration at all. The plugin deliberately does
+not write this file by itself — it changes every OpenCode/Kilo session on the machine —
+so it is an explicit per-agent button in the settings screen.
+
+Note that `memory-flash-client`'s HTTP MCP server reaches agents through the same
+session-injection path and is exposed to the same eviction.
+
+## 14. Limitations and roadmap
 
 Limitations:
 
@@ -607,6 +657,7 @@ Limitations:
 - **Attribution is cooperative.** `agent_id`/`changed_by` are set from the MCP caller (or the default setting); MCP does not authenticate callers, so attribution is a convention, not an enforcement boundary.
 - **Skill installation is filesystem-level.** It copies `SKILL.md` into well-known directories; agents that keep skills elsewhere need a manual path (visible in the settings screen status list).
 - **An agent created before 0.7.1 keeps its old entry path** until it is recreated (see §12). The host does not re-resolve an existing agent's MCP config, so the plugin cannot repair it from inside.
+- **Session-injected MCP servers in OpenCode are ephemeral.** A server Paseo adds at runtime disappears when OpenCode evicts the idle directory, and the plugin cannot re-add it (it has no handle on Paseo's OpenCode session). Registering in the config file (§6) is the workaround, and it must be done per agent family.
 
 Roadmap:
 
@@ -615,7 +666,7 @@ Roadmap:
 3. **Timeline surfacing** — post a plugin timeline item when a delegated agent finishes memory maintenance (`agent.turn_ended` hook + timeline renderer).
 4. **More transports** — real `tcp` and `relay` implementations behind the existing registry.
 
-## 14. Planned improvements with Paseo 0.11.0
+## 15. Planned improvements with Paseo 0.11.0
 
 Compatibility with the 0.11.0 prerelease (`v0.11.0-beta.5`, verified 2026-10-06)
 is established: the SDK diff `@getpaseo/plugin@0.10.1 → 0.11.0-beta.5` is purely

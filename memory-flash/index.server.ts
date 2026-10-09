@@ -35,6 +35,12 @@ import {
   unregisterCursorMcp,
   registerClineMcp,
   unregisterClineMcp,
+  registerOpencodeMcp,
+  unregisterOpencodeMcp,
+  opencodeMcpStatus,
+  registerKiloMcp,
+  unregisterKiloMcp,
+  kiloMcpStatus,
   registerAllAgentMcp,
 } from "./shared/memories";
 import type { ApiKey } from "./shared/memories";
@@ -58,6 +64,14 @@ import {
   registerCodexMcp as registerCodexMcpOnDisk,
   unregisterCodexMcp as unregisterCodexMcpOnDisk,
 } from "./server/codex-mcp";
+import {
+  opencodeMcpStatus as readOpencodeMcpStatus,
+  registerOpencodeMcp as registerOpencodeMcpOnDisk,
+  unregisterOpencodeMcp as unregisterOpencodeMcpOnDisk,
+  kiloMcpStatus as readKiloMcpStatus,
+  registerKiloMcp as registerKiloMcpOnDisk,
+  unregisterKiloMcp as unregisterKiloMcpOnDisk,
+} from "./server/opencode-mcp";
 import { withLiveSpawn } from "./server/mcp-probe";
 import { skillStatuses, skillMarkdown, installSkill as installSkillOnDisk, uninstallSkill as uninstallSkillOnDisk } from "./server/skill";
 import {
@@ -346,11 +360,28 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(unregisterCodexMcp, () => unregisterCodexMcpOnDisk());
 
+  // OpenCode and Kilo keep MCP servers in their own `mcp` config object.
+  // Registering there is what keeps the memory tools alive across OpenCode's
+  // per-directory location eviction (see server/opencode-mcp.ts).
+  server.handle(opencodeMcpStatus, () => readOpencodeMcpStatus());
+
+  server.handle(registerOpencodeMcp, () => registerOpencodeMcpOnDisk());
+
+  server.handle(unregisterOpencodeMcp, () => unregisterOpencodeMcpOnDisk());
+
+  server.handle(kiloMcpStatus, () => readKiloMcpStatus());
+
+  server.handle(registerKiloMcp, () => registerKiloMcpOnDisk());
+
+  server.handle(unregisterKiloMcp, () => unregisterKiloMcpOnDisk());
+
   server.handle(registerAllAgentMcp, () => ({
     results: [
       { agent: "Cline", ...registerClineMcpOnDisk() },
       { agent: "Cursor", ...registerCursorMcpOnDisk() },
       { agent: "Codex CLI", ...registerCodexMcpOnDisk() },
+      { agent: "OpenCode", ...registerOpencodeMcpOnDisk() },
+      { agent: "Kilo", ...registerKiloMcpOnDisk() },
     ],
   }));
 

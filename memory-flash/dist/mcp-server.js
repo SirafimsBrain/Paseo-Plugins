@@ -20014,6 +20014,36 @@ var unregisterCodexMcp = defineRpc({
   input: external_exports.object({}),
   output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
 });
+var opencodeMcpStatus = defineRpc({
+  name: "memory-flash.opencode-mcp-status",
+  input: external_exports.object({}),
+  output: agentMcpStatusSchema
+});
+var registerOpencodeMcp = defineRpc({
+  name: "memory-flash.opencode-mcp-register",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
+var unregisterOpencodeMcp = defineRpc({
+  name: "memory-flash.opencode-mcp-unregister",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
+var kiloMcpStatus = defineRpc({
+  name: "memory-flash.kilo-mcp-status",
+  input: external_exports.object({}),
+  output: agentMcpStatusSchema
+});
+var registerKiloMcp = defineRpc({
+  name: "memory-flash.kilo-mcp-register",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
+var unregisterKiloMcp = defineRpc({
+  name: "memory-flash.kilo-mcp-unregister",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
 var agentMcpRegistrationResultSchema = external_exports.object({
   /** Human-readable agent label ("Cline", "Cursor", "Codex CLI"). */
   agent: external_exports.string(),
@@ -21420,7 +21450,8 @@ function memoryLine(memory) {
 function dispatchMcpTool(name, args, context) {
   const { store } = context;
   const input2 = args ?? {};
-  switch (name) {
+  const normalizedName = name.startsWith("memory-flash_") ? name.slice("memory-flash_".length) : name;
+  switch (normalizedName) {
     case "memory_save": {
       const parsed = mcpSaveInputSchema.safeParse(input2);
       if (!parsed.success) return error62(`Invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
@@ -21573,7 +21604,7 @@ function dispatchMcpTool(name, args, context) {
       return text(store.stats());
     }
     default:
-      return error62(`Unknown tool: ${name}`);
+      return error62(`Unknown tool: ${name} (normalized: ${normalizedName})`);
   }
 }
 
