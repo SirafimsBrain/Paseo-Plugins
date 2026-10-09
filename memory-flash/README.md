@@ -127,3 +127,4 @@ live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
 Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
 
 Technical details, design decisions, alternatives considered, limitations and the roadmap: see [__doc.md](./__doc.md).
+# Test change
