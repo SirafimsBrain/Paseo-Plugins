@@ -235,7 +235,10 @@ export function dispatchMcpTool(name: string, args: unknown, context: McpDispatc
   const { store } = context;
   const input = (args ?? {}) as Record<string, unknown>;
 
-  switch (name) {
+  // Normalize tool name: agents may prefix with server name (e.g. "memory-flash_memory_save")
+  const normalizedName = name.startsWith("memory-flash_") ? name.slice("memory-flash_".length) : name;
+
+  switch (normalizedName) {
     case "memory_save": {
       const parsed = mcpSaveInputSchema.safeParse(input);
       if (!parsed.success) return error(`Invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
@@ -400,6 +403,6 @@ export function dispatchMcpTool(name: string, args: unknown, context: McpDispatc
     }
 
     default:
-      return error(`Unknown tool: ${name}`);
+      return error(`Unknown tool: ${name} (normalized: ${normalizedName})`);
   }
 }
