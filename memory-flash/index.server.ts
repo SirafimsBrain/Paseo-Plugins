@@ -71,6 +71,7 @@ import {
   kiloMcpStatus as readKiloMcpStatus,
   registerKiloMcp as registerKiloMcpOnDisk,
   unregisterKiloMcp as unregisterKiloMcpOnDisk,
+  agentConfigCoversProvider,
 } from "./server/opencode-mcp";
 import { withLiveSpawn } from "./server/mcp-probe";
 import { skillStatuses, skillMarkdown, installSkill as installSkillOnDisk, uninstallSkill as uninstallSkillOnDisk } from "./server/skill";
@@ -162,6 +163,20 @@ export default function contribute(server: PluginServerContext) {
     // mutation below is guaranteed to be applied to agent creation.
     const state = await settings.read().catch(() => null);
     if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
+    // 0.8.1: for OpenCode/Kilo the config-file registration is strictly
+    // better than the session-level entry injected here — after an idle
+    // location eviction the session-level entry dies and shadows the live
+    // config one, breaking every memory-flash_* call until the session is
+    // re-opened. Skip the injection when the config file carries a current
+    // registration; keep it as the fallback everywhere else.
+    const cover = agentConfigCoversProvider(request.config.provider);
+    if (cover.covered) {
+      console.log(
+        `[memory-flash] agent.create injection skipped for ${request.config.provider}: ` +
+          `config-file registration active at ${cover.path}`,
+      );
+      return request;
+    }
     const { command, args } = mcpServerCommand();
     // `as const` instead of a named `McpStdioServerConfig` annotation: the MCP
     // config types live in @getpaseo/protocol, which is not a host-supplied

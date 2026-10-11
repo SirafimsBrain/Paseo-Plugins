@@ -214,6 +214,32 @@ memory_handoff { "title": "<task> — state", "content": "Done: …. Failed atte
 
 ---
 
+## If a memory tool is briefly unavailable
+
+An OpenCode or Kilo session can lose its \`memory-flash_*\` tools for a
+while — typically after its workspace has idled out and been restarted. The
+calls then fail with:
+
+\`\`\`
+No tool named "memory-flash_memory_save" is currently available.
+\`\`\`
+
+This is a transport problem, not a data problem: the shared base is intact
+and other agents can still read and write it. What to do:
+
+1. **Do not conclude that memory is unavailable for the rest of the task**
+   and do not restate the task as if no memory exists — the tools usually
+   come back on their own by the next turn.
+2. **Keep the content you meant to save ready** (in the reply text, or in a
+   file under the project) and retry the \`memory_save\`/
+   \`memory_handoff\` call on the next turn.
+3. If it still fails after a retry, **tell the user which operations were
+   skipped** (saves, searches, handoff) so they can rerun them later or
+   restart the agent — a lost handoff silently costs the next session its
+   context.
+
+---
+
 ## Housekeeping
 
 You may be asked to maintain the memory (from the Paseo Memory Flash panel or

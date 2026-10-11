@@ -253,6 +253,44 @@ export function kiloConfigPath(): string {
   return resolveTarget(KILO).target;
 }
 
+/**
+ * Whether the config-file registration fully covers an agent of the given
+ * provider, making the `agent.create` session-level injection unnecessary
+ * (and harmful — see below).
+ *
+ * The session-level entry Paseo injects at agent creation lives in the
+ * session payload. When OpenCode evicts an idle location, every
+ * session-level MCP registration dies with it and is NOT re-established
+ * on the next prompt (only config-file servers reconnect at location
+ * boot), while still occupying the `memory-flash` name in that session —
+ * so the live config-file server reconnects, but the session keeps
+ * resolving the name through its stale entry and every call fails with
+ *
+ *   No tool named "memory-flash_memory_save" is currently available.
+ *
+ * A fresh session without the session-level entry heals itself after an
+ * eviction (verified 0.8.1), so for OpenCode and Kilo the plugin now
+ * skips the injection whenever the config file carries a current
+ * registration. The config entry wins on every dimension: it survives
+ * eviction, reconnects at every location boot, and reaches sessions Paseo
+ * never touches. The injection stays as the fallback for machines where
+ * the config file was never (or can no longer) be written.
+ */
+export function agentConfigCoversProvider(provider: string): {
+  covered: boolean;
+  path: string | null;
+} {
+  if (provider === "opencode") {
+    const status = opencodeMcpStatus();
+    return { covered: status.installed && status.upToDate === true, path: status.path };
+  }
+  if (provider === "kilo") {
+    const status = kiloMcpStatus();
+    return { covered: status.installed && status.upToDate === true, path: status.path };
+  }
+  return { covered: false, path: null };
+}
+
 /** Current registration state of memory-flash in OpenCode's config. */
 export function opencodeMcpStatus(): OpencodeMcpStatus {
   return opencodeConfigStatus(OPENCODE);

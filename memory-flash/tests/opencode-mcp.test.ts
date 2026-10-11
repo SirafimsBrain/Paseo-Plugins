@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  agentConfigCoversProvider,
   kiloConfigPath,
   kiloMcpStatus,
   opencodeConfigPath,
@@ -176,5 +177,65 @@ describe("Kilo MCP registration", () => {
     expect(readConfig(target).mcp["memory-flash"]).toBeDefined();
     expect(unregisterKiloMcp().ok).toBe(true);
     expect(readConfig(target).mcp).toBeUndefined();
+  });
+});
+
+/**
+ * The `agent.create` hook skips its session-level injection for OpenCode
+ * and Kilo exactly when the config-file registration covers the agent
+ * (0.8.1): a session-level entry dies with the location eviction and then
+ * shadows the live config-file server, breaking every memory-flash_* call.
+ * These tests pin the decision function the hook consults.
+ */
+describe("agentConfigCoversProvider", () => {
+  it("does not cover providers without a config-file path (injection stays)", () => {
+    expect(agentConfigCoversProvider("claude")).toEqual({ covered: false, path: null });
+    expect(agentConfigCoversProvider("unknown-agent")).toEqual({ covered: false, path: null });
+  });
+
+  it("does not cover opencode when the config file has no entry", () => {
+    const status = agentConfigCoversProvider("opencode");
+    expect(status.covered).toBe(false);
+    expect(status.path).toBe(opencodeConfigPath());
+  });
+
+  it("covers opencode once the config file carries a current entry", () => {
+    expect(registerOpencodeMcp().ok).toBe(true);
+    expect(agentConfigCoversProvider("opencode")).toEqual({
+      covered: true,
+      path: opencodeConfigPath(),
+    });
+  });
+
+  it("stops covering opencode when the registered entry is stale", () => {
+    // A stale entry (different command line than the plugin would write now)
+    // cannot be trusted to launch the current server, so the hook must fall
+    // back to injection.
+    writeConfig(opencodeConfigPath(), {
+      mcp: {
+        "memory-flash": {
+          type: "local",
+          command: ["node", "/old-revision/mcp-server.js"],
+          enabled: true,
+        },
+      },
+    });
+    expect(opencodeMcpStatus().upToDate).toBe(false);
+    expect(agentConfigCoversProvider("opencode").covered).toBe(false);
+  });
+
+  it("stops covering opencode after the entry is removed", () => {
+    expect(registerOpencodeMcp().ok).toBe(true);
+    expect(unregisterOpencodeMcp().ok).toBe(true);
+    expect(agentConfigCoversProvider("opencode").covered).toBe(false);
+  });
+
+  it("covers kilo when kilo's config carries a current entry", () => {
+    expect(agentConfigCoversProvider("kilo").covered).toBe(false);
+    expect(registerKiloMcp().ok).toBe(true);
+    expect(agentConfigCoversProvider("kilo")).toEqual({
+      covered: true,
+      path: kiloConfigPath(),
+    });
   });
 });

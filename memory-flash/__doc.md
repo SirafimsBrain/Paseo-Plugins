@@ -648,6 +648,48 @@ so it is an explicit per-agent button in the settings screen.
 Note that `memory-flash-client`'s HTTP MCP server reaches agents through the same
 session-injection path and is exposed to the same eviction.
 
+### 13.1 The session-level entry shadows the live config entry (0.8.2)
+
+After 0.8.0 the config-file entry made a *fresh* session heal itself, yet the same
+agent that had been created through Paseo kept failing (measured 2026-10-11). The
+reason is the second registration path: at `agent.create` the plugin used to inject a
+session-level `memory-flash` entry (`alwaysLoad: true`) into the agent's config, and
+that entry lives in the session payload — it is re-registered by Paseo only while a
+session is (re-)opened, not when OpenCode boots a location. After an eviction the
+config-file server reconnects at location boot, but the session-level entry stays
+dead **and still owns the `memory-flash` name**, so the session keeps resolving the
+tools through the dead entry and every call fails with the §13 error even though a
+healthy connected server exists underneath.
+
+Evidence trail (same long-lived agent, session `ses_ee4e983e7ffe…`):
+
+| Time (UTC) | Evidence |
+| ---------- | -------- |
+| 08:51:26 | Session re-opened after the daemon restart: `memory-flash` connected **twice** (config + session-level), plus the session-only `bunny-search` |
+| ~09:00–10:50 | Location idle past the eviction TTL |
+| 10:51:53 | Turn starts; location services boot |
+| 10:51:54 | `memory-flash` connected (config file, `tools=9`) — but **only one** connection: `bunny-search` and the session-level `memory-flash` never reconnected |
+| 10:52:32, 10:52:41 | `memory-flash_memory_save` → `No tool named … is currently available` — 38 s after the healthy connect |
+| 12:22 (diagnostic) | The same agent re-opened via `paseo send` → session-level re-registration on open → `memory_stats` returned real data (76 memories) again |
+
+The healing control: a **fresh session without the session-level entry** (created
+via the raw API, config-file registration only) booted a cold location on its first
+turn, the server connected ~1 s in, and a tool call later in the *same* turn
+succeeded — the location-level config entry is picked up mid-turn, the stale
+session-level entry is not.
+
+Fix (0.8.2): the `agent.create` hook now skips the session-level injection for
+OpenCode and Kilo whenever their config file carries a **current** registration
+(`agentConfigCoversProvider` in `server/opencode-mcp.ts`; stale/missing entries and
+every other provider still get the injection as before). The config entry wins on
+every dimension — it survives eviction, reconnects at every location boot, and
+reaches sessions Paseo never touches — while the injected entry can only shadow it.
+Agents created before 0.8.2 still carry the injected entry in their persisted
+config; it becomes harmless as soon as the config file is registered (§6) and the
+agent is recreated. The skill body also gained a short protocol for the transient
+case: the memory base is intact, retry on the next turn, and tell the user which
+operations were skipped.
+
 ## 14. Limitations and roadmap
 
 Limitations:
