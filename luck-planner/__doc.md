@@ -1,5 +1,10 @@
 # luck-planner — technical documentation
 
+> **Development status: version in development (`0.4.0`).** Development is currently paused
+> after **stage B3** (node CRUD + leaf state machine + revisions + append-only audit — done,
+> all tests green). The next stage is **B4** (FTS5 search and filters). Nothing in this
+> document is a released API: the roadmap in §7 describes work that is still ahead.
+
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
 
@@ -263,10 +268,14 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
+**Status: development paused after stage B3.** Stages A1–B3 are complete and released as
+tagged versions up to `luck-planner@0.4.0`; stage **B4** (FTS5 search and filters) is next.
+Blocks C–J are untouched.
+
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
-| A | A1–A2 | 0.1.0 | scaffold (done); this document; TEMP removed |
-| B | B1–B4 | 0.2.0–0.5.0 | zod schemas, SQLite store, CRUD + state machine + audit, FTS5 search |
+| A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
+| B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search ⏸ *next: B4* |
 | C | C1–C4 | 0.6.0–0.9.0 | bees, bugs, goals + approval gate, growth rates |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts, stdio server + bundle, agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
