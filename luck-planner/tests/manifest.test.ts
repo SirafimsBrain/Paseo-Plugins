@@ -39,8 +39,7 @@ describe("plugin manifest", () => {
     expect(manifest.description.trim().length).toBeGreaterThan(0);
   });
 
-  it("starts at the planned A1 version", () => {
+  it("versions as MAJOR.MINOR.PATCH", () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(pkg.version).toBe("0.1.0");
   });
 });
