@@ -1,8 +1,8 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.8.0`).** Development is currently paused
-> after **stage C3** (high goals + approval gate — done, all tests green). The next stage is
-> **C4** (growth rates). Nothing in this
+> **Development status: version in development (`0.9.0`).** Development is currently paused
+> after **stage C4** (growth rates — done, all tests green; **block C is complete**). The next
+> stage is **D1** (MCP tool contracts). Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -389,6 +389,36 @@ and the outer `BEGIN IMMEDIATE` instead of retrying on its own or dying with "ca
 transaction within a transaction". The outermost call still owns the retry and the rollback,
 so a lock error during materialization rolls back everything before the retry.
 
+### Growth rates (stage C4 — `server/store.ts`, closes block C)
+
+The polymorphic progress record of §4.4: `createGrowth`, `updateGrowth`, `deleteGrowth`; reads
+`getGrowth`, `getGrowthForSubject`, `listGrowth` and the aggregate `getGrowthProgress`.
+Verified by `tests/growth.test.ts` (13 tests):
+
+- **Binding is polymorphic and strict where it matters**: the subject may be **any live node
+  kind** (§4.4 — growth attaches to every tree element) or a goal of this project; archived
+  nodes, unknown ids and foreign projects are rejected before any write, with the subject named
+  in the message.
+- **One record per subject.** A second attach fails with a pointer to `updateGrowth`, so a
+  subject's progress stays one gapless revision sequence instead of fragments. The subject
+  itself is never mutated — like bees and bugs, growth rides on its own row and its own audit
+  entity (`entity_type = growth`).
+- **Steps** are the whole ordered array of `{ id, title, state, facts, reason }` — writes
+  validate every step and name the first offender by index (and require at least one); reads
+  survive a corrupt `steps_json` by dropping malformed steps, the `payload`/`plan_json` rule.
+- **Status** moves through `GROWTH_TRANSITIONS` (`active ⇄ stalled`, `→ done`, `→ cancelled`
+  and back); no-ops and illegal transitions are rejected and change nothing. The audit action
+  is `status` when the lifecycle moved and `update` when only steps changed — one row per
+  mutation, revisions gapless.
+- **The aggregate is shared code**: `getGrowthProgress` delegates to `growthProgress()` in
+  `shared/growth.ts`, so the dashboard (G5), the panel and any RPC compute the same number:
+  `ratio = completed / total`, where `skipped` steps stay in the denominator but never count
+  as completed, `failed` is reported separately. Returns `null` for an untracked subject — a
+  heatmap distinguishes "no record" from "0 % progress".
+- **`deleteGrowth`** is a real delete (no archive flag on this table) with the established
+  revision rule: the bump is recorded in `history`, the returned record carries that final
+  revision, and the subject may be given a fresh record afterwards.
+
 ## 6. Paseo integration surface (SDK 0.11.x)
 
 | Contribution | Where | Stage |
@@ -426,15 +456,15 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development paused after stage C3.** Stages A1–C3 are complete and released as
-tagged versions up to `luck-planner@0.8.0`; stage **C4** (growth rates) is next.
-Blocks C4–J are untouched.
+**Status: development paused after stage C4.** Stages A1–C4 are complete and released as
+tagged versions up to `luck-planner@0.9.0`; block **C (domain semantics) is closed** and
+stage **D1** (MCP tool contracts) is next. Blocks D–J are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
-| C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates |
+| C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts, stdio server + bundle, agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |

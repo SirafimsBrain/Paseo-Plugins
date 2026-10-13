@@ -38,6 +38,20 @@ import {
   type GoalStep,
 } from "../shared/goals";
 import {
+  GROWTH_STATUSES,
+  GROWTH_TRANSITIONS,
+  canTransitionGrowth,
+  growthProgress,
+  growthSchema,
+  growthStatusSchema,
+  growthStepSchema,
+  growthSubjectTypeSchema,
+  type Growth,
+  type GrowthStatus,
+  type GrowthStep,
+  type GrowthSubjectType,
+} from "../shared/growth";
+import {
   LEAF_STATUSES,
   LEAF_TRANSITIONS,
   NODE_KINDS,
@@ -95,6 +109,11 @@ import {
  * {@link LuckPlannerStore.write} and the transaction wrapper are
  * re-entrant. Replacing a plan supersedes the goal and cascades a reset
  * onto the derived leaves (MetaGPT `reset_task` semantics).
+ *
+ * Stage C4 closes block C with the growth rates: one polymorphic
+ * progress record per node or goal — ordered steps carrying state, facts
+ * and reasons — plus the aggregate (`growthProgress`) the dashboard
+ * growth layer renders. The subject itself is never mutated.
  */
 
 /**
@@ -342,6 +361,55 @@ export interface ReplaceGoalPlanInput {
   id: string;
   plan: GoalStep[];
   actor: string;
+}
+
+/**
+ * `createGrowth` input: a polymorphic progress record for **one** node or
+ * goal. A subject may hold at most one growth record — a second attach is
+ * rejected with a pointer to `updateGrowth`.
+ */
+export interface CreateGrowthInput {
+  projectKey: string;
+  subjectType: GrowthSubjectType;
+  subjectId: string;
+  /** Ordered steps; each carries state, facts and a reason. At least one. */
+  steps: GrowthStep[];
+  /** Initial status (defaults to `active`). */
+  status?: GrowthStatus;
+  actor: string;
+}
+
+/** `updateGrowth` input: at least one of `steps`, `status`. */
+export interface UpdateGrowthInput {
+  projectKey: string;
+  id: string;
+  steps?: GrowthStep[];
+  status?: GrowthStatus;
+  actor: string;
+}
+
+/** `deleteGrowth` input: hard-deletes the progress record (no archive flag). */
+export interface DeleteGrowthInput {
+  projectKey: string;
+  id: string;
+  actor: string;
+}
+
+/**
+ * Aggregate progress of one subject, as `getGrowthProgress` reports it:
+ * the numbers the dashboard growth layer (G5) renders. `ratio` is
+ * `completed / total` per `growthProgress` in `shared/growth.ts` —
+ * skipped steps stay in the denominator but never count as completed.
+ */
+export interface GrowthProgress {
+  subjectType: GrowthSubjectType;
+  subjectId: string;
+  status: GrowthStatus;
+  revision: number;
+  total: number;
+  completed: number;
+  failed: number;
+  ratio: number;
 }
 
 /**
@@ -2311,6 +2379,280 @@ export class LuckPlannerStore {
     return row;
   }
 
+  // -------------------------------------------------------------------------
+  // Growth rates — progress of any node or goal (stage C4)
+  // -------------------------------------------------------------------------
+
+  /** One growth record by id, or `null` when it is not in this `projectKey`. */
+  getGrowth(projectKey: string, id: string): Growth | null {
+    const row = this.db
+      .prepare("SELECT * FROM growth WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as GrowthRow | undefined;
+    return row ? rowToGrowth(row) : null;
+  }
+
+  /** The (single) progress record of a subject, or `null` if it has none. */
+  getGrowthForSubject(
+    projectKey: string,
+    subjectType: GrowthSubjectType,
+    subjectId: string,
+  ): Growth | null {
+    const type = parseGrowthSubjectType(subjectType);
+    const row = this.db
+      .prepare(
+        "SELECT * FROM growth WHERE project_key = ? AND subject_type = ? AND subject_id = ?",
+      )
+      .get(projectKey, type, subjectId) as GrowthRow | undefined;
+    return row ? rowToGrowth(row) : null;
+  }
+
+  /** Every growth record of the project (the dashboard heatmap's input). */
+  listGrowth(projectKey: string): Growth[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM growth WHERE project_key = ? ORDER BY created_at, id",
+      )
+      .all(projectKey) as unknown as GrowthRow[];
+    return rows.map(rowToGrowth);
+  }
+
+  /**
+   * The aggregate the dashboard renders for one subject: `null` when the
+   * subject has no progress record, otherwise the shared
+   * `growthProgress()` numbers plus the record's status and revision —
+   * one call instead of "fetch, then compute" for every row of a heatmap.
+   */
+  getGrowthProgress(
+    projectKey: string,
+    subjectType: GrowthSubjectType,
+    subjectId: string,
+  ): GrowthProgress | null {
+    const growth = this.getGrowthForSubject(projectKey, subjectType, subjectId);
+    if (!growth) return null;
+    const aggregate = growthProgress(growth.steps);
+    return {
+      subjectType: growth.subjectType,
+      subjectId: growth.subjectId,
+      status: growth.status,
+      revision: growth.revision,
+      ...aggregate,
+    };
+  }
+
+  /**
+   * Attaches a progress record to **any** live tree element or to a goal
+   * (the polymorphic binding of `__doc.md` §4.4). One record per subject:
+   * a second attach fails with a pointer to `updateGrowth`, so progress
+   * history stays one gapless revision sequence instead of fragments.
+   * The subject itself is never modified — like bees and bugs, growth is
+   * carried by its own row and audited on its own entity.
+   */
+  createGrowth(input: CreateGrowthInput): Growth {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const subjectType = parseGrowthSubjectType(input.subjectType);
+    const subjectId = requireText(input.subjectId, "growth subject id");
+    const steps = parseGrowthSteps(input.steps);
+    const status = parseGrowthStatus(input.status ?? "active");
+
+    return this.write(() =>
+      this.transaction(() => {
+        this.requireGrowthSubject(projectKey, subjectType, subjectId);
+        const existing = this.db
+          .prepare(
+            `SELECT id FROM growth
+              WHERE project_key = ? AND subject_type = ? AND subject_id = ?`,
+          )
+          .get(projectKey, subjectType, subjectId) as { id: string } | undefined;
+        if (existing) {
+          throw new Error(
+            `growth for ${subjectType} ${subjectId} already exists (${existing.id}); update it instead`,
+          );
+        }
+
+        const id = randomUUID();
+        const now = Date.now();
+        this.db
+          .prepare(
+            `INSERT INTO growth
+               (id, project_key, subject_type, subject_id, steps_json, status,
+                revision, created_at, updated_at, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          )
+          .run(
+            id,
+            projectKey,
+            subjectType,
+            subjectId,
+            JSON.stringify(steps),
+            status,
+            now,
+            now,
+            actor,
+            actor,
+          );
+        this.appendHistory(
+          projectKey,
+          "growth",
+          id,
+          "create",
+          1,
+          actor,
+          `created growth for ${subjectType} ${subjectId} with ${steps.length} step(s)`,
+          now,
+        );
+        return rowToGrowth(this.requireGrowthRow(projectKey, id));
+      }),
+    );
+  }
+
+  /**
+   * Updates a growth record: `steps` (the whole ordered array), `status`,
+   * or both — at least one is required. A status change runs through
+   * `GROWTH_TRANSITIONS`; a no-op and an illegal transition are rejected
+   * and change nothing. The audit action is `status` when the lifecycle
+   * moved, `update` otherwise — the exact discipline of `updateBee` /
+   * `updateBug`.
+   */
+  updateGrowth(input: UpdateGrowthInput): Growth {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    const sets: string[] = [];
+    const params: Array<string | number> = [];
+    let steps: GrowthStep[] | null = null;
+    if (input.steps !== undefined) {
+      steps = parseGrowthSteps(input.steps);
+      sets.push("steps_json = ?");
+      params.push(JSON.stringify(steps));
+    }
+    const wantsStatus = input.status !== undefined;
+    const to = wantsStatus ? parseGrowthStatus(input.status) : null;
+    if (sets.length === 0 && !wantsStatus) {
+      throw new Error("updateGrowth requires at least one of: steps, status");
+    }
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireGrowthRow(projectKey, input.id);
+        let from: GrowthStatus | null = null;
+        if (wantsStatus && to !== null) {
+          from = parseGrowthStatus(row.status);
+          if (from === to) {
+            throw new Error(`growth ${row.id} already has status \"${from}\"`);
+          }
+          if (!canTransitionGrowth(from, to)) {
+            const allowed = GROWTH_TRANSITIONS[from];
+            throw new Error(
+              `invalid status transition ${from} → ${to} for growth ${row.id}; ` +
+                `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
+            );
+          }
+          sets.push("status = ?");
+          params.push(to);
+        }
+
+        const now = Date.now();
+        sets.push("revision = revision + 1", "updated_at = ?", "updated_by = ?");
+        params.push(now, actor, projectKey, row.id);
+        this.db
+          .prepare(`UPDATE growth SET ${sets.join(", ")} WHERE project_key = ? AND id = ?`)
+          .run(...params);
+        this.appendHistory(
+          projectKey,
+          "growth",
+          row.id,
+          from !== null ? "status" : "update",
+          row.revision + 1,
+          actor,
+          from !== null
+            ? `${from} → ${to}${
+                steps !== null ? `; updated ${steps.length} step(s)` : ""
+              }`
+            : `updated ${steps!.length} step(s)`,
+          now,
+        );
+        return rowToGrowth(this.requireGrowthRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
+   * Removes a growth record (no `archived_at` on this table, so a real
+   * delete). The audit row keeps the same revision-bump rule as the other
+   * deletes: the bump lives on in `history`, the returned record carries
+   * that final revision, and the subject may be given a fresh progress
+   * record afterwards.
+   */
+  deleteGrowth(input: DeleteGrowthInput): Growth {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireGrowthRow(projectKey, input.id);
+        this.db
+          .prepare("DELETE FROM growth WHERE project_key = ? AND id = ?")
+          .run(projectKey, row.id);
+        const now = Date.now();
+        const finalRevision = row.revision + 1;
+        this.appendHistory(
+          projectKey,
+          "growth",
+          row.id,
+          "archive",
+          finalRevision,
+          actor,
+          `deleted growth for ${row.subject_type} ${row.subject_id} (${safeParseGrowthSteps(row.steps_json).length} step(s))`,
+          now,
+        );
+        return rowToGrowth({
+          ...row,
+          revision: finalRevision,
+          updated_at: now,
+          updated_by: actor,
+        });
+      }),
+    );
+  }
+
+  /** Loads a growth row scoped by `project_key` or throws a readable error. */
+  private requireGrowthRow(projectKey: string, id: string): GrowthRow {
+    const row = this.db
+      .prepare("SELECT * FROM growth WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as GrowthRow | undefined;
+    if (!row) throw new Error(`growth ${id} not found in project ${projectKey}`);
+    return row;
+  }
+
+  /**
+   * Validates the polymorphic subject: the node/goal must exist **in this
+   * project**, and a node must not be archived (progress of a deleted
+   * element is nonsense). Growth attaches to a node of **any** kind —
+   * §4.4 assigns it to every tree element.
+   */
+  private requireGrowthSubject(
+    projectKey: string,
+    subjectType: GrowthSubjectType,
+    subjectId: string,
+  ): void {
+    if (subjectType === "node") {
+      const row = this.db
+        .prepare("SELECT * FROM nodes WHERE project_key = ? AND id = ?")
+        .get(projectKey, subjectId) as NodeRow | undefined;
+      if (!row) {
+        throw new Error(
+          `growth subject node ${subjectId} not found in project ${projectKey}`,
+        );
+      }
+      if (row.archived_at !== null) {
+        throw new Error(`growth subject node ${subjectId} is archived`);
+      }
+      return;
+    }
+    this.requireGoalRow(projectKey, subjectId);
+  }
+
   /**
    * Idempotent: plugin cleanup can run more than once (disable, reload,
    * removal), and a second close must not throw.
@@ -2398,6 +2740,20 @@ interface GoalRow {
   updated_by: string | null;
 }
 
+interface GrowthRow {
+  id: string;
+  project_key: string;
+  subject_type: string;
+  subject_id: string;
+  steps_json: string;
+  status: string;
+  revision: number;
+  created_at: number;
+  updated_at: number;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
 /** Maps a `nodes` row to the shared `Node`, parsing the JSON payload. */
 function rowToNode(row: NodeRow): Node {
   let payload: Record<string, unknown> = {};
@@ -2472,6 +2828,23 @@ function rowToGoal(row: GoalRow): Goal {
     status: row.status,
     revision: row.revision,
     materializedNodeId: row.materialized_node_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+  });
+}
+
+/** Maps a `growth` row to the shared `Growth` (schema-validated). */
+function rowToGrowth(row: GrowthRow): Growth {
+  return growthSchema.parse({
+    id: row.id,
+    projectKey: row.project_key,
+    subjectType: row.subject_type,
+    subjectId: row.subject_id,
+    steps: safeParseGrowthSteps(row.steps_json),
+    status: row.status,
+    revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdBy: row.created_by,
@@ -2621,6 +2994,74 @@ function safeParsePlan(raw: string): GoalStep[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
       (step): step is GoalStep => goalStepSchema.safeParse(step).success,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Validates a growth subject type, failing with a readable message. */
+function parseGrowthSubjectType(value: unknown): GrowthSubjectType {
+  const parsed = growthSubjectTypeSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid growth subject type ${JSON.stringify(value)}; expected one of: ${["node", "goal"].join(", ")}`,
+    );
+  }
+  return parsed.data;
+}
+
+/** Validates a growth status, failing with a readable message. */
+function parseGrowthStatus(value: unknown): GrowthStatus {
+  const parsed = growthStatusSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid growth status ${JSON.stringify(value)}; expected one of: ${GROWTH_STATUSES.join(", ")}`,
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * Validates growth steps for a **write**: a non-empty array of
+ * `{ id, title, state, facts, reason }`, the first offender named by index.
+ */
+function parseGrowthSteps(value: unknown): GrowthStep[] {
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `growth steps must be an array, got ${JSON.stringify(value)}`,
+    );
+  }
+  if (value.length === 0) {
+    throw new Error("growth steps must contain at least one step");
+  }
+  const steps: GrowthStep[] = [];
+  for (const [index, step] of value.entries()) {
+    const parsed = growthStepSchema.safeParse(step);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new Error(
+        `invalid growth step ${index}: ${
+          issue ? `${issue.path.join(".") || "step"}: ${issue.message}` : "invalid step"
+        }; each step needs { id, title, state, facts, reason }`,
+      );
+    }
+    steps.push(parsed.data);
+  }
+  return steps;
+}
+
+/**
+ * Lenient step reader for **reads**: a corrupt `steps_json` must not break
+ * `listGrowth` / the dashboard — malformed steps are dropped, the same
+ * rule as `payload` and `plan_json`.
+ */
+function safeParseGrowthSteps(raw: string): GrowthStep[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (step): step is GrowthStep => growthStepSchema.safeParse(step).success,
     );
   } catch {
     return [];
