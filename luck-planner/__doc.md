@@ -360,6 +360,10 @@ The rules, each verified by `tests/goals.test.ts` (15 tests):
   cannot be walked around; `rejectGoal` sends a `proposed` plan back to `draft` with the
   `reject` audit action, while `setGoalStatus` remains the generic lifecycle mover for
   `in_progress`, `done`, `cancelled` and the bookkeeping transitions.
+  **Actor identity is not the store's business**: it records the approving actor verbatim
+  (`updated_by`, audit `actor`), while ADR-7's rule that only a human via the panel/RPC or a
+  managing agent may approve is enforced by the **E1 RPC layer**, the only place where the
+  caller's identity exists. Stage C3 ships the structural half of the gate.
 - **Approval materializes in the same transaction**: a side branch named after the formal
   task grows under `parentBranchId` (a live branch or subbranch — `root`/`trunk`/`leaf`,
   archived and foreign-project nodes are rejected *before* anything is written), holding one
