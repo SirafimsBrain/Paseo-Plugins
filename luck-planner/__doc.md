@@ -1,8 +1,8 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.7.0`).** Development is currently paused
-> after **stage C2** (bugs / incidents — done, all tests green). The next stage is
-> **C3** (high goals + approval gate). Nothing in this
+> **Development status: version in development (`0.8.0`).** Development is currently paused
+> after **stage C3** (high goals + approval gate — done, all tests green). The next stage is
+> **C4** (growth rates). Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -346,6 +346,45 @@ Incidents plus the m2m `bug_nodes` table: mutations `createBug`, `updateBug`, `d
 Every read is project-scoped. `listBugs` plus `listNodesForBug` are what `GET /api/tree` (F1)
 will serialize alongside the bee edges.
 
+### High goals (stage C3 — `server/store.ts`)
+
+Six mutations and three reads implement §4.3: `createGoal`, `updateGoal`, `setGoalStatus`,
+`approveGoal`, `rejectGoal`, `replaceGoalPlan`; `getGoal`, `listGoals`, `listGoalLeaves`.
+The rules, each verified by `tests/goals.test.ts` (15 tests):
+
+- **A goal starts `draft` and lives outside the tree.** `createGoal` writes only a `goals`
+  row — no node appears anywhere until approval (acceptance: an unapproved goal is not in the
+  tree).
+- **The gate is structural.** `setGoalStatus` refuses `approved` (→ `approveGoal`) and
+  `superseded` (→ `replaceGoalPlan`) *by name*, so the funnel `draft → proposed → approved`
+  cannot be walked around; `rejectGoal` sends a `proposed` plan back to `draft` with the
+  `reject` audit action, while `setGoalStatus` remains the generic lifecycle mover for
+  `in_progress`, `done`, `cancelled` and the bookkeeping transitions.
+- **Approval materializes in the same transaction**: a side branch named after the formal
+  task grows under `parentBranchId` (a live branch or subbranch — `root`/`trunk`/`leaf`,
+  archived and foreign-project nodes are rejected *before* anything is written), holding one
+  draft leaf per plan step with payload `{ goalId, stepId, stepOrder }`. Two audit rows mark
+  the two mutations (`approve`, then `materialize`), so revisions stay gapless, and a failed
+  approval rolls the gate crossing back with it: a half-grown subtree cannot exist.
+- **Materialization is idempotent** (acceptance): approving an already-approved,
+  already-materialized goal is a pure no-op — no nodes, no revision, no history rows.
+- **Replacing a plan extinguishes the derived leaves** (acceptance; MetaGPT `reset_task`):
+  the goal becomes `superseded` — terminal, because a redo starts as a fresh goal — and every
+  live derived leaf the shared machine can still move goes to `superseded`, each with its own
+  revision bump and a `supersede` audit row. Leaves already `cancelled`/`superseded` and
+  archived ones are left untouched (`canTransitionLeaf` decides). The subtree stays in the
+  tree as the record of the old plan, still reachable through `materialized_node_id`.
+- **Plan validation**: writes require a non-empty array of valid `{ id, title, description }`
+  steps and name the offending index; reads survive a corrupt `plan_json` by dropping
+  malformed steps instead of breaking every list call — the `payload` rule from stage B2.
+
+**Re-entrancy (cross-cutting change in this stage).** `approveGoal` grows its nodes through
+the very same `createNode` calls the rest of the store uses, inside one transaction — so
+`write()` and the transaction wrapper became re-entrant: a nested call joins the outer fence
+and the outer `BEGIN IMMEDIATE` instead of retrying on its own or dying with "cannot start a
+transaction within a transaction". The outermost call still owns the retry and the rollback,
+so a lock error during materialization rolls back everything before the retry.
+
 ## 6. Paseo integration surface (SDK 0.11.x)
 
 | Contribution | Where | Stage |
@@ -383,15 +422,15 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development paused after stage C2.** Stages A1–C2 are complete and released as
-tagged versions up to `luck-planner@0.7.0`; stage **C3** (goals + approval gate) is next.
-Blocks C3–J are untouched.
+**Status: development paused after stage C3.** Stages A1–C3 are complete and released as
+tagged versions up to `luck-planner@0.8.0`; stage **C4** (growth rates) is next.
+Blocks C4–J are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
-| C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate, growth rates |
+| C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts, stdio server + bundle, agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |

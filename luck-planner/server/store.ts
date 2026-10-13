@@ -26,6 +26,18 @@ import {
   type BugStatus,
 } from "../shared/links";
 import {
+  GOAL_STATUSES,
+  GOAL_TRANSITIONS,
+  canApproveGoal,
+  canTransitionGoal,
+  goalSchema,
+  goalStatusSchema,
+  goalStepSchema,
+  type Goal,
+  type GoalStatus,
+  type GoalStep,
+} from "../shared/goals";
+import {
   LEAF_STATUSES,
   LEAF_TRANSITIONS,
   NODE_KINDS,
@@ -76,6 +88,13 @@ import {
  * group of leaves. Every attachment change is a mutation of the bug
  * (revision bump + audit); the blocked leaves themselves are never
  * touched — a blocker is a computed read, not a node state.
+ *
+ * Stage C3 adds the high goals with their approval gate: a goal enters
+ * the tree only when `approveGoal` grows its subtree (side branch + one
+ * draft leaf per plan step) inside the *same* transaction — which is why
+ * {@link LuckPlannerStore.write} and the transaction wrapper are
+ * re-entrant. Replacing a plan supersedes the goal and cascades a reset
+ * onto the derived leaves (MetaGPT `reset_task` semantics).
  */
 
 /**
@@ -271,6 +290,61 @@ export interface DetachBugInput {
 }
 
 /**
+ * `createGoal` input. A goal always starts as a `draft` — the funnel
+ * draft → proposed → approved is what the gate enforces, so there is no
+ * status parameter to shortcut it.
+ */
+export interface CreateGoalInput {
+  projectKey: string;
+  /** The formal natural-language task; becomes the subtree root's name. */
+  formalText: string;
+  /** Atomic plan steps; on approval each becomes a draft leaf. */
+  plan: GoalStep[];
+  actor: string;
+}
+
+/** `updateGoal` input: pre-approval edits of the task or the plan. */
+export interface UpdateGoalInput {
+  projectKey: string;
+  id: string;
+  formalText?: string;
+  plan?: GoalStep[];
+  actor: string;
+}
+
+/** `setGoalStatus` input: the generic lifecycle mover (no gate, no cascade). */
+export interface SetGoalStatusInput {
+  projectKey: string;
+  id: string;
+  status: GoalStatus;
+  actor: string;
+}
+
+/** `approveGoal` input: crosses the gate and materializes in one transaction. */
+export interface ApproveGoalInput {
+  projectKey: string;
+  id: string;
+  /** Live branch (or subbranch) the goal's side branch grows under. */
+  parentBranchId: string;
+  actor: string;
+}
+
+/** `rejectGoal` input: a `proposed` plan is sent back to `draft`. */
+export interface RejectGoalInput {
+  projectKey: string;
+  id: string;
+  actor: string;
+}
+
+/** `replaceGoalPlan` input: supersedes the goal and resets derived leaves. */
+export interface ReplaceGoalPlanInput {
+  projectKey: string;
+  id: string;
+  plan: GoalStep[];
+  actor: string;
+}
+
+/**
  * Schema v1 (`__doc.md` §5). Referential integrity is documented in the
  * DDL but enforced in code (SQLite foreign keys default to off, the same
  * choice memory-flash makes) so deletes stay explicit and simple.
@@ -422,6 +496,10 @@ export class LuckPlannerStore {
   private readonly db: DatabaseSync;
   private readonly busyTimeoutMs: number;
   private closed = false;
+  /** Nesting depth of {@link write}; >0 means an outer call owns retries. */
+  private writeDepth = 0;
+  /** True while inside BEGIN…COMMIT — nested transactions join the outer one. */
+  private inTransaction = false;
 
   constructor(options: StoreOptions = {}) {
     this.dbPath = options.dbPath ?? defaultDbPath();
@@ -493,12 +571,23 @@ export class LuckPlannerStore {
    * before it surfaces as a readable error. **Every mutation of the
    * store must go through this method** — a write that bypasses it is
    * how parallel agent workers lose data.
+   *
+   * Re-entrant: a nested call (a materialization creating nodes inside
+   * the goal's own transaction) joins the outer one instead of retrying
+   * on its own — the outermost call owns the retry, and its rollback
+   * undoes the nested work too, so a retry starts from a clean slate.
    */
   write<T>(operation: () => T): T {
+    if (this.writeDepth > 0) return operation();
     let attempt = 0;
     for (;;) {
       try {
-        return operation();
+        this.writeDepth += 1;
+        try {
+          return operation();
+        } finally {
+          this.writeDepth -= 1;
+        }
       } catch (cause) {
         attempt += 1;
         if (attempt >= WRITE_ATTEMPTS || !isLockError(cause)) throw cause;
@@ -539,9 +628,16 @@ export class LuckPlannerStore {
    * change *and* its audit row land together, or neither does. Called only
    * from inside {@link write}, so a lock error rolls the whole transaction
    * back before the retry.
+   *
+   * Re-entrant: while a transaction is open, a nested call (e.g.
+   * `createNode` invoked by `approveGoal`) simply runs its statements in
+   * the outer transaction — SQLite cannot nest `BEGIN IMMEDIATE`, and one
+   * atomic unit is exactly what materialization needs.
    */
   private transaction<T>(operation: () => T): T {
+    if (this.inTransaction) return operation();
     this.db.exec("BEGIN IMMEDIATE");
+    this.inTransaction = true;
     try {
       const result = operation();
       this.db.exec("COMMIT");
@@ -553,6 +649,8 @@ export class LuckPlannerStore {
         // BEGIN itself may have failed; nothing to roll back.
       }
       throw error;
+    } finally {
+      this.inTransaction = false;
     }
   }
 
@@ -1709,6 +1807,510 @@ export class LuckPlannerStore {
     return row;
   }
 
+  // -------------------------------------------------------------------------
+  // High goals — approval gate, materialization, plan replacement (C3)
+  // -------------------------------------------------------------------------
+
+  /** One goal by id, or `null` when it is not in this `projectKey`. */
+  getGoal(projectKey: string, id: string): Goal | null {
+    const row = this.db
+      .prepare("SELECT * FROM goals WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as GoalRow | undefined;
+    return row ? rowToGoal(row) : null;
+  }
+
+  /** Every goal of the project, oldest first (approval queue + history). */
+  listGoals(projectKey: string): Goal[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM goals WHERE project_key = ? ORDER BY created_at, id",
+      )
+      .all(projectKey) as unknown as GoalRow[];
+    return rows.map(rowToGoal);
+  }
+
+  /**
+   * The live leaf descendants of the subtree this goal materialized — the
+   * derived plan facts. Empty until the goal is approved; after a plan
+   * replacement it still lists them (now superseded), because the subtree
+   * remains the historical record of the old plan.
+   */
+  listGoalLeaves(projectKey: string, goalId: string): Node[] {
+    const goal = this.requireGoalRow(projectKey, goalId);
+    if (goal.materialized_node_id === null) return [];
+    const rows = this.db
+      .prepare(
+        `WITH RECURSIVE subtree(id) AS (
+           SELECT id FROM nodes WHERE project_key = ? AND id = ?
+           UNION
+           SELECT n.id FROM nodes n
+             JOIN subtree s ON n.parent_id = s.id
+            WHERE n.project_key = ?
+         )
+         SELECT n.* FROM nodes n JOIN subtree s ON s.id = n.id
+          WHERE n.kind = 'leaf' AND n.archived_at IS NULL
+          ORDER BY n.created_at, n.id`,
+      )
+      .all(
+        projectKey,
+        goal.materialized_node_id,
+        projectKey,
+      ) as unknown as NodeRow[];
+    return rows.map(rowToNode);
+  }
+
+  /**
+   * Creates a high goal as a `draft`: the formal task plus the agent's
+   * plan. **Nothing enters the tree here** — a goal lives only in the
+   * `goals` table until it is approved, which is the acceptance rule
+   * "an unapproved goal is not in the tree" (ADR-7).
+   */
+  createGoal(input: CreateGoalInput): Goal {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const formalText = requireText(input.formalText, "goal formal text");
+    const plan = parsePlan(input.plan);
+
+    return this.write(() =>
+      this.transaction(() => {
+        const id = randomUUID();
+        const now = Date.now();
+        this.db
+          .prepare(
+            `INSERT INTO goals
+               (id, project_key, formal_text, plan_json, status, revision,
+                materialized_node_id, created_at, updated_at, created_by, updated_by)
+             VALUES (?, ?, ?, ?, 'draft', 1, NULL, ?, ?, ?, ?)`,
+          )
+          .run(
+            id,
+            projectKey,
+            formalText,
+            JSON.stringify(plan),
+            now,
+            now,
+            actor,
+            actor,
+          );
+        this.appendHistory(
+          projectKey,
+          "goal",
+          id,
+          "create",
+          1,
+          actor,
+          `created goal with ${plan.length} plan step(s)`,
+          now,
+        );
+        return rowToGoal(this.requireGoalRow(projectKey, id));
+      }),
+    );
+  }
+
+  /**
+   * Edits the task or the plan **before** approval (statuses `draft` and
+   * `proposed` only). Once a subtree exists the plan belongs to
+   * `replaceGoalPlan`, and terminal goals are immutable; both cases fail
+   * with a message that says which call to use instead.
+   */
+  updateGoal(input: UpdateGoalInput): Goal {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    const sets: string[] = [];
+    const params: Array<string | number> = [];
+    const changed: string[] = [];
+    if (input.formalText !== undefined) {
+      sets.push("formal_text = ?");
+      params.push(requireText(input.formalText, "goal formal text"));
+      changed.push("formal text");
+    }
+    if (input.plan !== undefined) {
+      const plan = parsePlan(input.plan);
+      sets.push("plan_json = ?");
+      params.push(JSON.stringify(plan));
+      changed.push(`plan (${plan.length} step(s))`);
+    }
+    if (sets.length === 0) {
+      throw new Error("updateGoal requires at least one of: formalText, plan");
+    }
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireGoalRow(projectKey, input.id);
+        const status = parseGoalStatus(row.status);
+        if (status !== "draft" && status !== "proposed") {
+          throw new Error(
+            ["approved", "in_progress", "done"].includes(status)
+              ? `goal ${row.id} already grew a subtree; replace its plan through replaceGoalPlan (it supersedes the derived leaves)`
+              : `goal ${row.id} is ${status} and can no longer be updated`,
+          );
+        }
+        const now = Date.now();
+        sets.push("revision = revision + 1", "updated_at = ?", "updated_by = ?");
+        params.push(now, actor, projectKey, row.id);
+        this.db
+          .prepare(`UPDATE goals SET ${sets.join(", ")} WHERE project_key = ? AND id = ?`)
+          .run(...params);
+        this.appendHistory(
+          projectKey,
+          "goal",
+          row.id,
+          "update",
+          row.revision + 1,
+          actor,
+          `updated ${changed.join(", ")}`,
+          now,
+        );
+        return rowToGoal(this.requireGoalRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
+   * The generic lifecycle mover: `draft → proposed`, `approved →
+   * in_progress → done`, `→ cancelled` — whatever `GOAL_TRANSITIONS`
+   * allows. Two transitions are deliberately unreachable here: `approved`
+   * (only {@link approveGoal} crosses the gate, and it materializes in the
+   * same breath) and `superseded` (only {@link replaceGoalPlan} marks it,
+   * because it owns the cascade). A no-op and an illegal transition are
+   * rejected and change nothing.
+   */
+  setGoalStatus(input: SetGoalStatusInput): Goal {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const to = parseGoalStatus(input.status);
+    if (to === "approved") {
+      throw new Error(
+        `goal status "approved" is behind the approval gate; call approveGoal for goal ${input.id}`,
+      );
+    }
+    if (to === "superseded") {
+      throw new Error(
+        `goal status "superseded" only comes from replaceGoalPlan for goal ${input.id}`,
+      );
+    }
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireGoalRow(projectKey, input.id);
+        const from = parseGoalStatus(row.status);
+        if (from === to) {
+          throw new Error(`goal ${row.id} already has status \"${from}\"`);
+        }
+        if (!canTransitionGoal(from, to)) {
+          const allowed = GOAL_TRANSITIONS[from];
+          throw new Error(
+            `invalid status transition ${from} → ${to} for goal ${row.id}; ` +
+              `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
+          );
+        }
+        const now = Date.now();
+        this.db
+          .prepare(
+            `UPDATE goals SET status = ?, revision = revision + 1,
+                             updated_at = ?, updated_by = ?
+              WHERE project_key = ? AND id = ?`,
+          )
+          .run(to, now, actor, projectKey, row.id);
+        this.appendHistory(
+          projectKey,
+          "goal",
+          row.id,
+          "status",
+          row.revision + 1,
+          actor,
+          `${from} → ${to}`,
+          now,
+        );
+        return rowToGoal(this.requireGoalRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
+   * **The approval gate.** Only a `proposed` goal may cross it
+   * (`canApproveGoal`), and crossing it *materializes the subtree in the
+   * same transaction*: a side branch named after the formal task,
+   * hanging under `parentBranchId`, with one draft leaf per plan step
+   * (payload `goalId`/`stepId`/`stepOrder`). Two audit rows mark the two
+   * mutations — `approve` (status) and `materialize` (subtree) — so the
+   * revision sequence stays gapless. The parent must be a live node that
+   * can take `subbranch` children (a branch or subbranch).
+   *
+   * **Idempotent**: approving an already-approved, already-materialized
+   * goal is a pure no-op — no nodes, no revision, no history — which is
+   * the acceptance rule "materialization is idempotent".
+   */
+  approveGoal(input: ApproveGoalInput): Goal {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const parentBranchId = requireText(input.parentBranchId, "parent branch id");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireGoalRow(projectKey, input.id);
+        const status = parseGoalStatus(row.status);
+        if (status === "approved" && row.materialized_node_id !== null) {
+          return rowToGoal(row); // already crossed and grown: nothing to do
+        }
+        if (!canApproveGoal(status)) {
+          throw new Error(
+            `only a proposed goal may be approved; goal ${row.id} is ${status}`,
+          );
+        }
+        const plan = parsePlan(safeParsePlan(row.plan_json));
+        const parent = this.requireGoalParent(projectKey, parentBranchId);
+
+        // 1) The gate crossing.
+        const approvedAt = Date.now();
+        this.db
+          .prepare(
+            `UPDATE goals SET status = 'approved', revision = revision + 1,
+                             updated_at = ?, updated_by = ?
+              WHERE project_key = ? AND id = ?`,
+          )
+          .run(approvedAt, actor, projectKey, row.id);
+        this.appendHistory(
+          projectKey,
+          "goal",
+          row.id,
+          "approve",
+          row.revision + 1,
+          actor,
+          `approved under parent ${parent.id}`,
+          approvedAt,
+        );
+
+        // 2) Materialization: the nested createNode calls join this very
+        // transaction (re-entrant write/transaction), so a failure anywhere
+        // rolls back the gate crossing too.
+        const root = this.createNode({
+          projectKey,
+          parentId: parent.id,
+          kind: "subbranch",
+          name: row.formal_text,
+          payload: { goalId: row.id },
+          actor,
+        });
+        for (const [index, step] of plan.entries()) {
+          this.createNode({
+            projectKey,
+            parentId: root.id,
+            kind: "leaf",
+            name: step.title,
+            description: step.description,
+            status: "draft",
+            payload: { goalId: row.id, stepId: step.id, stepOrder: index },
+            actor,
+          });
+        }
+
+        const materializedAt = Date.now();
+        this.db
+          .prepare(
+            `UPDATE goals SET materialized_node_id = ?, revision = revision + 1,
+                             updated_at = ?, updated_by = ?
+              WHERE project_key = ? AND id = ?`,
+          )
+          .run(root.id, materializedAt, actor, projectKey, row.id);
+        this.appendHistory(
+          projectKey,
+          "goal",
+          row.id,
+          "materialize",
+          row.revision + 2,
+          actor,
+          `grew side branch ${root.id} with ${plan.length} step leaf(s) under ${parent.id}`,
+          materializedAt,
+        );
+        return rowToGoal(this.requireGoalRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
+   * Structured rejection at the gate: a `proposed` goal goes back to
+   * `draft` for rework, recorded with the `reject` action (the panel's
+   * "Reject" button). Every other status is refused with a readable
+   * message and changes nothing.
+   */
+  rejectGoal(input: RejectGoalInput): Goal {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireGoalRow(projectKey, input.id);
+        const from = parseGoalStatus(row.status);
+        if (from !== "proposed") {
+          throw new Error(
+            `only a proposed goal can be rejected; goal ${row.id} is ${from}`,
+          );
+        }
+        const now = Date.now();
+        this.db
+          .prepare(
+            `UPDATE goals SET status = 'draft', revision = revision + 1,
+                             updated_at = ?, updated_by = ?
+              WHERE project_key = ? AND id = ?`,
+          )
+          .run(now, actor, projectKey, row.id);
+        this.appendHistory(
+          projectKey,
+          "goal",
+          row.id,
+          "reject",
+          row.revision + 1,
+          actor,
+          `${from} → draft (plan rejected)`,
+          now,
+        );
+        return rowToGoal(this.requireGoalRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
+   * Replaces the plan of a **materialized** goal (MetaGPT `reset_task`
+   * semantics): the goal becomes `superseded` — terminal, because a redo
+   * starts as a fresh goal with the new plan — and every derived leaf the
+   * shared machine can still move is reset to `superseded`, each with its
+   * own revision bump and a `supersede` audit row. Leaves already
+   * `cancelled`/`superseded` and archived ones are left untouched
+   * (`canTransitionLeaf` decides). The subtree stays in the tree as the
+   * historical record of the old plan, still reachable through
+   * `materialized_node_id`. The goal's plan is stored alongside, so the
+   * rejected plan is not lost.
+   */
+  replaceGoalPlan(input: ReplaceGoalPlanInput): Goal {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const plan = parsePlan(input.plan);
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireGoalRow(projectKey, input.id);
+        const from = parseGoalStatus(row.status);
+        if (from === "draft" || from === "proposed") {
+          throw new Error(
+            `goal ${row.id} has not grown a subtree yet (status ${from}); edit its plan with updateGoal`,
+          );
+        }
+        if (!canTransitionGoal(from, "superseded")) {
+          const allowed = GOAL_TRANSITIONS[from];
+          throw new Error(
+            `invalid status transition ${from} → superseded for goal ${row.id}; ` +
+              `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
+          );
+        }
+
+        // Cascade: reset every live leaf of the materialized subtree whose
+        // status may still move to `superseded`.
+        let total = 0;
+        let reset = 0;
+        if (row.materialized_node_id !== null) {
+          const leaves = this.db
+            .prepare(
+              `WITH RECURSIVE subtree(id) AS (
+                 SELECT id FROM nodes WHERE project_key = ? AND id = ?
+                 UNION
+                 SELECT n.id FROM nodes n
+                   JOIN subtree s ON n.parent_id = s.id
+                  WHERE n.project_key = ?
+               )
+               SELECT n.* FROM nodes n JOIN subtree s ON s.id = n.id
+                WHERE n.kind = 'leaf' AND n.archived_at IS NULL
+                ORDER BY n.created_at, n.id`,
+            )
+            .all(
+              projectKey,
+              row.materialized_node_id,
+              projectKey,
+            ) as unknown as NodeRow[];
+          const now = Date.now();
+          total = leaves.length;
+          for (const leafRow of leaves) {
+            const leafStatus = parseStatus(leafRow.status);
+            if (!canTransitionLeaf(leafStatus, "superseded")) continue;
+            this.db
+              .prepare(
+                `UPDATE nodes SET status = 'superseded', revision = revision + 1,
+                                 updated_at = ?, updated_by = ?
+                  WHERE project_key = ? AND id = ?`,
+              )
+              .run(now, actor, projectKey, leafRow.id);
+            this.appendHistory(
+              projectKey,
+              "node",
+              leafRow.id,
+              "supersede",
+              leafRow.revision + 1,
+              actor,
+              `superseded: goal ${row.id} plan replaced`,
+              now,
+            );
+            reset += 1;
+          }
+        }
+
+        const now = Date.now();
+        this.db
+          .prepare(
+            `UPDATE goals SET plan_json = ?, status = 'superseded',
+                             revision = revision + 1, updated_at = ?, updated_by = ?
+              WHERE project_key = ? AND id = ?`,
+          )
+          .run(JSON.stringify(plan), now, actor, projectKey, row.id);
+        this.appendHistory(
+          projectKey,
+          "goal",
+          row.id,
+          "supersede",
+          row.revision + 1,
+          actor,
+          `plan replaced (${plan.length} step(s)); ${reset}/${total} derived leaf(s) reset`,
+          now,
+        );
+        return rowToGoal(this.requireGoalRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /** Loads a goal row scoped by `project_key` or throws a readable error. */
+  private requireGoalRow(projectKey: string, id: string): GoalRow {
+    const row = this.db
+      .prepare("SELECT * FROM goals WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as GoalRow | undefined;
+    if (!row) throw new Error(`goal ${id} not found in project ${projectKey}`);
+    return row;
+  }
+
+  /**
+   * Validates where a goal's subtree may grow: a live node of this
+   * project that can take `subbranch` children — a branch or a subbranch.
+   */
+  private requireGoalParent(projectKey: string, nodeId: string): NodeRow {
+    const row = this.db
+      .prepare("SELECT * FROM nodes WHERE project_key = ? AND id = ?")
+      .get(projectKey, nodeId) as NodeRow | undefined;
+    if (!row) {
+      throw new Error(
+        `goal parent node ${nodeId} not found in project ${projectKey}`,
+      );
+    }
+    if (row.archived_at !== null) {
+      throw new Error(`goal parent node ${nodeId} is archived`);
+    }
+    const kind = parseKind(row.kind);
+    if (!canHaveChild(kind, "subbranch")) {
+      throw new Error(
+        `a goal subtree cannot grow under a ${kind}; it needs a branch or subbranch`,
+      );
+    }
+    return row;
+  }
+
   /**
    * Idempotent: plugin cleanup can run more than once (disable, reload,
    * removal), and a second close must not throw.
@@ -1782,6 +2384,20 @@ interface BugRow {
   updated_by: string | null;
 }
 
+interface GoalRow {
+  id: string;
+  project_key: string;
+  formal_text: string;
+  plan_json: string;
+  status: string;
+  revision: number;
+  materialized_node_id: string | null;
+  created_at: number;
+  updated_at: number;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
 /** Maps a `nodes` row to the shared `Node`, parsing the JSON payload. */
 function rowToNode(row: NodeRow): Node {
   let payload: Record<string, unknown> = {};
@@ -1839,6 +2455,23 @@ function rowToBug(row: BugRow): Bug {
     severity: row.severity,
     status: row.status,
     revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+  });
+}
+
+/** Maps a `goals` row to the shared `Goal` (schema-validated). */
+function rowToGoal(row: GoalRow): Goal {
+  return goalSchema.parse({
+    id: row.id,
+    projectKey: row.project_key,
+    formalText: row.formal_text,
+    plan: safeParsePlan(row.plan_json),
+    status: row.status,
+    revision: row.revision,
+    materializedNodeId: row.materialized_node_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdBy: row.created_by,
@@ -1934,6 +2567,64 @@ function parseBugStatus(value: unknown): BugStatus {
     );
   }
   return parsed.data;
+}
+
+/** Validates a goal status, failing with a readable message. */
+function parseGoalStatus(value: unknown): GoalStatus {
+  const parsed = goalStatusSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid goal status ${JSON.stringify(value)}; expected one of: ${GOAL_STATUSES.join(", ")}`,
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * Validates a plan for a **write**: an ordered array of at least one
+ * `{ id, title, description }` step. The first offending step fails with
+ * its index, so a caller with a big plan knows where to look.
+ */
+function parsePlan(value: unknown): GoalStep[] {
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `goal plan must be an array of steps, got ${JSON.stringify(value)}`,
+    );
+  }
+  if (value.length === 0) {
+    throw new Error("goal plan must contain at least one step");
+  }
+  const steps: GoalStep[] = [];
+  for (const [index, step] of value.entries()) {
+    const parsed = goalStepSchema.safeParse(step);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new Error(
+        `invalid goal plan step ${index}: ${
+          issue ? `${issue.path.join(".") || "step"}: ${issue.message}` : "invalid step"
+        }; each step needs { id, title, description }`,
+      );
+    }
+    steps.push(parsed.data);
+  }
+  return steps;
+}
+
+/**
+ * Lenient plan reader for **reads**: a goal row whose `plan_json` went
+ * corrupt must still open (the `rowToNode` payload rule applied to goals) —
+ * malformed steps are dropped instead of breaking every list call.
+ */
+function safeParsePlan(raw: string): GoalStep[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (step): step is GoalStep => goalStepSchema.safeParse(step).success,
+    );
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
