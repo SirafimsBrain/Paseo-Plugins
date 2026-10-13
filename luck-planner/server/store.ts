@@ -9,11 +9,21 @@ import {
 import {
   BEE_STATUSES,
   BEE_TRANSITIONS,
+  BUG_SEVERITIES,
+  BUG_STATUSES,
+  BUG_TRANSITIONS,
   beeSchema,
   beeStatusSchema,
+  bugSchema,
+  bugSeveritySchema,
+  bugStatusSchema,
   canTransitionBee,
+  canTransitionBug,
+  isBugBlocking,
   type Bee,
   type BeeStatus,
+  type Bug,
+  type BugStatus,
 } from "../shared/links";
 import {
   LEAF_STATUSES,
@@ -60,6 +70,12 @@ import {
  * `project_key`, alive), rejecting self-loops and duplicate pairs, moving
  * through its own status machine and carrying the same revision + audit
  * discipline as nodes.
+ *
+ * Stage C2 adds the incidents ("bugs"): a bug with severity and lifecycle
+ * plus the m2m `bug_nodes` table, so one incident can block a leaf or a
+ * group of leaves. Every attachment change is a mutation of the bug
+ * (revision bump + audit); the blocked leaves themselves are never
+ * touched — a blocker is a computed read, not a node state.
  */
 
 /**
@@ -201,6 +217,56 @@ export interface UpdateBeeInput {
 export interface DeleteBeeInput {
   projectKey: string;
   id: string;
+  actor: string;
+}
+
+/**
+ * `createBug` input: one transaction creates the incident and attaches its
+ * initial leaf set (the group the incident blocks).
+ */
+export interface CreateBugInput {
+  projectKey: string;
+  title: string;
+  description?: string;
+  severity: string;
+  /** Initial status (defaults to `open`). */
+  status?: string;
+  /** Leaves this incident blocks right away; defaults to none. */
+  nodeIds?: string[];
+  actor: string;
+}
+
+/** `updateBug` input: at least one of title/description/severity/status. */
+export interface UpdateBugInput {
+  projectKey: string;
+  id: string;
+  title?: string;
+  description?: string;
+  severity?: string;
+  status?: string;
+  actor: string;
+}
+
+/** `deleteBug` input: hard-deletes the incident and its attachments. */
+export interface DeleteBugInput {
+  projectKey: string;
+  id: string;
+  actor: string;
+}
+
+/** `attachBug` input: adds one live leaf to the incident's group. */
+export interface AttachBugInput {
+  projectKey: string;
+  bugId: string;
+  nodeId: string;
+  actor: string;
+}
+
+/** `detachBug` input: unlinks one leaf; the incident itself stays. */
+export interface DetachBugInput {
+  projectKey: string;
+  bugId: string;
+  nodeId: string;
   actor: string;
 }
 
@@ -1261,6 +1327,388 @@ export class LuckPlannerStore {
     return row;
   }
 
+  // -------------------------------------------------------------------------
+  // Bugs — incidents blocking a leaf or a group of leaves (stage C2)
+  // -------------------------------------------------------------------------
+
+  /** One bug by id, or `null` when it is not in this `projectKey`. */
+  getBug(projectKey: string, id: string): Bug | null {
+    const row = this.db
+      .prepare("SELECT * FROM bugs WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as BugRow | undefined;
+    return row ? rowToBug(row) : null;
+  }
+
+  /** Every bug of the project (the incident list for the panel/dashboard). */
+  listBugs(projectKey: string): Bug[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM bugs WHERE project_key = ? ORDER BY created_at, id",
+      )
+      .all(projectKey) as unknown as BugRow[];
+    return rows.map(rowToBug);
+  }
+
+  /** Every incident attached to `nodeId` — any status, ordered oldest first. */
+  listBugsForNode(projectKey: string, nodeId: string): Bug[] {
+    const rows = this.db
+      .prepare(
+        `SELECT b.* FROM bugs b
+           JOIN bug_nodes bn ON bn.bug_id = b.id
+          WHERE b.project_key = ? AND bn.node_id = ?
+          ORDER BY b.created_at, b.id`,
+      )
+      .all(projectKey, nodeId) as unknown as BugRow[];
+    return rows.map(rowToBug);
+  }
+
+  /**
+   * The incidents that **block** `nodeId` right now: `open` and
+   * `investigating` ones (`isBugBlocking`, `shared/links.ts`). This is what
+   * the leaf details panel renders as "blocked by" — a leaf with a blocking
+   * bug is visibly stuck even though its own status may still say
+   * `in_progress`.
+   */
+  listBlockingBugs(projectKey: string, nodeId: string): Bug[] {
+    return this.listBugsForNode(projectKey, nodeId).filter((bug) =>
+      isBugBlocking(bug.status),
+    );
+  }
+
+  /**
+   * The leaves one incident blocks — the "group" side of `bug_nodes`:
+   * reverse of {@link listBugsForNode}, what the bug details must show.
+   */
+  listNodesForBug(projectKey: string, bugId: string): Node[] {
+    this.requireBugRow(projectKey, bugId);
+    const rows = this.db
+      .prepare(
+        `SELECT n.* FROM nodes n
+           JOIN bug_nodes bn ON bn.node_id = n.id
+          WHERE bn.bug_id = ? AND n.project_key = ?
+          ORDER BY n.created_at, n.id`,
+      )
+      .all(bugId, projectKey) as unknown as NodeRow[];
+    return rows.map(rowToNode);
+  }
+
+  /**
+   * Creates an incident and attaches its initial leaf set in one
+   * transaction: either the bug and all its attachments land together, or
+   * nothing does. Severity is mandatory (triage needs it); status starts
+   * `open`. Every attached node must be a live leaf of this project.
+   * History: one `create` row, revision 1.
+   */
+  createBug(input: CreateBugInput): Bug {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const title = requireText(input.title, "bug title");
+    const description = requireString(input.description ?? "", "description");
+    const severity = parseBugSeverity(input.severity);
+    const status = parseBugStatus(input.status ?? "open");
+    const nodeIds = [...new Set(input.nodeIds ?? [])];
+
+    return this.write(() =>
+      this.transaction(() => {
+        for (const nodeId of nodeIds) {
+          this.requireBugNode(projectKey, nodeId);
+        }
+        const id = randomUUID();
+        const now = Date.now();
+        this.db
+          .prepare(
+            `INSERT INTO bugs
+               (id, project_key, title, description, severity, status,
+                revision, created_at, updated_at, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          )
+          .run(
+            id,
+            projectKey,
+            title,
+            description,
+            severity,
+            status,
+            now,
+            now,
+            actor,
+            actor,
+          );
+        const attach = this.db.prepare(
+          "INSERT INTO bug_nodes (bug_id, node_id) VALUES (?, ?)",
+        );
+        for (const nodeId of nodeIds) attach.run(id, nodeId);
+        this.appendHistory(
+          projectKey,
+          "bug",
+          id,
+          "create",
+          1,
+          actor,
+          `created bug \"${title}\" (${severity})${
+            nodeIds.length > 0 ? `; attached ${nodeIds.length} node(s)` : ""
+          }`,
+          now,
+        );
+        return rowToBug(this.requireBugRow(projectKey, id));
+      }),
+    );
+  }
+
+  /**
+   * Updates a bug: `title`, `description`, `severity`, `status` — at least
+   * one is required. A status change runs through `BUG_TRANSITIONS`; a
+   * no-op and an illegal transition are rejected with a readable message
+   * and change nothing (no revision, no history). The audit action is
+   * `status` when the lifecycle moved, `update` otherwise.
+   */
+  updateBug(input: UpdateBugInput): Bug {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    const sets: string[] = [];
+    const params: Array<string | number> = [];
+    const changed: string[] = [];
+    if (input.title !== undefined) {
+      sets.push("title = ?");
+      params.push(requireText(input.title, "bug title"));
+      changed.push("title");
+    }
+    if (input.description !== undefined) {
+      sets.push("description = ?");
+      params.push(requireString(input.description, "description"));
+      changed.push("description");
+    }
+    if (input.severity !== undefined) {
+      sets.push("severity = ?");
+      params.push(parseBugSeverity(input.severity));
+      changed.push("severity");
+    }
+    const wantsStatus = input.status !== undefined;
+    const to = wantsStatus ? parseBugStatus(input.status) : null;
+    if (sets.length === 0 && !wantsStatus) {
+      throw new Error(
+        "updateBug requires at least one of: title, description, severity, status",
+      );
+    }
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireBugRow(projectKey, input.id);
+        let from: BugStatus | null = null;
+        if (wantsStatus && to !== null) {
+          from = parseBugStatus(row.status);
+          if (from === to) {
+            throw new Error(`bug ${row.id} already has status \"${from}\"`);
+          }
+          if (!canTransitionBug(from, to)) {
+            const allowed = BUG_TRANSITIONS[from];
+            throw new Error(
+              `invalid status transition ${from} → ${to} for bug ${row.id}; ` +
+                `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
+            );
+          }
+          sets.push("status = ?");
+          params.push(to);
+          changed.push("status");
+        }
+
+        const now = Date.now();
+        sets.push("revision = revision + 1", "updated_at = ?", "updated_by = ?");
+        params.push(now, actor, projectKey, row.id);
+        this.db
+          .prepare(`UPDATE bugs SET ${sets.join(", ")} WHERE project_key = ? AND id = ?`)
+          .run(...params);
+        const otherChanged = changed.filter((field) => field !== "status");
+        this.appendHistory(
+          projectKey,
+          "bug",
+          row.id,
+          from !== null ? "status" : "update",
+          row.revision + 1,
+          actor,
+          from !== null
+            ? `${from} → ${to}${
+                otherChanged.length > 0
+                  ? `; updated ${otherChanged.join(", ")}`
+                  : ""
+              }`
+            : `updated ${otherChanged.join(", ")}`,
+          now,
+        );
+        return rowToBug(this.requireBugRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
+   * Links one live leaf to the incident: the group membership grows by one.
+   * The bug's revision bumps and a `link` row is appended — attachment is a
+   * mutation **of the bug**; the leaf's own revision and history stay
+   * untouched (a blocker is a computed read, not node state).
+   */
+  attachBug(input: AttachBugInput): Bug {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const nodeId = requireText(input.nodeId, "node id");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const bug = this.requireBugRow(projectKey, input.bugId);
+        this.requireBugNode(projectKey, nodeId);
+        const attached = this.db
+          .prepare("SELECT 1 FROM bug_nodes WHERE bug_id = ? AND node_id = ?")
+          .get(bug.id, nodeId);
+        if (attached) {
+          throw new Error(`bug ${bug.id} is already attached to node ${nodeId}`);
+        }
+        this.db
+          .prepare("INSERT INTO bug_nodes (bug_id, node_id) VALUES (?, ?)")
+          .run(bug.id, nodeId);
+        const now = Date.now();
+        this.db
+          .prepare(
+            `UPDATE bugs SET revision = revision + 1, updated_at = ?, updated_by = ?
+              WHERE project_key = ? AND id = ?`,
+          )
+          .run(now, actor, projectKey, bug.id);
+        this.appendHistory(
+          projectKey,
+          "bug",
+          bug.id,
+          "link",
+          bug.revision + 1,
+          actor,
+          `attached node ${nodeId}`,
+          now,
+        );
+        return rowToBug(this.requireBugRow(projectKey, bug.id));
+      }),
+    );
+  }
+
+  /**
+   * Unlinks one leaf from the incident (the incident itself stays). The
+   * bug's revision bumps and an `unlink` row is appended; unlinking a
+   * node that is not attached fails, and the leaf may be attached again.
+   */
+  detachBug(input: DetachBugInput): Bug {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const nodeId = requireText(input.nodeId, "node id");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const bug = this.requireBugRow(projectKey, input.bugId);
+        const result = this.db
+          .prepare("DELETE FROM bug_nodes WHERE bug_id = ? AND node_id = ?")
+          .run(bug.id, nodeId);
+        if (Number(result.changes) === 0) {
+          throw new Error(`bug ${bug.id} is not attached to node ${nodeId}`);
+        }
+        const now = Date.now();
+        this.db
+          .prepare(
+            `UPDATE bugs SET revision = revision + 1, updated_at = ?, updated_by = ?
+              WHERE project_key = ? AND id = ?`,
+          )
+          .run(now, actor, projectKey, bug.id);
+        this.appendHistory(
+          projectKey,
+          "bug",
+          bug.id,
+          "unlink",
+          bug.revision + 1,
+          actor,
+          `detached node ${nodeId}`,
+          now,
+        );
+        return rowToBug(this.requireBugRow(projectKey, bug.id));
+      }),
+    );
+  }
+
+  /**
+   * Removes an incident and **all of its attachments** in one transaction.
+   * Bugs carry no `archived_at`, so this is a real delete; the audit row is
+   * `archive` (the removal verb of the shared action vocabulary — `link` /
+   * `unlink` are reserved for single attachments) with the exact outcome in
+   * the result, and it keeps the same revision bump rule as `deleteBee`, so
+   * a deleted bug's history stays gapless and matches the returned final
+   * revision. Deleting an unknown bug fails.
+   */
+  deleteBug(input: DeleteBugInput): Bug {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireBugRow(projectKey, input.id);
+        const detached = Number(
+          this.db
+            .prepare("DELETE FROM bug_nodes WHERE bug_id = ?")
+            .run(row.id).changes,
+        );
+        this.db
+          .prepare("DELETE FROM bugs WHERE project_key = ? AND id = ?")
+          .run(projectKey, row.id);
+        const now = Date.now();
+        const finalRevision = row.revision + 1;
+        this.appendHistory(
+          projectKey,
+          "bug",
+          row.id,
+          "archive",
+          finalRevision,
+          actor,
+          `deleted bug \"${row.title}\" (${detached} attachment(s) removed)`,
+          now,
+        );
+        return rowToBug({
+          ...row,
+          revision: finalRevision,
+          updated_at: now,
+          updated_by: actor,
+        });
+      }),
+    );
+  }
+
+  /** Loads a bug row scoped by `project_key` or throws a readable error. */
+  private requireBugRow(projectKey: string, id: string): BugRow {
+    const row = this.db
+      .prepare("SELECT * FROM bugs WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as BugRow | undefined;
+    if (!row) throw new Error(`bug ${id} not found in project ${projectKey}`);
+    return row;
+  }
+
+  /**
+   * Validates one node a bug wants to block: it must exist **in this
+   * project**, be a `leaf`, and not be archived — the same contract as a
+   * bee's end, because a blocker that points nowhere is worse than no
+   * blocker at all.
+   */
+  private requireBugNode(projectKey: string, nodeId: string): NodeRow {
+    const row = this.db
+      .prepare("SELECT * FROM nodes WHERE project_key = ? AND id = ?")
+      .get(projectKey, nodeId) as NodeRow | undefined;
+    if (!row) {
+      throw new Error(
+        `bug node ${nodeId} not found in project ${projectKey}`,
+      );
+    }
+    if (row.archived_at !== null) {
+      throw new Error(`bug node ${nodeId} is archived`);
+    }
+    if (row.kind !== "leaf") {
+      throw new Error(
+        `bug node ${nodeId} is a ${row.kind}; bugs block leaves only`,
+      );
+    }
+    return row;
+  }
+
   /**
    * Idempotent: plugin cleanup can run more than once (disable, reload,
    * removal), and a second close must not throw.
@@ -1320,6 +1768,20 @@ interface BeeRow {
   updated_by: string | null;
 }
 
+interface BugRow {
+  id: string;
+  project_key: string;
+  title: string;
+  description: string;
+  severity: string;
+  status: string;
+  revision: number;
+  created_at: number;
+  updated_at: number;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
 /** Maps a `nodes` row to the shared `Node`, parsing the JSON payload. */
 function rowToNode(row: NodeRow): Node {
   let payload: Record<string, unknown> = {};
@@ -1360,6 +1822,23 @@ function rowToBee(row: BeeRow): Bee {
     status: row.status,
     revision: row.revision,
     impact: row.impact,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+  });
+}
+
+/** Maps a `bugs` row to the shared `Bug` (schema-validated). */
+function rowToBug(row: BugRow): Bug {
+  return bugSchema.parse({
+    id: row.id,
+    projectKey: row.project_key,
+    title: row.title,
+    description: row.description,
+    severity: row.severity,
+    status: row.status,
+    revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdBy: row.created_by,
@@ -1430,6 +1909,28 @@ function parseBeeStatus(value: unknown): BeeStatus {
   if (!parsed.success) {
     throw new Error(
       `invalid bee status ${JSON.stringify(value)}; expected one of: ${BEE_STATUSES.join(", ")}`,
+    );
+  }
+  return parsed.data;
+}
+
+/** Validates a bug severity, failing with a readable message. */
+function parseBugSeverity(value: unknown): string {
+  const parsed = bugSeveritySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid bug severity ${JSON.stringify(value)}; expected one of: ${BUG_SEVERITIES.join(", ")}`,
+    );
+  }
+  return parsed.data;
+}
+
+/** Validates a bug status, failing with a readable message. */
+function parseBugStatus(value: unknown): BugStatus {
+  const parsed = bugStatusSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid bug status ${JSON.stringify(value)}; expected one of: ${BUG_STATUSES.join(", ")}`,
     );
   }
   return parsed.data;

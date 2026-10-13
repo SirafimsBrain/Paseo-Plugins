@@ -1,8 +1,8 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.6.0`).** Development is currently paused
-> after **stage C1** (bees / influence links — done, all tests green). The next stage is
-> **C2** (bugs / incidents). Nothing in this
+> **Development status: version in development (`0.7.0`).** Development is currently paused
+> after **stage C2** (bugs / incidents — done, all tests green). The next stage is
+> **C3** (high goals + approval gate). Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -311,6 +311,41 @@ The influence links of §4.2 are implemented as six methods: `getBee`, `listBees
 All reads are project-scoped like every other method. `listBees` is what `GET /api/tree` (F1)
 will serialize as the graph's edge set.
 
+### Bugs (stage C2 — `server/store.ts`)
+
+Incidents plus the m2m `bug_nodes` table: mutations `createBug`, `updateBug`, `deleteBug`,
+`attachBug`, `detachBug`; reads `getBug`, `listBugs`, `listBugsForNode`, `listBlockingBugs`,
+`listNodesForBug`. The rules, each verified by `tests/bugs.test.ts` (19 tests):
+
+- **Severity is mandatory at creation** (`low|medium|high|critical`) — triage needs it — and
+  status starts `open`. The initial leaf set is attached **in the same transaction** as the
+  bug, so a half-created incident with dangling attachments cannot exist.
+- **Attachments obey the bee's end contract**: a blocked node must exist in this
+  `project_key`, be a `leaf`, and not be archived. A duplicate attach is rejected ("already
+  attached"), detaching something that is not attached fails, and re-attaching after a detach
+  works. A leaf of another project is simply "not found" — the project boundary never leaks.
+- **Lifecycle**: `open → investigating → resolved / cancelled` through `BUG_TRANSITIONS`; a
+  no-op and an illegal transition are rejected with the allowed list in the message and change
+  nothing — no revision, no history row.
+- **Attachment changes are mutations of the bug**: `attachBug` / `detachBug` bump the bug's
+  revision and append `link` / `unlink` with the node id in the result. `createBug` writes one
+  `create` row (initial attachments included in the result text), `updateBug` writes `status`
+  or `update`, `deleteBug` writes `archive`. **The blocked leaves themselves are never
+  touched** — a blocker is a computed read, not node state, so a leaf's revision and history
+  stay exactly as they were.
+- **`deleteBug` removes the incident and all of its attachments** in one transaction, records
+  the removed-attachment count in the audit result, and follows the `deleteBee` revision rule:
+  the bump is recorded in `history`, the returned bug carries that final revision, and the
+  sequence stays gapless.
+- **`listBlockingBugs`** is the "blocked by" view of the leaf details: only `open` and
+  `investigating` incidents (`isBugBlocking`, `shared/links.ts`). Resolving an incident keeps
+  it in `listBugsForNode` for history while instantly removing it from the blocking set.
+- **`listNodesForBug`** is the group side: one incident over N leaves reads back as N nodes;
+  the dashboard draws the bug as a badge, the panel shows it in both details views.
+
+Every read is project-scoped. `listBugs` plus `listNodesForBug` are what `GET /api/tree` (F1)
+will serialize alongside the bee edges.
+
 ## 6. Paseo integration surface (SDK 0.11.x)
 
 | Contribution | Where | Stage |
@@ -348,15 +383,15 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development paused after stage C1.** Stages A1–C1 are complete and released as
-tagged versions up to `luck-planner@0.6.0`; stage **C2** (bugs) is next.
-Blocks C2–J are untouched.
+**Status: development paused after stage C2.** Stages A1–C2 are complete and released as
+tagged versions up to `luck-planner@0.7.0`; stage **C3** (goals + approval gate) is next.
+Blocks C3–J are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
-| C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs, goals + approval gate, growth rates |
+| C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate, growth rates |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts, stdio server + bundle, agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
