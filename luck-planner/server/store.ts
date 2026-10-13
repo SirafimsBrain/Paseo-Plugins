@@ -7,6 +7,15 @@ import {
   type DatabaseSyncOptions,
 } from "node:sqlite";
 import {
+  BEE_STATUSES,
+  BEE_TRANSITIONS,
+  beeSchema,
+  beeStatusSchema,
+  canTransitionBee,
+  type Bee,
+  type BeeStatus,
+} from "../shared/links";
+import {
   LEAF_STATUSES,
   LEAF_TRANSITIONS,
   NODE_KINDS,
@@ -18,6 +27,7 @@ import {
   nodeSchema,
   type HistoryAction,
   type HistoryEntry,
+  type HistoryEntityType,
   type LeafStatus,
   type Node,
   type NodeKind,
@@ -44,6 +54,12 @@ import {
  * by bm25, and a `LIKE` fallback when nothing indexable remains — the
  * memory-flash `parseQuery`/`ftsQuery` approach, adapted to node kinds and
  * leaf statuses.
+ *
+ * Stage C1 adds the influence links ("bees"): a directed edge between two
+ * leaves of one project, validated at both ends (leaf kind, same
+ * `project_key`, alive), rejecting self-loops and duplicate pairs, moving
+ * through its own status machine and carrying the same revision + audit
+ * discipline as nodes.
  */
 
 /**
@@ -158,6 +174,34 @@ export interface SearchHit {
   score: number;
   /** Description with the matched terms highlighted; `null` when there is none. */
   snippet: string | null;
+}
+
+/** `createBee` input: a directed influence edge between two live leaves. */
+export interface CreateBeeInput {
+  projectKey: string;
+  sourceLeafId: string;
+  targetLeafId: string;
+  /** Initial status (defaults to `active`). */
+  status?: BeeStatus;
+  /** Degree/description of the influence; defaults to an empty string. */
+  impact?: string;
+  actor: string;
+}
+
+/** `updateBee` input: at least one of `impact`, `status` must be present. */
+export interface UpdateBeeInput {
+  projectKey: string;
+  id: string;
+  impact?: string;
+  status?: BeeStatus;
+  actor: string;
+}
+
+/** `deleteBee` input: hard-deletes the edge (bees carry no archive flag). */
+export interface DeleteBeeInput {
+  projectKey: string;
+  id: string;
+  actor: string;
 }
 
 /**
@@ -458,6 +502,7 @@ export class LuckPlannerStore {
   /** Appends one append-only audit row (mandatory for every mutation). */
   private appendHistory(
     projectKey: string,
+    entityType: HistoryEntityType,
     entityId: string,
     action: HistoryAction,
     revision: number,
@@ -469,9 +514,9 @@ export class LuckPlannerStore {
       .prepare(
         `INSERT INTO history
            (project_key, entity_type, entity_id, action, revision, actor, result, at)
-         VALUES (?, 'node', ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(projectKey, entityId, action, revision, actor, result, at);
+      .run(projectKey, entityType, entityId, action, revision, actor, result, at);
   }
 
   /** Creates a node; `parentId: null` is accepted for `root` nodes only. */
@@ -531,6 +576,7 @@ export class LuckPlannerStore {
           );
         this.appendHistory(
           projectKey,
+          "node",
           id,
           "create",
           1,
@@ -591,6 +637,7 @@ export class LuckPlannerStore {
           .run(...params);
         this.appendHistory(
           projectKey,
+          "node",
           row.id,
           "update",
           row.revision + 1,
@@ -661,6 +708,7 @@ export class LuckPlannerStore {
           .run(parent.id, now, actor, projectKey, row.id);
         this.appendHistory(
           projectKey,
+          "node",
           row.id,
           "update",
           row.revision + 1,
@@ -722,6 +770,7 @@ export class LuckPlannerStore {
           );
           this.appendHistory(
             projectKey,
+            "node",
             nodeId,
             "archive",
             revision,
@@ -780,6 +829,7 @@ export class LuckPlannerStore {
           .run(to, now, actor, projectKey, row.id);
         this.appendHistory(
           projectKey,
+          "node",
           row.id,
           "status",
           row.revision + 1,
@@ -947,6 +997,270 @@ export class LuckPlannerStore {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Bees — influence links between leaves (stage C1)
+  // -------------------------------------------------------------------------
+
+  /** One bee by id, or `null` when it is not in this `projectKey`. */
+  getBee(projectKey: string, id: string): Bee | null {
+    const row = this.db
+      .prepare("SELECT * FROM bees WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as BeeRow | undefined;
+    return row ? rowToBee(row) : null;
+  }
+
+  /** Every bee of the project (the graph the dashboard lays out). */
+  listBees(projectKey: string): Bee[] {
+    const rows = this.db
+      .prepare("SELECT * FROM bees WHERE project_key = ? ORDER BY created_at, id")
+      .all(projectKey) as unknown as BeeRow[];
+    return rows.map(rowToBee);
+  }
+
+  /**
+   * Every bee touching `nodeId` — **both directions**: the influences the
+   * node spreads (it is the source) and the ones landing on it (it is the
+   * target). What the node details panel and the graph renderer both need;
+   * an unknown node simply has no bees.
+   */
+  listBeesForNode(projectKey: string, nodeId: string): Bee[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM bees
+          WHERE project_key = ? AND (source_leaf_id = ? OR target_leaf_id = ?)
+          ORDER BY created_at, id`,
+      )
+      .all(projectKey, nodeId, nodeId) as unknown as BeeRow[];
+    return rows.map(rowToBee);
+  }
+
+  /**
+   * Creates a directed influence edge between two live leaves of the same
+   * project. Both ends are validated (existence in this project, `leaf`
+   * kind, not archived), self-loops are rejected, and a second bee for the
+   * same ordered pair is rejected too — parallel edges would render as one
+   * ambiguous arrow on the dashboard. The reverse pair (`B → A`) is a
+   * different, legitimate relation. The edge starts as `active` with
+   * revision 1 and a `link` audit row.
+   */
+  createBee(input: CreateBeeInput): Bee {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const sourceLeafId = requireText(input.sourceLeafId, "bee source leaf id");
+    const targetLeafId = requireText(input.targetLeafId, "bee target leaf id");
+    const status = parseBeeStatus(input.status ?? "active");
+    const impact = requireString(input.impact ?? "", "impact");
+
+    return this.write(() =>
+      this.transaction(() => {
+        if (sourceLeafId === targetLeafId) {
+          throw new Error(
+            `a bee cannot connect a leaf to itself (node ${sourceLeafId})`,
+          );
+        }
+        this.requireBeeEnd(projectKey, sourceLeafId, "source");
+        this.requireBeeEnd(projectKey, targetLeafId, "target");
+        const duplicate = this.db
+          .prepare(
+            `SELECT id FROM bees
+              WHERE project_key = ? AND source_leaf_id = ? AND target_leaf_id = ?`,
+          )
+          .get(projectKey, sourceLeafId, targetLeafId) as
+          | { id: string }
+          | undefined;
+        if (duplicate) {
+          throw new Error(
+            `a bee from ${sourceLeafId} to ${targetLeafId} already exists (${duplicate.id})`,
+          );
+        }
+
+        const id = randomUUID();
+        const now = Date.now();
+        this.db
+          .prepare(
+            `INSERT INTO bees
+               (id, project_key, source_leaf_id, target_leaf_id, status,
+                revision, impact, created_at, updated_at, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            id,
+            projectKey,
+            sourceLeafId,
+            targetLeafId,
+            status,
+            impact,
+            now,
+            now,
+            actor,
+            actor,
+          );
+        this.appendHistory(
+          projectKey,
+          "bee",
+          id,
+          "link",
+          1,
+          actor,
+          `linked ${sourceLeafId} → ${targetLeafId}`,
+          now,
+        );
+        return rowToBee(this.requireBeeRow(projectKey, id));
+      }),
+    );
+  }
+
+  /**
+   * Updates a bee: `impact`, `status`, or both — at least one is required.
+   * A status change runs through `BEE_TRANSITIONS` (`shared/links.ts`):
+   * a no-op and an illegal transition are rejected with a readable message
+   * and change nothing — no revision, no history row. The audit action is
+   * `status` when the lifecycle moved, `update` otherwise.
+   */
+  updateBee(input: UpdateBeeInput): Bee {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    const sets: string[] = [];
+    const params: Array<string | number> = [];
+    const changed: string[] = [];
+    if (input.impact !== undefined) {
+      sets.push("impact = ?");
+      params.push(requireString(input.impact, "impact"));
+      changed.push("impact");
+    }
+    const wantsStatus = input.status !== undefined;
+    const to = wantsStatus ? parseBeeStatus(input.status) : null;
+    if (sets.length === 0 && !wantsStatus) {
+      throw new Error("updateBee requires at least one of: impact, status");
+    }
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireBeeRow(projectKey, input.id);
+        let from: BeeStatus | null = null;
+        if (wantsStatus && to !== null) {
+          // Parses the stored value too, so a corrupt row fails readably.
+          from = parseBeeStatus(row.status);
+          if (from === to) {
+            throw new Error(`bee ${row.id} already has status \"${from}\"`);
+          }
+          if (!canTransitionBee(from, to)) {
+            const allowed = BEE_TRANSITIONS[from];
+            throw new Error(
+              `invalid status transition ${from} → ${to} for bee ${row.id}; ` +
+                `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
+            );
+          }
+          sets.push("status = ?");
+          params.push(to);
+          changed.push("status");
+        }
+
+        const now = Date.now();
+        sets.push("revision = revision + 1", "updated_at = ?", "updated_by = ?");
+        params.push(now, actor, projectKey, row.id);
+        this.db
+          .prepare(`UPDATE bees SET ${sets.join(", ")} WHERE project_key = ? AND id = ?`)
+          .run(...params);
+        const impactChanged = changed.includes("impact");
+        this.appendHistory(
+          projectKey,
+          "bee",
+          row.id,
+          from !== null ? "status" : "update",
+          row.revision + 1,
+          actor,
+          from !== null
+            ? `${from} → ${to}${impactChanged ? "; updated impact" : ""}`
+            : "updated impact",
+          now,
+        );
+        return rowToBee(this.requireBeeRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
+   * Removes a bee (bees carry no `archived_at`, so this is a real delete).
+   * The audit row is written in the same transaction with `revision + 1`,
+   * so the history of a deleted bee stays gapless and strictly increasing:
+   * the bump lives on in `history` after the row is gone. The returned bee
+   * is that final recorded state (its revision already includes the bump),
+   * which keeps the last history row and the returned value in agreement.
+   * Deleting an unknown bee fails, and the pair may be linked again
+   * afterwards.
+   */
+  deleteBee(input: DeleteBeeInput): Bee {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireBeeRow(projectKey, input.id);
+        this.db
+          .prepare("DELETE FROM bees WHERE project_key = ? AND id = ?")
+          .run(projectKey, row.id);
+        const now = Date.now();
+        const finalRevision = row.revision + 1;
+        this.appendHistory(
+          projectKey,
+          "bee",
+          row.id,
+          "unlink",
+          finalRevision,
+          actor,
+          `unlinked ${row.source_leaf_id} → ${row.target_leaf_id}`,
+          now,
+        );
+        return rowToBee({
+          ...row,
+          revision: finalRevision,
+          updated_at: now,
+          updated_by: actor,
+        });
+      }),
+    );
+  }
+
+  /** Loads a bee row scoped by `project_key` or throws a readable error. */
+  private requireBeeRow(projectKey: string, id: string): BeeRow {
+    const row = this.db
+      .prepare("SELECT * FROM bees WHERE project_key = ? AND id = ?")
+      .get(projectKey, id) as BeeRow | undefined;
+    if (!row) throw new Error(`bee ${id} not found in project ${projectKey}`);
+    return row;
+  }
+
+  /**
+   * Validates one end of a would-be bee: it must exist **in this project**,
+   * be a `leaf`, and not be archived. Reads the row for `createBee`'s own
+   * checks; the role name makes the error say which end is wrong.
+   */
+  private requireBeeEnd(
+    projectKey: string,
+    nodeId: string,
+    role: "source" | "target",
+  ): NodeRow {
+    const row = this.db
+      .prepare("SELECT * FROM nodes WHERE project_key = ? AND id = ?")
+      .get(projectKey, nodeId) as NodeRow | undefined;
+    if (!row) {
+      throw new Error(
+        `bee ${role} node ${nodeId} not found in project ${projectKey}`,
+      );
+    }
+    if (row.archived_at !== null) {
+      throw new Error(`bee ${role} node ${nodeId} is archived`);
+    }
+    if (row.kind !== "leaf") {
+      throw new Error(
+        `bee ${role} node ${nodeId} is a ${row.kind}; bees connect leaves only`,
+      );
+    }
+    return row;
+  }
+
   /**
    * Idempotent: plugin cleanup can run more than once (disable, reload,
    * removal), and a second close must not throw.
@@ -992,6 +1306,20 @@ interface HistoryRow {
   at: number;
 }
 
+interface BeeRow {
+  id: string;
+  project_key: string;
+  source_leaf_id: string;
+  target_leaf_id: string;
+  status: string;
+  revision: number;
+  impact: string;
+  created_at: number;
+  updated_at: number;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
 /** Maps a `nodes` row to the shared `Node`, parsing the JSON payload. */
 function rowToNode(row: NodeRow): Node {
   let payload: Record<string, unknown> = {};
@@ -1019,6 +1347,23 @@ function rowToNode(row: NodeRow): Node {
     createdBy: row.created_by,
     updatedBy: row.updated_by,
     archivedAt: row.archived_at,
+  });
+}
+
+/** Maps a `bees` row to the shared `Bee` (schema-validated). */
+function rowToBee(row: BeeRow): Bee {
+  return beeSchema.parse({
+    id: row.id,
+    projectKey: row.project_key,
+    sourceLeafId: row.source_leaf_id,
+    targetLeafId: row.target_leaf_id,
+    status: row.status,
+    revision: row.revision,
+    impact: row.impact,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
   });
 }
 
@@ -1065,6 +1410,29 @@ function requireText(value: string, label: string): string {
     throw new Error(`${label} must not be empty`);
   }
   return value;
+}
+
+/**
+ * Validates a string that may legitimately be empty (`impact` starts out
+ * blank) but must still *be* a string — RPC and MCP callers arrive from
+ * JavaScript, where `undefined`/`null`/`42` are easy to send.
+ */
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+/** Validates a bee status, failing with a readable message. */
+function parseBeeStatus(value: unknown): BeeStatus {
+  const parsed = beeStatusSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid bee status ${JSON.stringify(value)}; expected one of: ${BEE_STATUSES.join(", ")}`,
+    );
+  }
+  return parsed.data;
 }
 
 // ---------------------------------------------------------------------------

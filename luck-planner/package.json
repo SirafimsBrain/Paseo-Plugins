@@ -1,7 +1,7 @@
 {
   "name": "luck-planner",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",

@@ -1,8 +1,8 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.5.0`).** Development is currently paused
-> after **stage B4** (FTS5 search and filters — done, all tests green). The next stage is
-> **C1** (bees / influence links). Nothing in this
+> **Development status: version in development (`0.6.0`).** Development is currently paused
+> after **stage C1** (bees / influence links — done, all tests green). The next stage is
+> **C2** (bugs / incidents). Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -276,6 +276,41 @@ query must use the stored word form), the LIKE fallback with literal wildcards, 
 read-only guarantees (revisions, history and the index untouched), and a battery of hostile
 queries asserted to produce only MATCH expressions that SQLite accepts.
 
+### Bees (stage C1 — `server/store.ts`)
+
+The influence links of §4.2 are implemented as six methods: `getBee`, `listBees(projectKey)`,
+`listBeesForNode(projectKey, nodeId)` (reads) and `createBee`, `updateBee`, `deleteBee`
+(mutations). The rules, each verified by `tests/bees.test.ts` (21 tests):
+
+- **Both ends are validated at write time**: the node must exist *in this `project_key`*, be a
+  `leaf`, and not be archived. The error names the offending end ("bee source node … is a
+  branch; bees connect leaves only"), and a leaf of another project is simply "not found" —
+  the project boundary never leaks.
+- **Self-loops are rejected** ("a bee cannot connect a leaf to itself"), the runtime
+  counterpart of `beeSchema`'s refinement.
+- **One bee per ordered pair**: a second `A → B` edge is rejected, because parallel edges
+  would render as one ambiguous arrow on the dashboard; the reverse `B → A` is a distinct
+  relation and is allowed. The duplicate check sees live rows only, so a pair can be linked
+  again after `deleteBee`.
+- **Lifecycle**: a bee starts `active` and moves through `BEE_TRANSITIONS` (`shared/links.ts`).
+  A no-op and an illegal transition are rejected with the allowed list in the message and
+  change nothing — no revision, no history row: the B3 node discipline applied to links.
+- **Revision + audit on every mutation**: `createBee` → `link` (revision 1); `updateBee` →
+  `status` when the lifecycle moved (result `from → to`, plus `; updated impact` when both
+  fields changed) or `update` when only `impact` changed; `deleteBee` → `unlink`. Bees carry
+  no `archived_at`, so delete is a real delete — and it still bumps the revision in the audit
+  row, so a deleted bee's history stays gapless and strictly increasing, and the returned bee
+  carries that same final revision.
+- **`listBeesForNode` works in both directions**: the influences a leaf spreads (it is the
+  source) and the ones landing on it (it is the target). "Influence over a group" is a set of
+  bees sharing one source; the dashboard draws them as edges, the panel lists them in the node
+  details.
+- **Linking does not touch the leaves**: their revisions and histories stay unchanged, and a
+  rejected attempt writes nothing anywhere.
+
+All reads are project-scoped like every other method. `listBees` is what `GET /api/tree` (F1)
+will serialize as the graph's edge set.
+
 ## 6. Paseo integration surface (SDK 0.11.x)
 
 | Contribution | Where | Stage |
@@ -313,15 +348,15 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development paused after stage B4.** Stages A1–B4 are complete and released as
-tagged versions up to `luck-planner@0.5.0`; stage **C1** (bees) is next.
-Blocks C–J are untouched.
+**Status: development paused after stage C1.** Stages A1–C1 are complete and released as
+tagged versions up to `luck-planner@0.6.0`; stage **C2** (bugs) is next.
+Blocks C2–J are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
-| C | C1–C4 | 0.6.0–0.9.0 | bees, bugs, goals + approval gate, growth rates |
+| C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs, goals + approval gate, growth rates |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts, stdio server + bundle, agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
