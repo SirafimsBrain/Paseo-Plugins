@@ -1,8 +1,8 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.4.0`).** Development is currently paused
-> after **stage B3** (node CRUD + leaf state machine + revisions + append-only audit — done,
-> all tests green). The next stage is **B4** (FTS5 search and filters). Nothing in this
+> **Development status: version in development (`0.5.0`).** Development is currently paused
+> after **stage B4** (FTS5 search and filters — done, all tests green). The next stage is
+> **C1** (bees / influence links). Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -231,6 +231,51 @@ Storage rules carried over from memory-flash (verified there, apply here):
   (bm25 ordering), with a `LIKE` fallback when nothing indexable remains;
 - every failure path returns a readable `{ok:false, error}` rather than a raw SQLite message.
 
+### Search (stage B4 — `server/store.ts`, `search(query, options)`)
+
+Search is read-only (no write fence, no transaction, nothing to audit) and hard-scoped to one
+`projectKey`: rows of another project are unreachable even with a `project=` pair in the query
+text — a mismatch yields no hits rather than a leak. The path is chosen by what the query
+actually contains:
+
+1. **FTS5** when the free text has indexable terms. `parseQuery()` first removes the
+   recognized `key=value` pairs (`kind=`, `status=`, `project=`; repeated keys accumulate,
+   the two enum values are lowercased, one layer of quoting is stripped). `ftsQuery()` keeps
+   `"quoted phrases"` verbatim and reduces every other token to letters, digits, `_` and `-`
+   before OR-joining them, so bm25 ranks the strongest match first (SQLite returns bm25
+   negated: lower is better, and hits are returned in that order). Unknown pairs
+   (`version=1.2`) stay in the free text as **two** terms, never glued into one token.
+   English **and Russian** stop words are dropped — inside an OR-joined query a stop word
+   would otherwise pull every document containing it into the result — and a token counts as
+   indexable only when it is ≥2 characters, is not a stop word, and contains at least one
+   letter or digit. That last rule is what makes a run of punctuation (`---`, `__`) fall
+   through to the LIKE path instead of becoming an empty quoted phrase that silently matches
+   nothing. Quoting every term is what neutralizes FTS5 syntax: `key:value` cannot turn into a
+   column filter and `NEAR(` cannot turn into an operator, so no user text can produce a
+   SQLite syntax error.
+2. **`LIKE` scan** when nothing is indexable (stop-word-only or punctuation-only query), over
+   `name`, `description` and `payload`, with `%`, `_` and `\` escaped (the fallback finds the
+   literal text the caller typed, not a pattern). Unranked: `score = 0`, `snippet = null`,
+   newest first.
+3. **Filter-only listing** when there is no free text left at all (`kind=leaf` on its own) —
+   the natural backing for "everything with status X" views in the panel and the dashboard.
+
+Option filters and query filters are merged and AND-combined; `kinds` / `statuses` are
+validated through the shared enums, so a bad value fails *before any SQL* with the readable
+"expected one of …" message. Archived nodes are excluded unless `includeArchived` is set —
+search is a view of the live tree. `limit` is clamped to 1..100 (default 50): a search answers
+a question, it does not dump the tree. Each hit carries the node, its bm25 `score`, and a
+`snippet` — the description with the matched terms highlighted, `null` when there is nothing
+to show.
+
+Verified by `tests/search.test.ts` (28 tests): bm25 ordering (two-term short document beats
+single-term beats long document), inclusion/exclusion by kind, status, project and archived
+state, the FTS index staying in sync with a rename (B2 trigger), Cyrillic search including
+capitalized queries (unicode61 case-folds Cyrillic; `porter` stems ASCII only, so a Cyrillic
+query must use the stored word form), the LIKE fallback with literal wildcards, limit clamping,
+read-only guarantees (revisions, history and the index untouched), and a battery of hostile
+queries asserted to produce only MATCH expressions that SQLite accepts.
+
 ## 6. Paseo integration surface (SDK 0.11.x)
 
 | Contribution | Where | Stage |
@@ -268,14 +313,14 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development paused after stage B3.** Stages A1–B3 are complete and released as
-tagged versions up to `luck-planner@0.4.0`; stage **B4** (FTS5 search and filters) is next.
+**Status: development paused after stage B4.** Stages A1–B4 are complete and released as
+tagged versions up to `luck-planner@0.5.0`; stage **C1** (bees) is next.
 Blocks C–J are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
-| B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search ⏸ *next: B4* |
+| B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees, bugs, goals + approval gate, growth rates |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts, stdio server + bundle, agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |

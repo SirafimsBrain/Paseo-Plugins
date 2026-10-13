@@ -38,6 +38,12 @@ import {
  * leaf state machine (shared/tree.ts), a revision bump on every change and
  * the append-only audit row per mutation (ADR-6). Every mutation runs
  * inside {@link LuckPlannerStore.write} and its own transaction.
+ *
+ * Stage B4 adds read-side search over the `node_fts` index of stage B2:
+ * `key=value` filters parsed out of the free text, OR-joined terms ranked
+ * by bm25, and a `LIKE` fallback when nothing indexable remains — the
+ * memory-flash `parseQuery`/`ftsQuery` approach, adapted to node kinds and
+ * leaf statuses.
  */
 
 /**
@@ -121,6 +127,37 @@ export interface SetStatusInput {
   id: string;
   status: LeafStatus;
   actor: string;
+}
+
+/**
+ * `search` options (stage B4). The free text may carry its own
+ * `key=value` pairs (`kind=`, `status=`, `project=`); option filters and
+ * query filters are merged, and both AND with the text.
+ */
+export interface SearchOptions {
+  /** Hard scope: only nodes of this project are ever returned. */
+  projectKey: string;
+  /** Restrict to these node kinds (merged with `kind=` in the query). */
+  kinds?: NodeKind[];
+  /** Restrict to these leaf statuses (merged with `status=` in the query). */
+  statuses?: LeafStatus[];
+  /** Include soft-deleted (archived) nodes; they are excluded by default. */
+  includeArchived?: boolean;
+  /** Result cap, clamped to 1..100; defaults to {@link DEFAULT_SEARCH_LIMIT}. */
+  limit?: number;
+}
+
+/** One search result: the node, its rank and a description preview. */
+export interface SearchHit {
+  node: Node;
+  /**
+   * bm25 (lower is better — SQLite returns it negated so `ORDER BY score`
+   * sorts best-first). `0` for the LIKE fallback and the filter-only
+   * listing, which are unranked.
+   */
+  score: number;
+  /** Description with the matched terms highlighted; `null` when there is none. */
+  snippet: string | null;
 }
 
 /**
@@ -755,6 +792,161 @@ export class LuckPlannerStore {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // Search (stage B4): FTS5 + key=value filters, bm25 ordering, LIKE fallback
+  // -------------------------------------------------------------------------
+
+  /**
+   * Searches one project's nodes.
+   *
+   * Three paths, chosen by what the query actually contains:
+   *
+   * 1. **FTS5** when the free text has indexable terms — `parseQuery` pulls
+   *    `key=value` pairs out first, `ftsQuery` keeps quoted phrases and
+   *    OR-joins the rest, so a natural-language query still matches, and
+   *    bm25 ranks the strongest match first.
+   * 2. **`LIKE` scan** when the text has no indexable terms (stop words or
+   *    punctuation only) — a fallback that still answers instead of an
+   *    empty result.
+   * 3. **Filter-only listing** when there is no free text at all — the
+   *    natural backing for "everything with status X" views.
+   *
+   * Text and filters compose (AND): an option filter, a `key=value` pair in
+   * the query and the project scope must all hold, while the terms *inside*
+   * the text rank with OR. A `project=` pair that does not equal
+   * `options.projectKey` simply yields no hits — search never crosses the
+   * project boundary (ADR-2). Archived nodes stay out unless asked for.
+   *
+   * Read-only: no fence, no transaction, nothing to audit.
+   */
+  search(query: string, options: SearchOptions): SearchHit[] {
+    const projectKey = requireText(options.projectKey, "project key");
+    if (typeof query !== "string") {
+      throw new Error("search query must be a string");
+    }
+    const limit = clampLimit(options.limit);
+    const parsed = parseQuery(query);
+    const kinds = mergeUnique(
+      (options.kinds ?? []).map((value) => parseKind(value)),
+      parsed.filters.kinds.map((value) => parseKind(value)),
+    );
+    const statuses = mergeUnique(
+      (options.statuses ?? []).map((value) => parseStatus(value)),
+      parsed.filters.statuses.map((value) => parseStatus(value)),
+    );
+
+    // Structured filters, shared by all three paths. `where` always holds at
+    // least the project scope, so no path can ever see another project.
+    const where: string[] = ["n.project_key = ?"];
+    const params: Array<string | number> = [projectKey];
+    if (!options.includeArchived) where.push("n.archived_at IS NULL");
+    if (kinds.length > 0) {
+      where.push(`n.kind IN (${kinds.map(() => "?").join(", ")})`);
+      params.push(...kinds);
+    }
+    if (statuses.length > 0) {
+      where.push(`n.status IN (${statuses.map(() => "?").join(", ")})`);
+      params.push(...statuses);
+    }
+    if (parsed.filters.project !== null) {
+      where.push("n.project_key = ?");
+      params.push(parsed.filters.project);
+    }
+    const filtersSql = where.map((clause) => ` AND ${clause}`).join("");
+
+    const match = parsed.match;
+    let rows: Array<{ rowid: number; id: string; score: number }>;
+    if (match !== null) {
+      rows = this.db
+        .prepare(
+          `SELECT n.rowid AS rowid, n.id AS id, bm25(node_fts) AS score
+           FROM node_fts JOIN nodes n ON n.rowid = node_fts.rowid
+           WHERE node_fts MATCH ?${filtersSql}
+           ORDER BY score ASC, n.id ASC
+           LIMIT ?`,
+        )
+        .all(match, ...params, limit) as Array<{
+        rowid: number;
+        id: string;
+        score: number;
+      }>;
+    } else {
+      const freeText = parsed.freeText.trim();
+      const whereSql = ` WHERE ${where.join(" AND ")}`;
+      if (freeText.length > 0) {
+        // No indexable terms, but there is text: substring scan over the
+        // indexed columns. Unranked, so recency decides. Metacharacters are
+        // escaped, so the fallback finds the text the caller typed instead
+        // of treating `"_"` as "any single character".
+        const like = `%${escapeLikePattern(freeText)}%`;
+        rows = this.db
+          .prepare(
+            `SELECT n.rowid AS rowid, n.id AS id, 0 AS score
+             FROM nodes n
+             WHERE (n.name LIKE ? ESCAPE '\\'
+                    OR n.description LIKE ? ESCAPE '\\'
+                    OR n.payload LIKE ? ESCAPE '\\')
+               AND ${where.join(" AND ")}
+             ORDER BY n.updated_at DESC, n.id ASC
+             LIMIT ?`,
+          )
+          .all(like, like, like, ...params, limit) as Array<{
+          rowid: number;
+          id: string;
+          score: number;
+        }>;
+      } else {
+        rows = this.db
+          .prepare(
+            `SELECT n.rowid AS rowid, n.id AS id, 0 AS score
+             FROM nodes n${whereSql}
+             ORDER BY n.updated_at DESC, n.id ASC
+             LIMIT ?`,
+          )
+          .all(...params, limit) as Array<{
+          rowid: number;
+          id: string;
+          score: number;
+        }>;
+      }
+    }
+
+    // Hydrate in rank order; the same row can be re-read cheaply, and a node
+    // deleted between the two statements is simply skipped.
+    const nodeStmt = this.db.prepare(
+      "SELECT * FROM nodes WHERE project_key = ? AND id = ?",
+    );
+    const hits: SearchHit[] = [];
+    for (const row of rows) {
+      const nodeRow = nodeStmt.get(projectKey, row.id) as NodeRow | undefined;
+      if (!nodeRow) continue;
+      hits.push({
+        node: rowToNode(nodeRow),
+        score: Number(row.score),
+        snippet: match !== null ? this.snippetFor(row.rowid, match) : null,
+      });
+    }
+    return hits;
+  }
+
+  /**
+   * Highlighted description preview for a matched row (`null` when the
+   * description is empty or the row no longer matches). A failure here must
+   * never fail the search itself — the snippet is a nicety, the hits are not.
+   */
+  private snippetFor(rowid: number, match: string): string | null {
+    try {
+      const row = this.db
+        .prepare(
+          "SELECT snippet(node_fts, 1, '[…]', '[…]', '…', 12) AS s FROM node_fts WHERE rowid = ? AND node_fts MATCH ?",
+        )
+        .get(rowid, match) as { s?: string } | undefined;
+      return row?.s ? row.s : null;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Idempotent: plugin cleanup can run more than once (disable, reload,
    * removal), and a second close must not throw.
@@ -873,4 +1065,196 @@ function requireText(value: string, label: string): string {
     throw new Error(`${label} must not be empty`);
   }
   return value;
+}
+
+// ---------------------------------------------------------------------------
+// Query parsing and FTS5 expression building (stage B4)
+// ---------------------------------------------------------------------------
+
+/** Default and maximum result sizes: a search answers a question, it does not dump the tree. */
+const DEFAULT_SEARCH_LIMIT = 50;
+const MAX_SEARCH_LIMIT = 100;
+
+/** Clamps the requested limit to 1..100, rejecting nonsense loudly. */
+function clampLimit(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_SEARCH_LIMIT;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(
+      `search limit must be a finite number, got ${JSON.stringify(value)}`,
+    );
+  }
+  return Math.max(1, Math.min(MAX_SEARCH_LIMIT, Math.trunc(value)));
+}
+
+/** De-duplicates filter lists while preserving order (options ∪ query). */
+function mergeUnique<T>(...lists: readonly T[][]): T[] {
+  return [...new Set(lists.flat())];
+}
+
+/**
+ * Escapes the LIKE metacharacters (`%`, `_` and the escape character
+ * itself) so the fallback scans for the literal text the caller typed:
+ * without this a query of `_` would match every node with a name longer
+ * than zero characters.
+ */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/**
+ * Stop words dropped from free-text queries. FTS5 ships no stop-word list,
+ * and a term inside an OR-joined query *does* match documents that only
+ * contain that word — so without this list a natural-language query
+ * ("the bug where login fails" / "где ошибка в экспорте") drags every
+ * document containing a function word into the results. English list from
+ * memory-flash; Russian list added here because this tree's content is
+ * written in Russian. Single-character tokens are dropped anyway by
+ * {@link MIN_TOKEN_LENGTH}.
+ */
+const STOP_WORDS = new Set([
+  // English (memory-flash list)
+  "a", "an", "the", "and", "or", "but", "if", "then", "else", "when", "where", "why", "how", "what", "which", "who", "whom", "whose",
+  "is", "are", "was", "were", "be", "been", "being", "am",
+  "do", "does", "did", "done", "doing",
+  "have", "has", "had", "having",
+  "will", "would", "shall", "should", "can", "could", "may", "might", "must",
+  "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their",
+  "this", "that", "these", "those",
+  "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "into", "onto", "over", "under", "between", "through", "during", "before", "after", "above", "below", "up", "down", "out", "off", "again", "once", "here", "there", "all", "any", "both", "each", "few", "more", "most", "other", "some", "such", "no", "not", "only", "own", "same", "so", "than", "too", "very", "just", "because", "until", "while", "about",
+  // Russian function words
+  "без", "более", "больше", "будет", "будто", "был", "была", "были", "было", "быть",
+  "вам", "вас", "вдруг", "ведь", "весь", "вот", "впрочем", "все", "всего", "всех", "всю", "вся", "вы",
+  "где", "даже", "для", "до", "другой",
+  "его", "ее", "если", "есть", "еще", "же", "за", "зачем", "здесь",
+  "из", "или", "им", "их",
+  "как", "какая", "какой", "конечно", "кто", "куда",
+  "лучше", "между", "меня", "мне", "много", "мог", "можно", "мой", "моя", "мы",
+  "над", "надо", "наш", "него", "нее", "нет", "ни", "нибудь", "никогда", "ним", "них", "ничего", "но", "ну", "нужно",
+  "об", "один", "он", "она", "они", "оно", "опять", "от",
+  "перед", "под", "после", "потом", "потому", "почти", "при", "про",
+  "раз", "разве", "сам", "свою", "себе", "себя", "сейчас", "сказал", "сначала", "со", "совсем",
+  "так", "такая", "также", "такой", "там", "тебя", "тем", "теперь", "то", "тогда", "того", "тоже", "только", "том", "тот", "тут", "ты",
+  "уже", "хоть",
+  "чего", "чем", "через", "что", "чтоб", "чтобы", "чуть",
+  "эта", "эти", "это", "я",
+]);
+
+/** Tokens shorter than this are dropped from the FTS query. */
+const MIN_TOKEN_LENGTH = 2;
+
+/** `key=value` pairs recognized inside a free-text search query. */
+const KEY_VALUE_PATTERN = /([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("[^"]*"|'[^']*'|\S+)/g;
+
+/** Strips one layer of quoting from a filter value (`"a b"` → `a b`). */
+function unquote(value: string): string {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+/** Result of {@link parseQuery}. */
+export interface ParsedQuery {
+  /**
+   * FTS5 MATCH expression built from the free-text terms; `null` when
+   * nothing indexable remains (the caller falls back to LIKE).
+   */
+  match: string | null;
+  /** The query with the recognized `key=value` filters removed. */
+  freeText: string;
+  /** Structured filters parsed out of the query text. */
+  filters: { kinds: string[]; statuses: string[]; project: string | null };
+}
+
+/**
+ * Splits a free-form query into an FTS5 MATCH expression and structured
+ * filters. Recognized pairs (`kind=`, `status=`, `project=`) become
+ * filters — a bare word on either side of an *unknown* pair is kept as
+ * search terms instead, never glued into one token: `version=1.2` searches
+ * for "version" and "1.2", not for "version1.2". The remaining free text
+ * goes to {@link ftsQuery}, so `kind=leaf export` means "export" ANDed with
+ * the kind filter rather than a search for the literal "kindleaf export".
+ *
+ * Kind and status values are lowercased (the enums are lowercase), so
+ * `Kind=Leaf` works; anything else stays readable as a validation error
+ * listing the accepted values.
+ */
+export function parseQuery(raw: string): ParsedQuery {
+  const filters: ParsedQuery["filters"] = {
+    kinds: [],
+    statuses: [],
+    project: null,
+  };
+  const replacements: Array<{ start: number; end: number; text: string }> = [];
+  const regex = new RegExp(KEY_VALUE_PATTERN.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw)) !== null) {
+    const key = match[1].toLowerCase();
+    const value = unquote(match[2]).trim();
+    if (value.length === 0) continue;
+    if (key === "project") {
+      filters.project = value;
+    } else if (key === "kind" || key === "kinds") {
+      filters.kinds.push(value.toLowerCase());
+    } else if (key === "status" || key === "statuses") {
+      filters.statuses.push(value.toLowerCase());
+    } else {
+      // Unknown filter: keep both sides as separate search terms.
+      replacements.push({
+        start: match.index,
+        end: regex.lastIndex,
+        text: `${match[1]} ${value}`,
+      });
+      continue;
+    }
+    replacements.push({ start: match.index, end: regex.lastIndex, text: " " });
+  }
+  let freeText = raw;
+  for (const { start, end, text } of replacements.reverse()) {
+    freeText = freeText.slice(0, start) + text + freeText.slice(end);
+  }
+  return { match: ftsQuery(freeText), freeText, filters };
+}
+
+/**
+ * A token is indexable when it is long enough, is not a stop word and
+ * contains at least one letter or digit. The last rule matters: a run of
+ * punctuation (`---`) would otherwise become a quoted phrase with zero
+ * tokens, which matches nothing *and* blocks the LIKE fallback — the query
+ * would silently return an empty result instead of scanning for the text.
+ */
+function isIndexable(token: string): boolean {
+  if (token.length < MIN_TOKEN_LENGTH) return false;
+  if (STOP_WORDS.has(token.toLowerCase())) return false;
+  return /[\p{L}\p{N}]/u.test(token);
+}
+
+/**
+ * Builds an FTS5 MATCH expression from a free-form query. Quoted phrases
+ * are preserved verbatim; single terms are stripped of anything that is not
+ * a letter, digit, underscore or hyphen (so `key:value` cannot turn into a
+ * column filter and `NEAR(` cannot turn into an operator), then OR-joined
+ * so bm25 ranks the best matches first. Everything is quoted, which is what
+ * neutralizes FTS5 syntax. Returns `null` when nothing indexable remains.
+ */
+export function ftsQuery(raw: string): string | null {
+  const terms: string[] = [];
+  const phraseRegex = /"([^"]+)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = phraseRegex.exec(raw)) !== null) {
+    const cleaned = match[1].trim();
+    if (!isIndexable(cleaned)) continue;
+    terms.push(`"${cleaned.replace(/"/g, '""')}"`);
+  }
+  const withoutPhrases = raw.replace(phraseRegex, " ");
+  for (const token of withoutPhrases.split(/\s+/)) {
+    const cleaned = token.replace(/[^\p{L}\p{N}_-]/gu, "");
+    if (!isIndexable(cleaned)) continue;
+    terms.push(`"${cleaned}"`);
+  }
+  return terms.length > 0 ? terms.join(" OR ") : null;
 }
