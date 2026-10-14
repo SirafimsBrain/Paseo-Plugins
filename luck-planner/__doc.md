@@ -1,10 +1,10 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.11.0`).** Stage **D2** (stdio MCP
-> server, deterministic bundle, revision-independent entry publication) is done and all
-> tests are green; block **D** continues with **D3** (agent injection + skill). Stages
-> A1–D2 are complete; blocks E–J are untouched. Nothing in this document is a released API:
-> the roadmap in §7 describes work that is still ahead.
+> **Development status: version in development (`0.12.0`).** Stage **D3** (agent injection,
+> session audit actor, skill installer) is done and all tests are green; **block D is
+> closed** — the next stage is **E1** (plugin RPC contracts). Stages A1–D3 are complete;
+> blocks E–J are untouched. Nothing in this document is a released API: the roadmap in §7
+> describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -428,7 +428,9 @@ Verified by `tests/growth.test.ts` (13 tests):
 | Command Center items + slash commands | `addCommandCenterItem`, `addSlashCommand` | E3 |
 | Settings screen (`injectIntoAgents`, `mcpServerName`, HTTP port, token, retention) | `defineSettings` / settings screen | E4 |
 | Plugin RPCs (`tree.get`, `node.detail`, `node.setStatus`, `goal.approve`, …) | `defineRpc` + `server.handle` | E1 |
-| MCP injection into agents | `server.before("agent.create")` | D3 |
+| MCP injection into agents | `server.before("agent.create")` + `agent.session_open` | D3 ✅ |
+| Settings (`injectIntoAgents`, `mcpServerName`) | `defineSettings` / `server.registerSettings` (values); settings screen | D3 ✅ / E4 |
+| Skill for coding agents (`SKILL.md` protocol + installer) | `server/skill.ts`, auto-install on plugin load | D3 ✅ |
 | Bundled stdio MCP server (`dist/mcp-server.js`) | `paseo-plugin.json` `mcp.entry` + `server/mcp-server.ts`, spawned by agents | D2 ✅ |
 | Dashboard HTTP server | daemon subprocess, started by the plugin lifecycle | F1 |
 | "Open dashboard" | `navigation.openBrowser` → `openExternalUrl` fallback | F2 |
@@ -524,6 +526,72 @@ contract in `tests/manifest.test.ts`:
   Known limitation, inherited: a path already stored in an existing agent's config is not
   rewritten by the host; agents created before publication existed must be recreated once.
 
+### Agent injection and skill (stage D3 — `shared/settings.ts`, `server/skill.ts`)
+
+The other half of ADR-3: every Paseo-created agent gets the bundled server, every audit row
+gets a real actor, and agents get a written protocol for keeping the tree. Verified by
+`tests/d3-injection.test.ts` (6), `tests/skill.test.ts` (7), the `serverName` case in
+`tests/mcp-server-e2e.test.ts`, and a live acceptance run on the daemon:
+
+- **`agent.create` before-hook** (`index.server.ts`) — registers
+  `config.mcpServers["luck-planner"] = injectedMcpConfig({ serverName })` when the
+  `injectIntoAgents` setting (default `true`) allows it. The entry is
+  `{ type: "stdio", command, args, env, alwaysLoad: true }`: `command`/`args` come from
+  `mcpServerCommand()` (the published revision-independent entry), and `env` carries
+  `LUCK_PLANNER_SERVER_NAME` (the `mcpServerName` setting → `serverInfo.name` in
+  `initialize`) plus `PASEO_HOME` when the daemon runs on a non-default home. The config
+  **key stays `luck-planner`** — it becomes the host tool prefix
+  (`luck-planner_luck_tree_*`), which `dispatchMcpTool` normalizes with
+  `/^luck[-_]planner_/`. The hook logs `MCP injected: <command> <args>` into
+  `paseo plugin logs luck-planner`, which is how the injection is confirmed live.
+- **`agent.session_open` before-hook — the audit actor** — `agent.create` cannot carry the
+  actor: the agent id does not exist yet when the create request is intercepted. The
+  session-open request does (`request.agentId`) and exposes `request.env`, so the hook sets
+  `LUCK_PLANNER_AGENT_ID=<agentId>`. Env semantics were verified against the installed
+  daemon (`app.asar`): stdio servers spawn with
+  `env: { ...process.env, ...runtimeSettings, ...launchEnv, ...config.env }` — the session
+  env (`launchEnv`) is the base and the config env only adds to it. Live acceptance: all
+  four audit rows of the run carry the real agent id, not `agent:unknown`.
+- **Settings** — `shared/settings.ts` (`defineSettings`, host scope): `injectIntoAgents`
+  (bool, default `true`) gates both hooks; `mcpServerName` (default `luck-planner`) reaches
+  the bundle through `env`. Hooks read them through `settings.read()` with schema defaults
+  as the fallback, so a settings race can never disable injection silently. The settings
+  screen arrives in E4.
+- **First-leaf bootstrap** — the acceptance exposed a hole in the D1 tool set: **no tool
+  creates roots or branches**, so an empty project could not receive its first leaf.
+  `luck_tree_upsert_leaf` without `parentId` now bootstraps the minimal skeleton
+  `root → trunk → branch("General")` and files the leaf under it; the root takes its name
+  from the last path segment of `projectKey`. The emptiness check runs inside
+  `store.ensureSkeletonBranch()`'s write transaction (`BEGIN IMMEDIATE`), so two racing
+  agent processes cannot both bootstrap, every skeleton node gets its `create` audit row,
+  and a parentless create on a project that already has a tree comes back as a readable
+  `parentId is required when the project already has a tree …` error. Asserted by two
+  dispatch tests; the live run bootstrapped from `roots: []` in one call.
+- **Skill (`server/skill.ts`)** — `SKILL.md` with YAML frontmatter: a *protocol*, not a
+  tool list — orient-then-write (context/search first, one fact one leaf), when a leaf is
+  worth creating, the status table with honest transition criteria, "revision and audit are
+  automatic — never manage them by hand", bees/bugs/goals (propose only, human approves),
+  growth, and the transport-failure rule ("tools briefly unavailable ≠ data gone"). The
+  installer mirrors memory-flash: seven targets (`~/.agents/skills`, `.claude`, `.codex`,
+  `.config/opencode`, `.qwen`, `.cline`, `.kilo`) with status/install/uninstall functions
+  exposed for the E4 screen. On every plugin load `ensureSkillInstalled()` installs into
+  targets whose directory **already exists** (an existing directory means that agent
+  convention is active) and rewrites only when the content differs — idempotent, and each
+  write is logged so `paseo plugin logs luck-planner` shows the install. Live acceptance:
+  all seven directories on this machine received the skill.
+- **Live acceptance (stage D3)** — a real agent created through `paseo run --provider
+  kilo/…` called `luck-planner_luck_tree_get_context` (`roots: []`),
+  `luck-planner_luck_tree_upsert_leaf` without `parentId` (skeleton + leaf created,
+  `draft`), and `luck-planner_luck_tree_history` (actor = its own agent id), and reported
+  the results. **Known provider limitation:** on **OpenCode** the session-delivered entry
+  appeared in the initial catalog and then disappeared after the provider rebuilt its tool
+  catalog mid-session (memory-flash 0.8.1 lesson: for OpenCode/Kilo a registration in the
+  provider's own MCP config file is strictly more reliable than the session-level entry);
+  Cline/Cursor/Codex CLI ignore session-delivered MCP servers altogether. Porting
+  memory-flash's config-file registrations (`opencode`/`kilo`/`cline`/`cursor`/`codex`) is
+  the candidate follow-up stage **D4**; `mcpServerCommand()`/`injectedMcpConfig()` are the
+  single source those writers will reuse.
+
 ### Dashboard HTTP API (planned, stage F1, read-only)
 
 `GET /health`, `GET /api/tree?project=` (nodes + bees + bugs + goals + growth in one graph-
@@ -536,17 +604,20 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development continues after stage D2.** Stages A1–D2 are complete and released as
-tagged versions up to `luck-planner@0.11.0`; block **C (domain semantics) is closed** and
-block **D (agent access)** is one stage from done — next is **D3** (agent injection +
-skill). Blocks E–J are untouched.
+**Status: development continues after stage D3 — block D is closed.** Stages A1–D3 are
+complete and released as tagged versions up to `luck-planner@0.12.0`; blocks **B (storage)**
+and **C (domain semantics)** are closed, and **block D (agent access)** closes with D3 —
+verified end-to-end on a live daemon (injection, actor, skill, first-leaf bootstrap). The
+next stage is **E1** (plugin RPC contracts); a candidate **D4** (config-file MCP
+registrations for OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may
+precede it. Blocks E–J are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
-| D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill |
+| D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |

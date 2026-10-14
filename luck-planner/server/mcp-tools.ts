@@ -145,8 +145,10 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     title: "Create or update a fact leaf",
     description:
       "Record a planned or confirmed fact. Without leafId creates a leaf " +
-      "under parentId (name required, status defaults to draft). With " +
-      "leafId updates that leaf: any of name/description/version/payload, " +
+      "under parentId (name required, status defaults to draft); omitting " +
+      "parentId is allowed only for the very first leaf of a fresh project, " +
+      "which bootstraps the skeleton root → trunk → branch automatically. " +
+      "With leafId updates that leaf: any of name/description/version/payload, " +
       "plus an optional status transition in the same call. payload carries " +
       "the plan/fact pair, version the fact/code version. Follow the leaf " +
       "state machine: draft → ready → claimed → in_progress → done.",
@@ -155,7 +157,9 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       properties: {
         projectKey: PROJECT_KEY,
         leafId: str("Existing leaf to update. Omit to create a new leaf."),
-        parentId: str("Branch/subbranch to create the new leaf under."),
+        parentId: str(
+          "Branch/subbranch to create the new leaf under. Omit only for the first leaf of a fresh project (bootstraps the skeleton).",
+        ),
         name: str("Leaf name (required when creating)."),
         description: str("Longer description of the fact."),
         version: str("Fact/code version this leaf describes."),
@@ -600,15 +604,32 @@ function dispatchUpsertLeaf(
     return text({ created: false, leaf });
   }
 
-  if (value.parentId === undefined) {
-    return error("parentId is required when creating a leaf (leafId omitted)");
+  let parentId: string;
+  if (value.parentId !== undefined) {
+    parentId = value.parentId;
+  } else {
+    // Bootstrap: no tool creates roots or branches, so the very first leaf
+    // of a fresh project creates the minimal skeleton itself (the store
+    // re-checks emptiness inside its write transaction, so racing agents
+    // cannot both bootstrap). Every later leaf must name its parent.
+    if (store.listChildren(value.projectKey, null).length > 0) {
+      return error(
+        "parentId is required when the project already has a tree — call " +
+          "luck_tree_get_context and pass the parentId of a branch or subbranch " +
+          "(only the very first leaf may omit it)",
+      );
+    }
+    parentId = store.ensureSkeletonBranch({
+      projectKey: value.projectKey,
+      actor,
+    }).id;
   }
   if (value.name === undefined) {
     return error("name is required when creating a leaf (leafId omitted)");
   }
   const leaf = store.createNode({
     projectKey: value.projectKey,
-    parentId: value.parentId,
+    parentId,
     kind: "leaf",
     name: value.name,
     description: value.description,

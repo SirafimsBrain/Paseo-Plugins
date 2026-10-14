@@ -68,8 +68,11 @@ export type SearchInput = z.infer<typeof searchInputSchema>;
  * `luck_tree_upsert_leaf`: one call to record a planned or confirmed fact.
  * With `leafId` it updates that leaf (any mutable field plus an optional
  * status transition in the same call); without it, it creates a leaf under
- * `parentId` — `name` is required for a create. `payload` carries the
- * plan/fact pair, `version` the code/fact version (`__doc.md` §5).
+ * `parentId` — `name` is required for a create, and omitting `parentId` is
+ * allowed only for the very first leaf of a fresh project (the store then
+ * bootstraps the skeleton root → trunk → branch, stage D3). `payload`
+ * carries the plan/fact pair, `version` the code/fact version
+ * (`__doc.md` §5).
  */
 export const upsertLeafInputSchema = z.object({
   projectKey: projectKeySchema,

@@ -345,11 +345,14 @@ describe("luck_tree_upsert_leaf", () => {
     expect(result.leaf.revision).toBe(1);
   });
 
-  it("rejects creating without parentId or name", () => {
+  it("rejects creating without name, and without parentId once a tree exists", () => {
     const store = openStore();
+    const { branch } = seedTree(store);
+    // The project already has a tree — a parentless create is refused with
+    // guidance instead of silently picking a place for the leaf.
     expectError(
       call(store, "luck_tree_upsert_leaf", { projectKey: P, name: "x" }),
-      /parentId is required/,
+      /parentId is required when the project already has a tree/,
     );
     expectError(
       call(store, "luck_tree_upsert_leaf", {
@@ -357,6 +360,44 @@ describe("luck_tree_upsert_leaf", () => {
         parentId: "00000000-0000-4000-8000-000000000000",
       }),
       /name is required/,
+    );
+    // Neither rejected call wrote anything.
+    expect(store.listChildren(P, null)).toHaveLength(1);
+    expect(store.listChildren(P, branch.id)).toHaveLength(2);
+  });
+
+  it("bootstraps the skeleton for the very first leaf of a fresh project", () => {
+    const store = openStore();
+    const result = payload<{ created: boolean; leaf: Node }>(
+      call(store, "luck_tree_upsert_leaf", {
+        projectKey: P,
+        name: "first fact",
+        description: "the bootstrap leaf",
+      }),
+    );
+    expect(result.created).toBe(true);
+    // One call produced root → trunk → branch → leaf (no tool creates
+    // roots/branches, so the first leaf has to grow the skeleton itself).
+    const path = store.getNodePath(P, result.leaf.id);
+    expect(path.map((node) => node.kind)).toEqual([
+      "root",
+      "trunk",
+      "branch",
+      "leaf",
+    ]);
+    // The root is named after the project key: /projects/demo → demo.
+    expect(path[0].name).toBe("demo");
+    // The skeleton is not a backdoor around the audit rule.
+    for (const node of path) {
+      const history = store.listHistory(P, node.id);
+      expect(history).toHaveLength(1);
+      expect(history[0].actor).toBe(ACTOR);
+      expect(history[0].action).toBe("create");
+    }
+    // Now that a tree exists, the next parentless create gets guidance.
+    expectError(
+      call(store, "luck_tree_upsert_leaf", { projectKey: P, name: "second" }),
+      /parentId is required when the project already has a tree/,
     );
   });
 

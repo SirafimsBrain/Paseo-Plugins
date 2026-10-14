@@ -41,6 +41,54 @@ export function mcpServerCommand(): { command: string; args: string[] } {
   return { command: resolveNodeCommand(), args: [resolveMcpEntry()] };
 }
 
+/**
+ * Config key the server is registered under in `request.config.mcpServers`
+ * (stage D3). The key becomes the host's tool-name prefix — agents call
+ * `luck-planner_luck_tree_*` — which `dispatchMcpTool` normalizes back to
+ * the bare tool name, so the key must keep matching
+ * `/^luck[-_]planner_/` in `server/mcp-tools.ts`.
+ */
+export const MCP_SERVER_KEY = "luck-planner";
+
+/**
+ * The `mcpServers` entry injected into every Paseo-created agent
+ * (`agent.create` before-hook, stage D3).
+ *
+ * Env semantics verified against the installed daemon (`app.asar`): the
+ * stdio transport is spawned with `env: { ...sessionEnv, ...config.env }`,
+ * i.e. the session environment (which carries `LUCK_PLANNER_AGENT_ID` from
+ * the `agent.session_open` hook) is the base and this map only adds to it.
+ * `PASEO_HOME` is forwarded when set so a non-default daemon home survives
+ * even a provider that passes `config.env` through on its own.
+ */
+export function injectedMcpConfig(options: {
+  serverName: string;
+}): {
+  type: "stdio";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  alwaysLoad: true;
+} {
+  const { command, args } = mcpServerCommand();
+  const env: Record<string, string> = {
+    LUCK_PLANNER_SERVER_NAME: options.serverName,
+  };
+  if (process.env.PASEO_HOME) env.PASEO_HOME = process.env.PASEO_HOME;
+  return { type: "stdio", command, args, env, alwaysLoad: true };
+}
+
+/**
+ * Session environment that identifies the agent to the MCP server
+ * (`agent.session_open` before-hook, stage D3): the spawned server reads it
+ * as `LUCK_PLANNER_AGENT_ID` and stamps every audit row it writes with the
+ * agent that called the tool. `agent.create` cannot carry it — the agent id
+ * does not exist yet when the create request is intercepted.
+ */
+export function sessionActorEnv(agentId: string): Record<string, string> {
+  return { LUCK_PLANNER_AGENT_ID: agentId };
+}
+
 function resolveNodeCommand(): string {
   // A plain node binary — the ideal case (plugin host run by node).
   if (

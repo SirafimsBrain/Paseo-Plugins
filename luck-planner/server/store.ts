@@ -878,6 +878,68 @@ export class LuckPlannerStore {
     );
   }
 
+  /**
+   * The branch a first leaf hangs under, creating the minimal skeleton
+   * `root → trunk → branch` when the project has no live tree yet (stage D3).
+   *
+   * No MCP tool creates roots or branches, so without this an empty project
+   * could never receive its first leaf. The emptiness check runs inside the
+   * write transaction (`BEGIN IMMEDIATE` serializes writers), so two agent
+   * processes racing on a fresh project cannot both bootstrap the tree.
+   * Every created node gets a full audit row — the skeleton is not a
+   * backdoor around the history rule.
+   */
+  ensureSkeletonBranch(input: { projectKey: string; actor: string }): Node {
+    const projectKey = requireText(input.projectKey, "project key");
+    const actor = requireText(input.actor, "actor");
+
+    return this.write(() =>
+      this.transaction(() => {
+        const existing = this.db
+          .prepare(
+            `SELECT id FROM nodes
+              WHERE project_key = ? AND parent_id IS NULL AND archived_at IS NULL
+              LIMIT 1`,
+          )
+          .all(projectKey);
+        if (existing.length > 0) {
+          throw new Error(
+            "the project already has a tree — omit parentId only for the very first " +
+              "leaf; call luck_tree_get_context and pass the parentId of a branch " +
+              "or subbranch",
+          );
+        }
+        const root = this.createNode({
+          projectKey,
+          parentId: null,
+          kind: "root",
+          name: projectNameFromKey(projectKey),
+          description:
+            "Project root (tech stack). Created automatically with the first leaf.",
+          actor,
+        });
+        const trunk = this.createNode({
+          projectKey,
+          parentId: root.id,
+          kind: "trunk",
+          name: "Trunk",
+          description:
+            "Links platforms/libraries with the code. Created automatically with the first leaf.",
+          actor,
+        });
+        return this.createNode({
+          projectKey,
+          parentId: trunk.id,
+          kind: "branch",
+          name: "General",
+          description:
+            "Default module branch. Created automatically with the first leaf.",
+          actor,
+        });
+      }),
+    );
+  }
+
   /** Updates name/description/version/payload in place (one revision bump). */
   updateNode(input: UpdateNodeInput): Node {
     const actor = requireText(input.actor, "actor");
@@ -2952,6 +3014,16 @@ function requireText(value: string, label: string): string {
     throw new Error(`${label} must not be empty`);
   }
   return value;
+}
+
+/**
+ * Last segment of a project key — the name for an auto-created skeleton
+ * root (`/repos/my-app` → `my-app`).
+ */
+function projectNameFromKey(projectKey: string): string {
+  const parts = projectKey.split(/[\\/]+/).filter((part) => part.length > 0);
+  const last = parts[parts.length - 1] ?? "";
+  return last.length > 0 ? last : "project";
 }
 
 /**

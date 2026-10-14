@@ -28,12 +28,13 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-function startServer(home: string) {
+function startServer(home: string, extraEnv: Record<string, string> = {}) {
   const child = spawn(process.execPath, [SERVER_BUNDLE], {
     env: {
       ...process.env,
       PASEO_HOME: home,
       LUCK_PLANNER_AGENT_ID: "e2e-agent",
+      ...extraEnv,
     },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -120,6 +121,27 @@ function startServer(home: string) {
 }
 
 describe("MCP server end-to-end (real process)", () => {
+  it("reports the mcpServerName setting from LUCK_PLANNER_SERVER_NAME", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "luck-e2e-name-"));
+    const server = startServer(home, { LUCK_PLANNER_SERVER_NAME: "custom-luck" });
+    try {
+      const init = await server.request("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "e2e", version: "0.0.1" },
+      });
+      const info = init.serverInfo as { name: string; version: string };
+      // Stage D3: the injected config carries the setting through env.
+      expect(info.name).toBe("custom-luck");
+      expect(info.version).toBe(PKG_VERSION.version);
+      // stdout stayed protocol-only during the override handshake.
+      expect(server.unparsed()).toBe(0);
+    } finally {
+      server.stop();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 30000);
+
   it("rebuilds the bundle deterministically", () => {
     const hash = (): string => {
       execFileSync(process.execPath, [path.join(ROOT, "scripts", "bundle.mjs")], {

@@ -30,10 +30,21 @@ export const PROTOCOL_VERSION = "2024-11-05";
  * `package.json` by `tests/mcp-server-e2e.test.ts`, so every version bump
  * must update this constant — the handshake is what agents see.
  */
-export const SERVER_VERSION = "0.11.0";
+export const SERVER_VERSION = "0.12.0";
 
-/** Server name agents see in `initialize` and in their MCP config. */
+/**
+ * Default server name agents see in `initialize`. The `mcpServerName`
+ * setting (stage D3) overrides it through `LUCK_PLANNER_SERVER_NAME`, which
+ * the injected MCP config carries in `env` — the config key (and therefore
+ * the tool-name prefix) always stays `luck-planner`.
+ */
 export const SERVER_NAME = "luck-planner";
+
+/** The name this process reports: the `mcpServerName` setting, or the default. */
+function reportedServerName(): string {
+  const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();
+  return configured.length > 0 ? configured : SERVER_NAME;
+}
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -65,7 +76,7 @@ function handleJsonRpcRequest(request: JsonRpcRequest): JsonRpcResponse | null {
         result: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+          serverInfo: { name: reportedServerName(), version: SERVER_VERSION },
         },
       };
     case "notifications/initialized":

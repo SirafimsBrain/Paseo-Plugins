@@ -1,8 +1,8 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.11.0`).** Этап **D2** (stdio MCP-сервер + бандл)
-> выполнен, тесты зелёные (**блок D в работе**). Следующий этап — **D3** (инъекция в
-> агентов + SKILL.md). Этапы A1–D2 закрыты и помечены ниже; блоки E–J не начинались.
+> **Статус: версия в разработке (`0.12.0`).** Этап **D3** (инъекция в агентов + SKILL.md)
+> выполнен, тесты зелёные (**блок D закрыт**). Следующий этап — **E1** (RPC-контракты).
+> Этапы A1–D3 закрыты и помечены ниже; блоки E–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -213,7 +213,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - `server/mcp-server.ts` (JSON-RPC 2.0, `initialize`/`tools/list`/`tools/call`, stdout только для протокола), `scripts/bundle.mjs` (esbuild → `dist/mcp-server.js` на Node builtins), `build` в `paseo-plugin.json` (строго `string[][]`!), `mcp.entry`; публикация entry по revision-independent пути (перенос урока memory-flash 0.7.1: ревизионный uuid каталог удаляется при update).
 - Приёмка: e2e-тест реального спавна `dist/mcp-server.js` + `initialize` handshake + `tools/call`; повторный `npm run bundle` детерминирован.
 
-**D3. Инъекция в агентов + настройки + SKILL.md** → `0.12.0`
+**D3. Инъекция в агентов + настройки + SKILL.md** → `0.12.0` ✅
 - `server.before("agent.create")`: `config.mcpServers["luck-planner"] = {type:"stdio", command, args}` (резолв реального node-бинаря, как memory-flash `resolveNodeCommand`), настройки `injectIntoAgents`, `mcpServerName`. `server/skill.ts`: SKILL.md (как вести дерево: когда создавать лист, когда переводить статус, что писать в revision/аудит) + установщик в каталоги скиллов агентов.
 - Приёмка: `paseo plugin logs` подтверждает инъекцию; агент в реальной сессии вызывает `luck_tree_search` и создаёт лист; скилл устанавливается.
 
