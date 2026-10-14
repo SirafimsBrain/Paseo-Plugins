@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -11,6 +11,8 @@ const manifest = JSON.parse(
   id: string;
   description: string;
   requirements: { paseo: string };
+  build?: unknown;
+  mcp?: { entry?: unknown };
 };
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   version: string;
@@ -41,5 +43,31 @@ describe("plugin manifest", () => {
 
   it("versions as MAJOR.MINOR.PATCH", () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  // Stage D2: the daemon runs `build` without a shell — each step must be
+  // an argv array. A flat "npm run bundle" string fails manifest validation
+  // ("expected array, received string" at build[0]) and the plugin shows as
+  // failed (memory-flash lesson, __doc.md §6).
+  it("declares build steps as non-empty string arrays", () => {
+    expect(Array.isArray(manifest.build)).toBe(true);
+    const steps = manifest.build as unknown[];
+    expect(steps.length).toBeGreaterThan(0);
+    for (const step of steps) {
+      expect(Array.isArray(step)).toBe(true);
+      const argv = step as unknown[];
+      expect(argv.length).toBeGreaterThan(0);
+      for (const arg of argv) expect(typeof arg).toBe("string");
+    }
+    // The bundle step must exist — agents spawn dist/mcp-server.js.
+    expect(steps).toContainEqual(["npm", "run", "bundle"]);
+  });
+
+  it("declares an MCP entry that the bundle step produces", () => {
+    expect(manifest.mcp?.entry).toBe("dist/mcp-server.js");
+    // `pretest` bundles before every suite; a raw `vitest run` on a fresh
+    // checkout needs `npm run bundle` first (same precondition as the e2e
+    // spawn test).
+    expect(existsSync(join(root, "dist", "mcp-server.js"))).toBe(true);
   });
 });

@@ -1,8 +1,8 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.10.0`).** Этап **D1** (MCP-контракты + dispatch) выполнен,
-> тесты зелёные (**блок D открыт**). Следующий этап — **D2** (stdio MCP-сервер + бандл).
-> Этапы A1–D1 закрыты и помечены ниже; блоки E–J не начинались.
+> **Статус: версия в разработке (`0.11.0`).** Этап **D2** (stdio MCP-сервер + бандл)
+> выполнен, тесты зелёные (**блок D в работе**). Следующий этап — **D3** (инъекция в
+> агентов + SKILL.md). Этапы A1–D2 закрыты и помечены ниже; блоки E–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -209,7 +209,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - `shared/tools.ts` (zod) + `server/mcp-tools.ts` (транспорт-независимый): `luck_tree_get_context` (путь корень→…→лист + соседние факты — «агент спускается на уровень ствола»), `luck_tree_search`, `luck_tree_upsert_leaf` (план/факт + версия), `luck_tree_add_bee`, `luck_tree_report_bug`, `luck_tree_set_goal` (только draft/proposed), `luck_tree_update_growth`, `luck_tree_history`.
 - Приёмка: диспатч-тесты на каждый инструмент (валидация входа, понятные тексты ошибок), ничего не пишет мимо `project_key`.
 
-**D2. stdio MCP-сервер + бандл** → `0.11.0`
+**D2. stdio MCP-сервер + бандл** → `0.11.0` ✅
 - `server/mcp-server.ts` (JSON-RPC 2.0, `initialize`/`tools/list`/`tools/call`, stdout только для протокола), `scripts/bundle.mjs` (esbuild → `dist/mcp-server.js` на Node builtins), `build` в `paseo-plugin.json` (строго `string[][]`!), `mcp.entry`; публикация entry по revision-independent пути (перенос урока memory-flash 0.7.1: ревизионный uuid каталог удаляется при update).
 - Приёмка: e2e-тест реального спавна `dist/mcp-server.js` + `initialize` handshake + `tools/call`; повторный `npm run bundle` детерминирован.
 

@@ -1,10 +1,10 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.10.0`).** Stage **D1** (MCP tool
-> contracts and transport-independent dispatch) is done and all tests are green; block **D is
-> open**. The next stage is **D2** (stdio MCP server + bundle). Stages A1–D1 are complete;
-> blocks E–J are untouched. Nothing in this document is a released API: the roadmap in §7
-> describes work that is still ahead.
+> **Development status: version in development (`0.11.0`).** Stage **D2** (stdio MCP
+> server, deterministic bundle, revision-independent entry publication) is done and all
+> tests are green; block **D** continues with **D3** (agent injection + skill). Stages
+> A1–D2 are complete; blocks E–J are untouched. Nothing in this document is a released API:
+> the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -429,6 +429,7 @@ Verified by `tests/growth.test.ts` (13 tests):
 | Settings screen (`injectIntoAgents`, `mcpServerName`, HTTP port, token, retention) | `defineSettings` / settings screen | E4 |
 | Plugin RPCs (`tree.get`, `node.detail`, `node.setStatus`, `goal.approve`, …) | `defineRpc` + `server.handle` | E1 |
 | MCP injection into agents | `server.before("agent.create")` | D3 |
+| Bundled stdio MCP server (`dist/mcp-server.js`) | `paseo-plugin.json` `mcp.entry` + `server/mcp-server.ts`, spawned by agents | D2 ✅ |
 | Dashboard HTTP server | daemon subprocess, started by the plugin lifecycle | F1 |
 | "Open dashboard" | `navigation.openBrowser` → `openExternalUrl` fallback | F2 |
 | Agent timeline rows (goal approved, leaf done) | `paseo.agents.ref(id).timeline.append` (optional) | H2 |
@@ -474,6 +475,55 @@ Conventions:
   `defaultActor` (the agent id the stdio server will be launched with in D2), then
   `agent:unknown` — the audit trail is never empty.
 
+### stdio MCP server (stage D2 — `server/mcp-server.ts`, `server/mcp-launch.ts`)
+
+The transport half of ADR-3. Verified by `tests/mcp-server-e2e.test.ts` (a real spawn of the
+built bundle) and `tests/mcp-launch.test.ts` (6 publication tests), plus the manifest
+contract in `tests/manifest.test.ts`:
+
+- **Protocol** — newline-delimited JSON-RPC 2.0 over stdin/stdout: `initialize` (protocol
+  `2024-11-05`, `serverInfo` name `luck-planner`), `notifications/initialized`, `ping`,
+  `tools/list` (the eight `MCP_TOOLS`), `tools/call` (delegates to `dispatchMcpTool`).
+  Unknown methods answer `-32601`, unparseable lines `-32700`, notifications get no
+  response. **stdout carries the protocol and nothing else** — the ready line and any
+  tool-failure diagnostics go to stderr: one stray log line corrupts the client's framing
+  and surfaces as `Connection closed` on a perfectly healthy server (memory-flash lesson).
+  MCP semantics live next to the framing because there is exactly one transport: the
+  dashboard HTTP server (F1) is read-only REST, not an MCP endpoint.
+- **Actor** — the server reads `LUCK_PLANNER_AGENT_ID` at startup and uses it as the
+  dispatch default, so every audit row written through MCP names the agent that spawned the
+  server (stage D3 sets the variable per agent; the e2e asserts `createdBy`).
+- **Version guard** — `SERVER_VERSION` in `mcp-server.ts` must equal `package.json`'s
+  version; the e2e handshake asserts it, so every release bump updates the constant agents
+  see or the suite fails.
+- **Bundle** — `scripts/bundle.mjs` (esbuild → single-file `dist/mcp-server.js`, Node
+  built-ins external, ESM banner for CJS built-ins, no sourcemap). The suite rebuilds twice
+  and asserts byte-identical output; `pretest` runs the script so the spawn always sees a
+  fresh build even under a raw `vitest run`.
+- **Manifest** — `paseo-plugin.json` gains `build: [["npm","ci"],["npm","run","bundle"]]`
+  as **argv arrays**: the daemon runs each step without a shell, and a flat
+  `"build": ["npm run bundle"]` fails manifest validation (`expected array, received
+  string` at `build[0]`) leaving the plugin `failed` — the memory-flash lesson, now
+  asserted by the manifest tests. `mcp.entry: "dist/mcp-server.js"` lets the daemon locate
+  the entry for agent injection (D3).
+- **Revision-independent publication (`server/mcp-launch.ts`)** — the install directory
+  carries a per-revision uuid (`plugins/<id>/<uuid>/checkout/<plugin>`) that the daemon
+  deletes on every update, while an agent re-spawns the entry path baked into its config on
+  every later turn; the first update after an agent was created used to delete the entry
+  out from under it (node exits `MODULE_NOT_FOUND` before the handshake → `Connection
+  closed` on every turn — the measured memory-flash 0.7.1 failure). `resolveMcpEntry()`
+  finds the bundle (`plugins.luck-planner.path` in `$PASEO_HOME/config.json` first, then
+  `__dirname`/`import.meta.url` fallbacks) and publishes it at
+  `$PASEO_HOME/plugins/luck-planner/mcp-server.js` — a revision-independent path in the
+  plugin's data directory, removed only with the plugin itself — through symlink → temp
+  name → `rename` (atomic, so a spawn mid-update reads old or new, never missing), with a
+  copy fallback and `realpath`-based idempotence. `index.server.ts` runs it on **every
+  plugin load**, keeping already-created agents working after an update. `mcpServerCommand()`
+  pairs the entry with `resolveNodeCommand()` (real `node`: `process.execPath`, sibling
+  `node`, PATH scan, plain `node` last) — the single source the D3 injection will use.
+  Known limitation, inherited: a path already stored in an existing agent's config is not
+  rewritten by the host; agents created before publication existed must be recreated once.
+
 ### Dashboard HTTP API (planned, stage F1, read-only)
 
 `GET /health`, `GET /api/tree?project=` (nodes + bees + bugs + goals + growth in one graph-
@@ -486,17 +536,17 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development continues after stage D1.** Stages A1–D1 are complete and released as
-tagged versions up to `luck-planner@0.10.0`; block **C (domain semantics) is closed** and
-block **D (agent access) is open** — next is **D2** (stdio MCP server + bundle). Blocks E–J
-are untouched.
+**Status: development continues after stage D2.** Stages A1–D2 are complete and released as
+tagged versions up to `luck-planner@0.11.0`; block **C (domain semantics) is closed** and
+block **D (agent access)** is one stage from done — next is **D3** (agent injection +
+skill). Blocks E–J are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
-| D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle, agent injection + skill |
+| D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |

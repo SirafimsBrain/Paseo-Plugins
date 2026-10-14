@@ -136,9 +136,18 @@ export const SCHEMA_VERSION = 1;
  * luck-planner/luck-planner.db`, falling back to `~/.paseo` (the same
  * convention memory-flash and bunny-search use for plugin data).
  */
+/**
+ * The Paseo home directory: `$PASEO_HOME`, falling back to `~/.paseo`
+ * (the same convention memory-flash and bunny-search use for plugin
+ * data). Exported because every plugin-data path — the database here,
+ * the published MCP entry (`mcp-launch.ts`) — must agree on it.
+ */
+export function paseoHome(): string {
+  return process.env.PASEO_HOME ?? path.join(os.homedir(), ".paseo");
+}
+
 export function defaultDbPath(): string {
-  const home = process.env.PASEO_HOME ?? path.join(os.homedir(), ".paseo");
-  return path.join(home, "plugins", "luck-planner", "luck-planner.db");
+  return path.join(paseoHome(), "plugins", "luck-planner", "luck-planner.db");
 }
 
 export interface StoreOptions {

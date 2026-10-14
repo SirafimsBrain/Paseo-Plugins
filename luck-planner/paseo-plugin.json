@@ -3,5 +3,19 @@
   "description": "Project planning tree for coding agents: tech-stack root, module branches, fact leaves with statuses, influence links, incident bugs, high goals and growth rates, with 2D/3D dashboards.",
   "requirements": {
     "paseo": ">=0.11.0"
+  },
+  "build": [
+    [
+      "npm",
+      "ci"
+    ],
+    [
+      "npm",
+      "run",
+      "bundle"
+    ]
+  ],
+  "mcp": {
+    "entry": "dist/mcp-server.js"
   }
 }
