@@ -686,6 +686,54 @@ export class LuckPlannerStore {
     return rows.map(rowToHistory);
   }
 
+  /**
+   * Live direct children of a node, oldest first. `parentId: null` lists
+   * the project's roots — how the MCP context tool lets an agent start at
+   * the tech-stack level and descend (stage D1). Archived children stay
+   * out: context describes the tree an agent may actually work on.
+   * Read-only: no fence, no transaction, nothing to audit.
+   */
+  listChildren(projectKey: string, parentId: string | null): Node[] {
+    const rows =
+      parentId === null
+        ? (this.db
+            .prepare(
+              `SELECT * FROM nodes
+                WHERE project_key = ? AND parent_id IS NULL AND archived_at IS NULL
+                ORDER BY created_at, id`,
+            )
+            .all(projectKey) as unknown as NodeRow[])
+        : (this.db
+            .prepare(
+              `SELECT * FROM nodes
+                WHERE project_key = ? AND parent_id = ? AND archived_at IS NULL
+                ORDER BY created_at, id`,
+            )
+            .all(projectKey, parentId) as unknown as NodeRow[]);
+    return rows.map(rowToNode);
+  }
+
+  /**
+   * The ancestor chain of a node, root first, ending with the node itself
+   * — the "where am I" breadcrumb the MCP context tool returns so an agent
+   * can see how a fact hangs off the tech stack. An unknown id yields an
+   * empty path; a corrupt parent chain terminates instead of looping.
+   * Read-only.
+   */
+  getNodePath(projectKey: string, id: string): Node[] {
+    const path: Node[] = [];
+    const seen = new Set<string>();
+    let currentId: string | null = id;
+    while (currentId !== null && !seen.has(currentId)) {
+      seen.add(currentId);
+      const node = this.getNode(projectKey, currentId);
+      if (!node) break;
+      path.unshift(node);
+      currentId = node.parentId;
+    }
+    return path;
+  }
+
   // -------------------------------------------------------------------------
   // Mutations (stage B3): every one bumps `revision`, appends a history row
   // and runs inside a transaction behind the write fence.

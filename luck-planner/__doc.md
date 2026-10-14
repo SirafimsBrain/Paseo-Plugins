@@ -1,9 +1,10 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.9.0`).** Development is currently paused
-> after **stage C4** (growth rates — done, all tests green; **block C is complete**). The next
-> stage is **D1** (MCP tool contracts). Nothing in this
-> document is a released API: the roadmap in §7 describes work that is still ahead.
+> **Development status: version in development (`0.10.0`).** Stage **D1** (MCP tool
+> contracts and transport-independent dispatch) is done and all tests are green; block **D is
+> open**. The next stage is **D2** (stdio MCP server + bundle). Stages A1–D1 are complete;
+> blocks E–J are untouched. Nothing in this document is a released API: the roadmap in §7
+> describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -436,13 +437,42 @@ Client rules enforced at every UI stage: colors only from `theme.colors`, paddin
 `layout.compact`, host typography via `use-host-typography`, React Native primitives only, and
 the DOM-grep audit (`document.|window.|className=|onClick=` over `client/`) must return zero.
 
-### MCP tools (planned contract, stage D1)
+### MCP tools (stage D1 — `shared/tools.ts` + `server/mcp-tools.ts`)
 
-`luck_tree_get_context` (root→…→leaf path plus neighbouring facts), `luck_tree_search`,
-`luck_tree_upsert_leaf` (plan/fact + version), `luck_tree_add_bee`, `luck_tree_report_bug`,
-`luck_tree_set_goal` (draft/proposed only — humans approve), `luck_tree_update_growth`,
-`luck_tree_history`. All validated by the same zod schemas as the RPCs; all writes carry a
-`project_key` and an actor.
+Eight `luck_tree_*` tools, declared in `MCP_TOOLS` (JSON Schema for the future `tools/list`)
+and dispatched by `dispatchMcpTool(name, args, { store, defaultActor })`. The dispatch layer is
+transport-independent on purpose: the stdio server of stage D2 and
+`tests/mcp-tools.test.ts` (32 tests) call the same function — the memory-flash
+`server/mcp-tools.ts` precedent.
+
+| Tool | Behaviour |
+| --- | --- |
+| `luck_tree_get_context` | Orientation call. Without `nodeId`: overview — roots and their first level (`store.listChildren`). With `nodeId`: path root → … → node (`store.getNodePath`), children, sibling leaves, bees touching the node, blocking bugs and growth progress — the agent "descends one level" in one call instead of probing with searches. |
+| `luck_tree_search` | FTS5 search within one project (bm25 ranking, `key=value` filters inside free text, optional kinds/statuses arrays, archived excluded by default). |
+| `luck_tree_upsert_leaf` | Create a leaf under `parentId` (`name` required, status defaults to `draft`) or update `leafId` in place: any of name/description/version/payload plus an optional status transition in the same call. Stating the current status is a tolerated no-op; a real transition runs the state machine and its audit row; an illegal transition comes back as a readable `invalid status transition …` error that writes nothing. Editing a non-leaf or an unknown/foreign id is rejected with the node kind named. |
+| `luck_tree_add_bee` | Directed influence edge between two live leaves of one project; self-loops, non-leaf ends and foreign ids are rejected by the store with readable messages. |
+| `luck_tree_report_bug` | Incident with severity; `nodeIds` attach blocking leaves immediately — every id must resolve inside the project or nothing is written. |
+| `luck_tree_set_goal` | Pre-approval goal management only: `create` (draft; `formalText` + `plan` required), `update` (draft/proposed edits), `propose` (draft → proposed). **Deliberately no `approve` action** — ADR-7: the store refuses `approved` from any path but the native panel/RPC. `create`/`propose` responses carry a note telling the agent a human approves; a repeated `propose` is a readable no-op error, not a second transition. |
+| `luck_tree_update_growth` | Upsert of one subject's progress record: an explicit `growthId` wins; otherwise the record is resolved by subject — updated when one exists (error when neither `steps` nor `status` is given), or a fresh one is attached (`steps` required). Step shape and status transitions are validated by the store. |
+| `luck_tree_history` | Append-only audit trail of any entity (node/bee/bug/goal/growth), oldest first; an unknown id returns an empty list rather than an error. |
+
+Conventions:
+
+- **Validation** lives in the shared zod contracts (`shared/tools.ts`) — the same source of
+  truth the RPC layer (E1) will reuse; zod issues collapse into one readable
+  `Invalid input: <path>: <message>` line. The JSON Schema in `MCP_TOOLS` mirrors the zod
+  contracts for `tools/list` (D2).
+- **No throws**: validation failures, unknown tools (the error lists the available ones) and
+  store errors all come back as `isError` results, so one bad call can never take down the
+  MCP server. Host-prefixed names (`luck-planner_luck_tree_search`) are normalized before
+  dispatch.
+- **Scoping**: every input requires `projectKey`, and every read/write goes through the store,
+  which scopes by `project_key` — a tool call structurally cannot cross a project boundary.
+  Each dispatch test asserts this per tool: foreign ids error as "not found in project",
+  foreign projects come back empty, and rejected calls leave the target row untouched.
+- **Actor**: optional `actor` on every mutating input, falling back to the dispatch context's
+  `defaultActor` (the agent id the stdio server will be launched with in D2), then
+  `agent:unknown` — the audit trail is never empty.
 
 ### Dashboard HTTP API (planned, stage F1, read-only)
 
@@ -456,16 +486,17 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development paused after stage C4.** Stages A1–C4 are complete and released as
-tagged versions up to `luck-planner@0.9.0`; block **C (domain semantics) is closed** and
-stage **D1** (MCP tool contracts) is next. Blocks D–J are untouched.
+**Status: development continues after stage D1.** Stages A1–D1 are complete and released as
+tagged versions up to `luck-planner@0.10.0`; block **C (domain semantics) is closed** and
+block **D (agent access) is open** — next is **D2** (stdio MCP server + bundle). Blocks E–J
+are untouched.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
-| D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts, stdio server + bundle, agent injection + skill |
+| D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle, agent injection + skill |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
