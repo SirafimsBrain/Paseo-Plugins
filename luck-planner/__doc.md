@@ -1,9 +1,9 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.12.0`).** Stage **D3** (agent injection,
-> session audit actor, skill installer) is done and all tests are green; **block D is
-> closed** — the next stage is **E1** (plugin RPC contracts). Stages A1–D3 are complete;
-> blocks E–J are untouched. Nothing in this document is a released API: the roadmap in §7
+> **Development status: version in development (`0.13.0`).** Stage **E1** (plugin RPC
+> contracts + server handlers) is done and all tests are green; the next stage is **E2**
+> (native workspace panel). Stages A1–E1 are complete; blocks E (continued)–J are
+> otherwise untouched. Nothing in this document is a released API: the roadmap in §7
 > describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -462,7 +462,7 @@ transport-independent on purpose: the stdio server of stage D2 and
 Conventions:
 
 - **Validation** lives in the shared zod contracts (`shared/tools.ts`) — the same source of
-  truth the RPC layer (E1) will reuse; zod issues collapse into one readable
+  truth the RPC layer (E1) reuses; zod issues collapse into one readable
   `Invalid input: <path>: <message>` line. The JSON Schema in `MCP_TOOLS` mirrors the zod
   contracts for `tools/list` (D2).
 - **No throws**: validation failures, unknown tools (the error lists the available ones) and
@@ -525,6 +525,29 @@ contract in `tests/manifest.test.ts`:
   `node`, PATH scan, plain `node` last) — the single source the D3 injection will use.
   Known limitation, inherited: a path already stored in an existing agent's config is not
   rewritten by the host; agents created before publication existed must be recreated once.
+
+### Plugin RPC surface (stage E1 — `shared/rpc.ts`, `index.server.ts`)
+
+Seven `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
+Center items (E3) and the settings screen (E4) all go through them. The server
+registers the handlers over one shared `LuckPlannerStore` (closed on plugin
+cleanup); `tests/rpc.test.ts` (15 tests, fake `PluginServerContext` against a
+temp-directory database) covers the surface:
+
+- **Reads** return store rows directly: `tree-get` (roots with their first level of
+  children), `tree-search` (FTS5 with kind/status filters), `node-detail` (node +
+  path + children + bees + bugs + blocking bugs + history + growth), `growth-get`
+  (record plus the shared `growthProgress` aggregate), `stats` (panel counters —
+  new `store.stats()`: live nodes by kind/status, in-progress/done leaves, bees,
+  open bugs, proposed/approved goals, growth records).
+- **Writes** answer `{ ok, …, error }` instead of throwing (the MCP dispatch
+  discipline): `node-set-status` (leaf state machine) and `goal-approve` (gate
+  crossing + materialization in one transaction). Both stamp `actor ?? "user"` —
+  the panel acts for the human, and `goal.approve` records who approved in the
+  `approve` audit row.
+- **Scoping**: every contract carries `projectKey`; the suite asserts foreign
+  projects come back empty and unknown nodes fail with a readable
+  `not found in project` message.
 
 ### Agent injection and skill (stage D3 — `shared/settings.ts`, `server/skill.ts`)
 
@@ -604,13 +627,15 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development continues after stage D3 — block D is closed.** Stages A1–D3 are
-complete and released as tagged versions up to `luck-planner@0.12.0`; blocks **B (storage)**
-and **C (domain semantics)** are closed, and **block D (agent access)** closes with D3 —
-verified end-to-end on a live daemon (injection, actor, skill, first-leaf bootstrap). The
-next stage is **E1** (plugin RPC contracts); a candidate **D4** (config-file MCP
-registrations for OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may
-precede it. Blocks E–J are untouched.
+**Status: development continues after stage E1 — block D is closed.** Stages A1–E1 are
+complete and released as tagged versions up to `luck-planner@0.13.0`; blocks **B
+(storage)**, **C (domain semantics)** and **D (agent access)** are closed — D3 verified
+end-to-end on a live daemon (injection, actor, skill, first-leaf bootstrap). **Block E
+(UI transport)** opens with E1 (RPC contracts + handlers over one shared store,
+`shared/rpc.ts`, actor `user` default, `{ ok, error }` write envelope); a candidate
+**D4** (config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/Codex, the
+memory-flash 0.8.1 fix) may still precede the panel work. The next stage is **E2**
+(native workspace panel).
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
@@ -618,7 +643,7 @@ precede it. Blocks E–J are untouched.
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
-| E | E1–E4 | 0.13.0–0.16.0 | RPCs, native panel, ⌘K + slash, settings screen |
+| E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel, ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |

@@ -373,6 +373,32 @@ export interface ReplaceGoalPlanInput {
 }
 
 /**
+ * Project counters for the `luck-planner.stats` RPC (stage E1): everything
+ * the native panel renders without walking the whole tree. Archived nodes
+ * stay out of the node counters (they are not actionable work); bees, bugs,
+ * goals and growth are counted as-is.
+ */
+export interface ProjectStats {
+  projectKey: string;
+  /** Live (non-archived) nodes, total and broken down by kind and status. */
+  nodes: {
+    total: number;
+    byKind: Array<{ kind: NodeKind; count: number }>;
+    byStatus: Array<{ status: LeafStatus; count: number }>;
+  };
+  /** Live leaves: total, `in_progress` and `done`. */
+  leaves: { total: number; inProgress: number; done: number };
+  /** Influence edges of the project. */
+  bees: number;
+  /** Incidents: total and currently blocking (`open` + `investigating`). */
+  bugs: { total: number; open: number };
+  /** Goals: total, awaiting review (`proposed`) and crossed (`approved` + beyond). */
+  goals: { total: number; proposed: number; approved: number };
+  /** Progress records attached to nodes or goals. */
+  growthRecords: number;
+}
+
+/**
  * `createGrowth` input: a polymorphic progress record for **one** node or
  * goal. A subject may hold at most one growth record — a second attach is
  * rejected with a pointer to `updateGrowth`.
@@ -2780,6 +2806,98 @@ export class LuckPlannerStore {
     if (this.closed) return;
     this.closed = true;
     this.db.close();
+  }
+
+  // -------------------------------------------------------------------------
+  // Project stats (stage E1): one call for the panel counters
+  // -------------------------------------------------------------------------
+
+  /**
+   * Counts everything the native panel renders as counters, in one read-only
+   * call — no tree walk on the client. Scoped by `project_key` like every
+   * other read (ADR-2). Live nodes only in the node/leaf counters; bees,
+   * bugs, goals and growth count their whole project tables.
+   */
+  stats(projectKey: string): ProjectStats {
+    requireText(projectKey, "project key");
+    const count = (sql: string, ...params: Array<string | number>): number => {
+      const row = this.db.prepare(sql).get(...params) as
+        | { count: number }
+        | undefined;
+      return row?.count ?? 0;
+    };
+    const liveNodes = "project_key = ? AND archived_at IS NULL";
+    const byKind = (
+      this.db
+        .prepare(
+          `SELECT kind, COUNT(*) AS count FROM nodes WHERE ${liveNodes} GROUP BY kind`,
+        )
+        .all(projectKey) as Array<{ kind: string; count: number }>
+    ).map((row) => ({
+      kind: parseKind(row.kind) as ProjectStats["nodes"]["byKind"][number]["kind"],
+      count: row.count,
+    }));
+    const byStatus = (
+      this.db
+        .prepare(
+          `SELECT status, COUNT(*) AS count FROM nodes WHERE ${liveNodes} GROUP BY status`,
+        )
+        .all(projectKey) as Array<{ status: string; count: number }>
+    ).map((row) => ({
+      status: parseStatus(row.status) as ProjectStats["nodes"]["byStatus"][number]["status"],
+      count: row.count,
+    }));
+    const leafScope = `${liveNodes} AND kind = 'leaf'`;
+    const leavesTotal = count(
+      `SELECT COUNT(*) AS count FROM nodes WHERE ${leafScope}`,
+      projectKey,
+    );
+    const leavesInProgress = count(
+      `SELECT COUNT(*) AS count FROM nodes WHERE ${leafScope} AND status = 'in_progress'`,
+      projectKey,
+    );
+    const leavesDone = count(
+      `SELECT COUNT(*) AS count FROM nodes WHERE ${leafScope} AND status = 'done'`,
+      projectKey,
+    );
+    const bees = count(`SELECT COUNT(*) AS count FROM bees WHERE project_key = ?`, projectKey);
+    const bugsTotal = count(
+      `SELECT COUNT(*) AS count FROM bugs WHERE project_key = ?`,
+      projectKey,
+    );
+    const bugsOpen = count(
+      `SELECT COUNT(*) AS count FROM bugs WHERE project_key = ? AND status IN ('open', 'investigating')`,
+      projectKey,
+    );
+    const goalsTotal = count(
+      `SELECT COUNT(*) AS count FROM goals WHERE project_key = ?`,
+      projectKey,
+    );
+    const goalsProposed = count(
+      `SELECT COUNT(*) AS count FROM goals WHERE project_key = ? AND status = 'proposed'`,
+      projectKey,
+    );
+    const goalsApproved = count(
+      `SELECT COUNT(*) AS count FROM goals WHERE project_key = ? AND status IN ('approved', 'in_progress', 'done')`,
+      projectKey,
+    );
+    const growthRecords = count(
+      `SELECT COUNT(*) AS count FROM growth WHERE project_key = ?`,
+      projectKey,
+    );
+    return {
+      projectKey,
+      nodes: {
+        total: count(`SELECT COUNT(*) AS count FROM nodes WHERE ${liveNodes}`, projectKey),
+        byKind,
+        byStatus,
+      },
+      leaves: { total: leavesTotal, inProgress: leavesInProgress, done: leavesDone },
+      bees,
+      bugs: { total: bugsTotal, open: bugsOpen },
+      goals: { total: goalsTotal, proposed: goalsProposed, approved: goalsApproved },
+      growthRecords,
+    };
   }
 }
 

@@ -5,6 +5,16 @@ import {
   type LuckPlannerSettings,
 } from "./shared/settings";
 import {
+  UI_ACTOR,
+  goalApprove,
+  growthGet,
+  nodeDetail,
+  nodeSetStatus,
+  stats,
+  treeGet,
+  treeSearch,
+} from "./shared/rpc";
+import {
   MCP_SERVER_KEY,
   injectedMcpConfig,
   isExecutableFile,
@@ -13,6 +23,8 @@ import {
   sessionActorEnv,
 } from "./server/mcp-launch";
 import { ensureSkillInstalled } from "./server/skill";
+import { LuckPlannerStore } from "./server/store";
+import { growthProgress } from "./shared/growth";
 
 /**
  * Server entry (daemon subprocess runtime).
@@ -23,11 +35,14 @@ import { ensureSkillInstalled } from "./server/skill";
  *   stamp the per-agent audit actor onto the session env
  *   (`agent.session_open`), auto-install the skill into existing skills
  *   directories, host-scoped settings (`injectIntoAgents`, `mcpServerName`)
- * - E1: plugin RPC handlers
+ * - E1 (done): plugin RPC handlers (`shared/rpc.ts`) over one shared store
  * - F1: dashboard HTTP server
  */
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(luckPlannerSettings);
+
+  const store = new LuckPlannerStore();
+  let disposed = false;
 
   // Publish the bundle at its revision-independent path on every plugin
   // load, not only when an agent is created: agents created before an
@@ -104,8 +119,132 @@ export default function contribute(server: PluginServerContext) {
     },
   );
 
+  // -------------------------------------------------------------------------
+  // Plugin RPC surface (stage E1): the native panel, Command Center items
+  // and the settings screen all read and approve through these handlers.
+  // The store scopes every call by `projectKey` (ADR-2); writes stamp
+  // `actor ?? "user"` into the audit trail so panel approvals are
+  // attributable. Read handlers return store rows directly; write handlers
+  // answer `{ ok, …, error }` instead of throwing, mirroring the MCP
+  // dispatch discipline (one bad call never takes the server down).
+  // -------------------------------------------------------------------------
+
+  server.handle(treeGet, (input) => {
+    throwIfDisposed();
+    const roots = store.listChildren(input.projectKey, null);
+    return {
+      projectKey: input.projectKey,
+      roots: roots.map((node) => ({
+        node,
+        children: store.listChildren(input.projectKey, node.id),
+      })),
+    };
+  });
+
+  server.handle(treeSearch, (input) => {
+    throwIfDisposed();
+    const hits = store.search(input.query, {
+      projectKey: input.projectKey,
+      kinds: input.kinds,
+      statuses: input.statuses,
+      includeArchived: input.includeArchived,
+      limit: input.limit,
+    });
+    return {
+      matches: hits.length,
+      results: hits.map((hit) => ({
+        node: hit.node,
+        score: hit.score,
+        snippet: hit.snippet,
+      })),
+    };
+  });
+
+  server.handle(nodeDetail, (input) => {
+    throwIfDisposed();
+    const node = store.getNode(input.projectKey, input.nodeId);
+    if (!node) {
+      throw new Error(
+        `node ${input.nodeId} not found in project ${input.projectKey}`,
+      );
+    }
+    return {
+      node,
+      path: store.getNodePath(input.projectKey, node.id),
+      children: store.listChildren(input.projectKey, node.id),
+      bees: store.listBeesForNode(input.projectKey, node.id),
+      bugs: store.listBugsForNode(input.projectKey, node.id),
+      blockingBugs: store.listBlockingBugs(input.projectKey, node.id),
+      history: store.listHistory(input.projectKey, node.id),
+      growth: store.getGrowthForSubject(input.projectKey, "node", node.id),
+    };
+  });
+
+  server.handle(nodeSetStatus, (input) => {
+    try {
+      throwIfDisposed();
+      const node = store.setStatus({
+        projectKey: input.projectKey,
+        id: input.nodeId,
+        status: input.status,
+        actor: input.actor ?? UI_ACTOR,
+      });
+      return { ok: true, node, error: null };
+    } catch (cause) {
+      return {
+        ok: false,
+        node: null,
+        error: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  });
+
+  server.handle(goalApprove, (input) => {
+    try {
+      throwIfDisposed();
+      const goal = store.approveGoal({
+        projectKey: input.projectKey,
+        id: input.goalId,
+        parentBranchId: input.parentBranchId,
+        actor: input.actor ?? UI_ACTOR,
+      });
+      return { ok: true, goal, error: null };
+    } catch (cause) {
+      return {
+        ok: false,
+        goal: null,
+        error: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  });
+
+  server.handle(growthGet, (input) => {
+    throwIfDisposed();
+    const growth = store.getGrowthForSubject(
+      input.projectKey,
+      input.subjectType,
+      input.subjectId,
+    );
+    if (!growth) {
+      return { growth: null, total: 0, completed: 0, failed: 0, ratio: 0 };
+    }
+    const aggregate = growthProgress(growth.steps);
+    return { growth, ...aggregate };
+  });
+
+  server.handle(stats, (input) => {
+    throwIfDisposed();
+    return store.stats(input.projectKey);
+  });
+
+  function throwIfDisposed(): void {
+    if (disposed) throw new Error("luck-planner store is closed");
+  }
+
   return () => {
+    disposed = true;
     removeCreateHook();
     removeSessionHook();
+    store.close();
   };
 }
