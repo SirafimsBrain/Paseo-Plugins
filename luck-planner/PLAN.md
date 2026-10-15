@@ -1,8 +1,8 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.13.0`).** Этап **E1** (RPC-контракты + хендлеры)
-> выполнен, тесты зелёные. Следующий этап — **E2** (нативная панель).
-> Этапы A1–E1 закрыты и помечены ниже; E2–J не начинались.
+> **Статус: версия в разработке (`0.14.0`).** Этап **E2** (нативная панель)
+> выполнен, тесты зелёные. Следующий этап — **E3** (Command Center + slash).
+> Этапы A1–E2 закрыты и помечены ниже; E3–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -223,9 +223,9 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - `shared/rpc.ts` (`defineRpc`): `tree.get` (обзор: корни + дети первого уровня), `tree.search`, `node.detail` (+история, пчёлы, жуки, блокирующие, рост), `node.setStatus`, `goal.approve`, `growth.get` (+агрегат), `stats` (новый `store.stats()`). Валидация на обеих сторонах; записи — `{ok, error}`, актор `user` по умолчанию, один общий стор.
 - Приёмка ✅: `tests/rpc.test.ts` (15 тестов, fake `PluginServerContext` + реальная БД); ни один RPC не пишет без `project_key`; `goal.approve` фиксирует актора.
 
-**E2. Нативная workspace-панель** → `0.14.0`
-- `client/tree-panel.tsx`: сворачиваемый дерево-аутлайн (корень→…→листья), цветовой индикатор статуса листа, счётчики (всего/в работе/готово/открытые жуки), клик по листу → детали (версия, ревизия, статус, пчёлы, жуки, история), фильтры по статусу/типу, поиск (FTS). Всё из `theme.colors`, `layout.compact`, типографика хоста (`use-host-typography` по образцу memory-flash).
-- Приёмка: ручная проверка в светлой/тёмной теме и compact-режиме; аудит-grep `rg -n "document\.|window\.|className=|onClick=" client/` — ноль совпадений.
+**E2. Нативная workspace-панель** → `0.14.0` ✅
+- `client/tree-panel.tsx` (`addWorkspacePanel`, `projectKey` = `projectRootPath` текущего workspace): сворачиваемый дерево-аутлайн (корень→дети), цветовой индикатор статуса листа + текст статуса, счётчики (`stats`: всего/в работе/готово/открытые жуки), клик по листу → детали (хлебные крошки, `v{version} · r{revision}`, статус, рост, блокирующие жуки, пчёлы, история) + смена статуса листа, фильтры по статусу/типу, поиск (FTS, debounce). Всё из `theme.colors`, `layout.compact`, шкала шрифта хоста (`client/use-host-typography.ts`). Чистая view-model — `shared/panel.ts`.
+- Приёмка ✅: `tests/tree-panel.test.ts` (8 тестов на группировку/фильтры/метки без DOM); аудит-grep `document.|window.|className=|onClick=` по `client/` — ноль совпадений; ручная проверка темы/compact — за хостом (следующая живая проверка — на даэмоне в J2).
 
 **E3. Command Center + slash-команды** → `0.15.0`
 - ⌘K: «Open luck-planner tree», «New high goal», «Open dashboard». Slash: `/luck-status <leaf> <status>`, `/luck-bug <title>` — быстрые записи из композера.

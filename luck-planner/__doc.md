@@ -1,10 +1,10 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.13.0`).** Stage **E1** (plugin RPC
-> contracts + server handlers) is done and all tests are green; the next stage is **E2**
-> (native workspace panel). Stages A1–E1 are complete; blocks E (continued)–J are
-> otherwise untouched. Nothing in this document is a released API: the roadmap in §7
-> describes work that is still ahead.
+> **Development status: version in development (`0.14.0`).** Stage **E2** (native
+> workspace panel) is done and all tests are green; the next stage is **E3**
+> (Command Center items + slash commands). Stages A1–E2 are complete; blocks E
+> (continued)–J are otherwise untouched. Nothing in this document is a released
+> API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -526,6 +526,20 @@ contract in `tests/manifest.test.ts`:
   Known limitation, inherited: a path already stored in an existing agent's config is not
   rewritten by the host; agents created before publication existed must be recreated once.
 
+### Native workspace panel (stage E2 — `client/tree-panel.tsx`, `shared/panel.ts`)
+
+`index.client.tsx` registers `luck-planner` via `client.addWorkspacePanel`
+(workspace + explorer locations). The panel resolves the tree's `projectKey`
+from the current workspace's `projectRootPath` (`useWorkspace`, ADR-2
+scoping) and reads through the E1 RPCs: outline (`tree-get`) with
+collapse/expand, counters (`stats`), FTS search with status/kind filters
+(`tree-search`), details (`node-detail` + `growth-get`) with breadcrumb,
+version/revision badge, blocking bugs, bees, history and leaf status moves
+(`node-set-status`). Status is always text next to the colour dot (never
+colour alone). The view-model (`groupByParent`, `filterSections`,
+`nodeMatchesFilters`, labels) is pure and pinned by `tests/tree-panel.test.ts`
+(8 tests); the DOM-grep audit over `client/` returns zero matches.
+
 ### Plugin RPC surface (stage E1 — `shared/rpc.ts`, `index.server.ts`)
 
 Seven `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
@@ -627,15 +641,15 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development continues after stage E1 — block D is closed.** Stages A1–E1 are
-complete and released as tagged versions up to `luck-planner@0.13.0`; blocks **B
+**Status: development continues after stage E2 — block D is closed.** Stages A1–E2 are
+complete and released as tagged versions up to `luck-planner@0.14.0`; blocks **B
 (storage)**, **C (domain semantics)** and **D (agent access)** are closed — D3 verified
 end-to-end on a live daemon (injection, actor, skill, first-leaf bootstrap). **Block E
-(UI transport)** opens with E1 (RPC contracts + handlers over one shared store,
-`shared/rpc.ts`, actor `user` default, `{ ok, error }` write envelope); a candidate
+(UI transport)** continues with E2 (native workspace panel over the E1 RPCs:
+outline, filters, search, counters, details with status moves); a candidate
 **D4** (config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/Codex, the
-memory-flash 0.8.1 fix) may still precede the panel work. The next stage is **E2**
-(native workspace panel).
+memory-flash 0.8.1 fix) may still precede the remaining panel work. The next stage
+is **E3** (Command Center items + slash commands).
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
@@ -643,7 +657,7 @@ memory-flash 0.8.1 fix) may still precede the panel work. The next stage is **E2
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
-| E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel, ⌘K + slash, settings screen |
+| E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash, settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |

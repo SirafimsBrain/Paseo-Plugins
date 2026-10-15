@@ -30,7 +30,7 @@ export const PROTOCOL_VERSION = "2024-11-05";
  * `package.json` by `tests/mcp-server-e2e.test.ts`, so every version bump
  * must update this constant — the handshake is what agents see.
  */
-export const SERVER_VERSION = "0.13.0";
+export const SERVER_VERSION = "0.14.0";
 
 /**
  * Default server name agents see in `initialize`. The `mcpServerName`
