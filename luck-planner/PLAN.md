@@ -1,8 +1,8 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.14.0`).** Этап **E2** (нативная панель)
-> выполнен, тесты зелёные. Следующий этап — **E3** (Command Center + slash).
-> Этапы A1–E2 закрыты и помечены ниже; E3–J не начинались.
+> **Статус: версия в разработке (`0.15.0`).** Этап **E3** (Command Center + slash)
+> выполнен, тесты зелёные. Следующий этап — **E4** (settings screen).
+> Этапы A1–E3 закрыты и помечены ниже; E4–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -227,9 +227,10 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - `client/tree-panel.tsx` (`addWorkspacePanel`, `projectKey` = `projectRootPath` текущего workspace): сворачиваемый дерево-аутлайн (корень→дети), цветовой индикатор статуса листа + текст статуса, счётчики (`stats`: всего/в работе/готово/открытые жуки), клик по листу → детали (хлебные крошки, `v{version} · r{revision}`, статус, рост, блокирующие жуки, пчёлы, история) + смена статуса листа, фильтры по статусу/типу, поиск (FTS, debounce). Всё из `theme.colors`, `layout.compact`, шкала шрифта хоста (`client/use-host-typography.ts`). Чистая view-model — `shared/panel.ts`.
 - Приёмка ✅: `tests/tree-panel.test.ts` (8 тестов на группировку/фильтры/метки без DOM); аудит-grep `document.|window.|className=|onClick=` по `client/` — ноль совпадений; ручная проверка темы/compact — за хостом (следующая живая проверка — на даэмоне в J2).
 
-**E3. Command Center + slash-команды** → `0.15.0`
-- ⌘K: «Open luck-planner tree», «New high goal», «Open dashboard». Slash: `/luck-status <leaf> <status>`, `/luck-bug <title>` — быстрые записи из композера.
-- Приёмка: пункты находятся в ⌘K, slash-команда пишет через RPC и попадает в историю.
+**E3. Command Center + slash-команды** → `0.15.0` ✅
+- ⌘K (workspace-контекст): «Open luck-planner tree» (открывает панель), «New high goal» (через новый RPC `goal-create` создаёт draft-цель с placeholder-текстом и одним шагом — диалогового API в SDK 0.11 нет, план уточняется агентом; цель вне дерева до аппрува, ADR-7). Пункт «Open dashboard» перенесён в F2 — до HTTP-сервера он мёртвый. Slash (agent-контекст): `/luck-status <leaf|id> <status>` (uuid проходит напрямую, иначе FTS по листьям: 1 совпадение — ок, несколько — просьба уточнить) через `node-set-status`; `/luck-bug <title>` через новый RPC `bug-report` (severity `medium`). Ошибки — throw читаемого сообщения (хост репортит неудачный onSubmit), успех — открытие панели.
+- `shared/rpc.ts`: +`goal-create` (draft, актор `user`, план ≥1 шаг), +`bug-report` (`{ok,error}`, severity default `medium` и в контракте, и в хендлере). `client/slash.ts` — чистая логика парсинга/резолва.
+- Приёмка ✅: `tests/slash.test.ts` (13 тестов) + `tests/rpc.test.ts` (+6: регистрация 9 контрактов, draft с актором `user`, отказ пустого плана, дефолты жука, вложение листа, отказ чужого id); аудит-grep по `client/` — ноль; пункты и slash видны в хосте (живая проверка — на даэмоне в J2).
 
 **E4. Settings screen** → `0.16.0`
 - `defineSettings`: `injectIntoAgents`, `mcpServerName`, порт HTTP-сервера (default + auto), токен доступа (перегенерация), retention истории.

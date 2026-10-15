@@ -1,8 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { beeSchema } from "./links";
-import { bugSchema } from "./links";
-import { goalSchema } from "./goals";
+import { beeSchema, bugSchema, bugSeveritySchema } from "./links";
+import { goalSchema, goalStepSchema } from "./goals";
 import { growthSchema, growthSubjectTypeSchema } from "./growth";
 import {
   actorSchema,
@@ -122,6 +121,51 @@ export const goalApprove = defineRpc({
   }),
 });
 
+/**
+ * `luck-planner.goal-create`: a draft high goal (stage E3 — the ⌘K "New
+ * high goal" item). The goal starts as a `draft` and is **not** in the
+ * tree (ADR-7); the SDK has no dialog API, so the ⌘K item seeds a draft
+ * with placeholder text/steps that the user refines with an agent
+ * (`luck_tree_set_goal`) or a later UI stage. The store requires at least
+ * one plan step, so the contract does too.
+ */
+export const goalCreate = defineRpc({
+  name: "luck-planner.goal-create",
+  input: z.object({
+    projectKey: projectKeySchema,
+    formalText: z.string().min(1),
+    plan: z.array(goalStepSchema).min(1),
+    actor: actorSchema.optional(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    goal: goalSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+/**
+ * `luck-planner.bug-report`: report an incident from the composer (stage
+ * E3 — the `/luck-bug` slash command) or the panel. Severity defaults to
+ * `medium`; `nodeIds` attach blocking leaves immediately.
+ */
+export const bugReport = defineRpc({
+  name: "luck-planner.bug-report",
+  input: z.object({
+    projectKey: projectKeySchema,
+    title: z.string().min(1),
+    description: z.string().optional(),
+    severity: bugSeveritySchema.default("medium"),
+    nodeIds: z.array(idSchema).optional(),
+    actor: actorSchema.optional(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    bug: bugSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 /** `luck-planner.growth-get`: the progress record of one subject. */
 export const growthGet = defineRpc({
   name: "luck-planner.growth-get",
@@ -181,6 +225,8 @@ export const RPC_CONTRACT_NAMES = [
   nodeDetail.name,
   nodeSetStatus.name,
   goalApprove.name,
+  goalCreate.name,
+  bugReport.name,
   growthGet.name,
   stats.name,
 ] as const;

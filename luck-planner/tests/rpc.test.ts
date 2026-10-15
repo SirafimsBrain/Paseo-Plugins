@@ -7,7 +7,9 @@ import contribute from "../index.server";
 import { LuckPlannerStore } from "../server/store";
 import {
   UI_ACTOR,
+  bugReport,
   goalApprove,
+  goalCreate,
   growthGet,
   nodeDetail,
   nodeSetStatus,
@@ -182,7 +184,9 @@ describe("RPC surface", () => {
     try {
       expect([...server.handlers.keys()].sort()).toEqual(
         [
+          bugReport.name,
           goalApprove.name,
+          goalCreate.name,
           growthGet.name,
           nodeDetail.name,
           nodeSetStatus.name,
@@ -449,6 +453,134 @@ describe("goal.approve", () => {
       expect(result.ok).toBe(false);
       expect(result.goal).toBeNull();
       expect(result.error).toMatch(/only a proposed goal may be approved/);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("goal.create", () => {
+  it("creates a draft with the default user actor", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        ok: boolean;
+        goal: { id: string; status: string; materializedNodeId: string | null } | null;
+        error: string | null;
+      }>(goalCreate.name, {
+        projectKey: P,
+        formalText: "ship billing retries",
+        plan: [{ id: "s1", title: "step", description: "" }],
+      });
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeNull();
+      expect(result.goal?.status).toBe("draft");
+      // A draft is not in the tree until approved (ADR-7).
+      expect(result.goal?.materializedNodeId).toBeNull();
+      const store = new LuckPlannerStore();
+      try {
+        const history = store.listHistory(P, result.goal!.id);
+        const last = history[history.length - 1];
+        expect(last.action).toBe("create");
+        expect(last.actor).toBe(UI_ACTOR);
+      } finally {
+        store.close();
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("answers ok:false for an empty plan", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{ ok: boolean; goal: null; error: string | null }>(
+        goalCreate.name,
+        { projectKey: P, formalText: "x", plan: [] },
+      );
+      expect(result.ok).toBe(false);
+      expect(result.goal).toBeNull();
+      expect(result.error).toMatch(/at least one step/);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("bug.report", () => {
+  it("reports an incident with the default severity and actor", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        ok: boolean;
+        bug: { id: string; title: string; severity: string; status: string } | null;
+        error: string | null;
+      }>(bugReport.name, { projectKey: P, title: "queue stalls under load" });
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeNull();
+      expect(result.bug?.title).toBe("queue stalls under load");
+      expect(result.bug?.severity).toBe("medium");
+      expect(result.bug?.status).toBe("open");
+      const store = new LuckPlannerStore();
+      try {
+        const history = store.listHistory(P, result.bug!.id);
+        expect(history[history.length - 1].actor).toBe(UI_ACTOR);
+      } finally {
+        store.close();
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("attaches blocking leaves when nodeIds are given", async () => {
+    const store = new LuckPlannerStore();
+    const { leafA } = seedTree(store);
+    store.close();
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        ok: boolean;
+        bug: { id: string } | null;
+        error: string | null;
+      }>(bugReport.name, {
+        projectKey: P,
+        title: "retry deadlocks",
+        severity: "high",
+        nodeIds: [leafA.id],
+      });
+      expect(result.ok).toBe(true);
+      const check = new LuckPlannerStore();
+      try {
+        const blocking = check.listBlockingBugs(P, leafA.id);
+        expect(blocking.map((bug) => bug.id)).toEqual([result.bug!.id]);
+      } finally {
+        check.close();
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("answers ok:false for an unknown leaf id", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{ ok: boolean; bug: null; error: string | null }>(
+        bugReport.name,
+        {
+          projectKey: P,
+          title: "orphan",
+          nodeIds: ["00000000-0000-4000-8000-000000000000"],
+        },
+      );
+      expect(result.ok).toBe(false);
+      expect(result.bug).toBeNull();
+      expect(result.error).toMatch(/not found in project/);
     } finally {
       cleanup();
     }

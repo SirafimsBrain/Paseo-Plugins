@@ -6,7 +6,9 @@ import {
 } from "./shared/settings";
 import {
   UI_ACTOR,
+  bugReport,
   goalApprove,
+  goalCreate,
   growthGet,
   nodeDetail,
   nodeSetStatus,
@@ -36,6 +38,8 @@ import { growthProgress } from "./shared/growth";
  *   (`agent.session_open`), auto-install the skill into existing skills
  *   directories, host-scoped settings (`injectIntoAgents`, `mcpServerName`)
  * - E1 (done): plugin RPC handlers (`shared/rpc.ts`) over one shared store
+ * - E3 (done): goal-create + bug-report RPCs behind the ⌘K items and slash
+ *   commands
  * - F1: dashboard HTTP server
  */
 export default function contribute(server: PluginServerContext) {
@@ -213,6 +217,49 @@ export default function contribute(server: PluginServerContext) {
       return {
         ok: false,
         goal: null,
+        error: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  });
+
+  server.handle(goalCreate, (input) => {
+    try {
+      throwIfDisposed();
+      const goal = store.createGoal({
+        projectKey: input.projectKey,
+        formalText: input.formalText,
+        plan: input.plan,
+        actor: input.actor ?? UI_ACTOR,
+      });
+      return { ok: true, goal, error: null };
+    } catch (cause) {
+      return {
+        ok: false,
+        goal: null,
+        error: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  });
+
+  server.handle(bugReport, (input) => {
+    try {
+      throwIfDisposed();
+      const bug = store.createBug({
+        projectKey: input.projectKey,
+        title: input.title,
+        description: input.description,
+        // The contract defaults this to "medium" at the SDK boundary; the
+        // handler keeps its own fallback so a raw call cannot reach the
+        // store with an undefined severity (same pattern as `actor`).
+        severity: input.severity ?? "medium",
+        nodeIds: input.nodeIds,
+        actor: input.actor ?? UI_ACTOR,
+      });
+      return { ok: true, bug, error: null };
+    } catch (cause) {
+      return {
+        ok: false,
+        bug: null,
         error: cause instanceof Error ? cause.message : String(cause),
       };
     }

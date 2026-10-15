@@ -1,10 +1,10 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.14.0`).** Stage **E2** (native
-> workspace panel) is done and all tests are green; the next stage is **E3**
-> (Command Center items + slash commands). Stages A1–E2 are complete; blocks E
-> (continued)–J are otherwise untouched. Nothing in this document is a released
-> API: the roadmap in §7 describes work that is still ahead.
+> **Development status: version in development (`0.15.0`).** Stage **E3** (Command
+> Center items + slash commands) is done and all tests are green; the next stage is
+> **E4** (settings screen). Stages A1–E3 are complete; blocks E (continued)–J are
+> otherwise untouched. Nothing in this document is a released API: the roadmap in §7
+> describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -563,6 +563,34 @@ temp-directory database) covers the surface:
   projects come back empty and unknown nodes fail with a readable
   `not found in project` message.
 
+### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
+
+Two ⌘K items and two composer slash commands, all writing through the plugin
+RPCs (two new contracts since E1, nine total):
+
+- **⌘K** — "Open luck-planner tree" (opens the E2 panel) and "New high goal"
+  (seeds a draft goal via the new `goal-create` RPC with placeholder text and
+  one step, then opens the panel). The SDK 0.11 command context has no dialog
+  API, so the draft is refined by an agent (`luck_tree_set_goal`) or a later
+  UI stage; per ADR-7 the draft stays out of the tree until approved. The
+  dashboard item from the plan lands with F2 (it would be dead until the HTTP
+  server exists).
+- **Slash** — `/luck-status <leaf name or id> <status>` resolves the leaf
+  (uuid passes through; otherwise FTS restricted to leaves — one hit wins,
+  several demand a more specific query) and moves it via `node-set-status`;
+  `/luck-bug <title>` reports an incident via the new `bug-report` RPC
+  (severity `medium`). Errors are thrown as readable messages (the host
+  reports a failed `onSubmit`); successes open the panel where the change is
+  visible in the audit trail.
+- **RPCs** — `goal-create` (draft, actor `user`, plan ≥ 1 step enforced by
+  contract and store) and `bug-report` (severity defaults to `medium` both in
+  the contract and the handler, `nodeIds` attach blocking leaves). Both follow
+  the `{ ok, …, error }` write envelope.
+- **Tests** — `tests/slash.test.ts` (13 tests: parsing, uuid detection, leaf
+  resolution paths, placeholders) and `tests/rpc.test.ts` (+6: registration
+  set, draft creation with the `user` audit stamp, empty-plan refusal, bug
+  defaults, leaf attachment, foreign-id rejection).
+
 ### Agent injection and skill (stage D3 — `shared/settings.ts`, `server/skill.ts`)
 
 The other half of ADR-3: every Paseo-created agent gets the bundled server, every audit row
@@ -641,15 +669,14 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development continues after stage E2 — block D is closed.** Stages A1–E2 are
-complete and released as tagged versions up to `luck-planner@0.14.0`; blocks **B
+**Status: development continues after stage E3 — block D is closed.** Stages A1–E3 are
+complete and released as tagged versions up to `luck-planner@0.15.0`; blocks **B
 (storage)**, **C (domain semantics)** and **D (agent access)** are closed — D3 verified
 end-to-end on a live daemon (injection, actor, skill, first-leaf bootstrap). **Block E
-(UI transport)** continues with E2 (native workspace panel over the E1 RPCs:
-outline, filters, search, counters, details with status moves); a candidate
-**D4** (config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/Codex, the
-memory-flash 0.8.1 fix) may still precede the remaining panel work. The next stage
-is **E3** (Command Center items + slash commands).
+(UI transport)** continues with E3 (Command Center items + slash commands writing
+through new `goal-create`/`bug-report` RPCs); a candidate **D4** (config-file MCP
+registrations for OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may
+still precede the remaining UI work. The next stage is **E4** (settings screen).
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
@@ -657,7 +684,7 @@ is **E3** (Command Center items + slash commands).
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
-| E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash, settings screen |
+| E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
