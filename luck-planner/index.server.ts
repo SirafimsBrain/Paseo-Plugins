@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   defaultSettings,
   luckPlannerSettings,
+  normalizeSettings,
   type LuckPlannerSettings,
 } from "./shared/settings";
 import {
@@ -40,6 +41,7 @@ import { growthProgress } from "./shared/growth";
  * - E1 (done): plugin RPC handlers (`shared/rpc.ts`) over one shared store
  * - E3 (done): goal-create + bug-report RPCs behind the ⌘K items and slash
  *   commands
+ * - E4 (done): settings screen (five settings) + history retention enforcement
  * - F1: dashboard HTTP server
  */
 export default function contribute(server: PluginServerContext) {
@@ -74,8 +76,37 @@ export default function contribute(server: PluginServerContext) {
   /** Settings values for the hooks; schema defaults when not ready yet. */
   const readValues = async (): Promise<LuckPlannerSettings> => {
     const state = await settings.read().catch(() => null);
-    return state?.status === "ready" ? state.values : defaultSettings();
+    // `normalizeSettings` fills defaults for fields added after a settings
+    // doc was written, so an old doc upgrades without a daemon restart.
+    return state?.status === "ready"
+      ? normalizeSettings(state.values)
+      : defaultSettings();
   };
+
+  // History retention (stage E4): prune once at load and again on every
+  // settings change, so lowering the retention takes effect without a
+  // daemon restart (only a plugin reload). `0` disables pruning — the
+  // append-only trail is kept forever.
+  const applyRetention = (values: LuckPlannerSettings): void => {
+    try {
+      const removed = store.pruneHistory(values.historyRetentionDays);
+      if (removed > 0) {
+        console.log(
+          `[luck-planner] history retention: pruned ${removed} row(s) older than ${values.historyRetentionDays} day(s)`,
+        );
+      }
+    } catch (cause) {
+      console.error(
+        `[luck-planner] history retention prune failed: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+  void readValues().then(applyRetention);
+  const unsubscribeRetention = settings.subscribe((state) => {
+    if (state.status === "ready") applyRetention(normalizeSettings(state.values));
+  });
 
   // -------------------------------------------------------------------------
   // MCP injection (ADR-3): every Paseo-created agent gets the bundled stdio
@@ -292,6 +323,7 @@ export default function contribute(server: PluginServerContext) {
     disposed = true;
     removeCreateHook();
     removeSessionHook();
+    unsubscribeRetention();
     store.close();
   };
 }

@@ -1,10 +1,9 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.15.0`).** Stage **E3** (Command
-> Center items + slash commands) is done and all tests are green; the next stage is
-> **E4** (settings screen). Stages A1–E3 are complete; blocks E (continued)–J are
-> otherwise untouched. Nothing in this document is a released API: the roadmap in §7
-> describes work that is still ahead.
+> **Development status: version in development (`0.16.0`).** Stage **E4** (settings
+> screen) is done and all tests are green; the next stage is **F1** (dashboard HTTP
+> server). Stages A1–E4 are complete; blocks F–J are otherwise untouched. Nothing in
+> this document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -684,7 +683,7 @@ still precede the remaining UI work. The next stage is **E4** (settings screen).
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
-| E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen |
+| E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |

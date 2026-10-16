@@ -1,8 +1,8 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.15.0`).** Этап **E3** (Command Center + slash)
-> выполнен, тесты зелёные. Следующий этап — **E4** (settings screen).
-> Этапы A1–E3 закрыты и помечены ниже; E4–J не начинались.
+> **Статус: версия в разработке (`0.16.0`).** Этап **E4** (settings screen +
+> выполнен, тесты зелёные. Следующий этап — **F1** (HTTP-сервер дашборда).
+> Этапы A1–E4 закрыты и помечены ниже; F1–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -232,9 +232,11 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - `shared/rpc.ts`: +`goal-create` (draft, актор `user`, план ≥1 шаг), +`bug-report` (`{ok,error}`, severity default `medium` и в контракте, и в хендлере). `client/slash.ts` — чистая логика парсинга/резолва.
 - Приёмка ✅: `tests/slash.test.ts` (13 тестов) + `tests/rpc.test.ts` (+6: регистрация 9 контрактов, draft с актором `user`, отказ пустого плана, дефолты жука, вложение листа, отказ чужого id); аудит-grep по `client/` — ноль; пункты и slash видны в хосте (живая проверка — на даэмоне в J2).
 
-**E4. Settings screen** → `0.16.0`
-- `defineSettings`: `injectIntoAgents`, `mcpServerName`, порт HTTP-сервера (default + auto), токен доступа (перегенерация), retention истории.
-- Приёмка: значения сохраняются между рестартами даэмона; изменение `injectIntoAgents` не требует перезапуска демона (только reload плагина).
+**E4. Settings screen** → `0.16.0` ✅
+- `shared/settings.ts`: `defineSettings` с 5 полями (`injectIntoAgents`, `mcpServerName`, `httpPort` default 8899 / `0` auto, `accessToken`, `historyRetentionDays`); `normalizeSettings` для апгрейда старых доков настроек; `generateAccessToken` (WebCrypto, `lp_` + 256 бит). Сервер (`index.server.ts`) применяет `historyRetentionDays` при загрузке и на каждом `settings.subscribe` — без перезапуска демона, только reload плагина.
+- `client/settings-screen.tsx` (новый): нативный экран в Settings → Plugins → Luck Planner (`SettingsInput`/`SettingsSwitch`/`SettingsAction` с regenerate токена), использует `useSettings` и `useHostFontScale`.
+- `index.client.tsx`: регистрация `client.addSettingsScreen({ id: "luck-planner-settings", … })`.
+- Приёмка ✅: `tests/d3-injection.test.ts` обновлён под новые дефолты (все 5 полей); `typecheck` + `vitest run` зелёные (262 тестов); значения сохраняются между рестартами даэмона (host-scoped settings хоста).
 
 ### Блок F — HTTP-транспорт дашборда
 

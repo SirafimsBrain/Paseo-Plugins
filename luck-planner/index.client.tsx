@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { LuckPlannerPanel } from "./client/tree-panel";
+import { LuckPlannerSettingsScreen } from "./client/settings-screen";
 import {
   NEW_GOAL_PLACEHOLDER,
   NEW_GOAL_TEXT,
@@ -17,7 +18,7 @@ import { bugReport, goalCreate, nodeSetStatus, treeSearch } from "./shared/rpc";
  * - E2 (done): native workspace panel (tree outline)
  * - E3 (done): Command Center items + slash commands (`/luck-status`,
  *   `/luck-bug`) writing through the plugin RPCs
- * - E4: settings screen
+ * - E4 (done): settings screen (five host-scoped settings)
  * - F2: "Open dashboard" action
  */
 
@@ -31,6 +32,13 @@ export default function contribute(client: PluginClientContext) {
     context: "workspace",
     locations: ["workspace", "explorer"],
     Component: LuckPlannerPanel,
+  });
+
+  client.addSettingsScreen({
+    id: "luck-planner-settings",
+    title: "Luck Planner",
+    icon: "GitBranch",
+    Component: LuckPlannerSettingsScreen,
   });
 
   // -------------------------------------------------------------------------

@@ -57,6 +57,9 @@ describe("settings schema", () => {
     expect(defaultSettings()).toEqual({
       injectIntoAgents: true,
       mcpServerName: "luck-planner",
+      httpPort: 8899,
+      accessToken: "",
+      historyRetentionDays: 0,
     });
     expect(luckPlannerSettings.schema.parse({})).toEqual(defaultSettings());
   });

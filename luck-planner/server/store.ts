@@ -2809,6 +2809,29 @@ export class LuckPlannerStore {
   }
 
   // -------------------------------------------------------------------------
+  // History retention (stage E4): bounded audit trail
+  // -------------------------------------------------------------------------
+
+  /**
+   * Prunes audit rows older than `retentionDays` across all projects of
+   * this installation (the `historyRetentionDays` setting, stage E4).
+   * `0` (the default) keeps the append-only trail forever and is a no-op.
+   * Pruning is a maintenance delete, not a domain mutation: no revision
+   * bump and no audit row — recording a prune inside the log being pruned
+   * would defeat the purpose. Returns the number of rows removed.
+   */
+  pruneHistory(retentionDays: number): number {
+    if (!Number.isFinite(retentionDays) || retentionDays <= 0) return 0;
+    const cutoff = Date.now() - retentionDays * 86_400_000;
+    return this.write(() => {
+      const result = this.db
+        .prepare("DELETE FROM history WHERE at < ?")
+        .run(cutoff);
+      return Number(result.changes);
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Project stats (stage E1): one call for the panel counters
   // -------------------------------------------------------------------------
 
