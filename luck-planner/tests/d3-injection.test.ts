@@ -53,10 +53,11 @@ beforeEach(() => {
 });
 
 describe("settings schema", () => {
-  it("defaults to injection enabled with the default server name", () => {
+  it("defaults to injection and the dashboard enabled with the default server name", () => {
     expect(defaultSettings()).toEqual({
       injectIntoAgents: true,
       mcpServerName: "luck-planner",
+      httpEnabled: true,
       httpPort: 8899,
       accessToken: "",
       historyRetentionDays: 0,

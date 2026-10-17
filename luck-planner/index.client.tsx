@@ -18,7 +18,9 @@ import { bugReport, goalCreate, nodeSetStatus, treeSearch } from "./shared/rpc";
  * - E2 (done): native workspace panel (tree outline)
  * - E3 (done): Command Center items + slash commands (`/luck-status`,
  *   `/luck-bug`) writing through the plugin RPCs
- * - E4 (done): settings screen (five host-scoped settings)
+ * - E4 (done): settings screen
+ * - F1 (done): dashboard HTTP server settings (enable switch; the server itself
+ *   runs in the daemon, see `server/http-server.ts`)
  * - F2: "Open dashboard" action
  */
 

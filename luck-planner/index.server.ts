@@ -27,6 +27,7 @@ import {
 } from "./server/mcp-launch";
 import { ensureSkillInstalled } from "./server/skill";
 import { LuckPlannerStore } from "./server/store";
+import { DashboardEndpoint } from "./server/http-lifecycle";
 import { growthProgress } from "./shared/growth";
 
 /**
@@ -41,8 +42,10 @@ import { growthProgress } from "./shared/growth";
  * - E1 (done): plugin RPC handlers (`shared/rpc.ts`) over one shared store
  * - E3 (done): goal-create + bug-report RPCs behind the ⌘K items and slash
  *   commands
- * - E4 (done): settings screen (five settings) + history retention enforcement
- * - F1: dashboard HTTP server
+ * - E4 (done): settings screen + history retention enforcement
+ * - F1 (done): read-only dashboard HTTP server (`/health`, `/api/*`, SSE
+ *   placeholder) on loopback, kept in step with `httpEnabled`/`httpPort`/
+ *   `accessToken`
  */
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(luckPlannerSettings);
@@ -103,9 +106,31 @@ export default function contribute(server: PluginServerContext) {
       );
     }
   };
-  void readValues().then(applyRetention);
-  const unsubscribeRetention = settings.subscribe((state) => {
-    if (state.status === "ready") applyRetention(normalizeSettings(state.values));
+
+  // -------------------------------------------------------------------------
+  // Dashboard HTTP server (stage F1, ADR-1/ADR-9): a read-only JSON API and
+  // the SPA host for the 2D/3D dashboards, bound to loopback only. The
+  // endpoint owns the socket and serialises restarts, so a port typed one
+  // digit at a time causes one apply, not four (see the class docs).
+  // -------------------------------------------------------------------------
+  const dashboard = new DashboardEndpoint({
+    store,
+    log: (message) => console.log(message),
+    logError: (message) => console.error(message),
+  });
+
+  /** Applies every settings-dependent side effect in one place. */
+  const applySettings = (values: LuckPlannerSettings): void => {
+    applyRetention(values);
+    dashboard.sync({
+      enabled: values.httpEnabled,
+      port: values.httpPort,
+      accessToken: values.accessToken,
+    });
+  };
+  void readValues().then(applySettings);
+  const unsubscribeSettings = settings.subscribe((state) => {
+    if (state.status === "ready") applySettings(normalizeSettings(state.values));
   });
 
   // -------------------------------------------------------------------------
@@ -319,11 +344,15 @@ export default function contribute(server: PluginServerContext) {
     if (disposed) throw new Error("luck-planner store is closed");
   }
 
-  return () => {
+  return async () => {
     disposed = true;
     removeCreateHook();
     removeSessionHook();
-    unsubscribeRetention();
+    unsubscribeSettings();
+    // Awaited (unlike the fire-and-forget syncs above) so the listening
+    // socket is really gone before the store it serves is closed: a leaked
+    // port would break the next plugin load on the same setting.
+    await dashboard.dispose();
     store.close();
   };
 }

@@ -1,9 +1,10 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.16.0`).** Stage **E4** (settings
-> screen) is done and all tests are green; the next stage is **F1** (dashboard HTTP
-> server). Stages A1–E4 are complete; blocks F–J are otherwise untouched. Nothing in
-> this document is a released API: the roadmap in §7 describes work that is still ahead.
+> **Development status: version in development (`0.17.0`).** Stages **E4** (settings
+> screen) and **F1** (read-only dashboard HTTP server) are done and all tests are green;
+> the next stage is **F2** ("Open dashboard"). Stages A1–F1 are complete; F2 and blocks
+> G–J are otherwise untouched. Nothing in this document is a released API: the roadmap in
+> §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -74,6 +75,7 @@ luck-planner/
 │   ├── goals.ts             # high goals: formal text + plan
 │   ├── growth.ts            # growth rates (goal → steps → facts)
 │   ├── rpc.ts               # defineRpc contracts
+│   ├── api.ts               # read-only dashboard HTTP API contracts
 │   └── tools.ts             # MCP tool schemas
 ├── server/
 │   ├── store.ts             # SQLite: schema v1, migrations, CRUD, FTS5, audit
@@ -82,6 +84,7 @@ luck-planner/
 │   ├── mcp-tools.ts         # transport-independent dispatch
 │   ├── mcp-launch.ts        # node/entry resolution, revision-independent publication
 │   ├── http-server.ts       # SPA + JSON API + SSE + health
+│   ├── http-lifecycle.ts    # keeps the HTTP server in step with settings (debounce/restart)
 │   └── skill.ts             # SKILL.md for agents + installer
 ├── client/
 │   ├── tree-panel.tsx       # native workspace panel (tree outline)
@@ -425,13 +428,13 @@ Verified by `tests/growth.test.ts` (13 tests):
 | --- | --- | --- |
 | Workspace panel (tree outline, details, filters, search) | `client.addWorkspacePanel` | E2 |
 | Command Center items + slash commands | `addCommandCenterItem`, `addSlashCommand` | E3 |
-| Settings screen (`injectIntoAgents`, `mcpServerName`, HTTP port, token, retention) | `defineSettings` / settings screen | E4 |
+| Settings screen (`injectIntoAgents`, `mcpServerName`, `httpEnabled`, HTTP port, token, retention) | `defineSettings` / settings screen | E4 + F1 |
 | Plugin RPCs (`tree.get`, `node.detail`, `node.setStatus`, `goal.approve`, …) | `defineRpc` + `server.handle` | E1 |
 | MCP injection into agents | `server.before("agent.create")` + `agent.session_open` | D3 ✅ |
 | Settings (`injectIntoAgents`, `mcpServerName`) | `defineSettings` / `server.registerSettings` (values); settings screen | D3 ✅ / E4 |
 | Skill for coding agents (`SKILL.md` protocol + installer) | `server/skill.ts`, auto-install on plugin load | D3 ✅ |
 | Bundled stdio MCP server (`dist/mcp-server.js`) | `paseo-plugin.json` `mcp.entry` + `server/mcp-server.ts`, spawned by agents | D2 ✅ |
-| Dashboard HTTP server | daemon subprocess, started by the plugin lifecycle | F1 |
+| Dashboard HTTP server | daemon subprocess, started by the plugin lifecycle | F1 ✅ |
 | "Open dashboard" | `navigation.openBrowser` → `openExternalUrl` fallback | F2 |
 | Agent timeline rows (goal approved, leaf done) | `paseo.agents.ref(id).timeline.append` (optional) | H2 |
 
@@ -620,7 +623,7 @@ gets a real actor, and agents get a written protocol for keeping the tree. Verif
   (bool, default `true`) gates both hooks; `mcpServerName` (default `luck-planner`) reaches
   the bundle through `env`. Hooks read them through `settings.read()` with schema defaults
   as the fallback, so a settings race can never disable injection silently. The settings
-  screen arrives in E4.
+  screen (stage E4) edits these plus the dashboard endpoint settings (stage F1, see below).
 - **First-leaf bootstrap** — the acceptance exposed a hole in the D1 tool set: **no tool
   creates roots or branches**, so an empty project could not receive its first leaf.
   `luck_tree_upsert_leaf` without `parentId` now bootstraps the minimal skeleton
@@ -656,11 +659,82 @@ gets a real actor, and agents get a written protocol for keeping the tree. Verif
   the candidate follow-up stage **D4**; `mcpServerCommand()`/`injectedMcpConfig()` are the
   single source those writers will reuse.
 
-### Dashboard HTTP API (planned, stage F1, read-only)
+### Dashboard HTTP server (stage F1 — `server/http-server.ts`, `server/http-lifecycle.ts`, `shared/api.ts`)
 
-`GET /health`, `GET /api/tree?project=` (nodes + bees + bugs + goals + growth in one graph-
-ready response), `GET /api/node/:id` (details + history + links), `GET /api/search`,
-`GET /api/stats`, `SSE /api/events` (tree-changed notifications, stage H1).
+The 2D/3D dashboards are a separate web app (ADR-1) that this server *serves* from
+`dist/dashboard` and feeds from a **read-only** JSON API. It runs inside the daemon
+subprocess next to the store, so it shares the one SQLite file the native panel and the
+agent MCP servers use (ADR-2).
+
+**Endpoints** (all read-only, ADR-8):
+
+| Endpoint | Auth | Response |
+| --- | --- | --- |
+| `GET /health` | none | `{ ok: true, server: "luck-planner", version }` — liveness probe |
+| `GET /api/tree?project=<key>` | token | nodes + bees + bugs + `bugAttachments` + goals + growth in one graph-ready response |
+| `GET /api/node/:id?project=<key>` | token | the `node-detail` RPC shape (path, children, bees, bugs, blocking bugs, history, growth) |
+| `GET /api/search?project=<key>&q=&kind=&status=&limit=&includeArchived=` | token | the `tree-search` RPC shape (`matches`, `results[]`) |
+| `GET /api/stats?project=<key>` | token | the `stats` RPC shape |
+| `GET /api/events` | token | SSE stream: `ready` on open, heartbeat comment every 15 s, `tree-changed` broadcasts (stage H1) |
+| everything else | none | the SPA from `dist/dashboard` (SPA fallback for extensionless paths) |
+
+**Why the response shapes are not redefined.** `shared/api.ts` re-exports the RPC output
+schemas (`nodeDetail.output`, `treeSearch.output`, `stats.output`) instead of writing new
+zod objects, so the panel and the dashboard are guaranteed to read one shape; only the
+composite `/api/tree` graph is new there. `tests/http-server.test.ts` parses every response
+against those very schemas, which is what "JSON responses agree with the shared schemas"
+means concretely. The composite response carries `bugAttachments` (the `bug_nodes` map)
+because the badge layer must place each incident on every leaf it blocks without one query
+per bug — `store.listBugAttachments()` reads that map in one query, next to a new
+`store.listNodes({ includeArchived })` (archived nodes stay out of the graph).
+
+**Security (ADR-9).**
+
+- Binds `127.0.0.1` only. There is deliberately no `httpHost` setting (memory-flash needs
+  one because it serves remote MCP clients; the dashboard is local-only).
+- Every `/api/*` request needs the per-installation token, accepted as `?token=` (how the
+  browser tab is opened) or `Authorization: Bearer` (how scripts call it). The comparison
+  uses `crypto.timingSafeEqual` on equal-length buffers; the token is never logged as part
+  of a request line. `GET /health` stays public.
+- The API has **no write path**: a leaked token cannot mutate the tree (mutations stay on
+  MCP/RPC). This is what keeps the surface small.
+- Static assets are unauthenticated on purpose: they are the SPA shell (no data), and a
+  browser cannot attach a query token to relative asset requests. A path is normalized,
+  resolved against the dashboard root and rejected unless it stays inside it, so
+  `/%2e%2e%2f…` traversal returns 404 (pinned by a raw-socket test — the global `fetch`
+  would normalize the dot segments client-side).
+- The constructor refuses an empty token: an unauthenticated API is never started by
+  accident.
+
+**Lifecycle (`DashboardEndpoint`).** A class, not three lines in `contribute`, for the same
+reasons memory-flash 0.5.2 learned:
+
+- **Debounced + serialized.** Settings arrive per keystroke (`8899` emits `8`, `88`, `889`,
+  `8899`). A 150 ms quiet period collapses the burst into one apply, and every apply runs on
+  a promise chain, so two overlapping `stop()`/`start()` pairs can never interleave and
+  leave a stale listener on the old port.
+- **Truthful status.** The bound port/URL come from the running socket, never from the
+  settings, so a screen cannot claim a port that failed to bind.
+- **Real token.** `accessToken: ""` (default) means *auto*: a random `lp_…` token is minted
+  per plugin session, so the API is never exposed with a well-known value; a non-empty
+  setting pins it verbatim. Changing the token restarts the listener (the running server
+  holds the old one).
+- **Auto-fallback.** A busy configured port logs a line and falls back to an ephemeral port
+  (`status().portFallback`), instead of leaving the dashboard down.
+- **Awaited shutdown.** `contribute`'s cleanup awaits `dispose()`, so the listening socket
+  is really closed before the store it serves is; a leaked port would break the next plugin
+  load on the same setting.
+
+**Settings.** F1 adds `httpEnabled` (default `true`) so the socket can be closed without
+uninstalling — a listening socket deserves a switch. The settings screen gained the matching
+"Serve the dashboard HTTP endpoint" switch; `httpPort` (default 8899) and `accessToken`
+defaults are unchanged from E4. While `dist/dashboard` is not built (stage G1), `GET /`
+answers a truthful placeholder page instead of a blank 404 — the JSON API is already live.
+
+**Not yet wired (stage H1).** The MCP server runs in a *separate process* that writes the
+same SQLite file, so the daemon cannot learn about a mutation without polling or a DB hook.
+For that reason `/api/events` is a placeholder in F1: the stream, heartbeat and
+`broadcast()` exist and are tested, but no mutation calls them yet.
 
 ## 7. Roadmap (stage map)
 
@@ -668,14 +742,13 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: development continues after stage E3 — block D is closed.** Stages A1–E3 are
-complete and released as tagged versions up to `luck-planner@0.15.0`; blocks **B
-(storage)**, **C (domain semantics)** and **D (agent access)** are closed — D3 verified
-end-to-end on a live daemon (injection, actor, skill, first-leaf bootstrap). **Block E
-(UI transport)** continues with E3 (Command Center items + slash commands writing
-through new `goal-create`/`bug-report` RPCs); a candidate **D4** (config-file MCP
-registrations for OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may
-still precede the remaining UI work. The next stage is **E4** (settings screen).
+**Status: block F (HTTP transport) is open — F1 is done.** Stages A1–E4 are complete
+and released as tagged versions up to `luck-planner@0.16.0`; blocks **B (storage)**, **C
+(domain semantics)**, **D (agent access)** and **E (UI transport)** are closed. F1 (0.17.0)
+delivers the read-only dashboard HTTP server on loopback (ADR-9). **Block F continues with
+F2** ("Open dashboard": `navigation.openBrowser` with the tokenised URL, `openExternalUrl`
+fallback). A candidate **D4** (config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/
+Codex, the memory-flash 0.8.1 fix) may still precede the remaining UI work.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
@@ -684,7 +757,7 @@ still precede the remaining UI work. The next stage is **E4** (settings screen).
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
-| F | F1–F2 | 0.17.0–0.18.0 | dashboard HTTP server, "Open dashboard" action |
+| F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |

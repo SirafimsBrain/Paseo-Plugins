@@ -49,7 +49,13 @@ function createFakeServer(): FakeServer {
           return {
             status: "ready" as const,
             revision: "1",
-            values: { injectIntoAgents: true, mcpServerName: "luck-planner" },
+            values: {
+              injectIntoAgents: true,
+              mcpServerName: "luck-planner",
+              // Hermetic: these tests exercise the RPC surface, not the
+              // dashboard socket (covered by tests/http-server.test.ts).
+              httpEnabled: false,
+            },
           };
         },
         subscribe() {

@@ -23,6 +23,7 @@ import {
   type Bee,
   type BeeStatus,
   type Bug,
+  type BugNode,
   type BugStatus,
 } from "../shared/links";
 import {
@@ -767,6 +768,36 @@ export class LuckPlannerStore {
       currentId = node.parentId;
     }
     return path;
+  }
+
+  /**
+   * Every node of one project, oldest first — the single read the dashboard
+   * graph response (`GET /api/tree`, stage F1) is laid out from. Ordering
+   * matches {@link listChildren} so a graph built from this list is
+   * deterministic between reloads. Archived nodes are excluded unless
+   * `includeArchived` is set (the dashboard shows live work only). Read-only:
+   * no fence, no transaction, nothing to audit.
+   */
+  listNodes(
+    projectKey: string,
+    options: { includeArchived?: boolean } = {},
+  ): Node[] {
+    const project = requireText(projectKey, "project key");
+    const rows =
+      options.includeArchived === true
+        ? (this.db
+            .prepare(
+              "SELECT * FROM nodes WHERE project_key = ? ORDER BY created_at, id",
+            )
+            .all(project) as unknown as NodeRow[])
+        : (this.db
+            .prepare(
+              `SELECT * FROM nodes
+                WHERE project_key = ? AND archived_at IS NULL
+                ORDER BY created_at, id`,
+            )
+            .all(project) as unknown as NodeRow[]);
+    return rows.map(rowToNode);
   }
 
   // -------------------------------------------------------------------------
@@ -1701,6 +1732,27 @@ export class LuckPlannerStore {
       )
       .all(bugId, projectKey) as unknown as NodeRow[];
     return rows.map(rowToNode);
+  }
+
+  /**
+   * Every `bug_nodes` attachment of the project — the bug→leaf map the
+   * dashboard badge layer (stages F1/G3) needs to place each incident on
+   * every leaf it blocks, instead of one query per bug. `bug_nodes` carries
+   * no `project_key` of its own, so the scope comes from the owning bug.
+   * Deterministic order; read-only.
+   */
+  listBugAttachments(projectKey: string): BugNode[] {
+    const project = requireText(projectKey, "project key");
+    const rows = this.db
+      .prepare(
+        `SELECT bn.bug_id AS bug_id, bn.node_id AS node_id
+           FROM bug_nodes bn
+           JOIN bugs b ON b.id = bn.bug_id
+          WHERE b.project_key = ?
+          ORDER BY bn.bug_id, bn.node_id`,
+      )
+      .all(project) as Array<{ bug_id: string; node_id: string }>;
+    return rows.map((row) => ({ bugId: row.bug_id, nodeId: row.node_id }));
   }
 
   /**

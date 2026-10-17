@@ -18,13 +18,14 @@ import {
 
 /**
  * Plugin settings screen (Paseo Settings → Plugins → Luck Planner,
- * PLAN.md stage E4). Edits the five host-scoped settings registered by the
- * server: MCP injection, reported server name, dashboard HTTP port
- * (0 = auto), access token (regenerate), and audit-history retention
- * (0 = keep forever). Every save goes through `settings.save` — the host
- * persists the doc, so values survive daemon restarts, and the server
- * re-reads them live (`agent.create` per creation, retention on
- * `subscribe`), so no daemon restart is needed — a plugin reload suffices.
+ * PLAN.md stages E4 + F1). Edits the six host-scoped settings registered by
+ * the server: MCP injection, reported server name, whether the dashboard HTTP
+ * server runs, its port (0 = auto), its access token (regenerate), and
+ * audit-history retention (0 = keep forever). Every save goes through
+ * `settings.save` — the host persists the doc, so values survive daemon
+ * restarts, and the server re-reads them live (`agent.create` per creation,
+ * retention and the dashboard endpoint on `subscribe`), so no daemon restart
+ * is needed — a plugin reload suffices.
  */
 export function LuckPlannerSettingsScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(luckPlannerSettings);
@@ -84,6 +85,12 @@ export function LuckPlannerSettingsScreen({ theme }: PluginSurfaceProps) {
           />
         </SettingsSection>
         <SettingsSection title="Dashboard HTTP (stage F1)">
+          <SettingsSwitch
+            label="Serve the dashboard HTTP endpoint"
+            hint="Read-only dashboard API + web app on 127.0.0.1 (loopback only), protected by the access token below. Applies without a daemon restart."
+            value={values.httpEnabled}
+            onValueChange={(enabled: boolean) => patch({ httpEnabled: enabled })}
+          />
           <SettingsInput
             label="Port"
             hint={`1–65535, or 0 for auto (ephemeral). Default ${DEFAULT_HTTP_PORT}.`}

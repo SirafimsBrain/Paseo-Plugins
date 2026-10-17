@@ -1,8 +1,9 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.16.0`).** Этап **E4** (settings screen +
-> выполнен, тесты зелёные. Следующий этап — **F1** (HTTP-сервер дашборда).
-> Этапы A1–E4 закрыты и помечены ниже; F1–J не начинались.
+> **Статус: версия в разработке (`0.17.0`).** Этапы **E4** (settings screen +
+> retention) и **F1** (HTTP-сервер дашборда) выполнены, тесты зелёные.
+> Следующий этап — **F2** («Открыть дашборд»).
+> Этапы A1–F1 закрыты и помечены ниже; F2–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -44,6 +45,7 @@ luck-planner/
 │   ├── goals.ts             # высокие цели: формальное описание + план
 │   ├── growth.ts            # темпы роста (goal → шаги → факты)
 │   ├── rpc.ts               # defineRpc-контракты
+│   ├── api.ts               # read-only контракты dashboard HTTP API
 │   └── tools.ts             # схемы MCP-инструментов
 ├── server/
 │   ├── store.ts             # SQLite: схема v1, миграции, CRUD, FTS5, аудит
@@ -52,6 +54,7 @@ luck-planner/
 │   ├── mcp-tools.ts         # транспорт-независимый dispatch
 │   ├── mcp-launch.ts        # резолв node + entry, публикация revision-independent пути
 │   ├── http-server.ts       # SPA + JSON API + SSE + health
+│   ├── http-lifecycle.ts    # жизненный цикл HTTP-сервера из настроек (debounce/restart)
 │   └── skill.ts             # SKILL.md для агентов + установщик
 ├── client/
 │   ├── tree-panel.tsx       # нативная workspace-панель (дерево-аутлайн)
@@ -236,13 +239,16 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - `shared/settings.ts`: `defineSettings` с 5 полями (`injectIntoAgents`, `mcpServerName`, `httpPort` default 8899 / `0` auto, `accessToken`, `historyRetentionDays`); `normalizeSettings` для апгрейда старых доков настроек; `generateAccessToken` (WebCrypto, `lp_` + 256 бит). Сервер (`index.server.ts`) применяет `historyRetentionDays` при загрузке и на каждом `settings.subscribe` — без перезапуска демона, только reload плагина.
 - `client/settings-screen.tsx` (новый): нативный экран в Settings → Plugins → Luck Planner (`SettingsInput`/`SettingsSwitch`/`SettingsAction` с regenerate токена), использует `useSettings` и `useHostFontScale`.
 - `index.client.tsx`: регистрация `client.addSettingsScreen({ id: "luck-planner-settings", … })`.
-- Приёмка ✅: `tests/d3-injection.test.ts` обновлён под новые дефолты (все 5 полей); `typecheck` + `vitest run` зелёные (262 тестов); значения сохраняются между рестартами даэмона (host-scoped settings хоста).
+- Приёмка ✅: `tests/d3-injection.test.ts` обновлён под новые дефолты (все 5 полей; в F1 список расширен до 6 — добавлен `httpEnabled`); `typecheck` + `vitest run` зелёные (262 тестов); значения сохраняются между рестартами даэмона (host-scoped settings хоста).
 
 ### Блок F — HTTP-транспорт дашборда
 
-**F1. `server/http-server.ts`** → `0.17.0`
-- Старт в жизненном цикле плагина (или по первому запросу), `127.0.0.1`, порт из настроек (auto-fallback на эфемерный), пер-инсталляционный токен. Эндпоинты (read-only): `GET /health`, `GET /api/tree?project=` (узлы+пчёлы+жуки+цели+рост одним ответом — готовый graph для раскладки), `GET /api/node/:id` (детали+история+связи), `GET /api/search`, `GET /api/stats`, `SSE /api/events` (заготовка для H1). Отдача SPA из `dist/dashboard` (index.html + asset'ы, correct content-type).
-- Приёмка: тесты на реальном сервере (прецедент `tests/http-server.test.ts` в memory-flash): health, 401 без токена, JSON-ответы согласованы с shared-схемами, SPA отдаётся, cleanup останавливает сервер (нет утечки порта).
+**F1. `server/http-server.ts`** → `0.17.0` — ✅ **выполнен**
+- `server/http-server.ts`: `DashboardHttpServer` — `node:http` на `127.0.0.1`, пер-инсталляционный токен (query `?token=` или `Authorization: Bearer`, сравнение constant-time). Эндпоинты (read-only): `GET /health` (без токена), `GET /api/tree?project=` (узлы+пчёлы+жуки+их привязки+цели+рост одним ответом — готовый graph для раскладки), `GET /api/node/:id` (детали+история+связи), `GET /api/search` (FTS5 + фильтры kind/status/limit), `GET /api/stats`, `SSE /api/events` (заготовка для H1: `ready` + heartbeat + `broadcast`). Отдача SPA из `dist/dashboard` (index.html + assets, correct content-type, SPA-fallback, защита от traversal); пока сборки нет — честный placeholder.
+- `server/http-lifecycle.ts`: `DashboardEndpoint` держит сокет в соответствии с настройками — debounce 150 мс (порт, набранный по цифре, даёт один restart), сериализованный restart, auto-генерация токена при пустом `accessToken`, auto-fallback на эфемерный порт при занятом, `status()` из живого сокета, `dispose()` реально освобождает порт.
+- `shared/api.ts`: контракты JSON API (health + композитный tree), при этом `node`/`search`/`stats` **переиспользуют** output-схемы RPC (`shared/rpc.ts`) — одна форма для панели и дашборда. `server/store.ts`: новые read-only методы `listNodes` и `listBugAttachments`.
+- Настройки: добавлен `httpEnabled` (default `true`) + переключатель в settings screen; `contribute` запускает endpoint по настройкам и останавливает его в cleanup (cleanup стал async и дожидается закрытия сокета).
+- Приёмка ✅: `tests/http-server.test.ts` (16 тестов: health, 401 без токена/с неверным/с тем же хэшем, JSON согласован со shared-схемами, проектный скоуп, 405/404, SPA+traversal, SSE, освобождение порта) и `tests/http-lifecycle.test.ts` (9 тестов: off/on, эфемерный порт, pinned токен, debounce, fallback, restart, dispose, wiring через `contribute`). `typecheck` + `vitest run` зелёные (287 тестов).
 
 **F2. «Открыть дашборд»** → `0.18.0`
 - `client/open-dashboard.ts`: `navigation.openBrowser({url с токеном, workspaceId})` на Electron; фолбэк `openExternalUrl` (прецедент bunny-search `open-search-ui.ts`). Кнопка в панели + пункт ⌘K.

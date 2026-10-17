@@ -5,10 +5,10 @@ import { defineSettings } from "@getpaseo/plugin";
  * Plugin settings (host-scoped, edited in Paseo Settings → Plugins →
  * Luck Planner from stage E4). The server registers the definition and
  * reads it live (the `agent.create` hook re-reads per creation, history
- * retention re-applies on `settings.subscribe`), so a change takes effect
- * without a daemon restart — only a plugin reload. Defaults cover every
- * field, so `schema.parse({})` is a complete settings document (the
- * memory-flash fresh-install round-trip rule).
+ * retention and the dashboard endpoint re-apply on `settings.subscribe`),
+ * so a change takes effect without a daemon restart — only a plugin reload.
+ * Defaults cover every field, so `schema.parse({})` is a complete settings
+ * document (the memory-flash fresh-install round-trip rule).
  */
 export const luckPlannerSettings = defineSettings({
   id: "luck-planner",
@@ -29,9 +29,17 @@ export const luckPlannerSettings = defineSettings({
      */
     mcpServerName: z.string().trim().min(1).max(60).default("luck-planner"),
     /**
-     * Dashboard HTTP port (stage F1 reads this): a fixed port 1–65535, or
-     * `0` for auto — the OS picks an ephemeral port. Defaults to 8899,
-     * which no other plugin in this repo uses (memory-flash takes 8787).
+     * Serve the dashboard HTTP endpoint at all (stage F1). On by default —
+     * the dashboard is the point of the plugin — and the switch exists so a
+     * user can close the listening socket without uninstalling. The endpoint
+     * is loopback-only and token-protected either way (ADR-9).
+     */
+    httpEnabled: z.boolean().default(true),
+    /**
+     * Dashboard HTTP port (stage F1): a fixed port 1–65535, or `0` for auto —
+     * the OS picks an ephemeral port. Defaults to 8899, which no other plugin
+     * in this repo uses (memory-flash takes 8787). A busy port falls back to
+     * an ephemeral one.
      */
     httpPort: z.number().int().min(0).max(65535).default(8899),
     /**
@@ -60,9 +68,10 @@ export function defaultSettings(): LuckPlannerSettings {
 /**
  * Normalizes whatever the host reports as `ready` settings into a complete
  * document: fills the defaults for fields added after the settings doc was
- * written (the upgrade path — an old two-field doc must gain `httpPort`,
- * `accessToken` and `historyRetentionDays` without a daemon restart) and
- * falls back to the defaults entirely when the values cannot be parsed.
+ * written (the upgrade path — an old two-field doc must gain `httpEnabled`,
+ * `httpPort`, `accessToken` and `historyRetentionDays` without a daemon
+ * restart) and falls back to the defaults entirely when the values cannot be
+ * parsed.
  */
 export function normalizeSettings(values: unknown): LuckPlannerSettings {
   const parsed = luckPlannerSettings.schema.safeParse(values);

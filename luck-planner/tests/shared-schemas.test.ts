@@ -390,6 +390,7 @@ describe("shared/ import boundaries", () => {
   it("has the expected domain modules", () => {
     expect(files.sort()).toEqual(
       [
+        "api.ts",
         "goals.ts",
         "growth.ts",
         "links.ts",
