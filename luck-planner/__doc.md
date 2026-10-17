@@ -1,10 +1,10 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.17.0`).** Stages **E4** (settings
-> screen) and **F1** (read-only dashboard HTTP server) are done and all tests are green;
-> the next stage is **F2** ("Open dashboard"). Stages A1–F1 are complete; F2 and blocks
-> G–J are otherwise untouched. Nothing in this document is a released API: the roadmap in
-> §7 describes work that is still ahead.
+> **Development status: version in development (`0.18.0`).** Stages **E4** (settings
+> screen), **F1** (read-only dashboard HTTP server) and **F2** ("Open dashboard") are
+> done and all tests are green; the next stage is **G1** (dashboard web-app scaffold).
+> Stages A1–F2 are complete; blocks G–J are otherwise untouched. Nothing in this
+> document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -89,7 +89,8 @@ luck-planner/
 ├── client/
 │   ├── tree-panel.tsx       # native workspace panel (tree outline)
 │   ├── details.tsx          # node details panel
-│   ├── open-dashboard.ts    # openBrowser → openExternalUrl fallback
+│   ├── open-dashboard.ts    # openBrowser → openExternalUrl fallback (pure logic)
+│   ├── dashboard-screen.tsx # ⌘K "Open dashboard" screen + SDK glue
 │   └── use-host-typography.ts
 ├── dashboard/               # web app (separate bundle, NEVER imported from client/server)
 │   ├── index.html
@@ -435,7 +436,7 @@ Verified by `tests/growth.test.ts` (13 tests):
 | Skill for coding agents (`SKILL.md` protocol + installer) | `server/skill.ts`, auto-install on plugin load | D3 ✅ |
 | Bundled stdio MCP server (`dist/mcp-server.js`) | `paseo-plugin.json` `mcp.entry` + `server/mcp-server.ts`, spawned by agents | D2 ✅ |
 | Dashboard HTTP server | daemon subprocess, started by the plugin lifecycle | F1 ✅ |
-| "Open dashboard" | `navigation.openBrowser` → `openExternalUrl` fallback | F2 |
+| "Open dashboard" (panel button + ⌘K screen) | `navigation.openBrowser` → `openExternalUrl` fallback; `dashboard-status` RPC for the URL | F2 ✅ |
 | Agent timeline rows (goal approved, leaf done) | `paseo.agents.ref(id).timeline.append` (optional) | H2 |
 
 Client rules enforced at every UI stage: colors only from `theme.colors`, padding from
@@ -504,6 +505,10 @@ contract in `tests/manifest.test.ts`:
   built-ins external, ESM banner for CJS built-ins, no sourcemap). The suite rebuilds twice
   and asserts byte-identical output; `pretest` runs the script so the spawn always sees a
   fresh build even under a raw `vitest run`.
+- **The built bundle is committed.** The root `.gitignore` deliberately does not ignore
+  `dist/` for plugins (memory-flash and bunny-search track `dist/mcp-server.js`), so a host
+  can work from a clean clone without running the build. `npm test` regenerates the file, so
+  a stage commit includes the rebuilt bundle; `dist/dashboard` is still absent until G1.
 - **Manifest** — `paseo-plugin.json` gains `build: [["npm","ci"],["npm","run","bundle"]]`
   as **argv arrays**: the daemon runs each step without a shell, and a flat
   `"build": ["npm run bundle"]` fails manifest validation (`expected array, received
@@ -736,18 +741,70 @@ same SQLite file, so the daemon cannot learn about a mutation without polling or
 For that reason `/api/events` is a placeholder in F1: the stream, heartbeat and
 `broadcast()` exist and are tested, but no mutation calls them yet.
 
+### "Open dashboard" (stage F2 — `client/open-dashboard.ts`, `client/dashboard-screen.tsx`)
+
+F2 turns the F1 socket into something a user can actually reach: a **Dashboard** button in
+the workspace panel and a ⌘K item, both landing in Paseo's own browser tab on Electron and
+in the OS browser everywhere else (ADR-1).
+
+**Where the address comes from.** The client cannot build the URL from the settings: the
+port may have fallen back to an ephemeral one and the token is auto-generated when the
+setting is empty, so only the daemon knows the live address. The new read-only RPC
+`luck-planner.dashboard-status` answers exactly that (`enabled`, `listening`, `url`,
+`port`, `portFallback`, `error`), and the URL is built by the pure `dashboardUrl(origin,
+token, projectKey?)` in `shared/api.ts` — the same helper the server uses, so the panel and
+the HTTP server can never disagree about the query shape. `?project=` carries the
+workspace's `projectRootPath`, which is what makes a tab opened from workspace B show B
+instead of reusing whatever tab A opened. The URL contains the token, which is the same
+trust boundary as the settings screen (it shows the token too) and is never logged.
+
+**Two entry points, one code path.**
+
+| Entry point | How it reaches the browser |
+| --- | --- |
+| Panel **Dashboard** button | Calls `openDashboard(...)` directly — a workspace panel gets `navigation`, and the project key/workspace id are already at hand. |
+| ⌘K **Open luck-planner dashboard** | Opens the registered screen `luck-planner-dashboard` with `projectKey`/`workspaceId` params; the screen calls the same `openDashboard(...)` on mount and keeps the address visible with an "Open again" button. |
+
+The indirection for the ⌘K item is a **SDK constraint, not a design preference**: a Command
+Center callback receives `rpc`/`openScreen`/`openPanel`/`workspace`, but **no `navigation`**
+— only surfaces, panels and screens are `PluginNavigableHostProps`. bunny-search solves the
+same problem by making its ⌘K item open its surface; a screen is the equivalent here, and it
+doubles as the "why did nothing open?" card (disabled endpoint / port not bound / server
+error / no workspace).
+
+**Pure logic, injected openers.** `client/open-dashboard.ts` holds the whole decision and
+imports nothing (no React, no SDK), following `client/slash.ts`; `tests/open-dashboard.test.ts`
+pins every branch. The injection is not only a test convenience: the SDK's
+`@getpaseo/plugin/client` build re-exports `openExternalUrl` from its TypeScript *source*
+only, so a Node test that imported it would read `undefined`. The rules:
+
+- `navigation.openBrowser({ url, workspaceId })` wins when the host advertises it (Electron).
+- The workspace id is the caller's, else the first workspace the client knows
+  (`paseo.workspaces.list()`), else there is no workspace — and without one the in-app
+  browser cannot be used, so the external opener runs.
+- A host whose `openBrowser` **throws** (unknown workspace) must not swallow the URL: the
+  external opener runs instead. A failing workspace list is treated the same way.
+- Only absolute `http`/`https` URLs are ever handed to an opener; anything else throws,
+  because `openDashboardUrl` must never become a `javascript:`/`file:` navigation sink.
+
+**Status line.** The panel renders the report text under the counters row (success colour for
+`browser`/`external`, danger for `unavailable`/`error`), so a refused open says *why* instead
+of failing silently.
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block F (HTTP transport) is open — F1 is done.** Stages A1–E4 are complete
-and released as tagged versions up to `luck-planner@0.16.0`; blocks **B (storage)**, **C
-(domain semantics)**, **D (agent access)** and **E (UI transport)** are closed. F1 (0.17.0)
-delivers the read-only dashboard HTTP server on loopback (ADR-9). **Block F continues with
-F2** ("Open dashboard": `navigation.openBrowser` with the tokenised URL, `openExternalUrl`
-fallback). A candidate **D4** (config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/
+**Status: block F (HTTP transport) is closed — F1 and F2 are done.** Stages A1–E4 are
+complete and released as tagged versions up to `luck-planner@0.16.0`; blocks **B (storage)**,
+**C (domain semantics)**, **D (agent access)** and **E (UI transport)** are closed. F1
+(0.17.0) delivered the read-only dashboard HTTP server on loopback (ADR-9) and F2 (0.18.0)
+made it reachable — panel button + ⌘K screen, in-app browser with an external fallback.
+**Block G starts with G1** (dashboard web-app scaffold: React + TS, toolbar/canvas/details,
+own theming), which is the first stage that produces `dist/dashboard` instead of the
+placeholder. A candidate **D4** (config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/
 Codex, the memory-flash 0.8.1 fix) may still precede the remaining UI work.
 
 | Block | Stages | Versions | Content |
@@ -757,7 +814,7 @@ Codex, the memory-flash 0.8.1 fix) may still precede the remaining UI work.
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
-| F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action |
+| F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |

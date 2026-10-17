@@ -8,6 +8,7 @@ import contribute from "../index.server";
 import { DashboardEndpoint } from "../server/http-lifecycle";
 import { DEFAULT_DASHBOARD_HOST } from "../server/http-server";
 import { LuckPlannerStore } from "../server/store";
+import { dashboardStatus } from "../shared/rpc";
 
 /**
  * Stage F1 acceptance (`PLAN.md`): the lifecycle wrapper that keeps the
@@ -164,6 +165,45 @@ describe("DashboardEndpoint", () => {
     }
   });
 
+  // ── Stage F2: the per-project address the client opens ──────────────────
+
+  it("builds a project URL a browser can open, and none while down", async () => {
+    const ep = endpoint();
+    try {
+      expect(ep.projectUrl("/projects/demo")).toBeNull();
+
+      ep.sync({ enabled: true, port: 0, accessToken: "" });
+      await ep.settled();
+
+      const url = ep.projectUrl("/projects/Paseo plugins")!;
+      const parsed = new URL(url);
+      expect(parsed.origin).toBe(new URL(ep.status().url!).origin);
+      expect(parsed.searchParams.get("token")).toBe(ep.status().token);
+      // A path with a space must survive the round trip.
+      expect(parsed.searchParams.get("project")).toBe("/projects/Paseo plugins");
+
+      const page = await fetch(url);
+      expect(page.status).toBe(200);
+    } finally {
+      await ep.dispose();
+    }
+  });
+
+  it("drops the project URL when the setting is turned off", async () => {
+    const ep = endpoint();
+    try {
+      ep.sync({ enabled: true, port: 0, accessToken: "" });
+      await ep.settled();
+      expect(ep.projectUrl("/p")).not.toBeNull();
+
+      ep.sync({ enabled: false, port: 0, accessToken: "" });
+      await ep.settled();
+      expect(ep.projectUrl("/p")).toBeNull();
+    } finally {
+      await ep.dispose();
+    }
+  });
+
   it("dispose frees the socket", async () => {
     const ep = endpoint();
     ep.sync({ enabled: true, port: 0, accessToken: "" });
@@ -225,6 +265,50 @@ function fakeServer(values: SettingsValues): PluginServerContext {
     registerUsageSource() {},
   };
   return server as unknown as PluginServerContext;
+}
+
+/**
+ * Same fake, but keeps the RPC handlers so the F2 wiring test can call
+ * `luck-planner.dashboard-status` exactly as the panel does.
+ */
+interface CapturingServer extends PluginServerContext {
+  call<T>(name: string, input: unknown): Promise<T>;
+}
+
+function capturingServer(values: SettingsValues): CapturingServer {
+  const handlers = new Map<string, (input: never, context: never) => unknown>();
+  const server = {
+    registerSettings() {
+      return {
+        async read() {
+          return { status: "ready" as const, revision: "1", values };
+        },
+        subscribe() {
+          return () => {};
+        },
+      };
+    },
+    handle(
+      contract: { name: string },
+      handler: (input: never, context: never) => unknown,
+    ) {
+      handlers.set(contract.name, handler);
+    },
+    before() {
+      return () => {};
+    },
+    on() {
+      return () => {};
+    },
+    registerProvider() {},
+    registerUsageSource() {},
+    async call<T>(name: string, input: unknown): Promise<T> {
+      const handler = handlers.get(name);
+      if (!handler) throw new Error(`No handler registered for ${name}`);
+      return (await handler(input as never, undefined as never)) as T;
+    },
+  };
+  return server as unknown as CapturingServer;
 }
 
 /** Waits for the `dashboard listening on <url>` line from `contribute`. */
@@ -294,5 +378,67 @@ describe("plugin wiring (contribute)", () => {
 
     // Cleanup awaited the socket close: the port no longer answers.
     await expect(fetch(`${origin}/health`)).rejects.toThrow();
+  });
+
+  // Stage F2: the client opens the dashboard through this RPC, so the URL it
+  // answers has to be the *live* one — token included — and it has to work.
+  it("answers dashboard-status with a working, tokenised project URL", async () => {
+    process.env.PASEO_HOME = dir;
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map((value) => String(value)).join(" "));
+    });
+
+    const server = capturingServer({
+      injectIntoAgents: true,
+      mcpServerName: "luck-planner",
+      httpEnabled: true,
+      httpPort: 0,
+      accessToken: "",
+      historyRetentionDays: 0,
+    });
+    const cleanup = contribute(server);
+
+    try {
+      const logged = new URL(await waitForDashboardUrl(logs));
+      const projectKey = "/projects/Paseo plugins"; // space + slashes: encoded
+
+      const status = await server.call<{
+        enabled: boolean;
+        listening: boolean;
+        url: string | null;
+        port: number | null;
+        portFallback: boolean;
+        error: string | null;
+      }>(dashboardStatus.name, { projectKey });
+
+      expect(status.enabled).toBe(true);
+      expect(status.listening).toBe(true);
+      expect(status.port).toBe(Number(logged.port));
+      expect(status.portFallback).toBe(false);
+      expect(status.error).toBeNull();
+
+      const url = new URL(status.url!);
+      expect(url.origin).toBe(logged.origin);
+      expect(url.searchParams.get("token")).toBe(logged.searchParams.get("token"));
+      expect(url.searchParams.get("project")).toBe(projectKey);
+
+      // The URL the client hands to the browser really serves the dashboard...
+      const page = await fetch(status.url!);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("luck-planner dashboard");
+
+      // ...and its token is the one the API accepts for that project.
+      const api = await fetch(
+        `${url.origin}/api/stats?token=${url.searchParams.get("token")}&project=${encodeURIComponent(projectKey)}`,
+      );
+      expect(api.status).toBe(200);
+      expect((await api.json()).projectKey).toBe(projectKey);
+    } finally {
+      await cleanup();
+      spy.mockRestore();
+      if (originalHome === undefined) delete process.env.PASEO_HOME;
+      else process.env.PASEO_HOME = originalHome;
+    }
   });
 });

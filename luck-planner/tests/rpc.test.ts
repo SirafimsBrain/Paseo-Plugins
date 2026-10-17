@@ -8,6 +8,7 @@ import { LuckPlannerStore } from "../server/store";
 import {
   UI_ACTOR,
   bugReport,
+  dashboardStatus,
   goalApprove,
   goalCreate,
   growthGet,
@@ -191,6 +192,7 @@ describe("RPC surface", () => {
       expect([...server.handlers.keys()].sort()).toEqual(
         [
           bugReport.name,
+          dashboardStatus.name,
           goalApprove.name,
           goalCreate.name,
           growthGet.name,
@@ -716,3 +718,31 @@ describe("stats", () => {
   });
 });
 
+describe("dashboard.status (stage F2)", () => {
+  it("reports the endpoint as off when the setting is off", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      // The fake settings doc has `httpEnabled: false` — no socket is started
+      // here (the listening case is covered by tests/http-lifecycle.test.ts).
+      const result = await server.call<{
+        enabled: boolean;
+        listening: boolean;
+        url: string | null;
+        port: number | null;
+        portFallback: boolean;
+        error: string | null;
+      }>(dashboardStatus.name, { projectKey: P });
+      expect(result).toEqual({
+        enabled: false,
+        listening: false,
+        url: null,
+        port: null,
+        portFallback: false,
+        error: null,
+      });
+    } finally {
+      cleanup();
+    }
+  });
+});

@@ -1,9 +1,10 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.17.0`).** Этапы **E4** (settings screen +
-> retention) и **F1** (HTTP-сервер дашборда) выполнены, тесты зелёные.
-> Следующий этап — **F2** («Открыть дашборд»).
-> Этапы A1–F1 закрыты и помечены ниже; F2–J не начинались.
+> **Статус: версия в разработке (`0.18.0`).** Этапы **E4** (settings screen +
+> retention), **F1** (HTTP-сервер дашборда) и **F2** («Открыть дашборд»)
+> выполнены, тесты зелёные.
+> Следующий этап — **G1** (каркас веб-приложения дашборда, React+TS).
+> Этапы A1–F2 закрыты и помечены ниже; G–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -59,7 +60,8 @@ luck-planner/
 ├── client/
 │   ├── tree-panel.tsx       # нативная workspace-панель (дерево-аутлайн)
 │   ├── details.tsx          # панель деталей узла
-│   ├── open-dashboard.ts    # openBrowser → фолбэк openExternalUrl
+│   ├── open-dashboard.ts    # openBrowser → фолбэк openExternalUrl (чистая логика)
+│   ├── dashboard-screen.tsx # экран ⌘K «Open dashboard» + SDK-обвязка открытия
 │   └── use-host-typography.ts
 ├── dashboard/               # веб-приложение (отдельный бандл, НЕ импортируется из client/server)
 │   ├── index.html
@@ -250,9 +252,12 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - Настройки: добавлен `httpEnabled` (default `true`) + переключатель в settings screen; `contribute` запускает endpoint по настройкам и останавливает его в cleanup (cleanup стал async и дожидается закрытия сокета).
 - Приёмка ✅: `tests/http-server.test.ts` (16 тестов: health, 401 без токена/с неверным/с тем же хэшем, JSON согласован со shared-схемами, проектный скоуп, 405/404, SPA+traversal, SSE, освобождение порта) и `tests/http-lifecycle.test.ts` (9 тестов: off/on, эфемерный порт, pinned токен, debounce, fallback, restart, dispose, wiring через `contribute`). `typecheck` + `vitest run` зелёные (287 тестов).
 
-**F2. «Открыть дашборд»** → `0.18.0`
-- `client/open-dashboard.ts`: `navigation.openBrowser({url с токеном, workspaceId})` на Electron; фолбэк `openExternalUrl` (прецедент bunny-search `open-search-ui.ts`). Кнопка в панели + пункт ⌘K.
-- Приёмка: на desktop дашборд открывается в табе Paseo; при отсутствии workspace/на не-Electron — внешний браузер.
+**F2. «Открыть дашборд»** → `0.18.0` — ✅ **выполнен**
+- `client/open-dashboard.ts` (новый, чистый модуль без React/SDK — по прецеденту `client/slash.ts`): `openDashboardUrl(url, openers, workspaceId?)` — приоритет `navigation.openBrowser({url, workspaceId})` (только Electron), фолбэк `openExternalUrl`; инжектируемые опенеры (`openBrowser`, `openExternal`, `listWorkspaceIds`), гвард `isOpenableDashboardUrl` (только абсолютные http/https), «хост сломался — не теряем URL» (throw из `openBrowser` уходит в фолбэк), пустой workspaceId = нет workspace.
+- `client/dashboard-screen.tsx` (новый): SDK-обвязка `openDashboard({projectKey, workspaceId, readStatus, props, paseo})` → `{outcome, url, message}` и экран `LuckPlannerDashboardScreen`, который открывает дашборд при монтировании и показывает адрес + «Open again». Экран — единственный доступный SDK-путь: колбэк ⌘K-пункта не получает `navigation`, его получают только surface/panel/screen.
+- `shared/rpc.ts`: +`dashboard-status` (`{enabled, listening, url, port, portFallback, error}`) — контракт отдаёт **живой** адрес сокета (токен + `?project=`), а не значения настроек. `server/http-lifecycle.ts`: `DashboardEndpoint.projectUrl(projectKey)`; `server/http-server.ts`: `DashboardHttpServer.urlForProject(projectKey)`; `shared/api.ts`: чистый `dashboardUrl(origin, token, projectKey?)`.
+- `index.server.ts`: хендлер `dashboard-status`; `index.client.tsx`: кнопка в панели (ряд счётчиков) + пункт ⌘K «Open luck-planner dashboard» (`Globe`, workspace-контекст, открывает экран с `projectKey`/`workspaceId` в params) + `client.addScreen`.
+- Приёмка ✅: `tests/open-dashboard.test.ts` (10 тестов: in-app browser приоритетом, discovery workspace, фолбэки — нет `openBrowser`/пустой список/упавший список/throw хоста, отказ не-http URL), `tests/http-server.test.ts` (`urlForProject` + 4 теста `dashboardUrl`, включая пути с пробелами), `tests/http-lifecycle.test.ts` (`projectUrl` живого/погашенного сокета + wiring-тест `dashboard-status` через `contribute`: URL реально отдаёт dashboard shell, а его токен принимает `/api/stats`), `tests/rpc.test.ts` (контракт-сет + выключенный endpoint). `typecheck` + `vitest run` зелёные (306 тестов).
 
 ### Блок G — Dashboard 2D: диаграмма (React Flow)
 

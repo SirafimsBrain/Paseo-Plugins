@@ -13,6 +13,7 @@ import {
   DASHBOARD_STATS_PATH,
   DASHBOARD_TOKEN_PARAM,
   DASHBOARD_TREE_PATH,
+  dashboardUrl,
   type HealthResponse,
   type NodeResponse,
   type SearchResponse,
@@ -280,13 +281,25 @@ export class DashboardHttpServer {
   }
 
   /**
-   * Browser URL of the dashboard, token included — what stage F2 opens in the
-   * workspace browser. `null` while the server is down.
+   * Browser URL of the dashboard, token included — the address stage F2 opens
+   * in the workspace browser. `null` while the server is down. Carries no
+   * project: see {@link urlForProject} for the per-workspace URL.
    */
   get url(): string | null {
     const origin = this.origin;
     if (origin === null) return null;
-    return `${origin}/?${DASHBOARD_TOKEN_PARAM}=${encodeURIComponent(this.token)}`;
+    return dashboardUrl(origin, this.token);
+  }
+
+  /**
+   * Dashboard URL pointed at one project (token + `?project=`), so opening the
+   * dashboard from a workspace lands on that workspace's tree. `null` while the
+   * server is down.
+   */
+  urlForProject(projectKey: string): string | null {
+    const origin = this.origin;
+    if (origin === null) return null;
+    return dashboardUrl(origin, this.token, projectKey);
   }
 
   /** Number of live SSE streams — lets tests and the status screen see them. */

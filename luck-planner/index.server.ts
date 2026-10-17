@@ -8,6 +8,7 @@ import {
 import {
   UI_ACTOR,
   bugReport,
+  dashboardStatus,
   goalApprove,
   goalCreate,
   growthGet,
@@ -46,6 +47,8 @@ import { growthProgress } from "./shared/growth";
  * - F1 (done): read-only dashboard HTTP server (`/health`, `/api/*`, SSE
  *   placeholder) on loopback, kept in step with `httpEnabled`/`httpPort`/
  *   `accessToken`
+ * - F2 (done): `dashboard-status` RPC — where the client should open the
+ *   dashboard (live URL with token + project)
  */
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(luckPlannerSettings);
@@ -338,6 +341,23 @@ export default function contribute(server: PluginServerContext) {
   server.handle(stats, (input) => {
     throwIfDisposed();
     return store.stats(input.projectKey);
+  });
+
+  // Stage F2: the panel button and the ⌘K "Open dashboard" action ask where the
+  // dashboard is. The answer comes from the live endpoint (bound port + active
+  // token), not from the settings — a busy port may have fallen back and the
+  // token is auto-generated when the setting is empty. Read-only.
+  server.handle(dashboardStatus, (input) => {
+    throwIfDisposed();
+    const status = dashboard.status();
+    return {
+      enabled: status.enabled,
+      listening: status.listening,
+      url: dashboard.projectUrl(input.projectKey),
+      port: status.boundPort,
+      portFallback: status.portFallback,
+      error: status.error,
+    };
   });
 
   function throwIfDisposed(): void {

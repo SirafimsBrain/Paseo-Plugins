@@ -219,6 +219,41 @@ export const stats = defineRpc({
   }),
 });
 
+/**
+ * `luck-planner.dashboard-status`: the address of the dashboard HTTP server
+ * (stage F2 — the panel button and the ⌘K "Open dashboard" action).
+ *
+ * It reports the **live socket**, not the settings: a configured port that was
+ * busy fell back to an ephemeral one, and the token is auto-generated when the
+ * setting is empty, so only the endpoint itself knows where a browser tab
+ * should be pointed. Read-only, and the URL is only handed to the plugin's own
+ * UI channel (the same trust boundary as the settings screen, which shows the
+ * token too) — it is never logged.
+ */
+export const dashboardStatus = defineRpc({
+  name: "luck-planner.dashboard-status",
+  input: z.object({
+    projectKey: projectKeySchema,
+  }),
+  output: z.object({
+    /** `httpEnabled` — the user turned the whole endpoint off. */
+    enabled: z.boolean(),
+    /** A socket is bound right now. */
+    listening: z.boolean(),
+    /** Ready-to-open URL (token + project); null while the server is down. */
+    url: z.string().nullable(),
+    /** Port the live socket is bound to; null while the server is down. */
+    port: z.number().int().nullable(),
+    /** True when the configured port was busy and an ephemeral one is used. */
+    portFallback: z.boolean(),
+    /** Start failure message, or null. */
+    error: z.string().nullable(),
+  }),
+});
+
+/** Output of the `dashboard-status` RPC (shared by the client UI modules). */
+export type DashboardStatus = z.infer<typeof dashboardStatus.output>;
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -229,4 +264,5 @@ export const RPC_CONTRACT_NAMES = [
   bugReport.name,
   growthGet.name,
   stats.name,
+  dashboardStatus.name,
 ] as const;

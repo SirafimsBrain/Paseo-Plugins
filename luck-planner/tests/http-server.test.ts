@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DASHBOARD_EVENT_READY,
   DASHBOARD_EVENT_TREE_CHANGED,
+  dashboardUrl,
   nodeResponseSchema,
   searchResponseSchema,
   statsResponseSchema,
@@ -510,6 +511,48 @@ describe("wildcard-free bind", () => {
     expect(server.url).toContain("/?token=");
     expect(decodeURIComponent(server.url!)).toContain(TOKEN);
     expect(DEFAULT_DASHBOARD_HOST).toBe("127.0.0.1");
+  });
+
+  // Stage F2: the per-project URL the client opens (token + `?project=`).
+  it("advertises a per-project URL that survives paths with spaces", async () => {
+    await boot();
+    const url = server.urlForProject("/projects/Paseo plugins")!;
+    const parsed = new URL(url);
+    expect(parsed.origin).toBe(new URL(server.url!).origin);
+    expect(parsed.searchParams.get("token")).toBe(TOKEN);
+    expect(parsed.searchParams.get("project")).toBe("/projects/Paseo plugins");
+
+    // The URL really serves the dashboard shell and its token works.
+    const page = await fetch(url);
+    expect(page.status).toBe(200);
+    const api = await fetch(`${parsed.origin}/api/tree?token=${TOKEN}&project=/p`);
+    expect(api.status).toBe(200);
+  });
+});
+
+describe("dashboardUrl (shared builder)", () => {
+  it("omits the project when none is given", () => {
+    expect(dashboardUrl("http://127.0.0.1:8899", "lp_abc")).toBe(
+      "http://127.0.0.1:8899/?token=lp_abc",
+    );
+  });
+
+  it("normalises a trailing slash on the origin", () => {
+    expect(dashboardUrl("http://127.0.0.1:8899/", "lp_abc", "/p")).toBe(
+      "http://127.0.0.1:8899/?token=lp_abc&project=%2Fp",
+    );
+  });
+
+  it("round-trips a project key with spaces and slashes", () => {
+    const url = new URL(dashboardUrl("http://127.0.0.1:8899", "lp_a b", "/d/Paseo plugins"));
+    expect(url.searchParams.get("token")).toBe("lp_a b");
+    expect(url.searchParams.get("project")).toBe("/d/Paseo plugins");
+  });
+
+  it("treats an empty project as absent", () => {
+    expect(dashboardUrl("http://127.0.0.1:8899", "t", "")).toBe(
+      "http://127.0.0.1:8899/?token=t",
+    );
   });
 });
 

@@ -2,6 +2,12 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { LuckPlannerPanel } from "./client/tree-panel";
 import { LuckPlannerSettingsScreen } from "./client/settings-screen";
 import {
+  DASHBOARD_PROJECT_PARAM,
+  DASHBOARD_WORKSPACE_PARAM,
+  LUCK_PLANNER_DASHBOARD_SCREEN_ID,
+  LuckPlannerDashboardScreen,
+} from "./client/dashboard-screen";
+import {
   NEW_GOAL_PLACEHOLDER,
   NEW_GOAL_TEXT,
   bugSeverityFromArgs,
@@ -21,7 +27,8 @@ import { bugReport, goalCreate, nodeSetStatus, treeSearch } from "./shared/rpc";
  * - E4 (done): settings screen
  * - F1 (done): dashboard HTTP server settings (enable switch; the server itself
  *   runs in the daemon, see `server/http-server.ts`)
- * - F2: "Open dashboard" action
+ * - F2 (done): "Open dashboard" — panel button + ⌘K item, in-app browser with
+ *   an external fallback (`client/open-dashboard.ts`, `client/dashboard-screen.tsx`)
  */
 
 const PANEL_ID = "luck-planner";
@@ -43,8 +50,17 @@ export default function contribute(client: PluginClientContext) {
     Component: LuckPlannerSettingsScreen,
   });
 
+  // Stage F2: the ⌘K "Open dashboard" item opens this screen, which performs
+  // the actual browser opening on mount (a Command Center callback gets no
+  // `navigation`, only surfaces/panels/screens do).
+  client.addScreen({
+    id: LUCK_PLANNER_DASHBOARD_SCREEN_ID,
+    title: "Luck Planner dashboard",
+    Component: LuckPlannerDashboardScreen,
+  });
+
   // -------------------------------------------------------------------------
-  // Command Center (⌘K), stage E3
+  // Command Center (⌘K), stage E3; the dashboard item is stage F2.
   // -------------------------------------------------------------------------
 
   client.addCommandCenterItem({
@@ -55,6 +71,26 @@ export default function contribute(client: PluginClientContext) {
     context: "workspace",
     onSelect({ openPanel }) {
       openPanel(PANEL_ID);
+    },
+  });
+
+  // Stage F2. The item opens the dashboard screen rather than the browser: a
+  // command callback has no `navigation`, so the screen (which has one) does the
+  // opening on mount and shows the address afterwards.
+  client.addCommandCenterItem({
+    id: "luck-planner-open-dashboard",
+    title: "Open luck-planner dashboard",
+    icon: "Globe",
+    keywords: ["luck", "planner", "dashboard", "tree", "graph", "2d", "3d", "browser"],
+    context: "workspace",
+    onSelect({ openScreen, workspace }) {
+      openScreen({
+        screenId: LUCK_PLANNER_DASHBOARD_SCREEN_ID,
+        params: {
+          [DASHBOARD_PROJECT_PARAM]: workspace.projectRootPath,
+          [DASHBOARD_WORKSPACE_PARAM]: workspace.id,
+        },
+      });
     },
   });
 

@@ -145,6 +145,16 @@ export class DashboardEndpoint {
     };
   }
 
+  /**
+   * Ready-to-open dashboard URL for one project (token + `?project=`), or
+   * `null` while the server is down. The client (stage F2) calls this through
+   * the `dashboard-status` RPC; it reads the *live* socket, so a configured port
+   * that fell back to an ephemeral one still yields a working URL.
+   */
+  projectUrl(projectKey: string): string | null {
+    return this.server?.urlForProject(projectKey) ?? null;
+  }
+
   /** Stops the endpoint and refuses further syncs. */
   async dispose(): Promise<void> {
     this.disposed = true;

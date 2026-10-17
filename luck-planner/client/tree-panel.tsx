@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc, useWorkspace } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Bee } from "../shared/links";
 import type { Bug } from "../shared/links";
 import type { Growth } from "../shared/growth";
 import {
+  dashboardStatus,
   growthGet,
   nodeDetail,
   nodeSetStatus,
@@ -25,6 +26,7 @@ import {
   type NodeKindFilter,
   type TreeSection,
 } from "../shared/panel";
+import { type DashboardOpenReport, openDashboard } from "./dashboard-screen";
 import { scaledFont, useHostFontScale } from "./use-host-typography";
 
 /**
@@ -52,7 +54,8 @@ export interface DetailState {
   growth: Growth | null;
 }
 
-export function LuckPlannerPanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
+export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
+  const { theme, layout, workspaceId } = props;
   const fontScale = useHostFontScale();
   const font = (base: number) => scaledFont(base, fontScale);
   const fg = theme.colors.foreground;
@@ -72,6 +75,8 @@ export function LuckPlannerPanel({ theme, layout, workspaceId }: PluginWorkspace
   const nodeSetStatusRpc = useRpc(nodeSetStatus);
   const growthGetRpc = useRpc(growthGet);
   const statsRpc = useRpc(stats);
+  const dashboardStatusRpc = useRpc(dashboardStatus);
+  const paseo = usePaseo();
 
   const [sections, setSections] = useState<TreeSection[]>([]);
   const [counters, setCounters] = useState<{
@@ -194,6 +199,29 @@ export function LuckPlannerPanel({ theme, layout, workspaceId }: PluginWorkspace
   const [searchHits, setSearchHits] = useState<Node[] | null>(null);
   const [searching, setSearching] = useState(false);
 
+  // Stage F2: "Open dashboard" — resolve the live URL through the RPC and hand
+  // it to the in-app browser (Electron) or the external opener. The report is
+  // rendered under the counters row so a refusal explains itself.
+  const [dashboardReport, setDashboardReport] = useState<DashboardOpenReport | null>(null);
+  const [openingDashboard, setOpeningDashboard] = useState(false);
+  const openDashboardAction = useCallback(async () => {
+    if (!projectRootPath) return;
+    setOpeningDashboard(true);
+    try {
+      setDashboardReport(
+        await openDashboard({
+          projectKey: projectRootPath,
+          workspaceId,
+          readStatus: (input) => dashboardStatusRpc(input),
+          props,
+          paseo,
+        }),
+      );
+    } finally {
+      setOpeningDashboard(false);
+    }
+  }, [dashboardStatusRpc, paseo, projectRootPath, props, workspaceId]);
+
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailState | null>(null);
@@ -234,12 +262,37 @@ export function LuckPlannerPanel({ theme, layout, workspaceId }: PluginWorkspace
         ) : (
           <Text style={{ color: fgMuted, fontSize: font(12) }}>No counters yet</Text>
         )}
-        <Pressable accessibilityRole="button" onPress={reload} style={styles.reloadButton}>
-          <Text style={{ color: accent, fontSize: font(12) }}>Reload</Text>
-        </Pressable>
+        <View style={styles.counterActions}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={openingDashboard}
+            onPress={() => void openDashboardAction()}
+            style={styles.reloadButton}
+          >
+            <Text style={{ color: accent, fontSize: font(12), opacity: openingDashboard ? 0.5 : 1 }}>
+              {openingDashboard ? "Opening…" : "Dashboard"}
+            </Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={reload} style={styles.reloadButton}>
+            <Text style={{ color: accent, fontSize: font(12) }}>Reload</Text>
+          </Pressable>
+        </View>
       </View>
       {loadError ? (
         <Text style={{ color: danger, fontSize: font(12), marginTop: 6 }}>{loadError}</Text>
+      ) : null}
+      {dashboardReport ? (
+        <Text
+          style={{
+            color: dashboardReport.outcome === "unavailable" || dashboardReport.outcome === "error"
+              ? danger
+              : success,
+            fontSize: font(11),
+            marginTop: 6,
+          }}
+        >
+          {dashboardReport.message}
+        </Text>
       ) : null}
 
       <TextInput
@@ -609,7 +662,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 12 },
   flex: { flex: 1 },
   counters: { flexDirection: "row", alignItems: "center", borderBottomWidth: 1, paddingBottom: 6, gap: 12 },
-  reloadButton: { paddingVertical: 4, marginLeft: "auto" },
+  counterActions: { flexDirection: "row", alignItems: "center", gap: 12, marginLeft: "auto" },
+  reloadButton: { paddingVertical: 4 },
   input: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, marginTop: 8 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
   chip: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3, borderColor: "transparent" },

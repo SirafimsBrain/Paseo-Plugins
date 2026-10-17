@@ -39,6 +39,30 @@ export const DASHBOARD_TOKEN_PARAM = "token";
 /** Query parameter naming the project (canonical workspace path, ADR-2). */
 export const DASHBOARD_PROJECT_PARAM = "project";
 
+/**
+ * Builds the browser URL the dashboard is opened with (stage F2).
+ *
+ * The token travels in the query string because a browser tab cannot attach an
+ * `Authorization` header to its very first navigation (ADR-8), and `projectKey`
+ * travels with it so a tab opened from a *different* workspace shows that
+ * workspace instead of reusing whatever the first tab was pointed at. `origin`
+ * is `http://127.0.0.1:<port>` of the live socket — never the configured port,
+ * which may have fallen back to an ephemeral one. A missing/empty `projectKey`
+ * yields the bare dashboard URL (the SPA then asks which project to show).
+ */
+export function dashboardUrl(
+  origin: string,
+  token: string,
+  projectKey?: string,
+): string {
+  const params = new URLSearchParams();
+  params.set(DASHBOARD_TOKEN_PARAM, token);
+  if (projectKey !== undefined && projectKey.length > 0) {
+    params.set(DASHBOARD_PROJECT_PARAM, projectKey);
+  }
+  return `${origin.replace(/\/+$/, "")}/?${params.toString()}`;
+}
+
 /** SSE event sent once when the stream opens. */
 export const DASHBOARD_EVENT_READY = "ready";
 /** SSE event sent after a mutation (wired in stage H1). */
