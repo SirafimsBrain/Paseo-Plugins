@@ -1,10 +1,11 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.20.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.21.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
-> **G1** (dashboard web-app scaffold) and **G2** (data adapter + layout) are done
-> and all tests are green; the next stage is **G3** (custom nodes and edges).
-> Stages A1–G2 are complete; blocks G–J are otherwise untouched. Nothing in this
+> **G1** (dashboard web-app scaffold), **G2** (data adapter + layout) and **G3**
+> (custom nodes and edges) are done and all tests are green; the next stage is
+> **G4** (interaction: click → details, selection highlights, search, filters).
+> Stages A1–G3 are complete; blocks G–J are otherwise untouched. Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -896,18 +897,107 @@ incidents, the forest case, the default policy, and the acceptance block: a
 referencing visible nodes, and ten rebuilds stay under a second).
 `typecheck` (both configs) and the full suite are green: 24 files, 341 tests.
 
+### Custom nodes and edges (stage G3 — `graph-nodes.tsx`, `graph-edges.tsx`, `colors.ts`)
+
+Stage G3 fills the visual semantics on top of G2's structural shapes,
+keeping component names and the `GraphNodeData` contract so the adapter and
+its tests stay valid.
+
+**Palette** (`dashboard/src/colors.ts`) gained the G3 entries, all pure data
+pinned by `tests/dashboard-theme.test.ts`: `STATUS_PROGRESS` (the fraction a
+leaf's status bar fills to — plan → work → done, capped at 1, monotonically
+ordered along the happy path; `blocked` sits at the in-progress height and
+lets its red *colour* say blocked), `GOAL_STATUS_COLORS` +
+`GOAL_STATUS_LABELS`, `BEE_STATUS_COLORS` + `BEE_STATUS_LABELS`,
+`BUG_BADGE_COLOR`, and `withAlpha(hex, alpha)` for softened strokes.
+`paletteIsComplete()` now guards bee and goal enums too — a new enum member
+without a colour/label fails the suite instead of rendering blank.
+
+**Node rendering** (`graph-nodes.tsx`):
+- a **leaf status bar** — a 5px strip filled to `STATUS_PROGRESS[status]` and
+  painted `STATUS_COLORS[status]`, always next to the status *text* and the
+  `v{version} · r{revision}` caption; it carries `role="img"` +
+  `aria-label="Status: …"`, so colour never is the only carrier;
+- an **incident badge** `🐞 ×N` on any node with open/investigating
+  incidents (count in text, titles behind `title=`);
+- the existing kind shapes keep their glyphs (⚙️ 🪵 📦 📂 🍃).
+
+**Goal frames** — one dashed 🎯 rectangle per goal whose materialized
+subtree has visible nodes, labelled with the formal task text and the goal
+status *in text* beside the frame colour. Frames are **synthetic nodes**
+(`type: "goalFrame"`, `GoalFrameData`) kept in their own `goalFrames` array
+on `DashboardGraph`, never in `nodes`: the layout never sees them, the G2
+node type and its tests are untouched, and `Canvas` concatenates the two
+arrays on render. Geometry lives in `GOAL_FRAME` (28px padding + a 26px
+label strip); the box is the bounding box of the *visible* subtree in layout
+coordinates. A non-materialized goal (draft/proposed, ADR-7) or a subtree
+hidden by collapse yields no frame; collapsing the frame's own root shrinks
+the box to that node — the frame always describes exactly what is on
+screen. Frames are `zIndex: -1`, `selectable: false`, `pointer-events: none`,
+so they can never swallow a click or a canvas pan; ids are sorted by goal id
+for deterministic output.
+
+**Tree edges** keep React Flow's built-in `smoothstep` path (registering an
+empty custom component would hide the path) with `style.stroke =
+withAlpha(KIND_COLORS[parent.kind], 0.5)` — the stroke echoes the parent
+kind without competing with the nodes.
+
+**Bee edges** (`graph-edges.tsx`) switch from the built-in `default` type to
+`type: "bee"`, routed to a custom `BeeEdge` (verified against
+`@xyflow/react`'s `EdgeWrapper`: `edgeTypes?.[type] ||
+builtinEdgeTypes[type]`, so unregistered types — the tree's `smoothstep` —
+keep the built-ins). The renderer draws its own bezier path stroked in
+`BEE_STATUS_COLORS[status]`, dashed once `resolved`/`cancelled`, animated
+while `active` (the adapter's existing `animated` flag drives React Flow's
+path animation), and renders a mid-path label `🐝 <Status>` through
+`EdgeLabelRenderer` with `pointer-events: all` so the `title` (the impact
+text) stays hoverable.
+
+**Legend** renders the bee-status group from the same palette and explains
+the two badges (`🐞` open incidents on the node, `🎯` goal subtree — the
+progress layer is G5).
+
+**Bugfix found during the G3 visual acceptance** — `DashboardApi` invoked
+its `fetch` as a method of itself (`this.fetchImpl(url)`). Node's fetch
+ignores the receiver, so every test passed, while a real browser
+(`window.fetch`) throws `TypeError: Failed to execute 'fetch' on 'Window':
+Illegal invocation` — the dashboard rendered its chrome and never loaded a
+single payload. Fixed by calling the implementation with an explicit global
+receiver (`fetchImpl.call(globalThis, …)`), which is also how the injected
+test doubles are invoked now. Regression: the "global receiver" test in
+`tests/dashboard-build.test.ts` drives the client with a receiver-strict
+fetch stand-in that reproduces the browser's rule in Node. Lesson recorded:
+Node-side tests cannot see browser host-method receiver semantics — the
+tab-level check of PLAN rule 4 must actually watch the network panel, not
+only the console.
+
+**Tests** — `tests/dashboard-graph.test.ts` extended (+7: frame geometry
+against the layout, no frame without materialization, shrink-on-collapse,
+ancestor-collapse dropping the frame, id sorting, `bee` edge type, tree-edge
+tint), `tests/dashboard-theme.test.ts` (+4: bee/goal palette coverage,
+status-bar ordering bounds, `withAlpha`), `tests/dashboard-build.test.ts`
+(+1: the fetch receiver regression). Acceptance was checked **by eye in a
+real browser** against a seeded fixture (root/trunk/branches/subbranch, all
+leaf statuses, 3 bees of different statuses, 2 incidents, an approved goal
+with a materialized side branch plus a proposed one): status colour *and*
+text on every leaf, badges, frames, bee labels — console clean.
+`typecheck` (both configs) and the full suite green: 24 files, 353 tests.
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block G is under way — G2 is done.** Stages A1–F2 are complete and released
+**Status: block G is under way — G3 is done.** Stages A1–F2 are complete and released
 as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**, **C (domain
 semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP transport)** are
-closed. G1 (0.19.0) scaffolded the dashboard web app and G2 (0.20.0) added the
+closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
 `/api/tree` → React Flow data adapter with the d3-hierarchy layout and the
-collapse/expand policy. A candidate **D4** (config-file MCP registrations for
+collapse/expand policy, and G3 (0.21.0) painted the custom nodes and edges
+(status bars, incident badges, goal frames, bee-edge renderer) — plus the
+`window.fetch` receiver fix that the first real tab exposed. Next: G4
+(interaction). A candidate **D4** (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still precede the
 remaining UI work.
 
@@ -919,7 +1009,7 @@ remaining UI work.
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
-| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), nodes, interaction, growth layer |
+| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |

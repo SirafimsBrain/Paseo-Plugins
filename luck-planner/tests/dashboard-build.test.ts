@@ -200,6 +200,39 @@ describe("the browser API client against the real server", () => {
     const anon = new DashboardApi(origin, "lp_wrong", P);
     await expect(anon.stats()).rejects.toThrow(/access token was rejected/i);
   });
+
+  it("calls fetch with the global receiver (window.fetch rejects any other)", async () => {
+    // Regression (found during the G3 visual acceptance): the client used to
+    // invoke its fetch as a method of itself (`this.fetchImpl(url)`), which
+    // Node tolerates but a browser rejects with
+    // `TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation` —
+    // the dashboard then never loaded a single payload. A receiver-strict
+    // stand-in reproduces the browser's rule in Node.
+    const origin = await boot();
+    seed(store!);
+
+    let receiver: unknown = null;
+    const receiverStrictFetch = function (
+      this: unknown,
+      input: string | URL | Request,
+    ): Promise<Response> {
+      receiver = this;
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return fetch(input);
+    };
+
+    const client = new DashboardApi(
+      origin,
+      TOKEN,
+      P,
+      receiverStrictFetch as typeof fetch,
+    );
+    const stats = await client.stats();
+    expect(stats.nodes.total).toBe(4);
+    expect(receiver).toBe(globalThis);
+  });
 });
 
 describe("resolveApiOrigin", () => {

@@ -53,6 +53,14 @@ export interface DashboardClient {
  * `fetch`-based implementation. Constructed once by the app from the URL
  * parameters; no global state, so a test can point it at a real loopback
  * server (the way `tests/http-server.test.ts` already drives the server).
+ *
+ * The implementation is always invoked with **`globalThis` as the receiver**
+ * (`fetchImpl.call(globalThis, …)`): a browser's `window.fetch` throws
+ * `TypeError: Illegal invocation` when called as a method of any other
+ * object, and `this.fetchImpl(url)` would hand it the client instance. That
+ * mistake is invisible in Node (its fetch ignores the receiver), which is
+ * exactly why it survived until the first real tab — pinned by the
+ * "global receiver" test in `tests/dashboard-build.test.ts`.
  */
 export class DashboardApi implements DashboardClient {
   constructor(
@@ -109,7 +117,10 @@ export class DashboardApi implements DashboardClient {
   private async raw(pathWithQuery: string): Promise<unknown> {
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.origin}${pathWithQuery}`);
+      response = await this.fetchImpl.call(
+        globalThis,
+        `${this.origin}${pathWithQuery}`,
+      );
     } catch (cause) {
       throw new Error(
         `The plugin server is not reachable at ${this.origin} (${cause instanceof Error ? cause.message : String(cause)}).`,

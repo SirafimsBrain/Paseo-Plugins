@@ -32,7 +32,9 @@ import type { Edge, Node } from "@xyflow/react";
 import { hierarchy, tree } from "d3-hierarchy";
 import type { LeafStatus, Node as TreeNode, NodeKind } from "../../shared/tree";
 import type { BeeStatus } from "../../shared/links";
+import type { GoalStatus } from "../../shared/goals";
 import type { TreeResponse } from "../../shared/api";
+import { KIND_COLORS, withAlpha } from "./colors";
 
 /** React Flow `type` per node kind — the G3 shapes key off these strings. */
 export const NODE_KIND_TO_TYPE: Record<NodeKind, NodeKind> = {
@@ -57,6 +59,17 @@ export const LAYOUT = {
 
 /** Visible-node budget of the default collapse policy (G2 acceptance). */
 export const DEFAULT_VISIBLE_BUDGET = 120;
+
+/**
+ * Geometry of a goal frame (stage G3): the dashed rectangle that encloses
+ * the subtree a high goal materialized. `labelHeight` is the strip reserved
+ * at the top for the 🎯 label, so the frame box itself needs no padding hack
+ * in the renderer.
+ */
+export const GOAL_FRAME = {
+  padding: 28,
+  labelHeight: 26,
+} as const;
 
 /** Payload every graph node carries to its renderer. */
 export type GraphNodeData = {
@@ -91,8 +104,29 @@ export type BeeEdgeData = {
   status: BeeStatus;
 };
 
+/**
+ * Payload of a *synthetic* goal-frame node (stage G3): a dashed rectangle
+ * around the visible subtree a high goal materialized (`ADR-7`). Frames are
+ * never part of the layout — they are computed from the positions of the
+ * tree nodes they enclose and kept in their own array on
+ * {@link DashboardGraph}, so the G2 node type and its tests stay untouched.
+ */
+export type GoalFrameData = {
+  goalId: string;
+  /** The goal's formal task text (the renderer truncates it for the label). */
+  name: string;
+  status: GoalStatus;
+  /** Frame box in layout coordinates (position is its top-left corner). */
+  width: number;
+  height: number;
+  /** How many visible tree nodes the frame encloses. */
+  nodeCount: number;
+};
+
 /** A React Flow node positioned by this module. */
 export type GraphFlowNode = Node<GraphNodeData>;
+/** A synthetic goal-frame node (rendered behind the tree). */
+export type GoalFrameNode = Node<GoalFrameData>;
 /** A React Flow edge produced by this module. */
 export type GraphFlowEdge = Edge<TreeEdgeData | BeeEdgeData>;
 
@@ -307,11 +341,17 @@ export function buildGraph(
   for (const node of input.nodes) {
     if (!visible.has(node.id)) continue;
     if (node.parentId !== null && visible.has(node.parentId)) {
+      const parent = index.byId.get(node.parentId);
       edges.push({
         id: `t:${node.id}`,
         source: node.parentId,
         target: node.id,
         type: "smoothstep",
+        // The stroke echoes the parent kind's colour, softened so the node
+        // shapes stay the primary signal (G3).
+        style: parent
+          ? { stroke: withAlpha(KIND_COLORS[parent.kind], 0.5) }
+          : undefined,
         data: { kind: "tree" },
       });
     }
@@ -324,13 +364,89 @@ export function buildGraph(
       id: `b:${bee.id}`,
       source: bee.sourceLeafId,
       target: bee.targetLeafId,
-      type: "default",
+      // Custom renderer (`dashboard/src/components/graph-edges.tsx`): the
+      // bee edge draws its own stroke, colour and status label.
+      type: "bee",
       animated: bee.status === "active",
       data: { kind: "bee", impact: bee.impact, status: bee.status },
     });
   }
 
-  return { nodes, edges };
+  return {
+    nodes,
+    edges,
+    goalFrames: buildGoalFrames(input, visible, positions, index),
+  };
+}
+
+/**
+ * The synthetic goal frames (stage G3): one dashed rectangle per goal whose
+ * materialized subtree has visible nodes, sized to the bounding box of that
+ * subtree in layout coordinates. A goal that never materialized (draft /
+ * proposed, ADR-7) or whose subtree is currently hidden by collapse gets no
+ * frame — the frame always describes exactly what is on screen.
+ */
+function buildGoalFrames(
+  input: TreeResponse,
+  visible: ReadonlySet<string>,
+  positions: ReadonlyMap<string, { x: number; y: number }>,
+  index: TreeIndex,
+): GoalFrameNode[] {
+  const frames: GoalFrameNode[] = [];
+  // Sorted by id: the payload order must not leak into the output (the same
+  // determinism rule the layout follows).
+  const goals = [...input.goals].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
+  for (const goal of goals) {
+    const rootId = goal.materializedNodeId;
+    if (rootId === null || !visible.has(rootId)) continue;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let nodeCount = 0;
+    const stack: string[] = [rootId];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      if (!visible.has(id)) continue;
+      const position = positions.get(id);
+      if (position !== undefined) {
+        minX = Math.min(minX, position.x);
+        minY = Math.min(minY, position.y);
+        maxX = Math.max(maxX, position.x + LAYOUT.nodeWidth);
+        maxY = Math.max(maxY, position.y + LAYOUT.nodeHeight);
+        nodeCount += 1;
+      }
+      for (const child of index.childrenOf.get(id) ?? []) stack.push(child.id);
+    }
+    if (nodeCount === 0) continue;
+
+    frames.push({
+      id: `goal:${goal.id}`,
+      type: "goalFrame",
+      position: {
+        x: minX - GOAL_FRAME.padding,
+        y: minY - GOAL_FRAME.padding - GOAL_FRAME.labelHeight,
+      },
+      data: {
+        goalId: goal.id,
+        name: goal.formalText,
+        status: goal.status,
+        width: maxX - minX + 2 * GOAL_FRAME.padding,
+        height: maxY - minY + 2 * GOAL_FRAME.padding + GOAL_FRAME.labelHeight,
+        nodeCount,
+      },
+      // Behind every real node; purely visual, so it never steals a click
+      // or a canvas pan from the subtree it encloses.
+      zIndex: -1,
+      draggable: false,
+      selectable: false,
+      style: { pointerEvents: "none" },
+    });
+  }
+  return frames;
 }
 
 
@@ -352,7 +468,13 @@ function openBugCounts(input: TreeResponse): Map<string, number> {
 export interface DashboardGraph {
   nodes: GraphFlowNode[];
   edges: GraphFlowEdge[];
+  /** Synthetic goal frames (G3), rendered behind `nodes`. */
+  goalFrames: GoalFrameNode[];
 }
 
 /** Empty graph — the state before the first `/api/tree` response lands. */
-export const EMPTY_GRAPH: DashboardGraph = { nodes: [], edges: [] };
+export const EMPTY_GRAPH: DashboardGraph = {
+  nodes: [],
+  edges: [],
+  goalFrames: [],
+};

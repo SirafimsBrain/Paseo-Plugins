@@ -12445,11 +12445,11 @@ var require_with_selector = __commonJS({
 });
 
 // dashboard/src/main.tsx
-var import_react6 = __toESM(require_react());
+var import_react7 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // dashboard/src/app.tsx
-var import_react5 = __toESM(require_react());
+var import_react6 = __toESM(require_react());
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -32666,7 +32666,10 @@ var DashboardApi = class {
   async raw(pathWithQuery) {
     let response;
     try {
-      response = await this.fetchImpl(`${this.origin}${pathWithQuery}`);
+      response = await this.fetchImpl.call(
+        globalThis,
+        `${this.origin}${pathWithQuery}`
+      );
     } catch (cause) {
       throw new Error(
         `The plugin server is not reachable at ${this.origin} (${cause instanceof Error ? cause.message : String(cause)}).`
@@ -33065,6 +33068,116 @@ function tree_default() {
   return tree;
 }
 
+// dashboard/src/colors.ts
+var KIND_COLORS = {
+  root: "#8b7cf6",
+  // tech-stack root — the one purple shape
+  trunk: "#5b9dff",
+  // trunk
+  branch: "#3fa796",
+  // branch
+  subbranch: "#2f855a",
+  // side branch — quieter than its parent
+  leaf: "#4c5666"
+  // leaves are the work surface, not a signal
+};
+var STATUS_COLORS = {
+  draft: "#8b93a3",
+  ready: "#5b9dff",
+  claimed: "#b48ddb",
+  in_progress: "#e0a84f",
+  blocked: "#e05d5d",
+  done: "#4fa860",
+  cancelled: "#5c6470",
+  superseded: "#6b7280"
+};
+var KIND_LABELS = {
+  root: "Tech-stack root",
+  trunk: "Trunk",
+  branch: "Branch",
+  subbranch: "Side branch",
+  leaf: "Leaf (fact)"
+};
+var STATUS_LABELS = {
+  draft: "Draft",
+  ready: "Ready",
+  claimed: "Claimed",
+  in_progress: "In progress",
+  blocked: "Blocked",
+  done: "Done",
+  cancelled: "Cancelled",
+  superseded: "Superseded"
+};
+var KIND_GLYPHS = {
+  root: "\u2699\uFE0F",
+  trunk: "\u{1FAB5}",
+  branch: "\u{1F4E6}",
+  subbranch: "\u{1F4C2}",
+  leaf: "\u{1F343}"
+};
+var STATUS_PROGRESS = {
+  draft: 0.1,
+  // planned fact, barely started
+  ready: 0.3,
+  // planned and queued
+  claimed: 0.5,
+  // picked up
+  in_progress: 0.7,
+  // work underway
+  blocked: 0.7,
+  // stopped mid-work — the red colour says blocked, not the bar
+  done: 1,
+  // finished
+  cancelled: 0.15,
+  // abandoned where it stood
+  superseded: 0.15
+  // replaced by a newer plan
+};
+var GOAL_STATUS_COLORS = {
+  draft: "#8b93a3",
+  // not a decision yet
+  proposed: "#b48ddb",
+  // waiting for the approval gate (ADR-7)
+  approved: "#5b9dff",
+  // approved, materialization pending
+  in_progress: "#e0a84f",
+  // being grown
+  done: "#4fa860",
+  cancelled: "#5c6470",
+  superseded: "#6b7280"
+};
+var GOAL_STATUS_LABELS = {
+  draft: "Draft",
+  proposed: "Proposed",
+  approved: "Approved",
+  in_progress: "In progress",
+  done: "Done",
+  cancelled: "Cancelled",
+  superseded: "Superseded"
+};
+var BEE_STATUS_COLORS = {
+  active: "#f0b429",
+  // honey — the live influence, animated
+  watching: "#5b9dff",
+  resolved: "#4fa860",
+  cancelled: "#5c6470"
+};
+var BEE_STATUS_LABELS = {
+  active: "Active",
+  watching: "Watching",
+  resolved: "Resolved",
+  cancelled: "Cancelled"
+};
+var BUG_BADGE_COLOR = "#e05d5d";
+function withAlpha(hex4, alpha) {
+  const value = hex4.replace(/^#/, "");
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  const a = Math.min(1, Math.max(0, alpha));
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 // dashboard/src/graph.ts
 var NODE_KIND_TO_TYPE = {
   root: "root",
@@ -33080,6 +33193,10 @@ var LAYOUT = {
   verticalGap: 90
 };
 var DEFAULT_VISIBLE_BUDGET = 120;
+var GOAL_FRAME = {
+  padding: 28,
+  labelHeight: 26
+};
 function indexTree(nodes) {
   const byId = /* @__PURE__ */ new Map();
   for (const node2 of nodes) byId.set(node2.id, node2);
@@ -33218,11 +33335,15 @@ function buildGraph(input2, options = {}) {
   for (const node2 of input2.nodes) {
     if (!visible.has(node2.id)) continue;
     if (node2.parentId !== null && visible.has(node2.parentId)) {
+      const parent = index2.byId.get(node2.parentId);
       edges.push({
         id: `t:${node2.id}`,
         source: node2.parentId,
         target: node2.id,
         type: "smoothstep",
+        // The stroke echoes the parent kind's colour, softened so the node
+        // shapes stay the primary signal (G3).
+        style: parent ? { stroke: withAlpha(KIND_COLORS[parent.kind], 0.5) } : void 0,
         data: { kind: "tree" }
       });
     }
@@ -33235,12 +33356,71 @@ function buildGraph(input2, options = {}) {
       id: `b:${bee.id}`,
       source: bee.sourceLeafId,
       target: bee.targetLeafId,
-      type: "default",
+      // Custom renderer (`dashboard/src/components/graph-edges.tsx`): the
+      // bee edge draws its own stroke, colour and status label.
+      type: "bee",
       animated: bee.status === "active",
       data: { kind: "bee", impact: bee.impact, status: bee.status }
     });
   }
-  return { nodes, edges };
+  return {
+    nodes,
+    edges,
+    goalFrames: buildGoalFrames(input2, visible, positions, index2)
+  };
+}
+function buildGoalFrames(input2, visible, positions, index2) {
+  const frames = [];
+  const goals = [...input2.goals].sort(
+    (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+  );
+  for (const goal of goals) {
+    const rootId = goal.materializedNodeId;
+    if (rootId === null || !visible.has(rootId)) continue;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let nodeCount = 0;
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const id2 = stack.pop();
+      if (!visible.has(id2)) continue;
+      const position = positions.get(id2);
+      if (position !== void 0) {
+        minX = Math.min(minX, position.x);
+        minY = Math.min(minY, position.y);
+        maxX = Math.max(maxX, position.x + LAYOUT.nodeWidth);
+        maxY = Math.max(maxY, position.y + LAYOUT.nodeHeight);
+        nodeCount += 1;
+      }
+      for (const child of index2.childrenOf.get(id2) ?? []) stack.push(child.id);
+    }
+    if (nodeCount === 0) continue;
+    frames.push({
+      id: `goal:${goal.id}`,
+      type: "goalFrame",
+      position: {
+        x: minX - GOAL_FRAME.padding,
+        y: minY - GOAL_FRAME.padding - GOAL_FRAME.labelHeight
+      },
+      data: {
+        goalId: goal.id,
+        name: goal.formalText,
+        status: goal.status,
+        width: maxX - minX + 2 * GOAL_FRAME.padding,
+        height: maxY - minY + 2 * GOAL_FRAME.padding + GOAL_FRAME.labelHeight,
+        nodeCount
+      },
+      // Behind every real node; purely visual, so it never steals a click
+      // or a canvas pan from the subtree it encloses.
+      zIndex: -1,
+      draggable: false,
+      selectable: false,
+      style: { pointerEvents: "none" }
+    });
+  }
+  return frames;
 }
 function openBugCounts(input2) {
   const openStatuses = /* @__PURE__ */ new Set(["open", "investigating"]);
@@ -33253,7 +33433,11 @@ function openBugCounts(input2) {
   }
   return counts;
 }
-var EMPTY_GRAPH = { nodes: [], edges: [] };
+var EMPTY_GRAPH = {
+  nodes: [],
+  edges: [],
+  goalFrames: []
+};
 
 // dashboard/src/params.ts
 function parseDashboardParams(search) {
@@ -41193,16 +41377,16 @@ function EdgeUpdateAnchors({ isReconnectable, reconnectRadius, edge, sourceX, so
   const onReconnectMouseOut = () => setUpdateHover(false);
   return (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [(isReconnectable === true || isReconnectable === "source") && (0, import_jsx_runtime.jsx)(EdgeAnchor, { position: sourcePosition, centerX: sourceX, centerY: sourceY, radius: reconnectRadius, onMouseDown: onReconnectSourceMouseDown, onMouseEnter: onReconnectMouseEnter, onMouseOut: onReconnectMouseOut, type: "source" }), (isReconnectable === true || isReconnectable === "target") && (0, import_jsx_runtime.jsx)(EdgeAnchor, { position: targetPosition, centerX: targetX, centerY: targetY, radius: reconnectRadius, onMouseDown: onReconnectTargetMouseDown, onMouseEnter: onReconnectMouseEnter, onMouseOut: onReconnectMouseOut, type: "target" })] });
 }
-function EdgeWrapper({ id: id2, edgesFocusable, edgesReconnectable, elementsSelectable, onClick, onDoubleClick, onContextMenu, onMouseEnter, onMouseMove, onMouseLeave, reconnectRadius, onReconnect, onReconnectStart, onReconnectEnd, rfId, edgeTypes, noPanClassName, onError, disableKeyboardA11y }) {
+function EdgeWrapper({ id: id2, edgesFocusable, edgesReconnectable, elementsSelectable, onClick, onDoubleClick, onContextMenu, onMouseEnter, onMouseMove, onMouseLeave, reconnectRadius, onReconnect, onReconnectStart, onReconnectEnd, rfId, edgeTypes: edgeTypes2, noPanClassName, onError, disableKeyboardA11y }) {
   let edge = useStore((s) => s.edgeLookup.get(id2));
   const defaultEdgeOptions = useStore((s) => s.defaultEdgeOptions);
   edge = defaultEdgeOptions ? { ...defaultEdgeOptions, ...edge } : edge;
   let edgeType = edge.type || "default";
-  let EdgeComponent = edgeTypes?.[edgeType] || builtinEdgeTypes[edgeType];
+  let EdgeComponent = edgeTypes2?.[edgeType] || builtinEdgeTypes[edgeType];
   if (EdgeComponent === void 0) {
     onError?.("011", errorMessages["error011"](edgeType));
     edgeType = "default";
-    EdgeComponent = edgeTypes?.["default"] || builtinEdgeTypes.default;
+    EdgeComponent = edgeTypes2?.["default"] || builtinEdgeTypes.default;
   }
   const isFocusable = !!(edge.focusable || edgesFocusable && typeof edge.focusable === "undefined");
   const isReconnectable = typeof onReconnect !== "undefined" && (edge.reconnectable || edgesReconnectable && typeof edge.reconnectable === "undefined");
@@ -41308,11 +41492,11 @@ var selector$9 = (s) => ({
   connectionMode: s.connectionMode,
   onError: s.onError
 });
-function EdgeRendererComponent({ defaultMarkerColor, onlyRenderVisibleElements, rfId, edgeTypes, noPanClassName, onReconnect, onEdgeContextMenu, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, onEdgeClick, reconnectRadius, onEdgeDoubleClick, onReconnectStart, onReconnectEnd, disableKeyboardA11y }) {
+function EdgeRendererComponent({ defaultMarkerColor, onlyRenderVisibleElements, rfId, edgeTypes: edgeTypes2, noPanClassName, onReconnect, onEdgeContextMenu, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, onEdgeClick, reconnectRadius, onEdgeDoubleClick, onReconnectStart, onReconnectEnd, disableKeyboardA11y }) {
   const { edgesFocusable, edgesReconnectable, elementsSelectable, onError } = useStore(selector$9, shallow$1);
   const edgeIds = useVisibleEdgeIds(onlyRenderVisibleElements);
   return (0, import_jsx_runtime.jsxs)("div", { className: "react-flow__edges", children: [(0, import_jsx_runtime.jsx)(MarkerDefinitions$1, { defaultColor: defaultMarkerColor, rfId }), edgeIds.map((id2) => {
-    return (0, import_jsx_runtime.jsx)(EdgeWrapper$1, { id: id2, edgesFocusable, edgesReconnectable, elementsSelectable, noPanClassName, onReconnect, onContextMenu: onEdgeContextMenu, onMouseEnter: onEdgeMouseEnter, onMouseMove: onEdgeMouseMove, onMouseLeave: onEdgeMouseLeave, onClick: onEdgeClick, reconnectRadius, onDoubleClick: onEdgeDoubleClick, onReconnectStart, onReconnectEnd, rfId, onError, edgeTypes, disableKeyboardA11y }, id2);
+    return (0, import_jsx_runtime.jsx)(EdgeWrapper$1, { id: id2, edgesFocusable, edgesReconnectable, elementsSelectable, noPanClassName, onReconnect, onContextMenu: onEdgeContextMenu, onMouseEnter: onEdgeMouseEnter, onMouseMove: onEdgeMouseMove, onMouseLeave: onEdgeMouseLeave, onClick: onEdgeClick, reconnectRadius, onDoubleClick: onEdgeDoubleClick, onReconnectStart, onReconnectEnd, rfId, onError, edgeTypes: edgeTypes2, disableKeyboardA11y }, id2);
   })] });
 }
 EdgeRendererComponent.displayName = "EdgeRenderer";
@@ -41464,13 +41648,13 @@ function useStylesLoadedWarning() {
     }
   }, []);
 }
-function GraphViewComponent({ nodeTypes: nodeTypes2, edgeTypes, onInit, onNodeClick, onEdgeClick, onNodeDoubleClick, onEdgeDoubleClick, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, onSelectionContextMenu, onSelectionStart, onSelectionEnd, connectionLineType, connectionLineStyle, connectionLineComponent, connectionLineContainerStyle, selectionKeyCode, selectionOnDrag, selectionMode, multiSelectionKeyCode, panActivationKeyCode, zoomActivationKeyCode, deleteKeyCode, onlyRenderVisibleElements, elementsSelectable, defaultViewport: defaultViewport2, translateExtent, minZoom, maxZoom, preventScrolling, defaultMarkerColor, zoomOnScroll, zoomOnPinch, panOnScroll, panOnScrollSpeed, panOnScrollMode, zoomOnDoubleClick, panOnDrag, autoPanOnSelection, onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneScroll, onPaneContextMenu, paneClickDistance, nodeClickDistance, onEdgeContextMenu, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius, onReconnect, onReconnectStart, onReconnectEnd, noDragClassName, noWheelClassName, noPanClassName, disableKeyboardA11y, nodeExtent, rfId, viewport, onViewportChange, nodesDraggable }) {
+function GraphViewComponent({ nodeTypes: nodeTypes2, edgeTypes: edgeTypes2, onInit, onNodeClick, onEdgeClick, onNodeDoubleClick, onEdgeDoubleClick, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, onSelectionContextMenu, onSelectionStart, onSelectionEnd, connectionLineType, connectionLineStyle, connectionLineComponent, connectionLineContainerStyle, selectionKeyCode, selectionOnDrag, selectionMode, multiSelectionKeyCode, panActivationKeyCode, zoomActivationKeyCode, deleteKeyCode, onlyRenderVisibleElements, elementsSelectable, defaultViewport: defaultViewport2, translateExtent, minZoom, maxZoom, preventScrolling, defaultMarkerColor, zoomOnScroll, zoomOnPinch, panOnScroll, panOnScrollSpeed, panOnScrollMode, zoomOnDoubleClick, panOnDrag, autoPanOnSelection, onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneScroll, onPaneContextMenu, paneClickDistance, nodeClickDistance, onEdgeContextMenu, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius, onReconnect, onReconnectStart, onReconnectEnd, noDragClassName, noWheelClassName, noPanClassName, disableKeyboardA11y, nodeExtent, rfId, viewport, onViewportChange, nodesDraggable }) {
   useNodeOrEdgeTypesWarning(nodeTypes2);
-  useNodeOrEdgeTypesWarning(edgeTypes);
+  useNodeOrEdgeTypesWarning(edgeTypes2);
   useStylesLoadedWarning();
   useOnInitHandler(onInit);
   useViewportSync(viewport);
-  return (0, import_jsx_runtime.jsx)(FlowRenderer, { onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneContextMenu, onPaneScroll, paneClickDistance, deleteKeyCode, selectionKeyCode, selectionOnDrag, selectionMode, onSelectionStart, onSelectionEnd, multiSelectionKeyCode, panActivationKeyCode, zoomActivationKeyCode, elementsSelectable, zoomOnScroll, zoomOnPinch, zoomOnDoubleClick, panOnScroll, panOnScrollSpeed, panOnScrollMode, panOnDrag, autoPanOnSelection, defaultViewport: defaultViewport2, translateExtent, minZoom, maxZoom, onSelectionContextMenu, preventScrolling, noDragClassName, noWheelClassName, noPanClassName, disableKeyboardA11y, onViewportChange, isControlledViewport: !!viewport, children: (0, import_jsx_runtime.jsxs)(Viewport, { children: [(0, import_jsx_runtime.jsx)(EdgeRenderer, { edgeTypes, onEdgeClick, onEdgeDoubleClick, onReconnect, onReconnectStart, onReconnectEnd, onlyRenderVisibleElements, onEdgeContextMenu, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius, defaultMarkerColor, noPanClassName, disableKeyboardA11y, rfId }), (0, import_jsx_runtime.jsx)(ConnectionLineWrapper, { style: connectionLineStyle, type: connectionLineType, component: connectionLineComponent, containerStyle: connectionLineContainerStyle }), (0, import_jsx_runtime.jsx)("div", { className: "react-flow__edgelabel-renderer" }), (0, import_jsx_runtime.jsx)(NodeRenderer, { nodeTypes: nodeTypes2, onNodeClick, onNodeDoubleClick, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, nodeClickDistance, onlyRenderVisibleElements, noPanClassName, noDragClassName, disableKeyboardA11y, nodeExtent, rfId, nodesDraggable }), (0, import_jsx_runtime.jsx)("div", { className: "react-flow__viewport-portal" })] }) });
+  return (0, import_jsx_runtime.jsx)(FlowRenderer, { onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneContextMenu, onPaneScroll, paneClickDistance, deleteKeyCode, selectionKeyCode, selectionOnDrag, selectionMode, onSelectionStart, onSelectionEnd, multiSelectionKeyCode, panActivationKeyCode, zoomActivationKeyCode, elementsSelectable, zoomOnScroll, zoomOnPinch, zoomOnDoubleClick, panOnScroll, panOnScrollSpeed, panOnScrollMode, panOnDrag, autoPanOnSelection, defaultViewport: defaultViewport2, translateExtent, minZoom, maxZoom, onSelectionContextMenu, preventScrolling, noDragClassName, noWheelClassName, noPanClassName, disableKeyboardA11y, onViewportChange, isControlledViewport: !!viewport, children: (0, import_jsx_runtime.jsxs)(Viewport, { children: [(0, import_jsx_runtime.jsx)(EdgeRenderer, { edgeTypes: edgeTypes2, onEdgeClick, onEdgeDoubleClick, onReconnect, onReconnectStart, onReconnectEnd, onlyRenderVisibleElements, onEdgeContextMenu, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius, defaultMarkerColor, noPanClassName, disableKeyboardA11y, rfId }), (0, import_jsx_runtime.jsx)(ConnectionLineWrapper, { style: connectionLineStyle, type: connectionLineType, component: connectionLineComponent, containerStyle: connectionLineContainerStyle }), (0, import_jsx_runtime.jsx)("div", { className: "react-flow__edgelabel-renderer" }), (0, import_jsx_runtime.jsx)(NodeRenderer, { nodeTypes: nodeTypes2, onNodeClick, onNodeDoubleClick, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, nodeClickDistance, onlyRenderVisibleElements, noPanClassName, noDragClassName, disableKeyboardA11y, nodeExtent, rfId, nodesDraggable }), (0, import_jsx_runtime.jsx)("div", { className: "react-flow__viewport-portal" })] }) });
 }
 GraphViewComponent.displayName = "GraphView";
 var GraphView = (0, import_react2.memo)(GraphViewComponent);
@@ -41896,16 +42080,24 @@ var wrapperStyle = {
   position: "relative",
   zIndex: 0
 };
-function ReactFlow({ nodes, edges, defaultNodes, defaultEdges, className, nodeTypes: nodeTypes2, edgeTypes, onNodeClick, onEdgeClick, onInit, onMove, onMoveStart, onMoveEnd, onConnect, onConnectStart, onConnectEnd, onClickConnectStart, onClickConnectEnd, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, onNodeDoubleClick, onNodeDragStart, onNodeDrag, onNodeDragStop, onNodesDelete, onEdgesDelete, onDelete, onSelectionChange, onSelectionDragStart, onSelectionDrag, onSelectionDragStop, onSelectionContextMenu, onSelectionStart, onSelectionEnd, onBeforeDelete, connectionMode, connectionLineType = ConnectionLineType.Bezier, connectionLineStyle, connectionLineComponent, connectionLineContainerStyle, deleteKeyCode = "Backspace", selectionKeyCode = "Shift", selectionOnDrag = false, selectionMode = SelectionMode.Full, panActivationKeyCode = "Space", multiSelectionKeyCode = isMacOs() ? "Meta" : "Control", zoomActivationKeyCode = isMacOs() ? "Meta" : "Control", snapToGrid, snapGrid, onlyRenderVisibleElements = false, selectNodesOnDrag, nodesDraggable, autoPanOnNodeFocus, nodesConnectable, nodesFocusable, nodeOrigin = defaultNodeOrigin, edgesFocusable, edgesReconnectable, elementsSelectable = true, defaultViewport: defaultViewport$1 = defaultViewport, minZoom = 0.5, maxZoom = 2, translateExtent = infiniteExtent, preventScrolling = true, nodeExtent, defaultMarkerColor = "#b1b1b7", zoomOnScroll = true, zoomOnPinch = true, panOnScroll = false, panOnScrollSpeed = 0.5, panOnScrollMode = PanOnScrollMode.Free, zoomOnDoubleClick = true, panOnDrag = true, onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneScroll, onPaneContextMenu, paneClickDistance = 1, nodeClickDistance = 0, children: children2, onReconnect, onReconnectStart, onReconnectEnd, onEdgeContextMenu, onEdgeDoubleClick, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius = 10, onNodesChange, onEdgesChange, noDragClassName = "nodrag", noWheelClassName = "nowheel", noPanClassName = "nopan", fitView, fitViewOptions, connectOnClick, attributionPosition, proOptions, defaultEdgeOptions, elevateNodesOnSelect = true, elevateEdgesOnSelect = false, disableKeyboardA11y = false, autoPanOnConnect, autoPanOnNodeDrag, autoPanOnSelection = true, autoPanSpeed, connectionRadius, isValidConnection, onError, style: style2, id: id2, nodeDragThreshold, connectionDragThreshold, viewport, onViewportChange, width, height, colorMode = "light", debug, onScroll, ariaLabelConfig, zIndexMode = "basic", ...rest }, ref) {
+function ReactFlow({ nodes, edges, defaultNodes, defaultEdges, className, nodeTypes: nodeTypes2, edgeTypes: edgeTypes2, onNodeClick, onEdgeClick, onInit, onMove, onMoveStart, onMoveEnd, onConnect, onConnectStart, onConnectEnd, onClickConnectStart, onClickConnectEnd, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, onNodeDoubleClick, onNodeDragStart, onNodeDrag, onNodeDragStop, onNodesDelete, onEdgesDelete, onDelete, onSelectionChange, onSelectionDragStart, onSelectionDrag, onSelectionDragStop, onSelectionContextMenu, onSelectionStart, onSelectionEnd, onBeforeDelete, connectionMode, connectionLineType = ConnectionLineType.Bezier, connectionLineStyle, connectionLineComponent, connectionLineContainerStyle, deleteKeyCode = "Backspace", selectionKeyCode = "Shift", selectionOnDrag = false, selectionMode = SelectionMode.Full, panActivationKeyCode = "Space", multiSelectionKeyCode = isMacOs() ? "Meta" : "Control", zoomActivationKeyCode = isMacOs() ? "Meta" : "Control", snapToGrid, snapGrid, onlyRenderVisibleElements = false, selectNodesOnDrag, nodesDraggable, autoPanOnNodeFocus, nodesConnectable, nodesFocusable, nodeOrigin = defaultNodeOrigin, edgesFocusable, edgesReconnectable, elementsSelectable = true, defaultViewport: defaultViewport$1 = defaultViewport, minZoom = 0.5, maxZoom = 2, translateExtent = infiniteExtent, preventScrolling = true, nodeExtent, defaultMarkerColor = "#b1b1b7", zoomOnScroll = true, zoomOnPinch = true, panOnScroll = false, panOnScrollSpeed = 0.5, panOnScrollMode = PanOnScrollMode.Free, zoomOnDoubleClick = true, panOnDrag = true, onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneScroll, onPaneContextMenu, paneClickDistance = 1, nodeClickDistance = 0, children: children2, onReconnect, onReconnectStart, onReconnectEnd, onEdgeContextMenu, onEdgeDoubleClick, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius = 10, onNodesChange, onEdgesChange, noDragClassName = "nodrag", noWheelClassName = "nowheel", noPanClassName = "nopan", fitView, fitViewOptions, connectOnClick, attributionPosition, proOptions, defaultEdgeOptions, elevateNodesOnSelect = true, elevateEdgesOnSelect = false, disableKeyboardA11y = false, autoPanOnConnect, autoPanOnNodeDrag, autoPanOnSelection = true, autoPanSpeed, connectionRadius, isValidConnection, onError, style: style2, id: id2, nodeDragThreshold, connectionDragThreshold, viewport, onViewportChange, width, height, colorMode = "light", debug, onScroll, ariaLabelConfig, zIndexMode = "basic", ...rest }, ref) {
   const rfId = id2 || "1";
   const colorModeClassName = useColorModeClass(colorMode);
   const wrapperOnScroll = (0, import_react2.useCallback)((e) => {
     e.currentTarget.scrollTo({ top: 0, left: 0, behavior: "instant" });
     onScroll?.(e);
   }, [onScroll]);
-  return (0, import_jsx_runtime.jsx)("div", { "data-testid": "rf__wrapper", ...rest, onScroll: wrapperOnScroll, style: { ...style2, ...wrapperStyle }, ref, className: cc(["react-flow", className, colorModeClassName]), id: id2, role: "application", children: (0, import_jsx_runtime.jsxs)(Wrapper, { nodes, edges, width, height, fitView, fitViewOptions, minZoom, maxZoom, nodeOrigin, nodeExtent, zIndexMode, children: [(0, import_jsx_runtime.jsx)(StoreUpdater, { nodes, edges, defaultNodes, defaultEdges, onConnect, onConnectStart, onConnectEnd, onClickConnectStart, onClickConnectEnd, nodesDraggable, autoPanOnNodeFocus, nodesConnectable, nodesFocusable, edgesFocusable, edgesReconnectable, elementsSelectable, elevateNodesOnSelect, elevateEdgesOnSelect, minZoom, maxZoom, nodeExtent, onNodesChange, onEdgesChange, snapToGrid, snapGrid, connectionMode, translateExtent, connectOnClick, defaultEdgeOptions, fitView, fitViewOptions, onNodesDelete, onEdgesDelete, onDelete, onNodeDragStart, onNodeDrag, onNodeDragStop, onSelectionDrag, onSelectionDragStart, onSelectionDragStop, onMove, onMoveStart, onMoveEnd, noPanClassName, nodeOrigin, rfId, autoPanOnConnect, autoPanOnNodeDrag, autoPanSpeed, onError, connectionRadius, isValidConnection, selectNodesOnDrag, nodeDragThreshold, connectionDragThreshold, onBeforeDelete, debug, ariaLabelConfig, zIndexMode }), (0, import_jsx_runtime.jsx)(GraphView, { onInit, onNodeClick, onEdgeClick, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, onNodeDoubleClick, nodeTypes: nodeTypes2, edgeTypes, connectionLineType, connectionLineStyle, connectionLineComponent, connectionLineContainerStyle, selectionKeyCode, selectionOnDrag, selectionMode, deleteKeyCode, multiSelectionKeyCode, panActivationKeyCode, zoomActivationKeyCode, onlyRenderVisibleElements, defaultViewport: defaultViewport$1, translateExtent, minZoom, maxZoom, preventScrolling, zoomOnScroll, zoomOnPinch, zoomOnDoubleClick, panOnScroll, panOnScrollSpeed, panOnScrollMode, panOnDrag, autoPanOnSelection, onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneScroll, onPaneContextMenu, paneClickDistance, nodeClickDistance, onSelectionContextMenu, onSelectionStart, onSelectionEnd, onReconnect, onReconnectStart, onReconnectEnd, onEdgeContextMenu, onEdgeDoubleClick, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius, defaultMarkerColor, noDragClassName, noWheelClassName, noPanClassName, rfId, disableKeyboardA11y, nodeExtent, viewport, onViewportChange, nodesDraggable }), (0, import_jsx_runtime.jsx)(SelectionListener, { onSelectionChange }), children2, (0, import_jsx_runtime.jsx)(Attribution, { proOptions, position: attributionPosition }), (0, import_jsx_runtime.jsx)(A11yDescriptions, { rfId, disableKeyboardA11y })] }) });
+  return (0, import_jsx_runtime.jsx)("div", { "data-testid": "rf__wrapper", ...rest, onScroll: wrapperOnScroll, style: { ...style2, ...wrapperStyle }, ref, className: cc(["react-flow", className, colorModeClassName]), id: id2, role: "application", children: (0, import_jsx_runtime.jsxs)(Wrapper, { nodes, edges, width, height, fitView, fitViewOptions, minZoom, maxZoom, nodeOrigin, nodeExtent, zIndexMode, children: [(0, import_jsx_runtime.jsx)(StoreUpdater, { nodes, edges, defaultNodes, defaultEdges, onConnect, onConnectStart, onConnectEnd, onClickConnectStart, onClickConnectEnd, nodesDraggable, autoPanOnNodeFocus, nodesConnectable, nodesFocusable, edgesFocusable, edgesReconnectable, elementsSelectable, elevateNodesOnSelect, elevateEdgesOnSelect, minZoom, maxZoom, nodeExtent, onNodesChange, onEdgesChange, snapToGrid, snapGrid, connectionMode, translateExtent, connectOnClick, defaultEdgeOptions, fitView, fitViewOptions, onNodesDelete, onEdgesDelete, onDelete, onNodeDragStart, onNodeDrag, onNodeDragStop, onSelectionDrag, onSelectionDragStart, onSelectionDragStop, onMove, onMoveStart, onMoveEnd, noPanClassName, nodeOrigin, rfId, autoPanOnConnect, autoPanOnNodeDrag, autoPanSpeed, onError, connectionRadius, isValidConnection, selectNodesOnDrag, nodeDragThreshold, connectionDragThreshold, onBeforeDelete, debug, ariaLabelConfig, zIndexMode }), (0, import_jsx_runtime.jsx)(GraphView, { onInit, onNodeClick, onEdgeClick, onNodeMouseEnter, onNodeMouseMove, onNodeMouseLeave, onNodeContextMenu, onNodeDoubleClick, nodeTypes: nodeTypes2, edgeTypes: edgeTypes2, connectionLineType, connectionLineStyle, connectionLineComponent, connectionLineContainerStyle, selectionKeyCode, selectionOnDrag, selectionMode, deleteKeyCode, multiSelectionKeyCode, panActivationKeyCode, zoomActivationKeyCode, onlyRenderVisibleElements, defaultViewport: defaultViewport$1, translateExtent, minZoom, maxZoom, preventScrolling, zoomOnScroll, zoomOnPinch, zoomOnDoubleClick, panOnScroll, panOnScrollSpeed, panOnScrollMode, panOnDrag, autoPanOnSelection, onPaneClick, onPaneMouseEnter, onPaneMouseMove, onPaneMouseLeave, onPaneScroll, onPaneContextMenu, paneClickDistance, nodeClickDistance, onSelectionContextMenu, onSelectionStart, onSelectionEnd, onReconnect, onReconnectStart, onReconnectEnd, onEdgeContextMenu, onEdgeDoubleClick, onEdgeMouseEnter, onEdgeMouseMove, onEdgeMouseLeave, reconnectRadius, defaultMarkerColor, noDragClassName, noWheelClassName, noPanClassName, rfId, disableKeyboardA11y, nodeExtent, viewport, onViewportChange, nodesDraggable }), (0, import_jsx_runtime.jsx)(SelectionListener, { onSelectionChange }), children2, (0, import_jsx_runtime.jsx)(Attribution, { proOptions, position: attributionPosition }), (0, import_jsx_runtime.jsx)(A11yDescriptions, { rfId, disableKeyboardA11y })] }) });
 }
 var index = fixedForwardRef(ReactFlow);
+var selector$6 = (s) => s.domNode?.querySelector(".react-flow__edgelabel-renderer");
+function EdgeLabelRenderer({ children: children2 }) {
+  const edgeLabelRenderer = useStore(selector$6);
+  if (!edgeLabelRenderer) {
+    return null;
+  }
+  return (0, import_react_dom.createPortal)(children2, edgeLabelRenderer);
+}
 var error014 = errorMessages["error014"]();
 function LinePattern({ dimensions, lineWidth, variant, className }) {
   return (0, import_jsx_runtime.jsx)("path", { strokeWidth: lineWidth, d: `M${dimensions[0] / 2} 0 V${dimensions[1]} M0 ${dimensions[1] / 2} H${dimensions[0]}`, className: cc(["react-flow__background-pattern", variant, className]) });
@@ -42351,56 +42543,77 @@ function ResizeControl({ nodeId, position, variant = ResizeControlVariant.Handle
 }
 var NodeResizeControl = (0, import_react2.memo)(ResizeControl);
 
-// dashboard/src/colors.ts
-var KIND_COLORS = {
-  root: "#8b7cf6",
-  // tech-stack root — the one purple shape
-  trunk: "#5b9dff",
-  // trunk
-  branch: "#3fa796",
-  // branch
-  subbranch: "#2f855a",
-  // side branch — quieter than its parent
-  leaf: "#4c5666"
-  // leaves are the work surface, not a signal
-};
-var STATUS_COLORS = {
-  draft: "#8b93a3",
-  ready: "#5b9dff",
-  claimed: "#b48ddb",
-  in_progress: "#e0a84f",
-  blocked: "#e05d5d",
-  done: "#4fa860",
-  cancelled: "#5c6470",
-  superseded: "#6b7280"
-};
-var KIND_LABELS = {
-  root: "Tech-stack root",
-  trunk: "Trunk",
-  branch: "Branch",
-  subbranch: "Side branch",
-  leaf: "Leaf (fact)"
-};
-var STATUS_LABELS = {
-  draft: "Draft",
-  ready: "Ready",
-  claimed: "Claimed",
-  in_progress: "In progress",
-  blocked: "Blocked",
-  done: "Done",
-  cancelled: "Cancelled",
-  superseded: "Superseded"
-};
-var KIND_GLYPHS = {
-  root: "\u2699\uFE0F",
-  trunk: "\u{1FAB5}",
-  branch: "\u{1F4E6}",
-  subbranch: "\u{1F4C2}",
-  leaf: "\u{1F343}"
+// dashboard/src/components/graph-edges.tsx
+var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+function BeeEdge({
+  id: id2,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  data,
+  style: style2,
+  interactionWidth
+}) {
+  if (data?.kind !== "bee") return null;
+  const { status, impact } = data;
+  const color2 = BEE_STATUS_COLORS[status];
+  const label = BEE_STATUS_LABELS[status];
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    curvature: 0.35
+  });
+  const settled = status === "resolved" || status === "cancelled";
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      BaseEdge,
+      {
+        id: id2,
+        path,
+        interactionWidth,
+        style: {
+          stroke: color2,
+          strokeWidth: 2,
+          strokeDasharray: settled ? "6 4" : void 0,
+          ...style2
+        }
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(EdgeLabelRenderer, { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+      "div",
+      {
+        className: "lp-bee-label",
+        "data-status": status,
+        title: impact.length > 0 ? `${label} \u2014 ${impact}` : label,
+        style: {
+          transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+          borderColor: color2,
+          color: color2,
+          // The label renderer is pointer-events: none by default — keep
+          // the hover tooltip (the impact text) reachable.
+          pointerEvents: "all"
+        },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: "\u{1F41D} " }),
+          label
+        ]
+      }
+    ) })
+  ] });
+}
+var edgeTypes = {
+  bee: BeeEdge
 };
 
 // dashboard/src/components/graph-nodes.tsx
-var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+var import_jsx_runtime3 = __toESM(require_jsx_runtime());
 var KIND_SHAPE = {
   root: { borderRadius: 999, borderWidth: 2, padding: "12px 26px" },
   trunk: { borderRadius: 8, borderWidth: 2, padding: "10px 14px" },
@@ -42408,10 +42621,28 @@ var KIND_SHAPE = {
   subbranch: { borderRadius: 6, borderWidth: 1, padding: "6px 10px" },
   leaf: { borderRadius: 10, borderWidth: 1, padding: "6px 10px" }
 };
+function BugBadge({ count: count2 }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+    "span",
+    {
+      className: "lp-node-bugbadge",
+      title: `${count2} open incident${count2 === 1 ? "" : "s"} on this node`,
+      style: {
+        backgroundColor: `${BUG_BADGE_COLOR}26`,
+        borderColor: BUG_BADGE_COLOR,
+        color: BUG_BADGE_COLOR
+      },
+      children: [
+        "\u{1F41E} \xD7",
+        count2
+      ]
+    }
+  );
+}
 function GraphNode({ data }) {
   const shape = KIND_SHAPE[data.kind];
   const hasChildren = data.childCount > 0;
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     "div",
     {
       className: `lp-node lp-node-${data.kind}`,
@@ -42424,14 +42655,16 @@ function GraphNode({ data }) {
         color: "var(--lp-text, #e6e9ef)"
       },
       "data-status": data.status,
+      "data-kind": data.kind,
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Handle, { type: "target", position: Position.Top }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "lp-node-title", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "lp-node-glyph", "aria-hidden": "true", children: KIND_GLYPHS[data.kind] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "lp-node-name", title: data.name, children: data.name })
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Handle, { type: "target", position: Position.Top }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "lp-node-title", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-node-glyph", "aria-hidden": "true", children: KIND_GLYPHS[data.kind] }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-node-name", title: data.name, children: data.name }),
+          data.openBugCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BugBadge, { count: data.openBugCount }) : null
         ] }),
-        data.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "lp-node-status", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        data.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "lp-node-status", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
             "span",
             {
               className: "lp-node-status-dot",
@@ -42439,15 +42672,38 @@ function GraphNode({ data }) {
               "aria-hidden": "true"
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "lp-node-status-text", children: STATUS_LABELS[data.status] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: "lp-node-version", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-node-status-text", children: STATUS_LABELS[data.status] }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "lp-node-version", children: [
             "v",
             data.version,
             " \xB7 r",
             data.revision
           ] })
         ] }) : null,
-        hasChildren ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        data.kind === "leaf" ? (
+          /* The G3 status bar: fill = position in plan → work → done, colour =
+             status. Decorative — the text row above is the accessible carrier. */
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+            "div",
+            {
+              className: "lp-node-statusbar",
+              role: "img",
+              "aria-label": `Status: ${STATUS_LABELS[data.status]}`,
+              title: `Status: ${STATUS_LABELS[data.status]}`,
+              children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+                "div",
+                {
+                  className: "lp-node-statusbar-fill",
+                  style: {
+                    width: `${Math.round(STATUS_PROGRESS[data.status] * 100)}%`,
+                    backgroundColor: STATUS_COLORS[data.status]
+                  }
+                }
+              )
+            }
+          )
+        ) : null,
+        hasChildren ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           "button",
           {
             type: "button",
@@ -42462,8 +42718,40 @@ function GraphNode({ data }) {
             children: data.collapsed ? `+${data.hiddenDescendantCount}` : "\u2212"
           }
         ) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Handle, { type: "source", position: Position.Bottom })
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Handle, { type: "source", position: Position.Bottom })
       ]
+    }
+  );
+}
+function GoalFrame({
+  data
+}) {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    "div",
+    {
+      className: "lp-goal-frame",
+      "data-status": data.status,
+      style: {
+        width: data.width,
+        height: data.height,
+        borderColor: GOAL_STATUS_COLORS[data.status]
+      },
+      title: `${data.name} \u2014 ${GOAL_STATUS_LABELS[data.status]} (${data.nodeCount} nodes)`,
+      children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+        "span",
+        {
+          className: "lp-goal-frame-label",
+          style: { color: GOAL_STATUS_COLORS[data.status] },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: "\u{1F3AF} " }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-goal-frame-name", children: data.name }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "lp-goal-frame-status", children: [
+              " \xB7 ",
+              GOAL_STATUS_LABELS[data.status]
+            ] })
+          ]
+        }
+      )
     }
   );
 }
@@ -42472,19 +42760,20 @@ var nodeTypes = {
   trunk: GraphNode,
   branch: GraphNode,
   subbranch: GraphNode,
-  leaf: GraphNode
+  leaf: GraphNode,
+  goalFrame: GoalFrame
 };
 
 // dashboard/src/components/Canvas.tsx
-var import_jsx_runtime3 = __toESM(require_jsx_runtime());
+var import_jsx_runtime4 = __toESM(require_jsx_runtime());
 function Canvas(props) {
   const { graph, loaded, onToggleNode } = props;
   if (loaded && graph.nodes.length === 0) {
-    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "lp-canvas-empty", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "lp-canvas-empty-title", children: "This project has no tree yet" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("p", { className: "lp-canvas-empty-text", children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "lp-canvas-empty", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "lp-canvas-empty-title", children: "This project has no tree yet" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { className: "lp-canvas-empty-text", children: [
         "Ask a coding agent to grow the skeleton (",
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("code", { children: "luck_tree_upsert_leaf" }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("code", { children: "luck_tree_upsert_leaf" }),
         "), or open a workspace that has one \u2014 the diagram appears here after a refresh."
       ] })
     ] }) });
@@ -42496,12 +42785,13 @@ function Canvas(props) {
       onToggle: () => onToggleNode(node2.id)
     }
   }));
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
     index,
     {
-      nodes,
+      nodes: [...nodes, ...graph.goalFrames],
       edges: graph.edges,
       nodeTypes,
+      edgeTypes,
       fitView: true,
       fitViewOptions: { padding: 0.15, maxZoom: 1 },
       minZoom: 0.2,
@@ -42511,29 +42801,29 @@ function Canvas(props) {
       elementsSelectable: false,
       proOptions: { hideAttribution: true },
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Background, { gap: 22 }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Controls, { showInteractive: false })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Background, { gap: 22 }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Controls, { showInteractive: false })
       ]
     }
   ) });
 }
 
 // dashboard/src/components/DetailsPanel.tsx
-var import_jsx_runtime4 = __toESM(require_jsx_runtime());
+var import_jsx_runtime5 = __toESM(require_jsx_runtime());
 function DetailsPanel() {
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("aside", { className: "lp-details", "aria-label": "Node details", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("h2", { className: "lp-details-title", children: "Details" }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "lp-details-empty", children: "Select a node on the diagram (stage G4) to see its version, revision, status, influence links, incidents and history here." })
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("aside", { className: "lp-details", "aria-label": "Node details", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { className: "lp-details-title", children: "Details" }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Select a node on the diagram (stage G4) to see its version, revision, status, influence links, incidents and history here." })
   ] });
 }
 
 // dashboard/src/components/Legend.tsx
-var import_jsx_runtime5 = __toESM(require_jsx_runtime());
+var import_jsx_runtime6 = __toESM(require_jsx_runtime());
 function Legend() {
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("footer", { className: "lp-legend", "aria-label": "Legend", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-legend-title", children: "Legend" }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-legend-group", children: NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-legend-item", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "lp-legend", "aria-label": "Legend", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-title", children: "Legend" }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-group", children: NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "lp-legend-item", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "span",
         {
           className: "lp-legend-swatch",
@@ -42541,12 +42831,12 @@ function Legend() {
           "aria-hidden": "true"
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-legend-glyph", "aria-hidden": "true", children: KIND_GLYPHS[kind] }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-glyph", "aria-hidden": "true", children: KIND_GLYPHS[kind] }),
       KIND_LABELS[kind]
     ] }, kind)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-legend-group", children: LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-legend-item", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-group", children: LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "lp-legend-item", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "span",
         {
           className: "lp-legend-swatch",
@@ -42556,35 +42846,48 @@ function Legend() {
       ),
       STATUS_LABELS[status]
     ] }, status)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-legend-note", children: "bees \u{1F41D} \xB7 incidents \u{1F41E} \xB7 goals \u{1F3AF} \u2014 stages G3/G5" })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-group", children: BEE_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "lp-legend-item", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+        "span",
+        {
+          className: "lp-legend-swatch",
+          style: { backgroundColor: BEE_STATUS_COLORS[status] },
+          "aria-hidden": "true"
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { "aria-hidden": "true", children: "\u{1F41D} " }),
+      BEE_STATUS_LABELS[status]
+    ] }, status)) }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree (progress layer \u2014 stage G5)" })
   ] });
 }
 
 // dashboard/src/components/Toolbar.tsx
-var import_jsx_runtime6 = __toESM(require_jsx_runtime());
+var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 function Counter(props) {
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "lp-counter", title: props.label, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-counter-value", children: props.value }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-counter-label", children: props.label })
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-counter", title: props.label, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-counter-value", children: props.value }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-counter-label", children: props.label })
   ] });
 }
 function Toolbar(props) {
   const stats2 = props.stats;
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("header", { className: "lp-toolbar", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "lp-toolbar-identity", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("header", { className: "lp-toolbar", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-identity", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Counter, { label: "bees", value: stats2.bees }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "bees", value: stats2.bees }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
     ] }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "lp-toolbar-controls", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-controls", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
         "input",
         {
           className: "lp-toolbar-search",
@@ -42594,11 +42897,11 @@ function Toolbar(props) {
           disabled: true
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("select", { className: "lp-toolbar-filter", "aria-label": "Filter by kind", disabled: true, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("option", { children: "Kind (G4)" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("select", { className: "lp-toolbar-filter", "aria-label": "Filter by status", disabled: true, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("option", { children: "Status (G4)" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "lp-view-button lp-view-button-active", "aria-pressed": "true", children: "2D" }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("select", { className: "lp-toolbar-filter", "aria-label": "Filter by kind", disabled: true, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { children: "Kind (G4)" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("select", { className: "lp-toolbar-filter", "aria-label": "Filter by status", disabled: true, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { children: "Status (G4)" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "lp-view-button lp-view-button-active", "aria-pressed": "true", children: "2D" }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
           "button",
           {
             type: "button",
@@ -42611,12 +42914,12 @@ function Toolbar(props) {
         )
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "lp-toolbar-status", role: "status", children: props.statusLine })
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-toolbar-status", role: "status", children: props.statusLine })
   ] });
 }
 
 // dashboard/src/app.tsx
-var import_jsx_runtime7 = __toESM(require_jsx_runtime());
+var import_jsx_runtime8 = __toESM(require_jsx_runtime());
 function applyTheme(theme) {
   const tokens = tokensFor(theme);
   const root2 = document.documentElement;
@@ -42639,22 +42942,22 @@ function initialTheme() {
   return resolveTheme(stored, prefersDark);
 }
 function App() {
-  const params = (0, import_react5.useMemo)(() => parseDashboardParams(window.location.search), []);
-  const client = (0, import_react5.useMemo)(
+  const params = (0, import_react6.useMemo)(() => parseDashboardParams(window.location.search), []);
+  const client = (0, import_react6.useMemo)(
     () => params.token.length > 0 ? new DashboardApi(resolveApiOrigin(window.location.href), params.token, params.projectKey) : null,
     [params.projectKey, params.token]
   );
-  const [stats2, setStats] = (0, import_react5.useState)(null);
-  const [tree, setTree] = (0, import_react5.useState)(null);
-  const [collapsedIds, setCollapsedIds] = (0, import_react5.useState)(
+  const [stats2, setStats] = (0, import_react6.useState)(null);
+  const [tree, setTree] = (0, import_react6.useState)(null);
+  const [collapsedIds, setCollapsedIds] = (0, import_react6.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [statusLine, setStatusLine] = (0, import_react5.useState)("");
-  const [theme] = (0, import_react5.useState)(initialTheme);
-  (0, import_react5.useEffect)(() => {
+  const [statusLine, setStatusLine] = (0, import_react6.useState)("");
+  const [theme] = (0, import_react6.useState)(initialTheme);
+  (0, import_react6.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
-  const load = (0, import_react5.useCallback)(async () => {
+  const load = (0, import_react6.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
       return;
@@ -42678,20 +42981,20 @@ function App() {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
     }
   }, [client, params.projectKey]);
-  (0, import_react5.useEffect)(() => {
+  (0, import_react6.useEffect)(() => {
     void load();
   }, [load]);
-  const onToggleNode = (0, import_react5.useCallback)((id2) => {
+  const onToggleNode = (0, import_react6.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
-  const graph = (0, import_react5.useMemo)(
+  const graph = (0, import_react6.useMemo)(
     () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds }),
     [tree, collapsedIds]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-app", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Toolbar, { projectKey: params.projectKey, stats: stats2, statusLine }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-body", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-app", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Toolbar, { projectKey: params.projectKey, stats: stats2, statusLine }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-body", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         Canvas,
         {
           graph,
@@ -42699,20 +43002,20 @@ function App() {
           onToggleNode
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(DetailsPanel, {})
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DetailsPanel, {})
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Legend, {})
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Legend, {})
   ] });
 }
 
 // dashboard/src/main.tsx
-var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+var import_jsx_runtime9 = __toESM(require_jsx_runtime());
 var container = document.getElementById("root");
 if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_react6.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_react7.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(App, {}) })
 );
 /*! Bundled license information:
 

@@ -14,6 +14,10 @@
  */
 import { LEAF_STATUSES, NODE_KINDS } from "../../shared/tree";
 import type { LeafStatus, NodeKind } from "../../shared/tree";
+import { GOAL_STATUSES } from "../../shared/goals";
+import type { GoalStatus } from "../../shared/goals";
+import { BEE_STATUSES } from "../../shared/links";
+import type { BeeStatus } from "../../shared/links";
 
 /** Fill colour of a node shape, by node kind. */
 export const KIND_COLORS: Record<NodeKind, string> = {
@@ -67,12 +71,100 @@ export const KIND_GLYPHS: Record<NodeKind, string> = {
 };
 
 /**
- * Both enums must stay covered: an entry added to `shared/tree.ts` without a
- * colour would render as an invisible shape and only be noticed by eye.
+ * Lifecycle fraction a leaf's status bar fills up to (stage G3). The bar is
+ * the *position* in plan → work → done; the status colour and the status
+ * text next to it carry which status it actually is, so the bar never has to
+ * invent a meaning of its own. Capped at 1, monotonically ordered along the
+ * happy path (`tests/dashboard-theme.test.ts` pins both properties).
+ */
+export const STATUS_PROGRESS: Record<LeafStatus, number> = {
+  draft: 0.1, // planned fact, barely started
+  ready: 0.3, // planned and queued
+  claimed: 0.5, // picked up
+  in_progress: 0.7, // work underway
+  blocked: 0.7, // stopped mid-work — the red colour says blocked, not the bar
+  done: 1, // finished
+  cancelled: 0.15, // abandoned where it stood
+  superseded: 0.15, // replaced by a newer plan
+};
+
+/** Border colour of a goal frame (stage G3), by goal status. */
+export const GOAL_STATUS_COLORS: Record<GoalStatus, string> = {
+  draft: "#8b93a3", // not a decision yet
+  proposed: "#b48ddb", // waiting for the approval gate (ADR-7)
+  approved: "#5b9dff", // approved, materialization pending
+  in_progress: "#e0a84f", // being grown
+  done: "#4fa860",
+  cancelled: "#5c6470",
+  superseded: "#6b7280",
+};
+
+/** Human labels of the goal statuses (shown inside the frame, in text). */
+export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
+  draft: "Draft",
+  proposed: "Proposed",
+  approved: "Approved",
+  in_progress: "In progress",
+  done: "Done",
+  cancelled: "Cancelled",
+  superseded: "Superseded",
+};
+
+/** Stroke colour of a bee edge, by bee status (stage G3). */
+export const BEE_STATUS_COLORS: Record<BeeStatus, string> = {
+  active: "#f0b429", // honey — the live influence, animated
+  watching: "#5b9dff",
+  resolved: "#4fa860",
+  cancelled: "#5c6470",
+};
+
+/** Human labels of the bee statuses (rendered on the edge, in text). */
+export const BEE_STATUS_LABELS: Record<BeeStatus, string> = {
+  active: "Active",
+  watching: "Watching",
+  resolved: "Resolved",
+  cancelled: "Cancelled",
+};
+
+/** Incident badge (🐞 ×N) painted on nodes with open incidents. */
+export const BUG_BADGE_COLOR = "#e05d5d";
+
+/**
+ * Blends a `#rrggbb` hex with an alpha channel — used for tree-edge strokes
+ * that echo the parent kind's colour without competing with the nodes.
+ */
+export function withAlpha(hex: string, alpha: number): string {
+  const value = hex.replace(/^#/, "");
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  const a = Math.min(1, Math.max(0, alpha));
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+/**
+ * Every enum the diagram paints must stay covered: an entry added to
+ * `shared/*.ts` without a colour or a label would render as an invisible
+ * shape (or a blank caption) and only be noticed by eye.
  */
 export function paletteIsComplete(): boolean {
   return (
     NODE_KINDS.every((kind) => KIND_COLORS[kind] !== undefined) &&
-    LEAF_STATUSES.every((status) => STATUS_COLORS[status] !== undefined)
+    LEAF_STATUSES.every(
+      (status) =>
+        STATUS_COLORS[status] !== undefined &&
+        STATUS_LABELS[status] !== undefined &&
+        STATUS_PROGRESS[status] !== undefined,
+    ) &&
+    BEE_STATUSES.every(
+      (status) =>
+        BEE_STATUS_COLORS[status] !== undefined &&
+        BEE_STATUS_LABELS[status] !== undefined,
+    ) &&
+    GOAL_STATUSES.every(
+      (status) =>
+        GOAL_STATUS_COLORS[status] !== undefined &&
+        GOAL_STATUS_LABELS[status] !== undefined,
+    )
   );
 }

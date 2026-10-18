@@ -15,6 +15,7 @@ import type { ReactElement } from "react";
 import { Background, Controls, ReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { DashboardGraph } from "../graph";
+import { edgeTypes } from "./graph-edges";
 import { nodeTypes } from "./graph-nodes";
 
 /** Props of the canvas. */
@@ -46,7 +47,8 @@ export function Canvas(props: CanvasProps): ReactElement {
   }
 
   // The adapter owns the data; the app owns the toggle. Decorating here keeps
-  // graph.ts free of React while the nodes stay clickable.
+  // graph.ts free of React while the nodes stay clickable. Goal frames (G3)
+  // ride along behind the tree — they are synthetic, fixed and inert.
   const nodes = graph.nodes.map((node) => ({
     ...node,
     data: {
@@ -58,9 +60,10 @@ export function Canvas(props: CanvasProps): ReactElement {
   return (
     <section className="lp-canvas" aria-label="Tree diagram">
       <ReactFlow
-        nodes={nodes}
+        nodes={[...nodes, ...graph.goalFrames]}
         edges={graph.edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         minZoom={0.2}

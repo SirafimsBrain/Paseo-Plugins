@@ -15,16 +15,19 @@
 import { describe, expect, it } from "vitest";
 import type { TreeResponse } from "../shared/api";
 import type { Node as TreeNode } from "../shared/tree";
+import type { Goal } from "../shared/goals";
 import {
   buildGraph,
   DEFAULT_VISIBLE_BUDGET,
   defaultCollapsedIds,
   EMPTY_GRAPH,
+  GOAL_FRAME,
   indexTree,
   LAYOUT,
   NODE_KIND_TO_TYPE,
   toggleCollapsed,
 } from "../dashboard/src/graph";
+import { KIND_COLORS, withAlpha } from "../dashboard/src/colors";
 
 const P = "/tmp/luck-planner-g2";
 const T0 = 1_700_000_000_000;
@@ -52,6 +55,28 @@ function mknode(
     createdBy: "user",
     updatedBy: "user",
     archivedAt: null,
+    ...extra,
+  };
+}
+
+function mkgoal(
+  id: string,
+  status: Goal["status"],
+  materializedNodeId: string | null,
+  extra: Partial<Goal> = {},
+): Goal {
+  return {
+    id,
+    projectKey: P,
+    formalText: `Goal ${id}`,
+    plan: [{ id: "s1", title: "step", description: "" }],
+    status,
+    revision: 1,
+    materializedNodeId,
+    createdAt: T0,
+    updatedAt: T0,
+    createdBy: "user",
+    updatedBy: "user",
     ...extra,
   };
 }
@@ -334,6 +359,128 @@ describe("toggleCollapsed", () => {
     expect([...original]).toEqual(["a"]);
     const removed = toggleCollapsed(added, "a");
     expect([...removed]).toEqual(["b"]);
+  });
+});
+
+describe("G3: goal frames", () => {
+  it("draws a frame that encloses the visible materialized subtree", () => {
+    const withGoal = mktree(fixture().nodes, {
+      goals: [mkgoal("goal-1", "approved", "branch-1")],
+    });
+    const graph = buildGraph(withGoal);
+    expect(graph.goalFrames).toHaveLength(1);
+
+    const frame = graph.goalFrames[0];
+    expect(frame.id).toBe("goal:goal-1");
+    expect(frame.type).toBe("goalFrame");
+    expect(frame.zIndex).toBe(-1);
+    expect(frame.selectable).toBe(false);
+    expect(frame.data).toMatchObject({
+      goalId: "goal-1",
+      name: "Goal goal-1",
+      status: "approved",
+      nodeCount: 3,
+    });
+
+    // The box wraps branch + both leaves in layout coordinates.
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const box = ["branch-1", "leaf-a", "leaf-b"].map((id) => byId.get(id)!);
+    const minX = Math.min(...box.map((n) => n.position.x));
+    const minY = Math.min(...box.map((n) => n.position.y));
+    const maxX = Math.max(...box.map((n) => n.position.x + LAYOUT.nodeWidth));
+    const maxY = Math.max(...box.map((n) => n.position.y + LAYOUT.nodeHeight));
+
+    expect(frame.position.x).toBeCloseTo(minX - GOAL_FRAME.padding, 5);
+    expect(frame.position.y).toBeCloseTo(
+      minY - GOAL_FRAME.padding - GOAL_FRAME.labelHeight,
+      5,
+    );
+    expect(frame.data.width).toBeCloseTo(
+      maxX - minX + 2 * GOAL_FRAME.padding,
+      5,
+    );
+    expect(frame.data.height).toBeCloseTo(
+      maxY - minY + 2 * GOAL_FRAME.padding + GOAL_FRAME.labelHeight,
+      5,
+    );
+  });
+
+  it("gives no frame to a goal that never materialized (ADR-7)", () => {
+    const withGoal = mktree(fixture().nodes, {
+      goals: [mkgoal("goal-draft", "proposed", null)],
+    });
+    expect(buildGraph(withGoal).goalFrames).toEqual([]);
+  });
+
+  it("shrinks the frame to the root itself when its subtree is collapsed", () => {
+    const withGoal = mktree(fixture().nodes, {
+      goals: [mkgoal("goal-1", "in_progress", "branch-1")],
+    });
+    const graph = buildGraph(withGoal, { collapsedIds: new Set(["branch-1"]) });
+    expect(graph.goalFrames).toHaveLength(1);
+    const frame = graph.goalFrames[0];
+    expect(frame.data.nodeCount).toBe(1);
+    // Exactly the collapsed root's box, no ghost of the hidden leaves.
+    const branch = graph.nodes.find((n) => n.id === "branch-1")!;
+    expect(frame.position.x).toBeCloseTo(
+      branch.position.x - GOAL_FRAME.padding,
+      5,
+    );
+    expect(frame.data.width).toBeCloseTo(LAYOUT.nodeWidth + 2 * GOAL_FRAME.padding, 5);
+  });
+
+  it("keeps frames sorted by goal id (payload order must not leak)", () => {
+    const withGoals = mktree(fixture().nodes, {
+      goals: [
+        mkgoal("goal-b", "approved", "branch-1"),
+        mkgoal("goal-a", "done", "leaf-a"),
+      ],
+    });
+    expect(buildGraph(withGoals).goalFrames.map((f) => f.id)).toEqual([
+      "goal:goal-a",
+      "goal:goal-b",
+    ]);
+  });
+
+  it("drops the frame when an ancestor collapse hides the subtree root", () => {
+    const withGoal = mktree(fixture().nodes, {
+      goals: [mkgoal("goal-1", "approved", "branch-1")],
+    });
+    const graph = buildGraph(withGoal, { collapsedIds: new Set(["trunk-1"]) });
+    expect(graph.goalFrames).toEqual([]);
+  });
+});
+
+describe("G3: edge styling", () => {
+  it("routes bees through the custom `bee` renderer type", () => {
+    const bee = {
+      id: "bee-1",
+      projectKey: P,
+      sourceLeafId: "leaf-a",
+      targetLeafId: "leaf-b",
+      status: "watching" as const,
+      revision: 1,
+      impact: "shares the retry queue",
+      createdAt: T0,
+      updatedAt: T0,
+      createdBy: "agent-1",
+      updatedBy: "agent-1",
+    };
+    const graph = buildGraph({ ...fixture(), bees: [bee] });
+    const beeEdge = graph.edges.find((e) => e.data?.kind === "bee")!;
+    expect(beeEdge.type).toBe("bee");
+    // Only a live (`active`) influence animates — watching must not dance.
+    expect(beeEdge.animated).toBe(false);
+  });
+
+  it("tints each tree edge with its parent kind colour, softened", () => {
+    const graph = buildGraph(fixture());
+    const trunkEdge = graph.edges.find((e) => e.id === "t:trunk-1")!;
+    expect(trunkEdge.style?.stroke).toBe(withAlpha(KIND_COLORS.root, 0.5));
+    expect(trunkEdge.style?.stroke).toMatch(/^rgba\(/);
+
+    const leafEdge = graph.edges.find((e) => e.id === "t:leaf-a")!;
+    expect(leafEdge.style?.stroke).toBe(withAlpha(KIND_COLORS.branch, 0.5));
   });
 });
 

@@ -340,6 +340,73 @@ body {
   color: var(--lp-accent, #5b9dff);
 }
 
+/* ── Graph nodes and edges (stage G3) ────────────────────────────────── */
+
+/* 🐞 ×N incident chip on a node: text carries the count, red only flags it. */
+.lp-node-bugbadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 6px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+/* Leaf status bar: fill width = position in plan → work → done; the status
+   text above is the accessible carrier, this strip is the fast visual one. */
+.lp-node-statusbar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--lp-border, #262b36);
+  overflow: hidden;
+}
+
+.lp-node-statusbar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.15s ease;
+}
+
+/* 🎯 goal frame: a dashed rectangle behind the materialized subtree. It has
+   pointer-events: none from the adapter, so no interaction is swallowed. */
+.lp-goal-frame {
+  position: relative;
+  border-style: dashed;
+  border-width: 1.5px;
+  border-radius: 14px;
+  box-sizing: border-box;
+  background: rgba(127, 127, 127, 0.04);
+}
+
+.lp-goal-frame-label {
+  position: absolute;
+  top: 4px;
+  left: 10px;
+  right: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 🐝 bee-edge label: status in text next to the stroke colour. */
+.lp-bee-label {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid;
+  background: var(--lp-surface, #171a21);
+  white-space: nowrap;
+}
+
 /* React Flow viewport fills the canvas region. */
 .lp-canvas .react-flow {
   width: 100%;
