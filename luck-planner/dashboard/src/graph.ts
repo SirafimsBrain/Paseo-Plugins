@@ -86,10 +86,16 @@ export type GraphNodeData = {
   hiddenDescendantCount: number;
   /** Open/investigating incidents attached to this node (G3 badge). */
   openBugCount: number;
+  /** Ids behind the badge, sorted — the G4 selection uses them. */
+  openBugIds: string[];
   /** Whether this node currently hides its subtree. */
   collapsed: boolean;
   /** Wired by the Canvas decoration, never by the adapter (see below). */
   onToggle?: () => void;
+  /** Whether this node is the current selection (Canvas, stage G4). */
+  selected?: boolean;
+  /** Shares an open incident with the selection (Canvas, stage G4). */
+  bugLinked?: boolean;
 };
 
 /** Tree edge payload: which of the two graph layers the edge belongs to. */
@@ -130,10 +136,55 @@ export type GoalFrameNode = Node<GoalFrameData>;
 /** A React Flow edge produced by this module. */
 export type GraphFlowEdge = Edge<TreeEdgeData | BeeEdgeData>;
 
+/**
+ * Toolbar filters (stage G4). An empty/absent field matches everything; a
+ * version filter is a case-insensitive prefix of the node's stored version.
+ */
+export interface GraphFilter {
+  kind?: NodeKind | "";
+  status?: LeafStatus | "";
+  version?: string;
+}
+
+/** Whether at least one field of the filter narrows the graph. */
+export function isFilterActive(filter: GraphFilter | undefined): filter is GraphFilter {
+  if (filter === undefined) return false;
+  return (
+    (filter.kind !== undefined && filter.kind !== "") ||
+    (filter.status !== undefined && filter.status !== "") ||
+    (filter.version !== undefined && filter.version.trim() !== "")
+  );
+}
+
+/** All fields of the filter must hold (AND), the way the FTS options merge. */
+export function matchesFilter(node: TreeNode, filter: GraphFilter): boolean {
+  if (filter.kind !== undefined && filter.kind !== "" && node.kind !== filter.kind) {
+    return false;
+  }
+  if (
+    filter.status !== undefined &&
+    filter.status !== "" &&
+    node.status !== filter.status
+  ) {
+    return false;
+  }
+  const version = filter.version?.trim().toLowerCase();
+  if (version !== undefined && version.length > 0) {
+    if (!node.version.toLowerCase().startsWith(version)) return false;
+  }
+  return true;
+}
+
 /** Options of {@link buildGraph}. */
 export interface BuildGraphOptions {
   /** Node ids currently hiding their subtree. Defaults to "all expanded". */
   collapsedIds?: ReadonlySet<string>;
+  /**
+   * Toolbar filters (G4). A node survives when it matches *or* has a
+   * matching descendant — the path to the root stays as context, so a
+   * filtered leaf is still readable as a tree instead of floating alone.
+   */
+  filter?: GraphFilter;
 }
 /** Flat index of the tree: roots, sorted children and the node lookup. */
 interface TreeIndex {
@@ -277,7 +328,9 @@ export function buildGraph(
   const index = indexTree(input.nodes);
   const sizes = subtreeSizes(index);
   const { visible, hiddenCounts } = visibleSet(index, collapsed, sizes);
-  const bugCounts = openBugCounts(input);
+  // Visibility (collapse) is then narrowed by the toolbar filters (G4).
+  const shown = applyFilter(input.nodes, visible, index, options.filter);
+  const bugIdsByNode = openBugIdsByNode(input);
 
   // Nested layout input, visible nodes only.
   interface LayoutInput {
@@ -290,7 +343,7 @@ export function buildGraph(
     children: collapsed.has(id)
       ? []
       : (index.childrenOf.get(id) ?? [])
-          .filter((child) => visible.has(child.id))
+          .filter((child) => shown.has(child.id))
           .map((child) => makeLayout(child.id)),
   });
   const layoutInput: LayoutInput = {
@@ -314,8 +367,9 @@ export function buildGraph(
 
   const nodes: GraphFlowNode[] = [];
   for (const node of input.nodes) {
-    if (!visible.has(node.id)) continue;
+    if (!shown.has(node.id)) continue;
     const position = positions.get(node.id) ?? { x: 0, y: 0 };
+    const openBugIds = bugIdsByNode.get(node.id) ?? [];
     nodes.push({
       id: node.id,
       type: NODE_KIND_TO_TYPE[node.kind],
@@ -329,7 +383,8 @@ export function buildGraph(
         revision: node.revision,
         childCount: index.childrenOf.get(node.id)?.length ?? 0,
         hiddenDescendantCount: hiddenCounts.get(node.id) ?? 0,
-        openBugCount: bugCounts.get(node.id) ?? 0,
+        openBugCount: openBugIds.length,
+        openBugIds,
         collapsed: collapsed.has(node.id),
       },
       // Positions come from the layout, not from the user (yet).
@@ -339,8 +394,8 @@ export function buildGraph(
 
   const edges: GraphFlowEdge[] = [];
   for (const node of input.nodes) {
-    if (!visible.has(node.id)) continue;
-    if (node.parentId !== null && visible.has(node.parentId)) {
+    if (!shown.has(node.id)) continue;
+    if (node.parentId !== null && shown.has(node.parentId)) {
       const parent = index.byId.get(node.parentId);
       edges.push({
         id: `t:${node.id}`,
@@ -357,7 +412,7 @@ export function buildGraph(
     }
   }
   for (const bee of input.bees) {
-    if (!visible.has(bee.sourceLeafId) || !visible.has(bee.targetLeafId)) {
+    if (!shown.has(bee.sourceLeafId) || !shown.has(bee.targetLeafId)) {
       continue;
     }
     edges.push({
@@ -375,8 +430,36 @@ export function buildGraph(
   return {
     nodes,
     edges,
-    goalFrames: buildGoalFrames(input, visible, positions, index),
+    goalFrames: buildGoalFrames(input, shown, positions, index),
   };
+}
+
+/**
+ * Applies the toolbar filters (G4) on top of the collapse visibility: a node
+ * survives when it matches *or* has a matching descendant, so the path to
+ * the root always stays as context. With no active filter this is the plain
+ * visible set, and the layout code below sees one set either way.
+ */
+function applyFilter(
+  nodes: readonly TreeNode[],
+  visible: ReadonlySet<string>,
+  index: TreeIndex,
+  filter: GraphFilter | undefined,
+): Set<string> {
+  if (!isFilterActive(filter)) return new Set(visible);
+
+  const keep = new Set<string>();
+  for (const node of nodes) {
+    if (!visible.has(node.id)) continue;
+    if (!matchesFilter(node, filter)) continue;
+    keep.add(node.id);
+    let parentId = node.parentId;
+    while (parentId !== null && visible.has(parentId) && !keep.has(parentId)) {
+      keep.add(parentId);
+      parentId = index.byId.get(parentId)?.parentId ?? null;
+    }
+  }
+  return keep;
 }
 
 /**
@@ -450,19 +533,110 @@ function buildGoalFrames(
 }
 
 
-/** Open/investigating incidents per node id — the G3 badge counts. */
-function openBugCounts(input: TreeResponse): Map<string, number> {
+/**
+ * Open/investigating incident ids per node id (sorted, deduplicated) — the
+ * G3 badge count is the array length and the G4 selection follows them to
+ * the other leaves the incident touches.
+ */
+function openBugIdsByNode(input: TreeResponse): Map<string, string[]> {
   const openStatuses = new Set(["open", "investigating"]);
   const bugsById = new Map(input.bugs.map((bug) => [bug.id, bug]));
-  const counts = new Map<string, number>();
+  const ids = new Map<string, Set<string>>();
   for (const attachment of input.bugAttachments) {
     const bug = bugsById.get(attachment.bugId);
     if (!bug || !openStatuses.has(bug.status)) continue;
-    counts.set(attachment.nodeId, (counts.get(attachment.nodeId) ?? 0) + 1);
+    const set = ids.get(attachment.nodeId) ?? new Set<string>();
+    set.add(attachment.bugId);
+    ids.set(attachment.nodeId, set);
   }
-  return counts;
+  const sorted = new Map<string, string[]>();
+  for (const [nodeId, set] of ids) {
+    sorted.set(nodeId, [...set].sort());
+  }
+  return sorted;
 }
 
+
+/**
+ * The ancestor chain of `id` (nearest ancestor first — immediate parent,
+ * then upwards to the root); empty for a root or an unknown id.
+ * Cycle-safe — the payload is hand-editable.
+ */
+export function ancestorsOf(
+  nodes: readonly TreeNode[],
+  id: string,
+): string[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const chain: string[] = [];
+  const visited = new Set<string>([id]);
+  let current = byId.get(id);
+  while (current?.parentId !== null && current?.parentId !== undefined) {
+    const parentId = current.parentId;
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    chain.push(parentId);
+    current = byId.get(parentId);
+  }
+  return chain;
+}
+
+/**
+ * Canvas centre of a positioned node in layout coordinates (the node
+ * position is its top-left corner, the same convention the layout and the
+ * goal frames use).
+ */
+export function graphNodeCenter(node: {
+  position: { x: number; y: number };
+}): { x: number; y: number } {
+  return {
+    x: node.position.x + LAYOUT.nodeWidth / 2,
+    y: node.position.y + LAYOUT.nodeHeight / 2,
+  };
+}
+
+/**
+ * Nodes the current selection is tied to through a shared open incident
+ * (G4): selecting a blocked leaf highlights every other leaf the same
+ * 🐞 touches, which is the "all its blockers" half of the acceptance
+ * scenario. The selected node itself is not in the set.
+ */
+export function relatedByOpenBug(
+  graph: DashboardGraph,
+  selectedId: string | null,
+): Set<string> {
+  const related = new Set<string>();
+  if (selectedId === null) return related;
+  const selected = graph.nodes.find((node) => node.id === selectedId);
+  if (selected === undefined || selected.data.openBugIds.length === 0) {
+    return related;
+  }
+  const shared = new Set(selected.data.openBugIds);
+  for (const node of graph.nodes) {
+    if (node.id === selectedId) continue;
+    if (node.data.openBugIds.some((bugId) => shared.has(bugId))) {
+      related.add(node.id);
+    }
+  }
+  return related;
+}
+
+/**
+ * A request to fly the camera to one node (G4 search): `seq` makes repeated
+ * requests for the same node re-trigger the effect.
+ */
+export interface FocusRequest {
+  nodeId: string;
+  seq: number;
+}
+
+/** Whether an edge (tree or bee) is attached to the given node. */
+export function edgeTouchesNode(
+  edge: GraphFlowEdge,
+  nodeId: string | null,
+): boolean {
+  if (nodeId === null) return false;
+  return edge.source === nodeId || edge.target === nodeId;
+}
 
 /** What {@link buildGraph} hands to the React Flow viewport. */
 export interface DashboardGraph {

@@ -92,6 +92,8 @@ export function GraphNode({ data }: NodeProps<GraphFlowNode>): ReactElement {
       }}
       data-status={data.status}
       data-kind={data.kind}
+      data-selected={data.selected ? "true" : undefined}
+      data-bug-linked={data.bugLinked ? "true" : undefined}
     >
       <Handle type="target" position={Position.Top} />
       <div className="lp-node-title">

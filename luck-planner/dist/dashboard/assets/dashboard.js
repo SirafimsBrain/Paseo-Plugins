@@ -12307,12 +12307,12 @@ var require_use_sync_external_store_shim_production = __commonJS({
       return x === y && (0 !== x || 1 / x === 1 / y) || x !== x && y !== y;
     }
     var objectIs = "function" === typeof Object.is ? Object.is : is;
-    var useState3 = React.useState;
-    var useEffect3 = React.useEffect;
+    var useState4 = React.useState;
+    var useEffect4 = React.useEffect;
     var useLayoutEffect2 = React.useLayoutEffect;
     var useDebugValue2 = React.useDebugValue;
     function useSyncExternalStore$2(subscribe, getSnapshot) {
-      var value = getSnapshot(), _useState = useState3({ inst: { value, getSnapshot } }), inst = _useState[0].inst, forceUpdate = _useState[1];
+      var value = getSnapshot(), _useState = useState4({ inst: { value, getSnapshot } }), inst = _useState[0].inst, forceUpdate = _useState[1];
       useLayoutEffect2(
         function() {
           inst.value = value;
@@ -12321,7 +12321,7 @@ var require_use_sync_external_store_shim_production = __commonJS({
         },
         [subscribe, value, getSnapshot]
       );
-      useEffect3(
+      useEffect4(
         function() {
           checkIfSnapshotChanged(inst) && forceUpdate({ inst });
           return subscribe(function() {
@@ -12374,12 +12374,12 @@ var require_with_selector_production = __commonJS({
     }
     var objectIs = "function" === typeof Object.is ? Object.is : is;
     var useSyncExternalStore = shim.useSyncExternalStore;
-    var useRef2 = React.useRef;
-    var useEffect3 = React.useEffect;
+    var useRef3 = React.useRef;
+    var useEffect4 = React.useEffect;
     var useMemo3 = React.useMemo;
     var useDebugValue2 = React.useDebugValue;
     exports.useSyncExternalStoreWithSelector = function(subscribe, getSnapshot, getServerSnapshot, selector, isEqual) {
-      var instRef = useRef2(null);
+      var instRef = useRef3(null);
       if (null === instRef.current) {
         var inst = { hasValue: false, value: null };
         instRef.current = inst;
@@ -12419,7 +12419,7 @@ var require_with_selector_production = __commonJS({
         [getSnapshot, getServerSnapshot, selector, isEqual]
       );
       var value = useSyncExternalStore(subscribe, instRef[0], instRef[1]);
-      useEffect3(
+      useEffect4(
         function() {
           inst.hasValue = true;
           inst.value = value;
@@ -12445,11 +12445,11 @@ var require_with_selector = __commonJS({
 });
 
 // dashboard/src/main.tsx
-var import_react7 = __toESM(require_react());
+var import_react9 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // dashboard/src/app.tsx
-var import_react6 = __toESM(require_react());
+var import_react8 = __toESM(require_react());
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -32309,6 +32309,12 @@ var growthSchema = external_exports.object({
   createdBy: actorSchema.nullable(),
   updatedBy: actorSchema.nullable()
 });
+function growthProgress(steps) {
+  const total = steps.length;
+  const completed = steps.filter((s) => s.state === "completed").length;
+  const failed = steps.filter((s) => s.state === "failed").length;
+  return { total, completed, failed, ratio: total === 0 ? 0 : completed / total };
+}
 
 // shared/links.ts
 var beeStatusSchema = external_exports.enum([
@@ -33197,6 +33203,23 @@ var GOAL_FRAME = {
   padding: 28,
   labelHeight: 26
 };
+function isFilterActive(filter2) {
+  if (filter2 === void 0) return false;
+  return filter2.kind !== void 0 && filter2.kind !== "" || filter2.status !== void 0 && filter2.status !== "" || filter2.version !== void 0 && filter2.version.trim() !== "";
+}
+function matchesFilter(node2, filter2) {
+  if (filter2.kind !== void 0 && filter2.kind !== "" && node2.kind !== filter2.kind) {
+    return false;
+  }
+  if (filter2.status !== void 0 && filter2.status !== "" && node2.status !== filter2.status) {
+    return false;
+  }
+  const version2 = filter2.version?.trim().toLowerCase();
+  if (version2 !== void 0 && version2.length > 0) {
+    if (!node2.version.toLowerCase().startsWith(version2)) return false;
+  }
+  return true;
+}
 function indexTree(nodes) {
   const byId = /* @__PURE__ */ new Map();
   for (const node2 of nodes) byId.set(node2.id, node2);
@@ -33285,11 +33308,12 @@ function buildGraph(input2, options = {}) {
   const index2 = indexTree(input2.nodes);
   const sizes = subtreeSizes(index2);
   const { visible, hiddenCounts } = visibleSet(index2, collapsed, sizes);
-  const bugCounts = openBugCounts(input2);
+  const shown = applyFilter(input2.nodes, visible, index2, options.filter);
+  const bugIdsByNode = openBugIdsByNode(input2);
   const VIRTUAL_ROOT = "";
   const makeLayout = (id2) => ({
     id: id2,
-    children: collapsed.has(id2) ? [] : (index2.childrenOf.get(id2) ?? []).filter((child) => visible.has(child.id)).map((child) => makeLayout(child.id))
+    children: collapsed.has(id2) ? [] : (index2.childrenOf.get(id2) ?? []).filter((child) => shown.has(child.id)).map((child) => makeLayout(child.id))
   });
   const layoutInput = {
     id: VIRTUAL_ROOT,
@@ -33309,8 +33333,9 @@ function buildGraph(input2, options = {}) {
   });
   const nodes = [];
   for (const node2 of input2.nodes) {
-    if (!visible.has(node2.id)) continue;
+    if (!shown.has(node2.id)) continue;
     const position = positions.get(node2.id) ?? { x: 0, y: 0 };
+    const openBugIds = bugIdsByNode.get(node2.id) ?? [];
     nodes.push({
       id: node2.id,
       type: NODE_KIND_TO_TYPE[node2.kind],
@@ -33324,7 +33349,8 @@ function buildGraph(input2, options = {}) {
         revision: node2.revision,
         childCount: index2.childrenOf.get(node2.id)?.length ?? 0,
         hiddenDescendantCount: hiddenCounts.get(node2.id) ?? 0,
-        openBugCount: bugCounts.get(node2.id) ?? 0,
+        openBugCount: openBugIds.length,
+        openBugIds,
         collapsed: collapsed.has(node2.id)
       },
       // Positions come from the layout, not from the user (yet).
@@ -33333,8 +33359,8 @@ function buildGraph(input2, options = {}) {
   }
   const edges = [];
   for (const node2 of input2.nodes) {
-    if (!visible.has(node2.id)) continue;
-    if (node2.parentId !== null && visible.has(node2.parentId)) {
+    if (!shown.has(node2.id)) continue;
+    if (node2.parentId !== null && shown.has(node2.parentId)) {
       const parent = index2.byId.get(node2.parentId);
       edges.push({
         id: `t:${node2.id}`,
@@ -33349,7 +33375,7 @@ function buildGraph(input2, options = {}) {
     }
   }
   for (const bee of input2.bees) {
-    if (!visible.has(bee.sourceLeafId) || !visible.has(bee.targetLeafId)) {
+    if (!shown.has(bee.sourceLeafId) || !shown.has(bee.targetLeafId)) {
       continue;
     }
     edges.push({
@@ -33366,8 +33392,23 @@ function buildGraph(input2, options = {}) {
   return {
     nodes,
     edges,
-    goalFrames: buildGoalFrames(input2, visible, positions, index2)
+    goalFrames: buildGoalFrames(input2, shown, positions, index2)
   };
+}
+function applyFilter(nodes, visible, index2, filter2) {
+  if (!isFilterActive(filter2)) return new Set(visible);
+  const keep = /* @__PURE__ */ new Set();
+  for (const node2 of nodes) {
+    if (!visible.has(node2.id)) continue;
+    if (!matchesFilter(node2, filter2)) continue;
+    keep.add(node2.id);
+    let parentId = node2.parentId;
+    while (parentId !== null && visible.has(parentId) && !keep.has(parentId)) {
+      keep.add(parentId);
+      parentId = index2.byId.get(parentId)?.parentId ?? null;
+    }
+  }
+  return keep;
 }
 function buildGoalFrames(input2, visible, positions, index2) {
   const frames = [];
@@ -33422,16 +33463,62 @@ function buildGoalFrames(input2, visible, positions, index2) {
   }
   return frames;
 }
-function openBugCounts(input2) {
+function openBugIdsByNode(input2) {
   const openStatuses = /* @__PURE__ */ new Set(["open", "investigating"]);
   const bugsById = new Map(input2.bugs.map((bug) => [bug.id, bug]));
-  const counts = /* @__PURE__ */ new Map();
+  const ids = /* @__PURE__ */ new Map();
   for (const attachment of input2.bugAttachments) {
     const bug = bugsById.get(attachment.bugId);
     if (!bug || !openStatuses.has(bug.status)) continue;
-    counts.set(attachment.nodeId, (counts.get(attachment.nodeId) ?? 0) + 1);
+    const set4 = ids.get(attachment.nodeId) ?? /* @__PURE__ */ new Set();
+    set4.add(attachment.bugId);
+    ids.set(attachment.nodeId, set4);
   }
-  return counts;
+  const sorted = /* @__PURE__ */ new Map();
+  for (const [nodeId, set4] of ids) {
+    sorted.set(nodeId, [...set4].sort());
+  }
+  return sorted;
+}
+function ancestorsOf(nodes, id2) {
+  const byId = new Map(nodes.map((node2) => [node2.id, node2]));
+  const chain = [];
+  const visited = /* @__PURE__ */ new Set([id2]);
+  let current = byId.get(id2);
+  while (current?.parentId !== null && current?.parentId !== void 0) {
+    const parentId = current.parentId;
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    chain.push(parentId);
+    current = byId.get(parentId);
+  }
+  return chain;
+}
+function graphNodeCenter(node2) {
+  return {
+    x: node2.position.x + LAYOUT.nodeWidth / 2,
+    y: node2.position.y + LAYOUT.nodeHeight / 2
+  };
+}
+function relatedByOpenBug(graph, selectedId) {
+  const related = /* @__PURE__ */ new Set();
+  if (selectedId === null) return related;
+  const selected2 = graph.nodes.find((node2) => node2.id === selectedId);
+  if (selected2 === void 0 || selected2.data.openBugIds.length === 0) {
+    return related;
+  }
+  const shared = new Set(selected2.data.openBugIds);
+  for (const node2 of graph.nodes) {
+    if (node2.id === selectedId) continue;
+    if (node2.data.openBugIds.some((bugId) => shared.has(bugId))) {
+      related.add(node2.id);
+    }
+  }
+  return related;
+}
+function edgeTouchesNode(edge, nodeId) {
+  if (nodeId === null) return false;
+  return edge.source === nodeId || edge.target === nodeId;
 }
 var EMPTY_GRAPH = {
   nodes: [],
@@ -33475,6 +33562,9 @@ function resolveTheme(stored, prefersDark) {
   return prefersDark ? "dark" : "light";
 }
 var THEME_STORAGE_KEY = "luck-planner:theme";
+
+// dashboard/src/components/Canvas.tsx
+var import_react5 = __toESM(require_react());
 
 // node_modules/@xyflow/react/dist/esm/index.js
 var import_jsx_runtime = __toESM(require_jsx_runtime());
@@ -42656,6 +42746,8 @@ function GraphNode({ data }) {
       },
       "data-status": data.status,
       "data-kind": data.kind,
+      "data-selected": data.selected ? "true" : void 0,
+      "data-bug-linked": data.bugLinked ? "true" : void 0,
       children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Handle, { type: "target", position: Position.Top }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "lp-node-title", children: [
@@ -42766,32 +42858,56 @@ var nodeTypes = {
 
 // dashboard/src/components/Canvas.tsx
 var import_jsx_runtime4 = __toESM(require_jsx_runtime());
+function FocusController({ focus }) {
+  const flow = useReactFlow();
+  (0, import_react5.useEffect)(() => {
+    if (focus === null) return;
+    const node2 = flow.getNodes().find((candidate) => candidate.id === focus.nodeId);
+    if (node2 === void 0) return;
+    const center = graphNodeCenter(node2);
+    void flow.setCenter(center.x, center.y, {
+      zoom: Math.max(flow.getZoom(), 0.85),
+      duration: 400
+    });
+  }, [focus, flow]);
+  return null;
+}
 function Canvas(props) {
-  const { graph, loaded, onToggleNode } = props;
+  const { graph, loaded, onToggleNode, selectedId, onSelectNode, focus } = props;
   if (loaded && graph.nodes.length === 0) {
     return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "lp-canvas-empty", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "lp-canvas-empty-title", children: "This project has no tree yet" }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { className: "lp-canvas-empty-text", children: [
-        "Ask a coding agent to grow the skeleton (",
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("code", { children: "luck_tree_upsert_leaf" }),
-        "), or open a workspace that has one \u2014 the diagram appears here after a refresh."
-      ] })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "lp-canvas-empty-title", children: props.emptyTitle ?? "This project has no tree yet" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "lp-canvas-empty-text", children: props.emptyText ?? "Ask a coding agent to grow the skeleton (<code>luck_tree_upsert_leaf</code>), or open a workspace that has one \u2014 the diagram appears here after a refresh." })
     ] }) });
   }
+  const bugLinked = relatedByOpenBug(graph, selectedId);
   const nodes = graph.nodes.map((node2) => ({
     ...node2,
     data: {
       ...node2.data,
-      onToggle: () => onToggleNode(node2.id)
+      onToggle: () => onToggleNode(node2.id),
+      selected: node2.id === selectedId,
+      bugLinked: bugLinked.has(node2.id)
     }
   }));
+  const edges = graph.edges.map((edge) => {
+    if (!edgeTouchesNode(edge, selectedId)) return edge;
+    const emphasized = edge.data?.kind === "bee" ? 3 : 2.5;
+    return {
+      ...edge,
+      className: "lp-edge-emphasis",
+      style: { ...edge.style, strokeWidth: emphasized, opacity: 1 }
+    };
+  });
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
     index,
     {
       nodes: [...nodes, ...graph.goalFrames],
-      edges: graph.edges,
+      edges,
       nodeTypes,
       edgeTypes,
+      onNodeClick: (_event, node2) => onSelectNode(node2.id),
+      onPaneClick: () => onSelectNode(null),
       fitView: true,
       fitViewOptions: { padding: 0.15, maxZoom: 1 },
       minZoom: 0.2,
@@ -42801,6 +42917,7 @@ function Canvas(props) {
       elementsSelectable: false,
       proOptions: { hideAttribution: true },
       children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(FocusController, { focus }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Background, { gap: 22 }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Controls, { showInteractive: false })
       ]
@@ -42810,10 +42927,212 @@ function Canvas(props) {
 
 // dashboard/src/components/DetailsPanel.tsx
 var import_jsx_runtime5 = __toESM(require_jsx_runtime());
-function DetailsPanel() {
+function formatTime(ts) {
+  return new Date(ts).toLocaleString(void 0, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+function Row(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-row", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-row-label", children: props.label }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-row-value", children: props.children })
+  ] });
+}
+function DetailsPanel(props) {
+  const { detail, loading, error: error62, resolveName } = props;
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("aside", { className: "lp-details", "aria-label": "Node details", children: [
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { className: "lp-details-title", children: "Details" }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Select a node on the diagram (stage G4) to see its version, revision, status, influence links, incidents and history here." })
+    error62.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-error", role: "alert", children: error62 }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(NodeDetails, { detail, resolveName })
+  ] });
+}
+function NodeDetails(props) {
+  const { detail, resolveName } = props;
+  const { node: node2, path, children: children2, bees, bugs, blockingBugs, history, growth } = detail;
+  const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
+  const progress = growth === null ? null : growthProgress(growth.steps);
+  const shownHistory = history.slice(-20).reverse();
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-body", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+      "div",
+      {
+        className: "lp-details-node-name",
+        style: { borderLeftColor: KIND_COLORS[node2.kind] },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { "aria-hidden": "true", children: [
+            KIND_GLYPHS[node2.kind],
+            " "
+          ] }),
+          node2.name
+        ]
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-path", title: path.map((n) => n.name).join(" \u203A "), children: path.map((step) => step.name).join(" \u203A ") }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Row, { label: "Kind", children: KIND_LABELS[node2.kind] }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(Row, { label: "Status", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+          "span",
+          {
+            className: "lp-details-dot",
+            style: { backgroundColor: STATUS_COLORS[node2.status] },
+            "aria-hidden": "true"
+          }
+        ),
+        STATUS_LABELS[node2.status]
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Row, { label: "Version", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-mono", children: [
+        "v",
+        node2.version || "\u2014",
+        " \xB7 r",
+        node2.revision
+      ] }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(Row, { label: "Updated", children: [
+        formatTime(node2.updatedAt),
+        node2.updatedBy ? ` \xB7 ${node2.updatedBy}` : ""
+      ] })
+    ] }),
+    progress !== null && progress.total > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "lp-details-subtitle", children: "Growth" }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+        "div",
+        {
+          className: "lp-details-progress",
+          role: "img",
+          "aria-label": `Growth: ${progress.completed} of ${progress.total} steps completed`,
+          children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+            "div",
+            {
+              className: "lp-details-progress-fill",
+              style: { width: `${Math.round(progress.ratio * 100)}%` }
+            }
+          )
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-hint", children: [
+        progress.completed,
+        "/",
+        progress.total,
+        " steps",
+        progress.failed > 0 ? ` \xB7 ${progress.failed} failed` : "",
+        growth !== null ? ` \xB7 ${growth.status}` : ""
+      ] })
+    ] }) : null,
+    bugs.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("h3", { className: "lp-details-subtitle", children: [
+        "Incidents (",
+        bugs.length,
+        ")"
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "lp-details-list", children: bugs.map((bug) => {
+        const isBlocking = blockingIds.has(bug.id);
+        return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+          "li",
+          {
+            className: isBlocking ? "lp-details-bug lp-details-bug-blocking" : "lp-details-bug",
+            style: {
+              borderColor: isBlocking ? BUG_BADGE_COLOR : void 0
+            },
+            title: bug.description,
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+                "span",
+                {
+                  className: "lp-details-bug-sev",
+                  style: {
+                    color: isBlocking ? BUG_BADGE_COLOR : void 0
+                  },
+                  children: bug.severity
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-bug-title", children: bug.title }),
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-hint", children: bug.status })
+            ]
+          },
+          bug.id
+        );
+      }) })
+    ] }) : null,
+    bees.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("h3", { className: "lp-details-subtitle", children: [
+        "Influence links (",
+        bees.length,
+        ")"
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "lp-details-list", children: bees.map((bee) => {
+        const otherId = bee.sourceLeafId === node2.id ? bee.targetLeafId : bee.sourceLeafId;
+        const direction = bee.sourceLeafId === node2.id ? "\u2192" : "\u2190";
+        return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("li", { className: "lp-details-bee", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+            "span",
+            {
+              className: "lp-details-bee-status",
+              style: { color: BEE_STATUS_COLORS[bee.status] },
+              children: [
+                direction,
+                " ",
+                BEE_STATUS_LABELS[bee.status]
+              ]
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-bee-target", children: resolveName(otherId) }),
+          bee.impact ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-hint", children: bee.impact }) : null
+        ] }, bee.id);
+      }) })
+    ] }) : null,
+    children2.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("h3", { className: "lp-details-subtitle", children: [
+        "Children (",
+        children2.length,
+        ")"
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("ul", { className: "lp-details-list", children: [
+        children2.slice(0, 12).map((child) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("li", { className: "lp-details-child", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { "aria-hidden": "true", children: [
+            KIND_GLYPHS[child.kind],
+            " "
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-child-name", children: child.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+            "span",
+            {
+              className: "lp-details-dot",
+              style: { backgroundColor: STATUS_COLORS[child.status] },
+              "aria-hidden": "true"
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-hint", children: STATUS_LABELS[child.status] })
+        ] }, child.id)),
+        children2.length > 12 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("li", { className: "lp-details-hint", children: [
+          "\u2026and ",
+          children2.length - 12,
+          " more"
+        ] }) : null
+      ] })
+    ] }) : null,
+    history.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("h3", { className: "lp-details-subtitle", children: [
+        "History (",
+        history.length,
+        history.length > shownHistory.length ? `, last ${shownHistory.length}` : "",
+        ")"
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "lp-details-list", children: shownHistory.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("li", { className: "lp-details-history-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-mono", children: [
+          "r",
+          entry.revision
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-history-action", children: entry.action }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-hint", children: [
+          formatTime(entry.at),
+          entry.actor ? ` \xB7 ${entry.actor}` : ""
+        ] }),
+        entry.result ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-hint", children: entry.result }) : null
+      ] }, entry.id)) })
+    ] }) : null
   ] });
 }
 
@@ -42864,6 +43183,7 @@ function Legend() {
 }
 
 // dashboard/src/components/Toolbar.tsx
+var import_react7 = __toESM(require_react());
 var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 function Counter(props) {
   return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-counter", title: props.label, children: [
@@ -42873,6 +43193,12 @@ function Counter(props) {
 }
 function Toolbar(props) {
   const stats2 = props.stats;
+  const [draft, setDraft] = (0, import_react7.useState)("");
+  const submit = (event) => {
+    event.preventDefault();
+    const query = draft.trim();
+    if (query.length > 0) props.onSearch(query);
+  };
   return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("header", { className: "lp-toolbar", children: [
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-identity", children: [
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
@@ -42887,20 +43213,75 @@ function Toolbar(props) {
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
     ] }) }),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-controls", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
         "input",
         {
           className: "lp-toolbar-search",
           type: "search",
-          placeholder: "Search (stage G4)",
-          "aria-label": "Search the tree (arrives in stage G4)",
-          disabled: true
+          placeholder: "Search (FTS)",
+          "aria-label": "Search the tree",
+          value: draft,
+          onChange: (event) => setDraft(event.target.value)
+        }
+      ) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "select",
+        {
+          className: "lp-toolbar-filter",
+          "aria-label": "Filter by kind",
+          value: props.filters.kind,
+          onChange: (event) => props.onFiltersChange({
+            ...props.filters,
+            kind: event.target.value
+          }),
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "", children: "All kinds" }),
+            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
+          ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("select", { className: "lp-toolbar-filter", "aria-label": "Filter by kind", disabled: true, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { children: "Kind (G4)" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("select", { className: "lp-toolbar-filter", "aria-label": "Filter by status", disabled: true, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { children: "Status (G4)" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "select",
+        {
+          className: "lp-toolbar-filter",
+          "aria-label": "Filter by status",
+          value: props.filters.status,
+          onChange: (event) => props.onFiltersChange({
+            ...props.filters,
+            status: event.target.value
+          }),
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "", children: "All statuses" }),
+            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
+          ]
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "input",
+        {
+          className: "lp-toolbar-filter",
+          type: "text",
+          size: 8,
+          placeholder: "Version",
+          "aria-label": "Filter by version prefix",
+          title: "Filter by version prefix, e.g. 2.1",
+          value: props.filters.version,
+          onChange: (event) => props.onFiltersChange({
+            ...props.filters,
+            version: event.target.value
+          })
+        }
+      ),
       /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { type: "button", className: "lp-view-button lp-view-button-active", "aria-pressed": "true", children: "2D" }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+          "button",
+          {
+            type: "button",
+            className: "lp-view-button lp-view-button-active",
+            "aria-pressed": "true",
+            children: "2D"
+          }
+        ),
         /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
           "button",
           {
@@ -42941,23 +43322,41 @@ function initialTheme() {
   const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
   return resolveTheme(stored, prefersDark);
 }
+function filterExcludesNode(filters, node2) {
+  return {
+    kind: filters.kind !== "" && filters.kind !== node2.kind ? filters.kind : "",
+    status: filters.status !== "" && filters.status !== node2.status ? filters.status : "",
+    version: filters.version
+  };
+}
 function App() {
-  const params = (0, import_react6.useMemo)(() => parseDashboardParams(window.location.search), []);
-  const client = (0, import_react6.useMemo)(
+  const params = (0, import_react8.useMemo)(() => parseDashboardParams(window.location.search), []);
+  const client = (0, import_react8.useMemo)(
     () => params.token.length > 0 ? new DashboardApi(resolveApiOrigin(window.location.href), params.token, params.projectKey) : null,
     [params.projectKey, params.token]
   );
-  const [stats2, setStats] = (0, import_react6.useState)(null);
-  const [tree, setTree] = (0, import_react6.useState)(null);
-  const [collapsedIds, setCollapsedIds] = (0, import_react6.useState)(
+  const [stats2, setStats] = (0, import_react8.useState)(null);
+  const [tree, setTree] = (0, import_react8.useState)(null);
+  const [collapsedIds, setCollapsedIds] = (0, import_react8.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [statusLine, setStatusLine] = (0, import_react6.useState)("");
-  const [theme] = (0, import_react6.useState)(initialTheme);
-  (0, import_react6.useEffect)(() => {
+  const [statusLine, setStatusLine] = (0, import_react8.useState)("");
+  const [theme] = (0, import_react8.useState)(initialTheme);
+  const [selectedId, setSelectedId] = (0, import_react8.useState)(null);
+  const [detail, setDetail] = (0, import_react8.useState)(null);
+  const [detailLoading, setDetailLoading] = (0, import_react8.useState)(false);
+  const [detailError, setDetailError] = (0, import_react8.useState)("");
+  const [filters, setFilters] = (0, import_react8.useState)({
+    kind: "",
+    status: "",
+    version: ""
+  });
+  const [focus, setFocus] = (0, import_react8.useState)(null);
+  const focusSeq = (0, import_react8.useRef)(0);
+  (0, import_react8.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
-  const load = (0, import_react6.useCallback)(async () => {
+  const load = (0, import_react8.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
       return;
@@ -42981,28 +43380,122 @@ function App() {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
     }
   }, [client, params.projectKey]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react8.useEffect)(() => {
     void load();
   }, [load]);
-  const onToggleNode = (0, import_react6.useCallback)((id2) => {
+  (0, import_react8.useEffect)(() => {
+    if (client === null || selectedId === null) {
+      setDetail(null);
+      setDetailError("");
+      return;
+    }
+    let stale = false;
+    setDetailLoading(true);
+    setDetailError("");
+    void client.node(selectedId).then((response) => {
+      if (!stale) setDetail(response);
+    }).catch((cause) => {
+      if (!stale) {
+        setDetail(null);
+        setDetailError(cause instanceof Error ? cause.message : String(cause));
+      }
+    }).finally(() => {
+      if (!stale) setDetailLoading(false);
+    });
+    return () => {
+      stale = true;
+    };
+  }, [client, selectedId]);
+  const onToggleNode = (0, import_react8.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
-  const graph = (0, import_react6.useMemo)(
-    () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds }),
-    [tree, collapsedIds]
+  const requestFocus = (0, import_react8.useCallback)((nodeId) => {
+    focusSeq.current += 1;
+    setFocus({ nodeId, seq: focusSeq.current });
+  }, []);
+  const revealNode = (0, import_react8.useCallback)((nodeId) => {
+    setCollapsedIds((previous) => {
+      const next = new Set(previous);
+      for (const ancestor of ancestorsOf(tree?.nodes ?? [], nodeId)) {
+        next.delete(ancestor);
+      }
+      return next;
+    });
+    setFilters((previous) => {
+      const node2 = tree?.nodes.find((candidate) => candidate.id === nodeId);
+      if (node2 === void 0) return previous;
+      return filterExcludesNode(previous, node2);
+    });
+  }, [tree]);
+  const onSearch = (0, import_react8.useCallback)(
+    async (query) => {
+      if (client === null) return;
+      try {
+        const result = await client.search({ q: query });
+        if (result.results.length === 0) {
+          setStatusLine(`No matches for \u201C${query}\u201D.`);
+          return;
+        }
+        const hit = result.results[0].node;
+        revealNode(hit.id);
+        setSelectedId(hit.id);
+        requestFocus(hit.id);
+        setStatusLine(
+          result.matches === 1 ? `Found \u201C${hit.name}\u201D.` : `${result.matches} matches \u2014 showing \u201C${hit.name}\u201D.`
+        );
+      } catch (cause) {
+        setStatusLine(cause instanceof Error ? cause.message : String(cause));
+      }
+    },
+    [client, revealNode, requestFocus]
   );
+  const graph = (0, import_react8.useMemo)(
+    () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters }),
+    [tree, collapsedIds, filters]
+  );
+  const resolveName = (0, import_react8.useCallback)(
+    (id2) => {
+      const node2 = tree?.nodes.find((candidate) => candidate.id === id2);
+      return node2 !== void 0 ? node2.name : `\u2026${id2.slice(0, 8)}`;
+    },
+    [tree]
+  );
+  const filtersActive = isFilterActive(filters);
   return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-app", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Toolbar, { projectKey: params.projectKey, stats: stats2, statusLine }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      Toolbar,
+      {
+        projectKey: params.projectKey,
+        stats: stats2,
+        statusLine,
+        filters,
+        onFiltersChange: setFilters,
+        onSearch: (query) => void onSearch(query)
+      }
+    ),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-body", children: [
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         Canvas,
         {
           graph,
           loaded: tree !== null,
-          onToggleNode
+          onToggleNode,
+          selectedId,
+          onSelectNode: setSelectedId,
+          focus,
+          emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
+          emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(DetailsPanel, {})
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        DetailsPanel,
+        {
+          detail,
+          loading: detailLoading,
+          error: detailError,
+          resolveName
+        }
+      )
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Legend, {})
   ] });
@@ -43015,7 +43508,7 @@ if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_react7.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_react9.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(App, {}) })
 );
 /*! Bundled license information:
 

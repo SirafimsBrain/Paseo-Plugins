@@ -17,14 +17,20 @@ import type { TreeResponse } from "../shared/api";
 import type { Node as TreeNode } from "../shared/tree";
 import type { Goal } from "../shared/goals";
 import {
+  ancestorsOf,
   buildGraph,
   DEFAULT_VISIBLE_BUDGET,
   defaultCollapsedIds,
+  edgeTouchesNode,
   EMPTY_GRAPH,
+  graphNodeCenter,
   GOAL_FRAME,
   indexTree,
+  isFilterActive,
   LAYOUT,
+  matchesFilter,
   NODE_KIND_TO_TYPE,
+  relatedByOpenBug,
   toggleCollapsed,
 } from "../dashboard/src/graph";
 import { KIND_COLORS, withAlpha } from "../dashboard/src/colors";
@@ -523,5 +529,218 @@ describe("G2 acceptance: a 1000-node project", () => {
       buildGraph(mktree(nodes), { collapsedIds: collapsed });
     }
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe("G4: filters", () => {
+  it("knows when a filter narrows the graph", () => {
+    expect(isFilterActive(undefined)).toBe(false);
+    expect(isFilterActive({})).toBe(false);
+    expect(isFilterActive({ version: "  " })).toBe(false);
+    expect(isFilterActive({ kind: "leaf" })).toBe(true);
+    expect(isFilterActive({ status: "done" })).toBe(true);
+    expect(isFilterActive({ version: "2" })).toBe(true);
+  });
+
+  it("ANDs the fields; the version is a case-insensitive prefix", () => {
+    const leaf = fixture().nodes.find((n) => n.id === "leaf-a")!;
+    expect(matchesFilter(leaf, {})).toBe(true);
+    expect(matchesFilter(leaf, { kind: "leaf" })).toBe(true);
+    expect(matchesFilter(leaf, { kind: "branch" })).toBe(false);
+    expect(matchesFilter(leaf, { status: "in_progress" })).toBe(true);
+    expect(matchesFilter(leaf, { status: "done" })).toBe(false);
+    expect(matchesFilter(leaf, { version: "2.1" })).toBe(true);
+    expect(matchesFilter(leaf, { version: "2.1.0" })).toBe(true);
+    expect(matchesFilter(leaf, { version: "2" })).toBe(true);
+    expect(matchesFilter(leaf, { version: "1.0" })).toBe(false);
+    expect(matchesFilter(leaf, { kind: "leaf", status: "done" })).toBe(false);
+    expect(matchesFilter(leaf, { kind: "leaf", status: "in_progress", version: "2" })).toBe(
+      true,
+    );
+  });
+
+  it("keeps the ancestors of a match as context", () => {
+    const graph = buildGraph(fixture(), { filter: { kind: "leaf" } });
+    expect(graph.nodes.map((n) => n.id).sort()).toEqual([
+      "branch-1",
+      "leaf-a",
+      "leaf-b",
+      "root-1",
+      "trunk-1",
+    ]);
+    // Edges only connect kept nodes — no dangling references.
+    const ids = new Set(graph.nodes.map((n) => n.id));
+    for (const edge of graph.edges) {
+      expect(ids.has(edge.source)).toBe(true);
+      expect(ids.has(edge.target)).toBe(true);
+    }
+  });
+
+  it("filters by leaf status and by version prefix", () => {
+    const byStatus = buildGraph(fixture(), { filter: { status: "done" } });
+    expect(byStatus.nodes.map((n) => n.id).sort()).toEqual([
+      "branch-1",
+      "leaf-b",
+      "root-1",
+      "trunk-1",
+    ]);
+
+    const byVersion = buildGraph(fixture(), { filter: { version: "2.1" } });
+    expect(byVersion.nodes.map((n) => n.id).sort()).toEqual([
+      "branch-1",
+      "leaf-a",
+      "root-1",
+      "trunk-1",
+    ]);
+    // The bee edge to the filtered-out leaf disappears with it.
+    const withBee = {
+      ...fixture(),
+      bees: [
+        {
+          id: "bee-1",
+          projectKey: P,
+          sourceLeafId: "leaf-a",
+          targetLeafId: "leaf-b",
+          status: "active" as const,
+          revision: 1,
+          impact: "",
+          createdAt: T0,
+          updatedAt: T0,
+          createdBy: null,
+          updatedBy: null,
+        },
+      ],
+    };
+    expect(
+      buildGraph(withBee).edges.some((e) => e.data?.kind === "bee"),
+    ).toBe(true);
+    expect(
+      buildGraph(withBee, { filter: { version: "2.1" } }).edges.some(
+        (e) => e.data?.kind === "bee",
+      ),
+    ).toBe(false);
+  });
+
+  it("yields an empty graph when nothing matches", () => {
+    const graph = buildGraph(fixture(), { filter: { status: "superseded" } });
+    expect(graph.nodes).toEqual([]);
+    expect(graph.edges).toEqual([]);
+    expect(graph.goalFrames).toEqual([]);
+  });
+
+  it("lets collapse win over the filter (no phantom context without matches)", () => {
+    // Every leaf is hidden by the collapse, so the filter has no visible
+    // match to keep context for: the canvas shows its "no matches" state
+    // instead of resurrecting the collapsed subtree.
+    const graph = buildGraph(fixture(), {
+      filter: { kind: "leaf" },
+      collapsedIds: new Set(["branch-1"]),
+    });
+    expect(graph.nodes).toEqual([]);
+    expect(graph.edges).toEqual([]);
+  });
+});
+
+describe("G4: selection and focus helpers", () => {
+  it("walks the ancestor chain nearest-first and survives cycles", () => {
+    expect(ancestorsOf(fixture().nodes, "leaf-a")).toEqual([
+      "branch-1",
+      "trunk-1",
+      "root-1",
+    ]);
+    expect(ancestorsOf(fixture().nodes, "root-1")).toEqual([]);
+    expect(ancestorsOf(fixture().nodes, "nope")).toEqual([]);
+
+    const cycle: TreeNode[] = [
+      mknode("a", "b", "leaf", "a"),
+      mknode("b", "a", "leaf", "b"),
+    ];
+    expect(ancestorsOf(cycle, "a")).toEqual(["b"]);
+  });
+
+  it("computes the canvas centre of a positioned node", () => {
+    const center = graphNodeCenter({ position: { x: 100, y: 50 } });
+    expect(center).toEqual({
+      x: 100 + LAYOUT.nodeWidth / 2,
+      y: 50 + LAYOUT.nodeHeight / 2,
+    });
+  });
+
+  it("relates the nodes sharing an open incident with the selection", () => {
+    const withBugs = {
+      ...fixture(),
+      bugs: [
+        {
+          id: "bug-1",
+          projectKey: P,
+          title: "queue stalls",
+          description: "",
+          severity: "high" as const,
+          status: "open" as const,
+          revision: 1,
+          createdAt: T0,
+          updatedAt: T0,
+          createdBy: "user",
+          updatedBy: "user",
+        },
+        {
+          id: "bug-2",
+          projectKey: P,
+          title: "old flake",
+          description: "",
+          severity: "low" as const,
+          status: "resolved" as const,
+          revision: 1,
+          createdAt: T0,
+          updatedAt: T0,
+          createdBy: "user",
+          updatedBy: "user",
+        },
+      ],
+      bugAttachments: [
+        { bugId: "bug-1", nodeId: "leaf-a" },
+        { bugId: "bug-1", nodeId: "leaf-b" },
+        { bugId: "bug-2", nodeId: "leaf-a" },
+      ],
+    };
+    const graph = buildGraph(withBugs);
+
+    // Resolved incidents do not relate anything (same open definition the
+    // badge count uses).
+    expect([...relatedByOpenBug(graph, "leaf-a")]).toEqual(["leaf-b"]);
+    expect([...relatedByOpenBug(graph, "leaf-b")]).toEqual(["leaf-a"]);
+    expect([...relatedByOpenBug(graph, "branch-1")]).toEqual([]);
+    expect([...relatedByOpenBug(graph, null)]).toEqual([]);
+
+    // The open ids ride in the node data for the badge and the selection.
+    const leafA = graph.nodes.find((n) => n.id === "leaf-a")!;
+    expect(leafA.data.openBugIds).toEqual(["bug-1"]);
+    expect(leafA.data.openBugCount).toBe(1);
+  });
+
+  it("detects edges attached to the selection, both layers", () => {
+    const bee = {
+      id: "bee-1",
+      projectKey: P,
+      sourceLeafId: "leaf-a",
+      targetLeafId: "leaf-b",
+      status: "active" as const,
+      revision: 1,
+      impact: "",
+      createdAt: T0,
+      updatedAt: T0,
+      createdBy: null,
+      updatedBy: null,
+    };
+    const graph = buildGraph({ ...fixture(), bees: [bee] });
+    const treeEdge = graph.edges.find((e) => e.id === "t:leaf-a")!;
+    const beeEdge = graph.edges.find((e) => e.data?.kind === "bee")!;
+
+    expect(edgeTouchesNode(treeEdge, "leaf-a")).toBe(true);
+    expect(edgeTouchesNode(treeEdge, "branch-1")).toBe(true);
+    expect(edgeTouchesNode(treeEdge, "leaf-b")).toBe(false);
+    expect(edgeTouchesNode(beeEdge, "leaf-a")).toBe(true);
+    expect(edgeTouchesNode(beeEdge, "leaf-b")).toBe(true);
+    expect(edgeTouchesNode(beeEdge, null)).toBe(false);
   });
 });

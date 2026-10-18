@@ -1,11 +1,12 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.21.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.22.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
-> **G1** (dashboard web-app scaffold), **G2** (data adapter + layout) and **G3**
-> (custom nodes and edges) are done and all tests are green; the next stage is
-> **G4** (interaction: click → details, selection highlights, search, filters).
-> Stages A1–G3 are complete; blocks G–J are otherwise untouched. Nothing in this
+> **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
+> (custom nodes and edges) and **G4** (interaction: click → details, selection
+> highlights, search with camera focus, filters) are done and all tests are
+> green; the next stage is **G5** (growth layer on the diagram).
+> Stages A1–G4 are complete; blocks G–J are otherwise untouched. Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -983,23 +984,96 @@ with a materialized side branch plus a proposed one): status colour *and*
 text on every leaf, badges, frames, bee labels — console clean.
 `typecheck` (both configs) and the full suite green: 24 files, 353 tests.
 
+### Interaction (stage G4 — `graph.ts` filters + selection, `Canvas.tsx`, `DetailsPanel.tsx`, `Toolbar.tsx`)
+
+Stage G4 turns the read-only diagram into the tool the acceptance scenario
+names: *find a leaf by search and see its blockers and everything it is
+connected to, without a scroll hunt.*
+
+**Filters** (`dashboard/src/graph.ts`). The toolbar's kind/status selects
+and the version-prefix input narrow the graph through a new `filter` option
+of `buildGraph` — still a pure module, so the policy is unit-tested. A node
+survives when it matches *or* has a matching descendant: the path to the
+root stays as context, so a filtered leaf still reads as a tree instead of
+floating alone. Fields AND together; the version comparison is a
+case-insensitive prefix. Collapse wins over the filter — a hidden subtree is
+never resurrected, and a filter whose every match is collapsed yields the
+empty canvas with an honest "no nodes match the filters" state. Bee edges
+follow their endpoints out of the graph, so no edge ever dangles.
+
+**Selection** (`Canvas.tsx`). Clicking a node selects it, clicking the pane
+clears it; the adapter stays out of it — the Canvas decorates the nodes with
+`selected`/`bugLinked` (the same mechanism as the G2 `onToggle`). `bugLinked`
+comes from the pure `relatedByOpenBug(graph, id)`: every other node sharing
+an *open* incident with the selection — the blocker trail in both
+directions (the same open/investigating definition the badge count uses;
+`GraphNodeData.openBugIds` now carries the ids, sorted, next to the count).
+Every edge touching the selection — tree and bee alike, via
+`edgeTouchesNode` — is emphasized (`lp-edge-emphasis`, heavier stroke plus a
+soft glow; the bee keeps its status colour).
+
+**Camera focus** (`FocusController` inside the React Flow provider). On a
+`FocusRequest` (search picks a hit, `seq` makes repeats re-trigger) the
+controller centres the viewport on the node's layout box
+(`graphNodeCenter`) with `setCenter`, zoom floored at 0.85 and a 400 ms
+easing — the found node lands in the middle of the canvas instead of
+somewhere off-screen. The reveal logic lives in the app: searching a hit
+first removes its ancestors from the collapse set and clears whichever
+filter excludes it (`ancestorsOf`, nearest ancestor first), so a search can
+never "find" something invisible. (Empirically checked in a real browser:
+centring is exact; a mid-animation window resize can leave the React Flow
+store with a stale container width — the next interaction corrects it.)
+
+**Details panel** (`DetailsPanel.tsx`, real content since G1's placeholder).
+Clicking a selection fetches `GET /api/node/:id` (the `nodeDetail` RPC
+shape) with a stale-guard so a late response can never overwrite a newer
+selection. The panel renders: kind glyph + name, breadcrumb path, kind and
+status (dot **plus text**), `v{version} · r{revision}`, last update, the
+growth progress bar (`growthProgress` from `shared/growth.ts`), the
+incidents with the blocking ones ringed in red and the severity/status in
+text, the influence bees with the counterpart's *name* (resolved from the
+loaded tree, `→`/`←` showing the direction) and the impact text, the direct
+children, and the last 20 history rows (revision, action, timestamp, actor,
+result). Loading, error and "nothing selected" are each their own state.
+
+**Toolbar** (`Toolbar.tsx`). The G1 placeholders are now live: the search
+box submits an FTS query against `/api/search` on Enter (it owns its own
+draft — the query is not diagram state, only the picked result is), the two
+selects and the version input drive the adapter filter, and the status line
+reports `Found “…”` / `N matches — showing “…”` / `No matches for “…”`.
+
+**Tests** — `tests/dashboard-graph.test.ts` extended (+10: filter
+activity/AND/prefix semantics, ancestor context, the empty result, collapse
+beating the filter, the cycle-safe ancestor chain, the node centre,
+`relatedByOpenBug` honouring the open-only definition, `edgeTouchesNode` on
+both edge layers). Acceptance walked in a real browser against the seeded
+fixture: search "charges" → the leaf is selected, centred, its blocker
+(`webhook signature check`, shared open incident) ringed red, both touching
+edges emphasized, and the panel shows the incident, the bee to "prorate
+refunds" and the history; the kind/status/version filters narrow the graph
+with context and empty out with the honest message; pane click clears the
+selection; console clean. `typecheck` (both configs) and the full suite
+green: 24 files, 363 tests.
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block G is under way — G3 is done.** Stages A1–F2 are complete and released
+**Status: block G is under way — G4 is done.** Stages A1–F2 are complete and released
 as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**, **C (domain
 semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP transport)** are
 closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
 `/api/tree` → React Flow data adapter with the d3-hierarchy layout and the
-collapse/expand policy, and G3 (0.21.0) painted the custom nodes and edges
+collapse/expand policy, G3 (0.21.0) painted the custom nodes and edges
 (status bars, incident badges, goal frames, bee-edge renderer) — plus the
-`window.fetch` receiver fix that the first real tab exposed. Next: G4
-(interaction). A candidate **D4** (config-file MCP registrations for
-OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still precede the
-remaining UI work.
+`window.fetch` receiver fix that the first real tab exposed — and G4
+(0.22.0) wired the interaction: node selection with the blocker trail,
+`/api/node/:id` details panel, FTS search with camera focus, and the
+kind/status/version filters. Next: G5 (growth layer). A candidate **D4**
+(config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/Codex, the
+memory-flash 0.8.1 fix) may still precede the remaining UI work.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
@@ -1009,7 +1083,7 @@ remaining UI work.
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
-| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction, growth layer |
+| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |

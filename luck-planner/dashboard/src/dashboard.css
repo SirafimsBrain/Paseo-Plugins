@@ -407,6 +407,191 @@ body {
   white-space: nowrap;
 }
 
+/* ── Interaction (stage G4) ────────────────────────────────────────── */
+
+/* The selection: an accent ring plus a soft halo, and a dashed red ring on
+   every other leaf the same open incident touches (the “blockers” trail). */
+.lp-node[data-selected="true"] {
+  outline: 2px solid var(--lp-accent, #5b9dff);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 6px var(--lp-selection, rgba(91, 157, 255, 0.16)),
+    0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.lp-node[data-bug-linked="true"] {
+  outline: 1.5px dashed #e05d5d;
+  outline-offset: 2px;
+}
+
+/* Emphasized edges (the selection's tree + bee links) get a soft glow so
+   the connection reads across a dense diagram. */
+.react-flow__edge.lp-edge-emphasis .react-flow__edge-path {
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.35));
+}
+
+.lp-toolbar-search-form {
+  display: inline-flex;
+}
+
+/* ── Details panel content (stage G4) ──────────────────────────────── */
+
+.lp-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lp-details-node-name {
+  border-left: 3px solid;
+  padding-left: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.lp-details-path {
+  margin: 0;
+  font-size: 11px;
+  color: var(--lp-text-muted, #8b93a3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-details-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-details-subtitle {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lp-text-muted, #8b93a3);
+}
+
+.lp-details-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.lp-details-row-label {
+  width: 7ch;
+  flex: none;
+  color: var(--lp-text-muted, #8b93a3);
+}
+
+.lp-details-row-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lp-details-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.lp-details-mono {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.lp-details-hint {
+  color: var(--lp-text-muted, #8b93a3);
+  font-size: 11px;
+}
+
+.lp-details-error {
+  margin: 0;
+  color: #e05d5d;
+  font-size: 12px;
+}
+
+.lp-details-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--lp-border, #262b36);
+  overflow: hidden;
+}
+
+.lp-details-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--lp-accent, #5b9dff);
+}
+
+.lp-details-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-details-bug {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.lp-details-bug-sev {
+  flex: none;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--lp-text-muted, #8b93a3);
+}
+
+.lp-details-bug-title {
+  overflow-wrap: anywhere;
+}
+
+.lp-details-bee,
+.lp-details-child,
+.lp-details-history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.lp-details-bee-status {
+  flex: none;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.lp-details-bee-target {
+  font-weight: 600;
+}
+
+.lp-details-child-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-details-history-action {
+  font-weight: 600;
+}
+
 /* React Flow viewport fills the canvas region. */
 .lp-canvas .react-flow {
   width: 100%;
