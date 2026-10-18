@@ -16,6 +16,8 @@ import { describe, expect, it } from "vitest";
 import type { TreeResponse } from "../shared/api";
 import type { Node as TreeNode } from "../shared/tree";
 import type { Goal } from "../shared/goals";
+import { summarizeGrowth } from "../shared/growth";
+import type { Growth, GrowthStep, GrowthStepState } from "../shared/growth";
 import {
   ancestorsOf,
   buildGraph,
@@ -23,6 +25,8 @@ import {
   defaultCollapsedIds,
   edgeTouchesNode,
   EMPTY_GRAPH,
+  GRAPH_LAYER_LABELS,
+  GRAPH_LAYERS,
   graphNodeCenter,
   GOAL_FRAME,
   indexTree,
@@ -98,6 +102,40 @@ function mktree(nodes: TreeNode[], rest: Partial<TreeResponse> = {}): TreeRespon
     goals: [],
     growth: [],
     ...rest,
+  };
+}
+
+/** Growth steps from a compact state list: `["completed", "pending", …]`. */
+function mksteps(states: GrowthStepState[]): GrowthStep[] {
+  return states.map((state, index) => ({
+    id: `step-${index + 1}`,
+    title: `step ${index + 1}`,
+    state,
+    facts: [],
+    reason: "",
+  }));
+}
+
+function mkgrowth(
+  id: string,
+  subjectType: Growth["subjectType"],
+  subjectId: string,
+  states: GrowthStepState[],
+  extra: Partial<Growth> = {},
+): Growth {
+  return {
+    id,
+    projectKey: P,
+    subjectType,
+    subjectId,
+    steps: mksteps(states),
+    status: "active",
+    revision: 1,
+    createdAt: T0,
+    updatedAt: T0,
+    createdBy: "agent-1",
+    updatedBy: "agent-1",
+    ...extra,
   };
 }
 
@@ -742,5 +780,362 @@ describe("G4: selection and focus helpers", () => {
     expect(edgeTouchesNode(beeEdge, "leaf-a")).toBe(true);
     expect(edgeTouchesNode(beeEdge, "leaf-b")).toBe(true);
     expect(edgeTouchesNode(beeEdge, null)).toBe(false);
+  });
+});
+
+describe("G5: growth layer", () => {
+  // leaf-a: 2/2 steps done · leaf-b: 0/2, stalled · branch: 2/4 = 50 %.
+  const growthA = mkgrowth("growth-a", "node", "leaf-a", [
+    "completed",
+    "completed",
+  ]);
+  const growthB = mkgrowth("growth-b", "node", "leaf-b", ["pending", "pending"], {
+    status: "stalled",
+  });
+  const withGrowth = (overrides: Partial<TreeResponse> = {}): TreeResponse =>
+    mktree(fixture().nodes, { growth: [growthA, growthB], ...overrides });
+
+  const growthOf = (
+    graph: ReturnType<typeof buildGraph>,
+    id: string,
+  ): NonNullable<ReturnType<typeof buildGraph>["nodes"][number]["data"]["growth"]> =>
+    graph.nodes.find((node) => node.id === id)!.data.growth!;
+
+  it("rolls a leaf's record up into its ancestors, never into its siblings", () => {
+    const graph = buildGraph(withGrowth());
+
+    expect(growthOf(graph, "leaf-a")).toMatchObject({
+      total: 2,
+      completed: 2,
+      failed: 0,
+      ratio: 1,
+      records: 1,
+      hasOwn: true,
+      ownStatus: "active",
+    });
+    expect(growthOf(graph, "leaf-b")).toMatchObject({
+      total: 2,
+      completed: 0,
+      ratio: 0,
+      records: 1,
+      hasOwn: true,
+      ownStatus: "stalled",
+    });
+
+    const branch = growthOf(graph, "branch-1");
+    expect(branch).toMatchObject({
+      total: 4,
+      completed: 2,
+      failed: 0,
+      ratio: 0.5,
+      records: 2,
+      hasOwn: false,
+      ownStatus: null,
+    });
+    // Ancestors above the branch see exactly the same subtree.
+    expect(growthOf(graph, "trunk-1")).toEqual(branch);
+    expect(growthOf(graph, "root-1")).toEqual(branch);
+    // The roll-up is the shared aggregate, not a second implementation.
+    expect(branch).toMatchObject(summarizeGrowth([growthA, growthB]));
+  });
+
+  it("keeps 'no data' apart from '0 % done'", () => {
+    const onlyA = buildGraph(withGrowth({ growth: [growthA] }));
+    expect(growthOf(onlyA, "leaf-a").ratio).toBe(1);
+    expect(onlyA.nodes.find((n) => n.id === "leaf-b")!.data.growth).toBeNull();
+    // The branch still has data (from leaf-a) — and only from there.
+    expect(growthOf(onlyA, "branch-1")).toMatchObject({
+      total: 2,
+      completed: 2,
+      records: 1,
+      hasOwn: false,
+    });
+
+    // A payload without growth records leaves every node without a roll-up.
+    for (const node of buildGraph(fixture()).nodes) {
+      expect(node.data.growth).toBeNull();
+    }
+
+    // 0 % is data: the record exists with nothing completed.
+    const zero = buildGraph(
+      mktree(fixture().nodes, {
+        growth: [mkgrowth("growth-zero", "node", "leaf-a", ["pending"])],
+      }),
+    );
+    expect(growthOf(zero, "leaf-a")).toMatchObject({
+      total: 1,
+      completed: 0,
+      ratio: 0,
+      records: 1,
+      hasOwn: true,
+    });
+  });
+
+  it("counts only completed steps as progress; skipped stays in the denominator", () => {
+    const mixed = mkgrowth("growth-mixed", "node", "leaf-a", [
+      "completed",
+      "skipped",
+      "failed",
+      "pending",
+    ]);
+    const growth = growthOf(buildGraph(withGrowth({ growth: [mixed] })), "leaf-a");
+    expect(growth).toMatchObject({
+      total: 4,
+      completed: 1,
+      failed: 1,
+      ratio: 0.25,
+    });
+  });
+
+  it("marks a node with its own record apart from a descendant-only roll-up", () => {
+    const own = mkgrowth("growth-own", "node", "branch-1", ["completed"], {
+      status: "stalled",
+    });
+    const branch = growthOf(
+      buildGraph(withGrowth({ growth: [growthA, own] })),
+      "branch-1",
+    );
+    expect(branch).toMatchObject({
+      total: 3,
+      completed: 3,
+      ratio: 1,
+      records: 2,
+      hasOwn: true,
+      ownStatus: "stalled",
+    });
+  });
+
+  it("aggregates two records of one subject, own status = the first by id", () => {
+    const later = mkgrowth("growth-z", "node", "leaf-a", ["pending"], {
+      status: "stalled",
+    });
+    const earlier = mkgrowth("growth-a", "node", "leaf-a", ["completed"], {
+      status: "active",
+    });
+    // Payload order must not change the result.
+    for (const order of [
+      [later, earlier],
+      [earlier, later],
+    ]) {
+      const leaf = growthOf(
+        buildGraph(withGrowth({ growth: order })),
+        "leaf-a",
+      );
+      expect(leaf).toMatchObject({
+        total: 2,
+        completed: 1,
+        ratio: 0.5,
+        records: 2,
+        hasOwn: true,
+        ownStatus: "active",
+      });
+    }
+  });
+
+  it("ignores records of the other subject type or of an unknown subject", () => {
+    const goalRecordOnLeaf = mkgrowth("growth-goal", "goal", "leaf-a", [
+      "completed",
+    ]);
+    const ghost = mkgrowth("growth-ghost", "node", "ghost", ["completed"]);
+    const graph = buildGraph(
+      withGrowth({ growth: [goalRecordOnLeaf, ghost] }),
+    );
+    // The goal-subject record names a node that no goal materialized, so it
+    // tints nothing; the ghost node is not in the payload at all.
+    for (const node of graph.nodes) {
+      expect(node.data.growth).toBeNull();
+    }
+  });
+
+  it("keeps the layer out of the layout: positions, types and edges are identical", () => {
+    const payload = withGrowth({
+      goals: [mkgoal("goal-1", "in_progress", "branch-1")],
+    });
+    const status = buildGraph(payload, { layer: "status" });
+    const growth = buildGraph(payload, { layer: "growth" });
+
+    const skeleton = (graph: ReturnType<typeof buildGraph>) =>
+      graph.nodes.map((node) => ({
+        id: node.id,
+        type: node.type,
+        position: node.position,
+        draggable: node.draggable,
+      }));
+    expect(skeleton(growth)).toEqual(skeleton(status));
+    expect(growth.edges).toEqual(status.edges);
+    expect(
+      growth.goalFrames.map((frame) => ({
+        id: frame.id,
+        position: frame.position,
+        width: frame.data.width,
+        height: frame.data.height,
+        nodeCount: frame.data.nodeCount,
+      })),
+    ).toEqual(
+      status.goalFrames.map((frame) => ({
+        id: frame.id,
+        position: frame.position,
+        width: frame.data.width,
+        height: frame.data.height,
+        nodeCount: frame.data.nodeCount,
+      })),
+    );
+    // The growth data itself is identical in both layers.
+    expect(growth.nodes.map((node) => node.data.growth)).toEqual(
+      status.nodes.map((node) => node.data.growth),
+    );
+  });
+
+  it("fills heat only in the growth layer and only where data exists", () => {
+    const payload = withGrowth({
+      growth: [mkgrowth("growth-zero", "node", "leaf-a", ["pending"])],
+    });
+
+    for (const node of buildGraph(payload).nodes) {
+      expect(node.data.heat).toBeNull();
+    }
+
+    const heat = buildGraph(payload, { layer: "growth" });
+    const byId = new Map(heat.nodes.map((node) => [node.id, node]));
+    // 0 % is still data — it must not read as "no record".
+    expect(byId.get("leaf-a")!.data.heat).toBe(0);
+    expect(byId.get("root-1")!.data.heat).toBe(0);
+    // A node without any record stays neutral.
+    expect(byId.get("leaf-b")!.data.heat).toBeNull();
+  });
+
+  it("rolls a goal's record into the node it materialized, and the frame shows that roll-up", () => {
+    const goalRecord = mkgrowth("growth-goal", "goal", "goal-1", ["completed"], {
+      status: "active",
+    });
+    const payload = withGrowth({
+      goals: [mkgoal("goal-1", "in_progress", "branch-1")],
+      growth: [growthA, growthB, goalRecord],
+    });
+
+    // The goal's plan steps join the roll-up at the subtree root it grew
+    // (`branch-1` here), together with the node records below it.
+    const branch = growthOf(buildGraph(payload, { layer: "growth" }), "branch-1");
+    expect(branch).toMatchObject({
+      total: 5,
+      completed: 3,
+      failed: 0,
+      ratio: 0.6,
+      records: 3,
+      // The plan steps are not the node's *own* record.
+      hasOwn: false,
+      ownStatus: null,
+    });
+    expect(branch).toMatchObject(summarizeGrowth([growthA, growthB, goalRecord]));
+
+    // The frame never reports a different total than the tree it encloses.
+    const frame = buildGraph(payload, { layer: "growth" }).goalFrames[0];
+    expect(frame.data.growth).toEqual(branch);
+    expect(frame.data.heat).toBeCloseTo(0.6, 5);
+
+    // The status layer keeps the same numbers and no heat.
+    const statusFrame = buildGraph(payload).goalFrames[0];
+    expect(statusFrame.data.growth).toEqual(frame.data.growth);
+    expect(statusFrame.data.heat).toBeNull();
+  });
+
+  it("counts a goal's steps exactly once, at the node it materialized", () => {
+    const goalRecord = mkgrowth("growth-goal", "goal", "goal-1", ["completed"]);
+    const nodeOwn = mkgrowth("growth-own", "node", "branch-1", ["completed"]);
+    const payload = withGrowth({
+      goals: [mkgoal("goal-1", "in_progress", "branch-1")],
+      growth: [nodeOwn, goalRecord],
+    });
+    const graph = buildGraph(payload);
+
+    const branch = growthOf(graph, "branch-1");
+    expect(branch).toMatchObject({
+      total: 2,
+      completed: 2,
+      ratio: 1,
+      records: 2,
+      hasOwn: true,
+      ownStatus: "active",
+    });
+    // One pass up the tree, no doubling on the way.
+    expect(growthOf(graph, "root-1")).toMatchObject({
+      total: 2,
+      completed: 2,
+      records: 2,
+      hasOwn: false,
+    });
+    expect(graph.goalFrames[0].data.growth).toEqual(branch);
+    // A sibling leaf outside the materialized node stays without data.
+    expect(graph.nodes.find((node) => node.id === "leaf-a")!.data.growth).toBeNull();
+  });
+
+  it("gives a frame the goal record alone, and no growth at all without records", () => {
+    const goalRecord = mkgrowth("growth-goal", "goal", "goal-1", [
+      "completed",
+      "pending",
+    ]);
+    const goalOnly = buildGraph(
+      mktree(fixture().nodes, {
+        goals: [mkgoal("goal-1", "in_progress", "branch-1")],
+        growth: [goalRecord],
+      }),
+      { layer: "growth" },
+    ).goalFrames[0];
+    expect(goalOnly.data.growth).toMatchObject({
+      total: 2,
+      completed: 1,
+      ratio: 0.5,
+      records: 1,
+      hasOwn: false,
+      ownStatus: null,
+    });
+    expect(goalOnly.data.heat).toBe(0.5);
+
+    const none = buildGraph(
+      mktree(fixture().nodes, {
+        goals: [mkgoal("goal-1", "approved", "branch-1")],
+      }),
+      { layer: "growth" },
+    ).goalFrames[0];
+    expect(none.data.growth).toBeNull();
+    expect(none.data.heat).toBeNull();
+  });
+
+  it("ignores the record of a goal that never materialized (ADR-7)", () => {
+    const payload = mktree(fixture().nodes, {
+      goals: [mkgoal("goal-draft", "proposed", null)],
+      growth: [mkgrowth("growth-draft", "goal", "goal-draft", ["completed"])],
+    });
+    expect(buildGraph(payload).goalFrames).toEqual([]);
+    for (const node of buildGraph(payload).nodes) {
+      expect(node.data.growth).toBeNull();
+    }
+  });
+
+  it("reports the progress a collapsed branch hides", () => {
+    const graph = buildGraph(withGrowth(), {
+      collapsedIds: new Set(["branch-1"]),
+      layer: "growth",
+    });
+    expect(graph.nodes.map((node) => node.id).sort()).toEqual([
+      "branch-1",
+      "root-1",
+      "trunk-1",
+    ]);
+    const branch = graph.nodes.find((node) => node.id === "branch-1")!;
+    expect(branch.data.growth).toMatchObject({
+      total: 4,
+      completed: 2,
+      ratio: 0.5,
+      records: 2,
+    });
+    expect(branch.data.heat).toBe(0.5);
+  });
+
+  it("names every layer of the switch", () => {
+    expect(GRAPH_LAYERS).toEqual(["status", "growth"]);
+    for (const layer of GRAPH_LAYERS) {
+      expect(GRAPH_LAYER_LABELS[layer], `GRAPH_LAYER_LABELS.${layer}`).toBeTruthy();
+    }
   });
 });

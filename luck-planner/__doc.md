@@ -1,12 +1,13 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.22.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.23.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
-> (custom nodes and edges) and **G4** (interaction: click → details, selection
-> highlights, search with camera focus, filters) are done and all tests are
-> green; the next stage is **G5** (growth layer on the diagram).
-> Stages A1–G4 are complete; blocks G–J are otherwise untouched. Nothing in this
+> (custom nodes and edges), **G4** (interaction: click → details, selection
+> highlights, search with camera focus, filters) and **G5** (growth layer: per-node
+> growth roll-up, heat map, goal-frame progress) are done and all tests are green;
+> the next stage is **H1** (SSE live updates).
+> Stages A1–G5 are complete; blocks H–J are otherwise untouched. Nothing in this
 > document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
@@ -956,7 +957,7 @@ text) stays hoverable.
 
 **Legend** renders the bee-status group from the same palette and explains
 the two badges (`🐞` open incidents on the node, `🎯` goal subtree — the
-progress layer is G5).
+progress layer arrived in G5).
 
 **Bugfix found during the G3 visual acceptance** — `DashboardApi` invoked
 its `fetch` as a method of itself (`this.fetchImpl(url)`). Node's fetch
@@ -1055,25 +1056,127 @@ with context and empty out with the honest message; pane click clears the
 selection; console clean. `typecheck` (both configs) and the full suite
 green: 24 files, 363 tests.
 
+### Growth layer (stage G5 — `graph.ts` roll-ups, `colors.ts` heat ramp, `graph-nodes.tsx`, `Toolbar.tsx`, `app.tsx`)
+
+Stage G5 makes the plan/fact progress visible on the diagram, without touching
+the layout: **the layer is a display option and nothing else**. The acceptance
+rule of the stage — "switching the layer does not break the layout" — is a
+property of the code, not of the eye: the very same `buildGraph` call produces
+identical positions, node types, edges and frame boxes in both layers
+(pinned by a test that compares the two skeletons field by field).
+
+**Roll-up semantics** (`shared/growth.ts` + `dashboard/src/graph.ts`). The
+dashboard never walks the tree itself; it folds the `/api/tree` payload the
+server already sends. `summarizeGrowth(records)` in `shared/growth.ts` is the
+single arithmetic: it delegates each record to the C4 `growthProgress()` and
+only sums, so the dashboard, the native panel and any future RPC compute the
+same "share of completed steps" (`skipped` steps leave the denominator, only
+`completed` counts). `nodeGrowthRollups()` then does one iterative post-order
+pass over the tree (children before parents — the same traversal `subtreeSizes`
+uses) and gives every node the merged counters of:
+
+- its own `node`-subject growth record (this is what `hasOwn`/`ownStatus`
+  report — the status text next to the bar),
+- the `goal`-subject records of every goal **materialized at** that node
+  (`goal.materializedNodeId`): a goal's plan steps are part of the tree from
+  the moment the gate is crossed (ADR-7), so they join the roll-up exactly
+  where they were grown — this is what makes the heat map cover plan progress
+  and fact progress with one number, and why the goal frame's bar and the node
+  bar can never disagree (the frame simply renders the roll-up of its
+  materialized subtree root),
+- the roll-ups of its children.
+
+A node with no record anywhere below it is *absent* from the map: the renderer
+then draws no bar and no heat, which is how **"no data" stays distinct from
+"0 % done"** (`growth: null` vs a `0/N` roll-up). Growth records whose subject
+is not in the payload (an archived node, a goal that never materialized) are
+ignored; records of the wrong subject type can never tint a node. Roll-ups are
+computed over the **full** tree, so a collapsed branch still reports the
+progress of what it hides — collapse and filter change what is *shown*, never
+what is *counted*.
+
+**Heat ramp** (`dashboard/src/colors.ts`). `HEAT_RAMP` has three stops —
+muted grey `#5c6470` at 0 %, the in-progress amber `#e0a84f` at 50 %, the done
+green `#4fa860` at 100 % — i.e. the palette's own status vocabulary instead of
+an arbitrary gradient, and `heatColor(ratio)` interpolates them in RGB with a
+clamped, total domain (out-of-range or non-finite input still yields a valid
+hex). The toolbar's second segmented control switches `status` ⇄ `growth`;
+in the `growth` layer the adapter fills each node's `heat` with its ratio and
+the node body is tinted `withAlpha(heatColor(ratio), 0.22)` while the **kind
+border stays untouched** — the shape signal is never lost to the colour, and
+the heat value is always accompanied by the `N/M steps` text (the same
+accessibility rule the rest of the diagram follows; the tint was verified on
+both the dark and the light theme). `GROWTH_STATUS_COLORS/LABELS` join the
+palette guard (`paletteIsComplete()`), so a growth status added to
+`shared/growth.ts` cannot silently render as a blank caption.
+
+**Rendering** (`graph-nodes.tsx`). Any node with a roll-up gets a bar under
+its status row: fill = ratio, colour = the heat ramp, text = `N/M steps` plus
+either its own record's status (`· Active`, coloured) or `· subtree` (the
+number is rolled up from below). Goal frames render the same bar in their
+label strip (the frame box is unchanged — `GOAL_FRAME.labelHeight` still
+reserves the strip), with `aria-label`/`title` spelling the percentage out.
+The legend gained the heat ramp with its `growth 0 % → 100 %` wording, and the
+toolbar carries the layer switch next to the 2D/3D placeholder.
+
+**Honest empty state** (`app.tsx`). Switching to the heat layer in a project
+that has no growth records at all writes a status line saying so
+("`No growth records in this project yet — the heat layer stays neutral
+(agents write them with luck_tree_update_growth)`") instead of letting an
+all-grey tree read as "nothing done". Switching back clears only that hint.
+
+**Tests** — `tests/dashboard-graph.test.ts` gained a `G5: growth layer` suite
+(12 tests: the leaf → ancestor roll-up and its identity with
+`summarizeGrowth`, "no data" vs "0 %", skipped/failed arithmetic, `hasOwn` vs
+descendant-only roll-ups, two records of one subject aggregated with the
+first-by-id status, foreign subject types and unknown subjects ignored, a
+field-by-field layout comparison of the two layers, `heat` only in the growth
+layer, the goal record rolling into its materialized node exactly once, the
+goal-only and no-record frames, a collapsed branch keeping its hidden
+progress, and layer-label coverage). `tests/dashboard-theme.test.ts` gained a
+`G5 palettes` suite (5 tests: growth-status coverage through
+`paletteIsComplete()`, ramp sortedness/hex validity, `heatColor` at the stops
+with clamping and `NaN`, blend + 0 %/100 % distinguishability, and
+`summarizeGrowth` arithmetic), and `tests/dashboard-build.test.ts` now asserts
+the built bundle carries the layer switch (`Growth heat`, `lp-node-growthbar`).
+
+**Acceptance** — walked in a real pane against a seeded fixture: root → trunk →
+three branches, three approved goals materialized under them with exactly
+0 %, 50 % and 100 % growth, one node-level record, a bee and an open incident.
+Computed styles in the growth layer: the 0 % node tints `rgba(92, 100, 112,
+0.22)` (grey), the 50 % one `rgba(224, 168, 79, 0.22)` (amber) and the 100 %
+one `rgba(79, 168, 96, 0.22)` (green) — the three goals are distinguishable at
+a glance, the goal frames' bars measure 0 %/50 %/100 % wide, nodes without
+records stay neutral, and the node transforms are **byte-identical** before
+and after the switch (the layout did not move). Clicking a node still fills
+the G4 details panel (with its growth bar), the light theme was checked the
+same way, and the console stayed clean. `typecheck` (both configs) and the full
+suite green: 24 files, 382 tests.
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block G is under way — G4 is done.** Stages A1–F2 are complete and released
+**Status: block G is complete — G5 is done.** Stages A1–F2 are complete and released
 as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**, **C (domain
 semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP transport)** are
 closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
 `/api/tree` → React Flow data adapter with the d3-hierarchy layout and the
 collapse/expand policy, G3 (0.21.0) painted the custom nodes and edges
 (status bars, incident badges, goal frames, bee-edge renderer) — plus the
-`window.fetch` receiver fix that the first real tab exposed — and G4
+`window.fetch` receiver fix that the first real tab exposed — G4
 (0.22.0) wired the interaction: node selection with the blocker trail,
 `/api/node/:id` details panel, FTS search with camera focus, and the
-kind/status/version filters. Next: G5 (growth layer). A candidate **D4**
-(config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/Codex, the
-memory-flash 0.8.1 fix) may still precede the remaining UI work.
+kind/status/version filters, and G5 (0.23.0) added the growth layer: the
+per-node roll-up of its own record plus everything below it (goal records
+included at the node they materialized), the toolbar heat map, the growth bars
+on nodes and goal frames, and the honest "no growth records yet" hint. Next:
+H1 (SSE live updates + cache invalidation) and H2 (optional agent timeline
+rows). A candidate **D4** (config-file MCP registrations for
+OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
+precede the remaining UI work.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
@@ -1083,7 +1186,7 @@ memory-flash 0.8.1 fix) may still precede the remaining UI work.
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
-| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer |
+| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |

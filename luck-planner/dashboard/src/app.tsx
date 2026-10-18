@@ -1,5 +1,5 @@
 /**
- * The dashboard application shell (PLAN.md stages G1, G2, G4).
+ * The dashboard application shell (PLAN.md stages G1, G2, G4, G5).
  *
  * Layout: toolbar (identity + counters + controls), the diagram canvas, the
  * details panel and the legend. What is live so far:
@@ -15,6 +15,10 @@
  *   an FTS query, clears whatever hides the best hit (collapse ancestors,
  *   conflicting filters) and flies the camera to it; the kind/status/version
  *   selects narrow the diagram through the adapter's filter option.
+ * - **G5 growth layer**: the toolbar layer switch hands `layer` to the
+ *   adapter, which fills each node's `heat` with its rolled-up growth ratio;
+ *   switching it is a pure re-render (same positions), and an empty heat
+ *   layer says so in words instead of looking like "nothing done".
  *
  * State rules kept deliberately small so later stages can extend them
  * without a rewrite: one `load()` effect keyed on the resolved client, one
@@ -35,6 +39,7 @@ import {
   isFilterActive,
   toggleCollapsed,
   type FocusRequest,
+  type GraphLayer,
 } from "./graph";
 import { parseDashboardParams } from "./params";
 import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./theme";
@@ -85,6 +90,10 @@ function filterExcludesNode(
   };
 }
 
+/** Shown when the growth layer is switched on in a project without records. */
+const GROWTH_EMPTY_HINT =
+  "No growth records in this project yet — the heat layer stays neutral (agents write them with luck_tree_update_growth).";
+
 export function App(): ReactElement {
   const params = useMemo(() => parseDashboardParams(window.location.search), []);
   const client = useMemo(
@@ -115,6 +124,9 @@ export function App(): ReactElement {
   });
   const [focus, setFocus] = useState<FocusRequest | null>(null);
   const focusSeq = useRef(0);
+
+  // G5 growth layer: `status` is the G3/G4 view, `growth` tints the tree.
+  const [layer, setLayer] = useState<GraphLayer>("status");
 
   useEffect(() => {
     applyTheme(theme);
@@ -192,6 +204,27 @@ export function App(): ReactElement {
   }, []);
 
   /**
+   * Switches the diagram layer (G5). Purely a display option — the layout is
+   * rebuilt with the same positions — but with one honest hint: an empty heat
+   * layer means "no growth records yet", not "nothing done".
+   */
+  const onLayerChange = useCallback(
+    (next: GraphLayer): void => {
+      setLayer(next);
+      setStatusLine((previous) => {
+        if (next === "growth") {
+          if (previous === "" && (tree?.growth.length ?? 0) === 0) {
+            return GROWTH_EMPTY_HINT;
+          }
+          return previous;
+        }
+        return previous === GROWTH_EMPTY_HINT ? "" : previous;
+      });
+    },
+    [tree],
+  );
+
+  /**
    * Makes sure a node is actually on screen: expands its collapsed
    * ancestors and clears whichever filter excludes it (search should never
    * "find" something the user cannot see — the G4 acceptance scenario).
@@ -240,8 +273,8 @@ export function App(): ReactElement {
     () =>
       tree === null
         ? EMPTY_GRAPH
-        : buildGraph(tree, { collapsedIds, filter: filters }),
-    [tree, collapsedIds, filters],
+        : buildGraph(tree, { collapsedIds, filter: filters, layer }),
+    [tree, collapsedIds, filters, layer],
   );
 
   const resolveName = useCallback(
@@ -263,6 +296,8 @@ export function App(): ReactElement {
         filters={filters}
         onFiltersChange={setFilters}
         onSearch={(query) => void onSearch(query)}
+        layer={layer}
+        onLayerChange={onLayerChange}
       />
       <div className="lp-body">
         <Canvas

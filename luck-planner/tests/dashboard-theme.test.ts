@@ -12,11 +12,17 @@ import { describe, expect, it } from "vitest";
 import { LEAF_STATUSES, NODE_KINDS } from "../shared/tree";
 import { BEE_STATUSES } from "../shared/links";
 import { GOAL_STATUSES } from "../shared/goals";
+import { GROWTH_STATUSES, summarizeGrowth } from "../shared/growth";
+import type { Growth } from "../shared/growth";
 import {
   BEE_STATUS_COLORS,
   BEE_STATUS_LABELS,
   GOAL_STATUS_COLORS,
   GOAL_STATUS_LABELS,
+  GROWTH_STATUS_COLORS,
+  GROWTH_STATUS_LABELS,
+  HEAT_RAMP,
+  heatColor,
   KIND_COLORS,
   KIND_GLYPHS,
   KIND_LABELS,
@@ -126,5 +132,88 @@ describe("G3 palettes", () => {
     expect(withAlpha("#5b9dff", 0.5)).toBe("rgba(91, 157, 255, 0.5)");
     expect(withAlpha("#5b9dff", 2)).toBe("rgba(91, 157, 255, 1)");
     expect(withAlpha("#5b9dff", -1)).toBe("rgba(91, 157, 255, 0)");
+  });
+});
+
+describe("G5 palettes", () => {
+  it("covers every growth status with a colour and a text label", () => {
+    for (const status of GROWTH_STATUSES) {
+      expect(GROWTH_STATUS_COLORS[status], `GROWTH_STATUS_COLORS.${status}`).toBeTruthy();
+      expect(GROWTH_STATUS_LABELS[status], `GROWTH_STATUS_LABELS.${status}`).toBeTruthy();
+    }
+    expect(paletteIsComplete()).toBe(true);
+  });
+
+  it("keeps the heat ramp sorted, spanning 0 → 1, every stop a hex", () => {
+    expect(HEAT_RAMP.length).toBeGreaterThanOrEqual(3);
+    expect(HEAT_RAMP[0].at).toBe(0);
+    expect(HEAT_RAMP[HEAT_RAMP.length - 1].at).toBe(1);
+    for (let i = 1; i < HEAT_RAMP.length; i += 1) {
+      expect(HEAT_RAMP[i].at, `stop ${i} must follow stop ${i - 1}`).toBeGreaterThan(
+        HEAT_RAMP[i - 1].at,
+      );
+    }
+    for (const stop of HEAT_RAMP) {
+      expect(stop.color, `stop at ${stop.at}`).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+
+  it("returns the ramp colours at the stops and clamps the ends", () => {
+    expect(heatColor(0)).toBe(HEAT_RAMP[0].color);
+    expect(heatColor(1)).toBe(HEAT_RAMP[HEAT_RAMP.length - 1].color);
+    expect(heatColor(0.5)).toBe(HEAT_RAMP[1].color);
+    // Out-of-range and non-finite input still yields a valid end colour.
+    expect(heatColor(-1)).toBe(HEAT_RAMP[0].color);
+    expect(heatColor(2)).toBe(HEAT_RAMP[HEAT_RAMP.length - 1].color);
+    expect(heatColor(Number.NaN)).toBe(HEAT_RAMP[0].color);
+  });
+
+  it("blends between stops and keeps 0 % vs 100 % distinguishable", () => {
+    const quarter = heatColor(0.25);
+    expect(quarter).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(quarter).not.toBe(heatColor(0));
+    expect(quarter).not.toBe(heatColor(0.5));
+    expect(heatColor(0)).not.toBe(heatColor(1));
+  });
+
+  it("uses the shared step arithmetic for the roll-up", () => {
+    const record = (id: string, states: Growth["steps"][number]["state"][]): Growth => ({
+      id,
+      projectKey: "/tmp/luck-planner-g5",
+      subjectType: "node",
+      subjectId: "node-1",
+      steps: states.map((state, index) => ({
+        id: `s${index}`,
+        title: `step ${index}`,
+        state,
+        facts: [],
+        reason: "",
+      })),
+      status: "active",
+      revision: 1,
+      createdAt: 0,
+      updatedAt: 0,
+      createdBy: null,
+      updatedBy: null,
+    });
+
+    const summary = summarizeGrowth([
+      record("g1", ["completed", "pending"]),
+      record("g2", ["completed", "failed", "skipped"]),
+    ]);
+    expect(summary).toEqual({
+      total: 5,
+      completed: 2,
+      failed: 1,
+      ratio: 0.4,
+      records: 2,
+    });
+    expect(summarizeGrowth([])).toEqual({
+      total: 0,
+      completed: 0,
+      failed: 0,
+      ratio: 0,
+      records: 0,
+    });
   });
 });

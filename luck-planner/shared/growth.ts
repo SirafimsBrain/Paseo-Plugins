@@ -99,3 +99,43 @@ export function growthProgress(steps: readonly GrowthStep[]): {
   const failed = steps.filter((s) => s.state === "failed").length;
   return { total, completed, failed, ratio: total === 0 ? 0 : completed / total };
 }
+
+/**
+ * Roll-up of one or more growth records — the number the dashboard growth
+ * layer (stage G5) paints as a bar and as heat, and the same shape the native
+ * panel can use once it shows subtree progress. `records` tells "no data"
+ * (`0`) apart from "not a single step completed" (`0/N` completed), which is
+ * the distinction the heatmap must not lose.
+ */
+export interface GrowthSummary {
+  total: number;
+  completed: number;
+  failed: number;
+  ratio: number;
+  /** How many growth records went into the numbers (0 = no data at all). */
+  records: number;
+}
+
+/**
+ * Aggregates several growth records into one summary, delegating the
+ * per-record arithmetic to {@link growthProgress} so a subtree roll-up and a
+ * single record can never disagree about what a completed step is.
+ */
+export function summarizeGrowth(records: readonly Growth[]): GrowthSummary {
+  let total = 0;
+  let completed = 0;
+  let failed = 0;
+  for (const record of records) {
+    const progress = growthProgress(record.steps);
+    total += progress.total;
+    completed += progress.completed;
+    failed += progress.failed;
+  }
+  return {
+    total,
+    completed,
+    failed,
+    ratio: total === 0 ? 0 : completed / total,
+    records: records.length,
+  };
+}

@@ -1,10 +1,12 @@
 /**
- * The dashboard toolbar (PLAN.md stages G1, G4): identity, counters and the
- * controls. G1 shipped the search box and the kind/status filters as
+ * The dashboard toolbar (PLAN.md stages G1, G4, G5): identity, counters and
+ * the controls. G1 shipped the search box and the kind/status filters as
  * disabled placeholders with a hint naming this stage; G4 wires them for
  * real: the search box submits an FTS query against `/api/search` (the app
  * focuses the camera on the best hit), the two selects and the version input
- * narrow the diagram through the adapter's `filter` option.
+ * narrow the diagram through the adapter's `filter` option. G5 adds the layer
+ * switch — `Status` (the G3/G4 view) vs `Growth heat` (the whole tree tinted
+ * by its growth ratio).
  *
  * The search input keeps its own draft state (the query is *not* diagram
  * state — only the picked result is) and submits on Enter, which is the
@@ -15,6 +17,7 @@ import type { ChangeEvent, FormEvent, ReactElement } from "react";
 import type { StatsResponse } from "../../../shared/api";
 import { LEAF_STATUSES, NODE_KINDS } from "../../../shared/tree";
 import type { LeafStatus, NodeKind } from "../../../shared/tree";
+import { GRAPH_LAYER_LABELS, GRAPH_LAYERS, type GraphLayer } from "../graph";
 import { KIND_LABELS, STATUS_LABELS } from "../colors";
 
 /** The three toolbar filters, owned by the app and applied by the adapter. */
@@ -38,6 +41,10 @@ export interface ToolbarProps {
   readonly onFiltersChange: (filters: ToolbarFilters) => void;
   /** Runs an FTS query — the app focuses the best hit (G4). */
   readonly onSearch: (query: string) => void;
+  /** Active diagram layer (G5). */
+  readonly layer: GraphLayer;
+  /** Switches the diagram layer (G5). */
+  readonly onLayerChange: (layer: GraphLayer) => void;
 }
 
 /** One `label · value` counter cell. */
@@ -148,6 +155,23 @@ export function Toolbar(props: ToolbarProps): ReactElement {
             })
           }
         />
+        <div className="lp-view-switch" role="group" aria-label="Layer" title="Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.">
+          {GRAPH_LAYERS.map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              className={
+                candidate === props.layer
+                  ? "lp-view-button lp-view-button-active"
+                  : "lp-view-button"
+              }
+              aria-pressed={candidate === props.layer}
+              onClick={() => props.onLayerChange(candidate)}
+            >
+              {GRAPH_LAYER_LABELS[candidate]}
+            </button>
+          ))}
+        </div>
         <div className="lp-view-switch" role="group" aria-label="View">
           <button
             type="button"

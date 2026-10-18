@@ -1,5 +1,5 @@
 /**
- * Graph node components (PLAN.md stages G2–G3).
+ * Graph node components (PLAN.md stages G2–G5).
  *
  * G2 delivers the *structural* rendering: one box per node with the kind
  * distinction by **shape** (the tech-stack root is a wide pill, the trunk a
@@ -19,6 +19,17 @@
  *   the materialized subtree of a high goal, labelled 🎯 with the goal text
  *   and its status in text.
  *
+ * Stage G5 adds the growth layer on top of the same contract:
+ *
+ * - **growth bar** — any node *or* goal whose subtree carries growth records
+ *   gets a bar filled to the rolled-up ratio (`N/M steps` in text next to it,
+ *   plus the status of its own record when it has one), so a collapsed branch
+ *   still shows what it hides;
+ * - **heat tint** — when the toolbar layer is `growth`, `data.heat` colours
+ *   the node body with `heatColor(ratio)`, which is how the whole tree reads
+ *   as one progress heatmap. A node without any growth record stays untinted
+ *   (no data ≠ 0 %).
+ *
  * Edges live in `graph-edges.tsx` (bee renderer); tree edges keep React Flow's
  * built-in `smoothstep` path with a kind-tinted stroke from the adapter.
  *
@@ -32,17 +43,22 @@ import {
   BUG_BADGE_COLOR,
   GOAL_STATUS_COLORS,
   GOAL_STATUS_LABELS,
+  GROWTH_STATUS_COLORS,
+  GROWTH_STATUS_LABELS,
+  heatColor,
   KIND_COLORS,
   KIND_GLYPHS,
   STATUS_COLORS,
   STATUS_LABELS,
   STATUS_PROGRESS,
+  withAlpha,
 } from "../colors";
 import {
   LAYOUT,
   type GraphFlowNode,
   type GraphNodeData,
   type GoalFrameNode,
+  type GrowthRollup,
 } from "../graph";
 
 /**
@@ -75,10 +91,62 @@ function BugBadge({ count }: { count: number }): ReactElement {
   );
 }
 
+/** Human wording of a growth roll-up, used in `title` and `aria-label`. */
+function growthText(growth: GrowthRollup): string {
+  const percent = Math.round(growth.ratio * 100);
+  return `${growth.completed} of ${growth.total} steps completed (${percent}%)`;
+}
+
+/**
+ * The G5 growth bar: fill = share of completed steps of the node's subtree
+ * roll-up, colour = the heat ramp. Text next to it carries the count, and the
+ * node's own record status when there is one — the bar alone never has to be
+ * interpreted.
+ */
+function GrowthBar({ growth }: { growth: GrowthRollup }): ReactElement {
+  return (
+    <div
+      className="lp-node-growth"
+      title={`Growth: ${growthText(growth)}${
+        growth.hasOwn ? "" : " · rolled up from the subtree"
+      }`}
+    >
+      <div
+        className="lp-node-growthbar"
+        role="img"
+        aria-label={`Growth: ${growthText(growth)}`}
+      >
+        <div
+          className="lp-node-growthbar-fill"
+          style={{
+            width: `${Math.round(growth.ratio * 100)}%`,
+            backgroundColor: heatColor(growth.ratio),
+          }}
+        />
+      </div>
+      <span className="lp-node-growth-label">
+        {growth.completed}/{growth.total} steps
+        {growth.ownStatus !== null ? (
+          <span
+            className="lp-node-growth-status"
+            style={{ color: GROWTH_STATUS_COLORS[growth.ownStatus] }}
+          >
+            {" · "}
+            {GROWTH_STATUS_LABELS[growth.ownStatus]}
+          </span>
+        ) : (
+          <span className="lp-node-growth-subtree"> · subtree</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 /** One node of the diagram. */
 export function GraphNode({ data }: NodeProps<GraphFlowNode>): ReactElement {
   const shape = KIND_SHAPE[data.kind];
   const hasChildren = data.childCount > 0;
+  const heat = data.heat;
   return (
     <div
       className={`lp-node lp-node-${data.kind}`}
@@ -86,12 +154,18 @@ export function GraphNode({ data }: NodeProps<GraphFlowNode>): ReactElement {
         ...shape,
         width: LAYOUT.nodeWidth,
         minHeight: LAYOUT.nodeHeight,
-        background: "var(--lp-surface, #171a21)",
+        // In the growth layer the body is tinted by the rolled-up ratio; the
+        // kind border stays, so the shape signal is never lost to the heat.
+        background:
+          heat === null
+            ? "var(--lp-surface, #171a21)"
+            : withAlpha(heatColor(heat), 0.22),
         borderColor: KIND_COLORS[data.kind],
         color: "var(--lp-text, #e6e9ef)",
       }}
       data-status={data.status}
       data-kind={data.kind}
+      data-layer={heat !== null ? "growth" : "status"}
       data-selected={data.selected ? "true" : undefined}
       data-bug-linked={data.bugLinked ? "true" : undefined}
     >
@@ -137,6 +211,7 @@ export function GraphNode({ data }: NodeProps<GraphFlowNode>): ReactElement {
           />
         </div>
       ) : null}
+      {data.growth !== null ? <GrowthBar growth={data.growth} /> : null}
       {hasChildren ? (
         <button
           type="button"
@@ -162,10 +237,12 @@ export function GraphNode({ data }: NodeProps<GraphFlowNode>): ReactElement {
 }
 
 /**
- * The 🎯 goal frame (G3): a dashed rectangle behind the subtree a high goal
- * materialized, labelled with the goal's formal text and its status in text
- * next to the colour. Pointer-transparent and non-selectable (the adapter set
- * `zIndex: -1`), so it can never swallow a click meant for a node.
+ * The 🎯 goal frame (G3) with its growth strip (G5): a dashed rectangle
+ * behind the subtree a high goal materialized, labelled with the goal's
+ * formal text and its status in text next to the colour, plus a progress bar
+ * of the goal's own record merged with its subtree roll-up. Pointer-
+ * transparent and non-selectable (the adapter set `zIndex: -1`), so it can
+ * never swallow a click meant for a node.
  */
 export function GoalFrame({
   data,
@@ -174,6 +251,7 @@ export function GoalFrame({
     <div
       className="lp-goal-frame"
       data-status={data.status}
+      data-layer={data.heat !== null ? "growth" : "status"}
       style={{
         width: data.width,
         height: data.height,
@@ -185,12 +263,37 @@ export function GoalFrame({
         className="lp-goal-frame-label"
         style={{ color: GOAL_STATUS_COLORS[data.status] }}
       >
-        <span aria-hidden="true">🎯 </span>
-        <span className="lp-goal-frame-name">{data.name}</span>
-        <span className="lp-goal-frame-status">
-          {" · "}
-          {GOAL_STATUS_LABELS[data.status]}
+        <span className="lp-goal-frame-caption">
+          <span aria-hidden="true">🎯 </span>
+          <span className="lp-goal-frame-name">{data.name}</span>
+          <span className="lp-goal-frame-status">
+            {" · "}
+            {GOAL_STATUS_LABELS[data.status]}
+          </span>
         </span>
+        {data.growth !== null ? (
+          <span
+            className="lp-goal-frame-growth"
+            title={`Growth: ${growthText(data.growth)}`}
+          >
+            <span
+              className="lp-goal-frame-progress"
+              role="img"
+              aria-label={`Growth: ${growthText(data.growth)}`}
+            >
+              <span
+                className="lp-goal-frame-progress-fill"
+                style={{
+                  width: `${Math.round(data.growth.ratio * 100)}%`,
+                  backgroundColor: heatColor(data.growth.ratio),
+                }}
+              />
+            </span>
+            <span className="lp-goal-frame-steps">
+              {data.growth.completed}/{data.growth.total} steps
+            </span>
+          </span>
+        ) : null}
       </span>
     </div>
   );

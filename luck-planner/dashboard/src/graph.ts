@@ -23,16 +23,28 @@
  *   edge per influence bee whose *both* endpoints are visible;
  * - **badges**: per-leaf open-incident counts (open + investigating, the same
  *   definition `store.stats()` uses) ride in node data for the G3 badges.
+ * - **growth** (G5): every node carries the roll-up of its own growth record
+ *   plus every descendant record, and the toolbar's `layer` option turns that
+ *   ratio into the heat value the renderer tints the node with. The layer is a
+ *   *display* option only — it never touches the layout, so switching it
+ *   cannot move a node (the G5 acceptance rule).
  *
  * Determinism: children are sorted by name before the layout, so the same
  * payload always yields identical positions — required for the fixture tests
- * and for SSE-driven rebuilds (H1) not to make the graph dance.
+ * and for SSE-driven rebuilds (H1) not to make the graph dance. Growth records
+ * are sorted by id for the same reason.
  */
 import type { Edge, Node } from "@xyflow/react";
 import { hierarchy, tree } from "d3-hierarchy";
 import type { LeafStatus, Node as TreeNode, NodeKind } from "../../shared/tree";
 import type { BeeStatus } from "../../shared/links";
 import type { GoalStatus } from "../../shared/goals";
+import { growthProgress } from "../../shared/growth";
+import type {
+  Growth,
+  GrowthStatus,
+  GrowthSummary,
+} from "../../shared/growth";
 import type { TreeResponse } from "../../shared/api";
 import { KIND_COLORS, withAlpha } from "./colors";
 
@@ -90,12 +102,54 @@ export type GraphNodeData = {
   openBugIds: string[];
   /** Whether this node currently hides its subtree. */
   collapsed: boolean;
+  /**
+   * Growth roll-up of this node's own record plus every descendant record
+   * (G5); `null` means "no growth data anywhere in this subtree" — which the
+   * heat layer keeps distinct from "0 % done".
+   */
+  growth: GrowthRollup | null;
+  /**
+   * Heat ratio in `[0, 1]` when the growth layer is active, `null` otherwise
+   * (or without growth data). The renderer converts it with `heatColor`.
+   */
+  heat: number | null;
   /** Wired by the Canvas decoration, never by the adapter (see below). */
   onToggle?: () => void;
   /** Whether this node is the current selection (Canvas, stage G4). */
   selected?: boolean;
   /** Shares an open incident with the selection (Canvas, stage G4). */
   bugLinked?: boolean;
+};
+
+/**
+ * Growth roll-up of one subject (stage G5): its own record merged with the
+ * records of everything below it. Extends the shared {@link GrowthSummary}
+ * (the same aggregate `shared/growth.ts` defines for the panel and any RPC),
+ * so the dashboard can never compute a different "share of completed steps".
+ */
+export interface GrowthRollup extends GrowthSummary {
+  /** Whether the subject itself carries a growth record. */
+  hasOwn: boolean;
+  /** Status of the subject's own record (the first by id), or `null`. */
+  ownStatus: GrowthStatus | null;
+}
+
+/**
+ * Diagram layers the toolbar switches between (stage G5). `status` is the
+ * default G3/G4 view (kind shapes, status bars, badges); `growth` adds the
+ * heat tint of the whole tree by its growth ratio. The layer is purely
+ * presentational: {@link buildGraph} produces identical positions and types
+ * for both.
+ */
+export type GraphLayer = "status" | "growth";
+
+/** Every layer of the toolbar switch, in display order. */
+export const GRAPH_LAYERS: readonly GraphLayer[] = ["status", "growth"];
+
+/** Human labels of the layers (the toolbar buttons). */
+export const GRAPH_LAYER_LABELS: Record<GraphLayer, string> = {
+  status: "Status",
+  growth: "Growth heat",
 };
 
 /** Tree edge payload: which of the two graph layers the edge belongs to. */
@@ -127,6 +181,13 @@ export type GoalFrameData = {
   height: number;
   /** How many visible tree nodes the frame encloses. */
   nodeCount: number;
+  /**
+   * Growth roll-up of the goal's own record plus the records of every node in
+   * its materialized subtree (G5); `null` when neither carries growth data.
+   */
+  growth: GrowthRollup | null;
+  /** Heat ratio when the growth layer is active, `null` otherwise (G5). */
+  heat: number | null;
 };
 
 /** A React Flow node positioned by this module. */
@@ -185,6 +246,12 @@ export interface BuildGraphOptions {
    * filtered leaf is still readable as a tree instead of floating alone.
    */
   filter?: GraphFilter;
+  /**
+   * Active diagram layer (G5). `growth` fills each node's `heat` with its
+   * growth ratio; `status` (the default) leaves it `null`. Positions, types
+   * and edges are identical in both layers by construction.
+   */
+  layer?: GraphLayer;
 }
 /** Flat index of the tree: roots, sorted children and the node lookup. */
 interface TreeIndex {
@@ -325,12 +392,22 @@ export function buildGraph(
   if (input.nodes.length === 0) return EMPTY_GRAPH;
 
   const collapsed = options.collapsedIds ?? new Set<string>();
+  const layer = options.layer ?? "status";
   const index = indexTree(input.nodes);
   const sizes = subtreeSizes(index);
   const { visible, hiddenCounts } = visibleSet(index, collapsed, sizes);
   // Visibility (collapse) is then narrowed by the toolbar filters (G4).
   const shown = applyFilter(input.nodes, visible, index, options.filter);
   const bugIdsByNode = openBugIdsByNode(input);
+  // Growth roll-ups (G5) are computed over the *full* tree: a collapsed
+  // branch still reports the progress of what it hides. A goal's own record
+  // joins the roll-up at the node it materialized, so the heat map covers
+  // plan progress and fact progress with one number.
+  const nodeGrowth = nodeGrowthRollups(
+    index,
+    growthRecordsBySubject(input.growth, "node"),
+    goalRecordsByMaterializedRoot(input),
+  );
 
   // Nested layout input, visible nodes only.
   interface LayoutInput {
@@ -370,6 +447,7 @@ export function buildGraph(
     if (!shown.has(node.id)) continue;
     const position = positions.get(node.id) ?? { x: 0, y: 0 };
     const openBugIds = bugIdsByNode.get(node.id) ?? [];
+    const growth = nodeGrowth.get(node.id) ?? null;
     nodes.push({
       id: node.id,
       type: NODE_KIND_TO_TYPE[node.kind],
@@ -386,6 +464,8 @@ export function buildGraph(
         openBugCount: openBugIds.length,
         openBugIds,
         collapsed: collapsed.has(node.id),
+        growth,
+        heat: heatFor(growth, layer),
       },
       // Positions come from the layout, not from the user (yet).
       draggable: false,
@@ -430,8 +510,151 @@ export function buildGraph(
   return {
     nodes,
     edges,
-    goalFrames: buildGoalFrames(input, shown, positions, index),
+    goalFrames: buildGoalFrames(input, shown, positions, index, {
+      layer,
+      nodeGrowth,
+    }),
   };
+}
+
+/** The heat ratio of a roll-up in the active layer, or `null` (G5). */
+function heatFor(growth: GrowthRollup | null, layer: GraphLayer): number | null {
+  if (layer !== "growth" || growth === null) return null;
+  return growth.ratio;
+}
+
+/**
+ * Growth records grouped by their subject id, one map per subject type
+ * (`node`/`goal`), each list sorted by record id so the payload order cannot
+ * leak into the numbers (the determinism rule of this module). Records whose
+ * subject is not in the payload are kept: they simply never get looked up.
+ */
+function growthRecordsBySubject(
+  growth: readonly Growth[],
+  subjectType: Growth["subjectType"],
+): Map<string, Growth[]> {
+  const bySubject = new Map<string, Growth[]>();
+  for (const record of growth) {
+    if (record.subjectType !== subjectType) continue;
+    const list = bySubject.get(record.subjectId);
+    if (list === undefined) bySubject.set(record.subjectId, [record]);
+    else list.push(record);
+  }
+  const byId = (a: Growth, b: Growth): number =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  for (const list of bySubject.values()) list.sort(byId);
+  return bySubject;
+}
+
+/**
+ * The goal records re-keyed by the node the goal materialized (G5): that is
+ * where a goal's plan becomes part of the tree, so its steps join the
+ * subtree roll-up at exactly that point. Goals that never materialized
+ * (ADR-7) contribute nothing — they are not part of the tree at all.
+ */
+function goalRecordsByMaterializedRoot(
+  input: TreeResponse,
+): Map<string, Growth[]> {
+  const byGoal = growthRecordsBySubject(input.growth, "goal");
+  const byRoot = new Map<string, Growth[]>();
+  for (const goal of input.goals) {
+    const rootId = goal.materializedNodeId;
+    if (rootId === null) continue;
+    const records = byGoal.get(goal.id);
+    if (records === undefined || records.length === 0) continue;
+    byRoot.set(rootId, [...(byRoot.get(rootId) ?? []), ...records]);
+  }
+  for (const list of byRoot.values()) {
+    list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+  return byRoot;
+}
+
+/** Step counters accumulated for one subtree. */
+interface GrowthCounters {
+  total: number;
+  completed: number;
+  failed: number;
+  records: number;
+}
+
+/** Folds one record list onto its counters (via the shared step arithmetic). */
+function addRecords(
+  counters: GrowthCounters,
+  records: readonly Growth[],
+): GrowthCounters {
+  let { total, completed, failed, records: count } = counters;
+  for (const record of records) {
+    const progress = growthProgress(record.steps);
+    total += progress.total;
+    completed += progress.completed;
+    failed += progress.failed;
+  }
+  count += records.length;
+  return { total, completed, failed, records: count };
+}
+
+/**
+ * One roll-up per node that has growth data in its subtree (G5): the node's
+ * own records — plus any goal materialized *at* this node — merged with the
+ * roll-ups of its children, computed in one iterative post-order pass. Nodes
+ * without any record anywhere below them are absent from the map — the
+ * renderer shows *no* bar and *no* heat for them, which is how "no data"
+ * stays distinct from "0 % done".
+ *
+ * `hasOwn`/`ownStatus` describe the node's *own* growth record only: a
+ * goal's plan steps roll into the numbers but never claim to be the node's
+ * own record (the goal status is shown on its frame).
+ */
+function nodeGrowthRollups(
+  index: TreeIndex,
+  byNode: Map<string, Growth[]>,
+  byMaterializedRoot: ReadonlyMap<string, Growth[]>,
+): Map<string, GrowthRollup> {
+  const rollups = new Map<string, GrowthRollup>();
+  const counters = new Map<string, GrowthCounters>();
+  for (const root of index.roots) {
+    // Pre-order over a stack, then reversed: every child runs before its
+    // parent, so the child counters are ready when the parent is folded.
+    const order: string[] = [];
+    const stack: string[] = [root.id];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      order.push(id);
+      for (const child of index.childrenOf.get(id) ?? []) stack.push(child.id);
+    }
+    for (const id of order.reverse()) {
+      const own = byNode.get(id) ?? [];
+      const materialized = byMaterializedRoot.get(id) ?? [];
+      let accumulated = addRecords(
+        { total: 0, completed: 0, failed: 0, records: 0 },
+        own,
+      );
+      accumulated = addRecords(accumulated, materialized);
+      for (const child of index.childrenOf.get(id) ?? []) {
+        const below = counters.get(child.id);
+        if (below === undefined) continue;
+        accumulated = {
+          total: accumulated.total + below.total,
+          completed: accumulated.completed + below.completed,
+          failed: accumulated.failed + below.failed,
+          records: accumulated.records + below.records,
+        };
+      }
+      counters.set(id, accumulated);
+      if (accumulated.records === 0) continue;
+      rollups.set(id, {
+        ...accumulated,
+        ratio:
+          accumulated.total === 0
+            ? 0
+            : accumulated.completed / accumulated.total,
+        hasOwn: own.length > 0,
+        ownStatus: own.length > 0 ? own[0].status : null,
+      });
+    }
+  }
+  return rollups;
 }
 
 /**
@@ -463,17 +686,27 @@ function applyFilter(
 }
 
 /**
- * The synthetic goal frames (stage G3): one dashed rectangle per goal whose
- * materialized subtree has visible nodes, sized to the bounding box of that
- * subtree in layout coordinates. A goal that never materialized (draft /
- * proposed, ADR-7) or whose subtree is currently hidden by collapse gets no
- * frame — the frame always describes exactly what is on screen.
+ * The synthetic goal frames (stage G3) with their growth roll-up (G5): one
+ * dashed rectangle per goal whose materialized subtree has visible nodes,
+ * sized to the bounding box of that subtree in layout coordinates. A goal
+ * that never materialized (draft / proposed, ADR-7) or whose subtree is
+ * currently hidden by collapse gets no frame — the frame always describes
+ * exactly what is on screen.
+ *
+ * The frame's growth is the roll-up of its materialized subtree root, which
+ * already carries the goal's own record (it is keyed to that node) plus every
+ * node record below it — so the frame and the tree can never report two
+ * different totals for the same subtree.
  */
 function buildGoalFrames(
   input: TreeResponse,
   visible: ReadonlySet<string>,
   positions: ReadonlyMap<string, { x: number; y: number }>,
   index: TreeIndex,
+  growth: {
+    layer: GraphLayer;
+    nodeGrowth: ReadonlyMap<string, GrowthRollup>;
+  },
 ): GoalFrameNode[] {
   const frames: GoalFrameNode[] = [];
   // Sorted by id: the payload order must not leak into the output (the same
@@ -506,6 +739,8 @@ function buildGoalFrames(
     }
     if (nodeCount === 0) continue;
 
+    const rollup = growth.nodeGrowth.get(rootId) ?? null;
+
     frames.push({
       id: `goal:${goal.id}`,
       type: "goalFrame",
@@ -520,6 +755,8 @@ function buildGoalFrames(
         width: maxX - minX + 2 * GOAL_FRAME.padding,
         height: maxY - minY + 2 * GOAL_FRAME.padding + GOAL_FRAME.labelHeight,
         nodeCount,
+        growth: rollup,
+        heat: heatFor(rollup, growth.layer),
       },
       // Behind every real node; purely visual, so it never steals a click
       // or a canvas pan from the subtree it encloses.

@@ -18,6 +18,8 @@ import { GOAL_STATUSES } from "../../shared/goals";
 import type { GoalStatus } from "../../shared/goals";
 import { BEE_STATUSES } from "../../shared/links";
 import type { BeeStatus } from "../../shared/links";
+import { GROWTH_STATUSES } from "../../shared/growth";
+import type { GrowthStatus } from "../../shared/growth";
 
 /** Fill colour of a node shape, by node kind. */
 export const KIND_COLORS: Record<NodeKind, string> = {
@@ -130,6 +132,86 @@ export const BEE_STATUS_LABELS: Record<BeeStatus, string> = {
 export const BUG_BADGE_COLOR = "#e05d5d";
 
 /**
+ * Stroke/label colour of a growth record's own status (stage G5), next to the
+ * step counter — the same vocabulary the rest of the diagram uses: blue while
+ * growing, amber when stalled, green when done.
+ */
+export const GROWTH_STATUS_COLORS: Record<GrowthStatus, string> = {
+  active: "#5b9dff",
+  stalled: "#e0a84f",
+  done: "#4fa860",
+  cancelled: "#5c6470",
+};
+
+/** Human labels of the growth statuses (rendered in text). */
+export const GROWTH_STATUS_LABELS: Record<GrowthStatus, string> = {
+  active: "Active",
+  stalled: "Stalled",
+  done: "Done",
+  cancelled: "Cancelled",
+};
+
+/**
+ * Heat ramp of the growth layer (stage G5): the colour a node is tinted with
+ * as its share of completed growth steps rises. Three stops, deliberately the
+ * palette's own semantics rather than an arbitrary gradient — nothing done is
+ * the muted grey, half-way is the in-progress amber, done is the done green —
+ * so heat and status colours tell the same story. `at` runs from 0 to 1 and
+ * must stay sorted (`tests/dashboard-theme.test.ts` pins it).
+ */
+export const HEAT_RAMP: readonly { at: number; color: string }[] = [
+  { at: 0, color: "#5c6470" },
+  { at: 0.5, color: "#e0a84f" },
+  { at: 1, color: "#4fa860" },
+];
+
+/** Parses `#rrggbb` into its three channels. */
+function hexChannels(hex: string): { r: number; g: number; b: number } {
+  const value = hex.replace(/^#/, "");
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16),
+  };
+}
+
+/** Formats three channels back into `#rrggbb`. */
+function hexFromChannels(r: number, g: number, b: number): string {
+  const channel = (value: number): string =>
+    Math.round(Math.min(255, Math.max(0, value)))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
+/**
+ * The heat colour of a progress ratio in `[0, 1]` (clamped): interpolates
+ * linearly between the {@link HEAT_RAMP} stops in RGB. Pure and total — a
+ * ratio outside the range (a hand-edited payload) still yields a valid hex.
+ */
+export function heatColor(ratio: number): string {
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : 0));
+  let lower = HEAT_RAMP[0];
+  let upper = HEAT_RAMP[HEAT_RAMP.length - 1];
+  for (let i = 0; i < HEAT_RAMP.length - 1; i += 1) {
+    if (clamped >= HEAT_RAMP[i].at && clamped <= HEAT_RAMP[i + 1].at) {
+      lower = HEAT_RAMP[i];
+      upper = HEAT_RAMP[i + 1];
+      break;
+    }
+  }
+  const span = upper.at - lower.at;
+  const t = span === 0 ? 0 : (clamped - lower.at) / span;
+  const from = hexChannels(lower.color);
+  const to = hexChannels(upper.color);
+  return hexFromChannels(
+    from.r + (to.r - from.r) * t,
+    from.g + (to.g - from.g) * t,
+    from.b + (to.b - from.b) * t,
+  );
+}
+
+/**
  * Blends a `#rrggbb` hex with an alpha channel — used for tree-edge strokes
  * that echo the parent kind's colour without competing with the nodes.
  */
@@ -165,6 +247,11 @@ export function paletteIsComplete(): boolean {
       (status) =>
         GOAL_STATUS_COLORS[status] !== undefined &&
         GOAL_STATUS_LABELS[status] !== undefined,
+    ) &&
+    GROWTH_STATUSES.every(
+      (status) =>
+        GROWTH_STATUS_COLORS[status] !== undefined &&
+        GROWTH_STATUS_LABELS[status] !== undefined,
     )
   );
 }

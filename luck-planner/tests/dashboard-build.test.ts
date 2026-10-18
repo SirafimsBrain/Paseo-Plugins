@@ -83,6 +83,10 @@ describe("dist/dashboard (the built SPA)", () => {
     // The app itself is in the bundle, not an empty stub.
     expect(js).toContain("lp-app");
     expect(js).toContain("luck-planner:theme");
+    // The G5 growth layer ships with it: the toolbar switch and the heat
+    // class the nodes are tinted with.
+    expect(js).toContain("Growth heat");
+    expect(js).toContain("lp-node-growthbar");
   });
 
   it("rebuilds deterministically", () => {

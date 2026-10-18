@@ -33175,6 +33175,56 @@ var BEE_STATUS_LABELS = {
   cancelled: "Cancelled"
 };
 var BUG_BADGE_COLOR = "#e05d5d";
+var GROWTH_STATUS_COLORS = {
+  active: "#5b9dff",
+  stalled: "#e0a84f",
+  done: "#4fa860",
+  cancelled: "#5c6470"
+};
+var GROWTH_STATUS_LABELS = {
+  active: "Active",
+  stalled: "Stalled",
+  done: "Done",
+  cancelled: "Cancelled"
+};
+var HEAT_RAMP = [
+  { at: 0, color: "#5c6470" },
+  { at: 0.5, color: "#e0a84f" },
+  { at: 1, color: "#4fa860" }
+];
+function hexChannels(hex4) {
+  const value = hex4.replace(/^#/, "");
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16)
+  };
+}
+function hexFromChannels(r, g, b) {
+  const channel = (value) => Math.round(Math.min(255, Math.max(0, value))).toString(16).padStart(2, "0");
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+function heatColor(ratio) {
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : 0));
+  let lower2 = HEAT_RAMP[0];
+  let upper = HEAT_RAMP[HEAT_RAMP.length - 1];
+  for (let i = 0; i < HEAT_RAMP.length - 1; i += 1) {
+    if (clamped >= HEAT_RAMP[i].at && clamped <= HEAT_RAMP[i + 1].at) {
+      lower2 = HEAT_RAMP[i];
+      upper = HEAT_RAMP[i + 1];
+      break;
+    }
+  }
+  const span = upper.at - lower2.at;
+  const t = span === 0 ? 0 : (clamped - lower2.at) / span;
+  const from = hexChannels(lower2.color);
+  const to = hexChannels(upper.color);
+  return hexFromChannels(
+    from.r + (to.r - from.r) * t,
+    from.g + (to.g - from.g) * t,
+    from.b + (to.b - from.b) * t
+  );
+}
 function withAlpha(hex4, alpha) {
   const value = hex4.replace(/^#/, "");
   const r = parseInt(value.slice(0, 2), 16);
@@ -33202,6 +33252,11 @@ var DEFAULT_VISIBLE_BUDGET = 120;
 var GOAL_FRAME = {
   padding: 28,
   labelHeight: 26
+};
+var GRAPH_LAYERS = ["status", "growth"];
+var GRAPH_LAYER_LABELS = {
+  status: "Status",
+  growth: "Growth heat"
 };
 function isFilterActive(filter2) {
   if (filter2 === void 0) return false;
@@ -33305,11 +33360,17 @@ function visibleSet(index2, collapsed, sizes) {
 function buildGraph(input2, options = {}) {
   if (input2.nodes.length === 0) return EMPTY_GRAPH;
   const collapsed = options.collapsedIds ?? /* @__PURE__ */ new Set();
+  const layer = options.layer ?? "status";
   const index2 = indexTree(input2.nodes);
   const sizes = subtreeSizes(index2);
   const { visible, hiddenCounts } = visibleSet(index2, collapsed, sizes);
   const shown = applyFilter(input2.nodes, visible, index2, options.filter);
   const bugIdsByNode = openBugIdsByNode(input2);
+  const nodeGrowth = nodeGrowthRollups(
+    index2,
+    growthRecordsBySubject(input2.growth, "node"),
+    goalRecordsByMaterializedRoot(input2)
+  );
   const VIRTUAL_ROOT = "";
   const makeLayout = (id2) => ({
     id: id2,
@@ -33336,6 +33397,7 @@ function buildGraph(input2, options = {}) {
     if (!shown.has(node2.id)) continue;
     const position = positions.get(node2.id) ?? { x: 0, y: 0 };
     const openBugIds = bugIdsByNode.get(node2.id) ?? [];
+    const growth = nodeGrowth.get(node2.id) ?? null;
     nodes.push({
       id: node2.id,
       type: NODE_KIND_TO_TYPE[node2.kind],
@@ -33351,7 +33413,9 @@ function buildGraph(input2, options = {}) {
         hiddenDescendantCount: hiddenCounts.get(node2.id) ?? 0,
         openBugCount: openBugIds.length,
         openBugIds,
-        collapsed: collapsed.has(node2.id)
+        collapsed: collapsed.has(node2.id),
+        growth,
+        heat: heatFor(growth, layer)
       },
       // Positions come from the layout, not from the user (yet).
       draggable: false
@@ -33392,8 +33456,94 @@ function buildGraph(input2, options = {}) {
   return {
     nodes,
     edges,
-    goalFrames: buildGoalFrames(input2, shown, positions, index2)
+    goalFrames: buildGoalFrames(input2, shown, positions, index2, {
+      layer,
+      nodeGrowth
+    })
   };
+}
+function heatFor(growth, layer) {
+  if (layer !== "growth" || growth === null) return null;
+  return growth.ratio;
+}
+function growthRecordsBySubject(growth, subjectType) {
+  const bySubject = /* @__PURE__ */ new Map();
+  for (const record2 of growth) {
+    if (record2.subjectType !== subjectType) continue;
+    const list = bySubject.get(record2.subjectId);
+    if (list === void 0) bySubject.set(record2.subjectId, [record2]);
+    else list.push(record2);
+  }
+  const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  for (const list of bySubject.values()) list.sort(byId);
+  return bySubject;
+}
+function goalRecordsByMaterializedRoot(input2) {
+  const byGoal = growthRecordsBySubject(input2.growth, "goal");
+  const byRoot = /* @__PURE__ */ new Map();
+  for (const goal of input2.goals) {
+    const rootId = goal.materializedNodeId;
+    if (rootId === null) continue;
+    const records = byGoal.get(goal.id);
+    if (records === void 0 || records.length === 0) continue;
+    byRoot.set(rootId, [...byRoot.get(rootId) ?? [], ...records]);
+  }
+  for (const list of byRoot.values()) {
+    list.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  }
+  return byRoot;
+}
+function addRecords(counters, records) {
+  let { total, completed, failed, records: count2 } = counters;
+  for (const record2 of records) {
+    const progress = growthProgress(record2.steps);
+    total += progress.total;
+    completed += progress.completed;
+    failed += progress.failed;
+  }
+  count2 += records.length;
+  return { total, completed, failed, records: count2 };
+}
+function nodeGrowthRollups(index2, byNode, byMaterializedRoot) {
+  const rollups = /* @__PURE__ */ new Map();
+  const counters = /* @__PURE__ */ new Map();
+  for (const root2 of index2.roots) {
+    const order = [];
+    const stack = [root2.id];
+    while (stack.length > 0) {
+      const id2 = stack.pop();
+      order.push(id2);
+      for (const child of index2.childrenOf.get(id2) ?? []) stack.push(child.id);
+    }
+    for (const id2 of order.reverse()) {
+      const own2 = byNode.get(id2) ?? [];
+      const materialized = byMaterializedRoot.get(id2) ?? [];
+      let accumulated = addRecords(
+        { total: 0, completed: 0, failed: 0, records: 0 },
+        own2
+      );
+      accumulated = addRecords(accumulated, materialized);
+      for (const child of index2.childrenOf.get(id2) ?? []) {
+        const below = counters.get(child.id);
+        if (below === void 0) continue;
+        accumulated = {
+          total: accumulated.total + below.total,
+          completed: accumulated.completed + below.completed,
+          failed: accumulated.failed + below.failed,
+          records: accumulated.records + below.records
+        };
+      }
+      counters.set(id2, accumulated);
+      if (accumulated.records === 0) continue;
+      rollups.set(id2, {
+        ...accumulated,
+        ratio: accumulated.total === 0 ? 0 : accumulated.completed / accumulated.total,
+        hasOwn: own2.length > 0,
+        ownStatus: own2.length > 0 ? own2[0].status : null
+      });
+    }
+  }
+  return rollups;
 }
 function applyFilter(nodes, visible, index2, filter2) {
   if (!isFilterActive(filter2)) return new Set(visible);
@@ -33410,7 +33560,7 @@ function applyFilter(nodes, visible, index2, filter2) {
   }
   return keep;
 }
-function buildGoalFrames(input2, visible, positions, index2) {
+function buildGoalFrames(input2, visible, positions, index2, growth) {
   const frames = [];
   const goals = [...input2.goals].sort(
     (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0
@@ -33438,6 +33588,7 @@ function buildGoalFrames(input2, visible, positions, index2) {
       for (const child of index2.childrenOf.get(id2) ?? []) stack.push(child.id);
     }
     if (nodeCount === 0) continue;
+    const rollup = growth.nodeGrowth.get(rootId) ?? null;
     frames.push({
       id: `goal:${goal.id}`,
       type: "goalFrame",
@@ -33451,7 +33602,9 @@ function buildGoalFrames(input2, visible, positions, index2) {
         status: goal.status,
         width: maxX - minX + 2 * GOAL_FRAME.padding,
         height: maxY - minY + 2 * GOAL_FRAME.padding + GOAL_FRAME.labelHeight,
-        nodeCount
+        nodeCount,
+        growth: rollup,
+        heat: heatFor(rollup, growth.layer)
       },
       // Behind every real node; purely visual, so it never steals a click
       // or a canvas pan from the subtree it encloses.
@@ -42729,9 +42882,60 @@ function BugBadge({ count: count2 }) {
     }
   );
 }
+function growthText(growth) {
+  const percent = Math.round(growth.ratio * 100);
+  return `${growth.completed} of ${growth.total} steps completed (${percent}%)`;
+}
+function GrowthBar({ growth }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+    "div",
+    {
+      className: "lp-node-growth",
+      title: `Growth: ${growthText(growth)}${growth.hasOwn ? "" : " \xB7 rolled up from the subtree"}`,
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          "div",
+          {
+            className: "lp-node-growthbar",
+            role: "img",
+            "aria-label": `Growth: ${growthText(growth)}`,
+            children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+              "div",
+              {
+                className: "lp-node-growthbar-fill",
+                style: {
+                  width: `${Math.round(growth.ratio * 100)}%`,
+                  backgroundColor: heatColor(growth.ratio)
+                }
+              }
+            )
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "lp-node-growth-label", children: [
+          growth.completed,
+          "/",
+          growth.total,
+          " steps",
+          growth.ownStatus !== null ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+            "span",
+            {
+              className: "lp-node-growth-status",
+              style: { color: GROWTH_STATUS_COLORS[growth.ownStatus] },
+              children: [
+                " \xB7 ",
+                GROWTH_STATUS_LABELS[growth.ownStatus]
+              ]
+            }
+          ) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-node-growth-subtree", children: " \xB7 subtree" })
+        ] })
+      ]
+    }
+  );
+}
 function GraphNode({ data }) {
   const shape = KIND_SHAPE[data.kind];
   const hasChildren = data.childCount > 0;
+  const heat = data.heat;
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     "div",
     {
@@ -42740,12 +42944,15 @@ function GraphNode({ data }) {
         ...shape,
         width: LAYOUT.nodeWidth,
         minHeight: LAYOUT.nodeHeight,
-        background: "var(--lp-surface, #171a21)",
+        // In the growth layer the body is tinted by the rolled-up ratio; the
+        // kind border stays, so the shape signal is never lost to the heat.
+        background: heat === null ? "var(--lp-surface, #171a21)" : withAlpha(heatColor(heat), 0.22),
         borderColor: KIND_COLORS[data.kind],
         color: "var(--lp-text, #e6e9ef)"
       },
       "data-status": data.status,
       "data-kind": data.kind,
+      "data-layer": heat !== null ? "growth" : "status",
       "data-selected": data.selected ? "true" : void 0,
       "data-bug-linked": data.bugLinked ? "true" : void 0,
       children: [
@@ -42795,6 +43002,7 @@ function GraphNode({ data }) {
             }
           )
         ) : null,
+        data.growth !== null ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GrowthBar, { growth: data.growth }) : null,
         hasChildren ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           "button",
           {
@@ -42823,6 +43031,7 @@ function GoalFrame({
     {
       className: "lp-goal-frame",
       "data-status": data.status,
+      "data-layer": data.heat !== null ? "growth" : "status",
       style: {
         width: data.width,
         height: data.height,
@@ -42835,12 +43044,47 @@ function GoalFrame({
           className: "lp-goal-frame-label",
           style: { color: GOAL_STATUS_COLORS[data.status] },
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: "\u{1F3AF} " }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-goal-frame-name", children: data.name }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "lp-goal-frame-status", children: [
-              " \xB7 ",
-              GOAL_STATUS_LABELS[data.status]
-            ] })
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "lp-goal-frame-caption", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { "aria-hidden": "true", children: "\u{1F3AF} " }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-goal-frame-name", children: data.name }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "lp-goal-frame-status", children: [
+                " \xB7 ",
+                GOAL_STATUS_LABELS[data.status]
+              ] })
+            ] }),
+            data.growth !== null ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+              "span",
+              {
+                className: "lp-goal-frame-growth",
+                title: `Growth: ${growthText(data.growth)}`,
+                children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+                    "span",
+                    {
+                      className: "lp-goal-frame-progress",
+                      role: "img",
+                      "aria-label": `Growth: ${growthText(data.growth)}`,
+                      children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+                        "span",
+                        {
+                          className: "lp-goal-frame-progress-fill",
+                          style: {
+                            width: `${Math.round(data.growth.ratio * 100)}%`,
+                            backgroundColor: heatColor(data.growth.ratio)
+                          }
+                        }
+                      )
+                    }
+                  ),
+                  /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "lp-goal-frame-steps", children: [
+                    data.growth.completed,
+                    "/",
+                    data.growth.total,
+                    " steps"
+                  ] })
+                ]
+              }
+            ) : null
           ]
         }
       )
@@ -43178,7 +43422,27 @@ function Legend() {
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { "aria-hidden": "true", children: "\u{1F41D} " }),
       BEE_STATUS_LABELS[status]
     ] }, status)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree (progress layer \u2014 stage G5)" })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+      "span",
+      {
+        className: "lp-legend-group lp-legend-heat",
+        "aria-label": "Growth heat ramp",
+        title: "Growth layer: the share of completed growth steps of a node's subtree",
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-ramp", "aria-hidden": "true", children: HEAT_RAMP.map((stop) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+            "span",
+            {
+              className: "lp-legend-ramp-stop",
+              style: { backgroundColor: stop.color }
+            },
+            stop.at
+          )) }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: "growth 0 % \u2192 100 %" })
+        ]
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree \xB7 the growth bar under a node counts completed steps (its own record plus everything below it)" })
   ] });
 }
 
@@ -43272,6 +43536,17 @@ function Toolbar(props) {
           })
         }
       ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "button",
+        {
+          type: "button",
+          className: candidate === props.layer ? "lp-view-button lp-view-button-active" : "lp-view-button",
+          "aria-pressed": candidate === props.layer,
+          onClick: () => props.onLayerChange(candidate),
+          children: GRAPH_LAYER_LABELS[candidate]
+        },
+        candidate
+      )) }),
       /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
         /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
           "button",
@@ -43329,6 +43604,7 @@ function filterExcludesNode(filters, node2) {
     version: filters.version
   };
 }
+var GROWTH_EMPTY_HINT = "No growth records in this project yet \u2014 the heat layer stays neutral (agents write them with luck_tree_update_growth).";
 function App() {
   const params = (0, import_react8.useMemo)(() => parseDashboardParams(window.location.search), []);
   const client = (0, import_react8.useMemo)(
@@ -43353,6 +43629,7 @@ function App() {
   });
   const [focus, setFocus] = (0, import_react8.useState)(null);
   const focusSeq = (0, import_react8.useRef)(0);
+  const [layer, setLayer] = (0, import_react8.useState)("status");
   (0, import_react8.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
@@ -43413,6 +43690,21 @@ function App() {
     focusSeq.current += 1;
     setFocus({ nodeId, seq: focusSeq.current });
   }, []);
+  const onLayerChange = (0, import_react8.useCallback)(
+    (next) => {
+      setLayer(next);
+      setStatusLine((previous) => {
+        if (next === "growth") {
+          if (previous === "" && (tree?.growth.length ?? 0) === 0) {
+            return GROWTH_EMPTY_HINT;
+          }
+          return previous;
+        }
+        return previous === GROWTH_EMPTY_HINT ? "" : previous;
+      });
+    },
+    [tree]
+  );
   const revealNode = (0, import_react8.useCallback)((nodeId) => {
     setCollapsedIds((previous) => {
       const next = new Set(previous);
@@ -43450,8 +43742,8 @@ function App() {
     [client, revealNode, requestFocus]
   );
   const graph = (0, import_react8.useMemo)(
-    () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters }),
-    [tree, collapsedIds, filters]
+    () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters, layer }),
+    [tree, collapsedIds, filters, layer]
   );
   const resolveName = (0, import_react8.useCallback)(
     (id2) => {
@@ -43470,7 +43762,9 @@ function App() {
         statusLine,
         filters,
         onFiltersChange: setFilters,
-        onSearch: (query) => void onSearch(query)
+        onSearch: (query) => void onSearch(query),
+        layer,
+        onLayerChange
       }
     ),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-body", children: [

@@ -602,3 +602,105 @@ body {
 .react-flow__edge-text {
   font-size: 10px;
 }
+
+/* ── Growth layer (stage G5) ─────────────────────────────────────────── */
+
+/* The rolled-up growth bar under a node: fill = completed steps of the
+   subtree, colour = the heat ramp. Text below it carries the count, so the
+   bar itself is never the only source of the number. */
+.lp-node-growth {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-node-growthbar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--lp-border, #262b36);
+  overflow: hidden;
+}
+
+.lp-node-growthbar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.15s ease, background-color 0.15s ease;
+}
+
+.lp-node-growth-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--lp-text-muted, #8b93a3);
+}
+
+.lp-node-growth-status {
+  font-weight: 600;
+}
+
+.lp-node-growth-subtree {
+  opacity: 0.85;
+}
+
+/* In the growth layer the node body carries a heat tint from the adapter;
+   the kind border is untouched, so the shape signal survives the colour. */
+.lp-node[data-layer="growth"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* The goal frame label becomes a two-row strip: caption, then the goal's
+   growth bar. The frame geometry (GOAL_FRAME.labelHeight) is unchanged. */
+.lp-goal-frame-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-goal-frame-caption {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-goal-frame-growth {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-goal-frame-progress {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lp-border, #262b36);
+  overflow: hidden;
+}
+
+.lp-goal-frame-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.lp-goal-frame-steps {
+  flex: none;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--lp-text-muted, #8b93a3);
+}
+
+/* The legend's heat ramp: the three stops of HEAT_RAMP, blended together. */
+.lp-legend-ramp {
+  display: inline-flex;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.lp-legend-ramp-stop {
+  width: 14px;
+  height: 10px;
+}
