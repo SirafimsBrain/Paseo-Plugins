@@ -1,11 +1,11 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.19.0`).** Stages **E4** (settings
-> screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard") and
-> **G1** (dashboard web-app scaffold) are done and all tests are green; the next
-> stage is **G2** (data adapter + layout). Stages A1–G1 are complete; blocks G–J are
-> otherwise untouched. Nothing in this document is a released API: the roadmap in §7
-> describes work that is still ahead.
+> **Development status: version in development (`0.20.0`).** Stages **E4** (settings
+> screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
+> **G1** (dashboard web-app scaffold) and **G2** (data adapter + layout) are done
+> and all tests are green; the next stage is **G3** (custom nodes and edges).
+> Stages A1–G2 are complete; blocks G–J are otherwise untouched. Nothing in this
+> document is a released API: the roadmap in §7 describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -843,16 +843,58 @@ construction). `npm run typecheck` runs both. The pure modules the vitest suite 
 (`params.ts`, `theme.ts`, `colors.ts`) touch no DOM APIs, so they typecheck under either
 configuration.
 
-**Tests** — `tests/dashboard-params.test.ts` (5: token/project parsing, absent/unknown
-parameters, encoded project paths), `tests/dashboard-theme.test.ts` (8: preference rule,
-both palettes complete, the colour/label/glyph coverage guard over both enums) and
-`tests/dashboard-build.test.ts` (7: the built shell + asset pair with root-absolute
-URLs; production build with no live `process.env`; byte-identical rebuild; the real
-`DashboardHttpServer` serving the real `dist/dashboard` — shell, assets with the right
-content types, SPA fallback; the browser client round-tripping stats/tree/node against
-that real server + store, with the bad-token message pinned). Tab-level acceptance that
-needs a real browser (console clean, theme applied) stays manual per PLAN rule 4.
-`typecheck` (both configs) and the full suite are green: 23 files, 326 tests.
+### Data adapter and layout (stage G2 — `dashboard/src/graph.ts`, G2 nodes)
+
+The `/api/tree` payload becomes a React Flow `{ nodes, edges }` graph in a
+**pure** module: only `d3-hierarchy` at runtime and *type-only* React Flow
+imports for the output shapes, so the vitest suite asserts the mapping,
+positions and collapse policy without a DOM — the same split `shared/panel.ts`
+uses for the native panel.
+
+**Mapping.** `kind → type` one-to-one (`root`/`trunk`/`branch`/`subbranch`/
+`leaf`): the `type` is what lets the tech-stack root and the trunk render a
+different *shape* from the branches. Every node carries its name, kind,
+status, `versionBadge` inputs, direct-child and hidden-descendant counts, and
+the open-incident count (open + investigating, the same definition
+`stats()` uses) for the G3 badges.
+
+**Layout.** A layered top-down `d3.tree()` over the *visible* subtree only
+(amounting to the ADR-4 "layered" choice: it reads as an org chart and
+`fitView` normalizes the absolute coordinates anyway), with the node size and
+both gaps in one `LAYOUT` constant that the components and the tests share.
+Children are sorted by name before the layout, so the same payload yields
+identical positions — required for the fixture tests and for SSE-driven
+rebuilds (H1) not to make the graph dance. Forests (several roots) are laid
+out under an invisible virtual root without emitting a phantom node; a node
+whose `parentId` is unknown becomes a root defensively.
+
+**Collapse.** A node in `collapsedIds` stays visible but hides its whole
+subtree, and the layout is recomputed over the remainder (no gaps).
+`defaultCollapsedIds` keeps the visible set within a 120-node budget,
+breadth-first: a small tree opens fully expanded, a 1000-node project as its
+top levels (G2 acceptance — this is what keeps the canvas responsive, because
+React Flow only renders the visible set; the adapter itself rebuilds in a few
+milliseconds). `toggleCollapsed` returns a new set; the app owns it in state
+and the Canvas decorates node data with the callback the adapter never writes.
+
+**Edges.** One `smoothstep` tree edge per visible non-root node; one edge per
+influence bee whose *both* endpoints are visible, with the impact text and the
+bee status in its payload (the G3 edge renderer styles it). No edge ever
+references a hidden node — asserted over every fixture and over the synthetic.
+
+**Viewport.** The Canvas mounts React Flow (`fitView`, `nodeTypes`,
+positions layout-owned via `draggable: false`). The five kind components are
+the structural shapes from G1 (pill/column/box/card with the palette colour
+and the status spelled out in text); G3 replaces the visual details, keeping
+component names and the data contract. Edges use the built-in renderers —
+registering an empty custom edge component would silently hide every path.
+
+**Tests** — `tests/dashboard-graph.test.ts` (15: exact fixture positions and
+types, collapse semantics including hidden counts and the relayout, bees and
+incidents, the forest case, the default policy, and the acceptance block: a
+1045-node synthetic opens within the visible budget with every edge
+referencing visible nodes, and ten rebuilds stay under a second).
+`typecheck` (both configs) and the full suite are green: 24 files, 341 tests.
 
 ## 7. Roadmap (stage map)
 
@@ -860,12 +902,12 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block G has started — G1 is done.** Stages A1–F2 are complete and released as
-tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**, **C (domain
+**Status: block G is under way — G2 is done.** Stages A1–F2 are complete and released
+as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**, **C (domain
 semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP transport)** are
-closed. G1 (0.19.0) delivered the dashboard web-app scaffold: toolbar/canvas/details/
-legend chrome, the dashboard's own dark/light theming, the typed browser API client and
-the `dist/dashboard` build. A candidate **D4** (config-file MCP registrations for
+closed. G1 (0.19.0) scaffolded the dashboard web app and G2 (0.20.0) added the
+`/api/tree` → React Flow data adapter with the d3-hierarchy layout and the
+collapse/expand policy. A candidate **D4** (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still precede the
 remaining UI work.
 
@@ -877,7 +919,7 @@ remaining UI work.
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
-| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout, nodes, interaction, growth layer |
+| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |

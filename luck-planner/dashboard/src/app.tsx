@@ -1,22 +1,31 @@
 /**
- * The dashboard application shell (PLAN.md stage G1).
+ * The dashboard application shell (PLAN.md stages G1–G2).
  *
  * Layout: toolbar (identity + counters + future controls), the diagram canvas,
- * the details panel and the legend — the regions stages G2–G5 fill in. What is
- * already real at G1: the app reads the token/project from the URL, talks to
- * the plugin's read-only HTTP API through the typed client, and renders the
- * live counters from `/api/stats`; the theme is the dashboard's own
+ * the details panel and the legend. What is real: the app reads the token and
+ * project from the URL, talks to the plugin's read-only HTTP API through the
+ * typed client, and renders the live counters from `/api/stats` plus the node
+ * diagram from `/api/tree` — the G2 adapter (`dashboard/src/graph.ts`) maps
+ * the payload to React Flow nodes/edges with a d3-hierarchy layout, honoring
+ * the collapse set this shell owns. The theme is the dashboard's own
  * dark/light palette, applied to `:root` as CSS custom properties.
  *
  * State rules kept deliberately small so later stages can extend them without
  * a rewrite: one `load()` effect keyed on the resolved client, one status line
  * for every non-fatal error (a dashboard that fails to fetch says why in the
- * toolbar instead of throwing to the console).
+ * toolbar instead of throwing to the console), and the collapse set that
+ * survives refetches (the default policy applies to the first payload only).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
-import type { StatsResponse } from "../../shared/api";
+import type { StatsResponse, TreeResponse } from "../../shared/api";
 import { DashboardApi, resolveApiOrigin } from "./api";
+import {
+  buildGraph,
+  defaultCollapsedIds,
+  EMPTY_GRAPH,
+  toggleCollapsed,
+} from "./graph";
 import { parseDashboardParams } from "./params";
 import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./theme";
 import { Canvas } from "./components/Canvas";
@@ -61,6 +70,10 @@ export function App(): ReactElement {
   );
 
   const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [tree, setTree] = useState<TreeResponse | null>(null);
+  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const [statusLine, setStatusLine] = useState("");
   const [theme] = useState<ThemeName>(initialTheme);
 
@@ -78,7 +91,18 @@ export function App(): ReactElement {
       return;
     }
     try {
-      setStats(await client.stats());
+      const [nextStats, nextTree] = await Promise.all([
+        client.stats(),
+        client.tree(),
+      ]);
+      setStats(nextStats);
+      setTree(nextTree);
+      // First payload only: apply the default collapse policy (G2 acceptance —
+      // a 1000-node project must open as a readable skeleton). Later refreshes
+      // keep whatever the user expanded or collapsed by hand.
+      setCollapsedIds((previous) =>
+        previous.size > 0 ? previous : defaultCollapsedIds(nextTree.nodes),
+      );
       setStatusLine("");
     } catch (cause) {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
@@ -89,11 +113,24 @@ export function App(): ReactElement {
     void load();
   }, [load]);
 
+  const onToggleNode = useCallback((id: string): void => {
+    setCollapsedIds((previous) => toggleCollapsed(previous, id));
+  }, []);
+
+  const graph = useMemo(
+    () => (tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds })),
+    [tree, collapsedIds],
+  );
+
   return (
     <div className="lp-app">
       <Toolbar projectKey={params.projectKey} stats={stats} statusLine={statusLine} />
       <div className="lp-body">
-        <Canvas />
+        <Canvas
+          graph={graph}
+          loaded={tree !== null}
+          onToggleNode={onToggleNode}
+        />
         <DetailsPanel />
       </div>
       <Legend />
