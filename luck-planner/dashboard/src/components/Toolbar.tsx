@@ -27,6 +27,23 @@ export interface ToolbarFilters {
   version: string;
 }
 
+/** Connection state of the live-update stream (stage H1). */
+export type ToolbarLiveState = "connecting" | "live" | "offline";
+
+/** Text of the live indicator — the state is never colour-only. */
+const LIVE_LABELS: Record<ToolbarLiveState, string> = {
+  connecting: "connecting",
+  live: "live",
+  offline: "offline",
+};
+
+const LIVE_HINTS: Record<ToolbarLiveState, string> = {
+  connecting: "Connecting to the change stream…",
+  live: "Live: the server pushes tree-changed events over /api/events (SSE).",
+  offline:
+    "The change stream is down and reconnecting; the data on screen may be stale. Reload the tab if the plugin was restarted.",
+};
+
 /** Props of the toolbar. */
 export interface ToolbarProps {
   /** Canonical project key the tab is showing (ADR-2). */
@@ -45,6 +62,8 @@ export interface ToolbarProps {
   readonly layer: GraphLayer;
   /** Switches the diagram layer (G5). */
   readonly onLayerChange: (layer: GraphLayer) => void;
+  /** Live-update stream state (H1). */
+  readonly live: ToolbarLiveState;
 }
 
 /** One `label · value` counter cell. */
@@ -193,7 +212,14 @@ export function Toolbar(props: ToolbarProps): ReactElement {
       </div>
 
       <div className="lp-toolbar-status" role="status">
-        {props.statusLine}
+        <span
+          className={`lp-live lp-live-${props.live}`}
+          title={LIVE_HINTS[props.live]}
+        >
+          <span className="lp-live-dot" aria-hidden="true" />
+          {LIVE_LABELS[props.live]}
+        </span>
+        <span className="lp-toolbar-status-text">{props.statusLine}</span>
       </div>
     </header>
   );

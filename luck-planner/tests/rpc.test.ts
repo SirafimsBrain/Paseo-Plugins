@@ -15,6 +15,7 @@ import {
   nodeDetail,
   nodeSetStatus,
   stats,
+  treeChanges,
   treeGet,
   treeSearch,
 } from "../shared/rpc";
@@ -199,10 +200,79 @@ describe("RPC surface", () => {
           nodeDetail.name,
           nodeSetStatus.name,
           stats.name,
+          treeChanges.name,
           treeGet.name,
           treeSearch.name,
         ].sort(),
       );
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("tree.changes (stage H1)", () => {
+  it("primes the watermark without replaying the trail", async () => {
+    const store = new LuckPlannerStore();
+    const { root } = seedTree(store);
+    store.close();
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const primed = await server.call<{ watermark: number; changes: unknown[] }>(
+        treeChanges.name,
+        { projectKey: P },
+      );
+      // The seed wrote several rows; priming must report none of them.
+      expect(primed.watermark).toBeGreaterThan(0);
+      expect(primed.changes).toEqual([]);
+      expect(root.id).toBeTruthy();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("answers the delta, scoped to the caller's project", async () => {
+    const store = new LuckPlannerStore();
+    seedTree(store);
+    store.close();
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const primed = await server.call<{ watermark: number }>(treeChanges.name, {
+        projectKey: P,
+      });
+      // An agent writes through *another* connection to the same file — the
+      // cross-process case the whole stage exists for.
+      const writer = new LuckPlannerStore();
+      const { leafA } = seedTree(writer);
+      writer.setStatus({ projectKey: P, id: leafA.id, status: "ready", actor: ACTOR });
+      const otherRoot = writer.createNode({
+        projectKey: OTHER,
+        parentId: null,
+        kind: "root",
+        name: "Another project",
+        actor: ACTOR,
+      });
+      writer.close();
+
+      const delta = await server.call<{
+        watermark: number;
+        changes: Array<{ entityId: string; projectKey: string; action: string }>;
+      }>(treeChanges.name, { projectKey: P, sinceId: primed.watermark });
+
+      expect(delta.watermark).toBeGreaterThan(primed.watermark);
+      expect(delta.changes.map((change) => change.entityId)).toContain(leafA.id);
+      expect(delta.changes.every((change) => change.projectKey === P)).toBe(true);
+      // Other projects stay out of the answer even though the cursor is global.
+      expect(delta.changes.map((change) => change.entityId)).not.toContain(otherRoot.id);
+
+      const other = await server.call<{ changes: Array<{ entityId: string }> }>(
+        treeChanges.name,
+        { projectKey: OTHER, sinceId: primed.watermark },
+      );
+      expect(other.changes.map((change) => change.entityId)).toContain(otherRoot.id);
+      expect(other.changes.map((change) => change.entityId)).not.toContain(leafA.id);
     } finally {
       cleanup();
     }

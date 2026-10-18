@@ -36,9 +36,43 @@ function endpoint(): DashboardEndpoint {
     store,
     version: "0.17.0-test",
     dashboardDir: path.join(dir, "dashboard"),
+    // Stage H1: the change feed polls the audit trail. Tests turn the default
+    // one-second cadence down so an assertion never waits a second per event;
+    // the production default is asserted where it is defined.
+    changePollMs: 25,
     log: () => {},
     logError: () => {},
   });
+}
+
+/** SSE reader as `Response.body.getReader()` hands it over. */
+interface SseReader {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+}
+
+/** Reads frames until `needle` shows up in the buffer (or the clock runs out). */
+async function readUntil(
+  reader: SseReader,
+  needle: string,
+  buffer: { text: string },
+  timeoutMs = 3000,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + timeoutMs;
+  while (!buffer.text.includes(needle)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error(`timed out waiting for "${needle}"; got: ${buffer.text}`);
+    }
+    const result = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`timed out waiting for "${needle}"`)), remaining),
+      ),
+    ]);
+    if (result.done) break;
+    if (result.value) buffer.text += decoder.decode(result.value, { stream: true });
+  }
 }
 
 describe("DashboardEndpoint", () => {
@@ -185,6 +219,109 @@ describe("DashboardEndpoint", () => {
       const page = await fetch(url);
       expect(page.status).toBe(200);
     } finally {
+      await ep.dispose();
+    }
+  });
+
+  // ── Stage H1: agent writes reach the dashboard without a refresh ─────────
+
+  /**
+   * The acceptance scenario of stage H1, and the reason the change feed polls
+   * the shared audit trail instead of hooking `store.write`: the writer here is
+   * a **second store instance on the same file** — exactly what an agent
+   * process writing through the MCP server is — and it must show up on an open
+   * SSE stream without anyone touching the endpoint.
+   */
+  it("pushes tree-changed to open streams when another connection writes", async () => {
+    const ep = endpoint();
+    const controller = new AbortController();
+    try {
+      ep.sync({ enabled: true, port: 0, accessToken: "" });
+      await ep.settled();
+      const status = ep.status();
+      const origin = new URL(status.url!).origin;
+      const projectKey = "/projects/live";
+
+      const res = await fetch(
+        `${origin}/api/events?token=${status.token}&project=${encodeURIComponent(projectKey)}`,
+        { signal: controller.signal },
+      );
+      expect(res.status).toBe(200);
+      const reader = res.body!.getReader() as unknown as SseReader;
+      const buffer = { text: "" };
+      await readUntil(reader, "event: ready", buffer);
+      // `ready` carries the cursor the stream resumes from, not an empty object.
+      expect(buffer.text).toMatch(/"version":"0\.17\.0-test","watermark":\d+/);
+
+      // The agent's process: its own connection to the same database file.
+      const writer = new LuckPlannerStore({ dbPath: store.dbPath });
+      const root = writer.createNode({
+        projectKey,
+        parentId: null,
+        kind: "root",
+        name: "Live project",
+        actor: "agent:coder",
+      });
+      writer.close();
+
+      await readUntil(reader, "event: tree-changed", buffer);
+      expect(buffer.text).toContain(`"projectKey":"${projectKey}"`);
+      expect(buffer.text).toContain(root.id);
+      expect(buffer.text).toContain('"entityType":"node"');
+    } finally {
+      controller.abort();
+      await ep.dispose();
+    }
+  });
+
+  it("does not wake a stream opened for another project", async () => {
+    const ep = endpoint();
+    const controller = new AbortController();
+    try {
+      ep.sync({ enabled: true, port: 0, accessToken: "" });
+      await ep.settled();
+      const status = ep.status();
+      const origin = new URL(status.url!).origin;
+      const watching = "/projects/watched";
+
+      const res = await fetch(
+        `${origin}/api/events?token=${status.token}&project=${encodeURIComponent(watching)}`,
+        { signal: controller.signal },
+      );
+      const reader = res.body!.getReader() as unknown as SseReader;
+      const buffer = { text: "" };
+      await readUntil(reader, "event: ready", buffer);
+
+      // A daemon hosts many workspaces: a write in one project must not make
+      // a tab open on another refetch.
+      const writer = new LuckPlannerStore({ dbPath: store.dbPath });
+      writer.createNode({
+        projectKey: "/projects/other",
+        parentId: null,
+        kind: "root",
+        name: "Other project",
+        actor: "agent:coder",
+      });
+      writer.close();
+
+      // Give the feed several ticks to (not) deliver, then prove the stream
+      // still works by writing to the project it *is* watching.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(buffer.text).not.toContain("event: tree-changed");
+
+      const mine = new LuckPlannerStore({ dbPath: store.dbPath });
+      mine.createNode({
+        projectKey: watching,
+        parentId: null,
+        kind: "root",
+        name: "Watched project",
+        actor: "agent:coder",
+      });
+      mine.close();
+      await readUntil(reader, "event: tree-changed", buffer);
+      expect(buffer.text).not.toContain("/projects/other");
+    } finally {
+      controller.abort();
       await ep.dispose();
     }
   });

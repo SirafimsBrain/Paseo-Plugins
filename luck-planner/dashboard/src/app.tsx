@@ -29,7 +29,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { NodeResponse, StatsResponse, TreeResponse } from "../../shared/api";
+import {
+  changesTouchNode,
+  type NodeResponse,
+  type StatsResponse,
+  type TreeResponse,
+} from "../../shared/api";
 import { DashboardApi, resolveApiOrigin } from "./api";
 import {
   ancestorsOf,
@@ -42,6 +47,7 @@ import {
   type GraphLayer,
 } from "./graph";
 import { parseDashboardParams } from "./params";
+import { createChangeStream } from "./live";
 import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./theme";
 import { Canvas } from "./components/Canvas";
 import { DetailsPanel } from "./components/DetailsPanel";
@@ -94,6 +100,9 @@ function filterExcludesNode(
 const GROWTH_EMPTY_HINT =
   "No growth records in this project yet — the heat layer stays neutral (agents write them with luck_tree_update_growth).";
 
+/** Connection state of the SSE stream (stage H1), incl. "not open yet". */
+type LiveState = "connecting" | "live" | "offline";
+
 export function App(): ReactElement {
   const params = useMemo(() => parseDashboardParams(window.location.search), []);
   const client = useMemo(
@@ -127,6 +136,13 @@ export function App(): ReactElement {
 
   // G5 growth layer: `status` is the G3/G4 view, `growth` tints the tree.
   const [layer, setLayer] = useState<GraphLayer>("status");
+
+  // H1 live updates: the SSE connection state and a counter that forces the
+  // details panel to refetch when a change touches the node it shows.
+  const [live, setLive] = useState<LiveState>("connecting");
+  const [detailRefresh, setDetailRefresh] = useState(0);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
 
   useEffect(() => {
     applyTheme(theme);
@@ -164,6 +180,37 @@ export function App(): ReactElement {
     void load();
   }, [load]);
 
+  /**
+   * Stage H1: live updates. One SSE stream per tab; each `tree-changed` batch
+   * refetches the project (the stream coalesces the burst) and refreshes the
+   * details panel when the open node — or anything linked to it — moved.
+   *
+   * A **reconnect** refetches as well: events sent while the stream was down
+   * are gone for good, and the first `open` of a fresh mount must not double
+   * the initial `load()` above.
+   */
+  useEffect(() => {
+    if (client === null) return;
+    let opens = 0;
+    const stream = createChangeStream({
+      url: client.eventsUrl(),
+      onStatus: (status) => {
+        setLive(status.state);
+        if (status.state !== "live") return;
+        opens += 1;
+        if (opens > 1) void load();
+      },
+      onTreeChanged: (event) => {
+        void load();
+        const current = selectedIdRef.current;
+        if (current !== null && changesTouchNode(event.changes, current)) {
+          setDetailRefresh((count) => count + 1);
+        }
+      },
+    });
+    return () => stream.close();
+  }, [client, load]);
+
   // Load the selected node's detail (`/api/node/:id`); ignore a response
   // that arrives after the selection moved on.
   useEffect(() => {
@@ -192,7 +239,7 @@ export function App(): ReactElement {
     return () => {
       stale = true;
     };
-  }, [client, selectedId]);
+  }, [client, selectedId, detailRefresh]);
 
   const onToggleNode = useCallback((id: string): void => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id));
@@ -293,6 +340,7 @@ export function App(): ReactElement {
         projectKey={params.projectKey}
         stats={stats}
         statusLine={statusLine}
+        live={live}
         filters={filters}
         onFiltersChange={setFilters}
         onSearch={(query) => void onSearch(query)}

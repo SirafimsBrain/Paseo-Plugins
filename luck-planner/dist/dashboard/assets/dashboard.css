@@ -680,12 +680,48 @@ body {
   font-weight: 600;
 }
 .lp-toolbar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   color: var(--lp-text-muted, #8b93a3);
   font-size: 11px;
+}
+.lp-toolbar-status-text {
   max-width: 36ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.lp-live {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.lp-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.lp-live-live {
+  color: #4fa860;
+  border-color: #4fa860;
+}
+.lp-live-connecting {
+  color: #e0a84f;
+  border-color: #e0a84f;
+}
+.lp-live-offline {
+  color: #e06c6c;
+  border-color: #e06c6c;
 }
 .lp-body {
   display: grid;

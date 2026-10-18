@@ -1,14 +1,17 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.23.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.24.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection
-> highlights, search with camera focus, filters) and **G5** (growth layer: per-node
-> growth roll-up, heat map, goal-frame progress) are done and all tests are green;
-> the next stage is **H1** (SSE live updates).
-> Stages A1–G5 are complete; blocks H–J are otherwise untouched. Nothing in this
-> document is a released API: the roadmap in §7 describes work that is still ahead.
+> highlights, search with camera focus, filters), **G5** (growth layer: per-node
+> growth roll-up, heat map, goal-frame progress) and **H1** (live data: the
+> `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls) are
+> done and all tests are green; the next stage is **H2** (agent timeline rows,
+> optional).
+> Stages A1–H1 are complete; H2 and blocks I–J are otherwise untouched. Nothing in
+> this document is a released API: the roadmap in §7 describes work that is still
+> ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -89,6 +92,7 @@ luck-planner/
 │   ├── mcp-launch.ts        # node/entry resolution, revision-independent publication
 │   ├── http-server.ts       # SPA + JSON API + SSE + health
 │   ├── http-lifecycle.ts    # keeps the HTTP server in step with settings (debounce/restart)
+│   ├── change-feed.ts       # polls the shared audit trail → `tree-changed` (stage H1)
 │   └── skill.ts             # SKILL.md for agents + installer
 ├── client/
 │   ├── tree-panel.tsx       # native workspace panel (tree outline)
@@ -98,7 +102,7 @@ luck-planner/
 │   └── use-host-typography.ts
 ├── dashboard/               # web app (separate bundle, NEVER imported from client/server)
 │   ├── index.html
-│   └── src/                 # app, data adapter, layout, nodes2d/, scene3d/, details/
+│   └── src/                 # app, live SSE client, data adapter, layout, nodes2d/, scene3d/, details/
 ├── scripts/bundle.mjs       # esbuild: dist/mcp-server.js + dist/dashboard/*
 ├── tests/                   # vitest: store, semantics, mcp e2e, http, adapters
 ├── README.md                # English (project rule)
@@ -553,10 +557,10 @@ colour alone). The view-model (`groupByParent`, `filterSections`,
 
 ### Plugin RPC surface (stage E1 — `shared/rpc.ts`, `index.server.ts`)
 
-Seven `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
+Eleven `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
 Center items (E3) and the settings screen (E4) all go through them. The server
 registers the handlers over one shared `LuckPlannerStore` (closed on plugin
-cleanup); `tests/rpc.test.ts` (15 tests, fake `PluginServerContext` against a
+cleanup); `tests/rpc.test.ts` (23 tests, fake `PluginServerContext` against a
 temp-directory database) covers the surface:
 
 - **Reads** return store rows directly: `tree-get` (roots with their first level of
@@ -564,7 +568,9 @@ temp-directory database) covers the surface:
   path + children + bees + bugs + blocking bugs + history + growth), `growth-get`
   (record plus the shared `growthProgress` aggregate), `stats` (panel counters —
   new `store.stats()`: live nodes by kind/status, in-progress/done leaves, bees,
-  open bugs, proposed/approved goals, growth records).
+  open bugs, proposed/approved goals, growth records), `dashboard-status` (F2:
+  the live dashboard address) and `tree-changes` (H1: the audit rows written
+  after a watermark — see §6 "Live data").
 - **Writes** answer `{ ok, …, error }` instead of throwing (the MCP dispatch
   discipline): `node-set-status` (leaf state machine) and `goal-approve` (gate
   crossing + materialization in one transaction). Both stamp `actor ?? "user"` —
@@ -684,7 +690,7 @@ agent MCP servers use (ADR-2).
 | `GET /api/node/:id?project=<key>` | token | the `node-detail` RPC shape (path, children, bees, bugs, blocking bugs, history, growth) |
 | `GET /api/search?project=<key>&q=&kind=&status=&limit=&includeArchived=` | token | the `tree-search` RPC shape (`matches`, `results[]`) |
 | `GET /api/stats?project=<key>` | token | the `stats` RPC shape |
-| `GET /api/events` | token | SSE stream: `ready` on open, heartbeat comment every 15 s, `tree-changed` broadcasts (stage H1) |
+| `GET /api/events` | token | SSE stream: `ready` (version + watermark) on open, heartbeat comment every 15 s, `tree-changed` broadcasts, narrowed by `?project=` (stage H1) |
 | everything else | none | the SPA from `dist/dashboard` (SPA fallback for extensionless paths) |
 
 **Why the response shapes are not redefined.** `shared/api.ts` re-exports the RPC output
@@ -737,13 +743,15 @@ reasons memory-flash 0.5.2 learned:
 **Settings.** F1 adds `httpEnabled` (default `true`) so the socket can be closed without
 uninstalling — a listening socket deserves a switch. The settings screen gained the matching
 "Serve the dashboard HTTP endpoint" switch; `httpPort` (default 8899) and `accessToken`
-defaults are unchanged from E4. While `dist/dashboard` is not built (stage G1), `GET /`
-answers a truthful placeholder page instead of a blank 404 — the JSON API is already live.
+defaults are unchanged from E4. A checkout where `dist/dashboard` was never built still
+answers a truthful placeholder page instead of a blank 404 — the JSON API is already live
+(the built SPA from G1 takes its place).
 
-**Not yet wired (stage H1).** The MCP server runs in a *separate process* that writes the
-same SQLite file, so the daemon cannot learn about a mutation without polling or a DB hook.
-For that reason `/api/events` is a placeholder in F1: the stream, heartbeat and
-`broadcast()` exist and are tested, but no mutation calls them yet.
+**Live events are wired in H1.** The MCP server runs in a *separate process* that writes the
+same SQLite file, so the daemon cannot learn about a mutation from an in-process hook: it
+polls the shared audit trail. F1 itself ships only the transport — the stream, the heartbeat
+and `broadcast()` exist and are tested, and no mutation called them yet; §6 "Live data"
+below documents what H1 added.
 
 ### "Open dashboard" (stage F2 — `client/open-dashboard.ts`, `client/dashboard-screen.tsx`)
 
@@ -1153,28 +1161,131 @@ the G4 details panel (with its growth bar), the light theme was checked the
 same way, and the console stayed clean. `typecheck` (both configs) and the full
 suite green: 24 files, 382 tests.
 
+### Live data (stage H1 — `server/change-feed.ts`, `server/store.ts`, `server/http-server.ts`, `server/http-lifecycle.ts`, `shared/api.ts`, `shared/rpc.ts`, `dashboard/src/live.ts`, `client/tree-panel.tsx`)
+
+H1 makes both live surfaces follow the tree without a manual reload: the dashboard tab over
+SSE, the native panel over RPC polling. What makes it interesting is *who writes*.
+
+**The cross-process problem, and why the audit trail is the event bus.** The panel, the HTTP
+server and any in-process watcher live in the daemon, but every agent mutation goes through
+the bundled stdio **MCP server — a separate process** with its own connection to the same
+SQLite file (ADR-3). A hook on `LuckPlannerStore.write` would therefore see panel-driven
+mutations only and silently miss every agent write, which is precisely the acceptance
+scenario of the stage ("a leaf moves by an MCP tool and both views update"). What *is* shared
+across processes is the file, and B3 already guarantees that **every mutation appends exactly
+one row to `history`**. So the feed polls `history.id > watermark` — an indexed read on the
+primary key — and the audit trail becomes the event bus, with no new table and no schema
+bump (`SCHEMA_VERSION` stays 1).
+
+**`ChangeFeed`** (`server/change-feed.ts`) owns the cursor and the cadence:
+`DEFAULT_POLL_MS = 1000` (fast enough to feel live, slow enough to stay invisible), an
+`unref`'d `setInterval` so a daemon with nothing to serve can still exit, no overlap between
+ticks, an immediate re-prime in `start()` so an endpoint that sat disabled for hours does not
+greet a client with a burst of stale events, and self-stop after three consecutive failures —
+a database that went away must end the feed, not fill the log forever. Rows are grouped **per
+project**, so a burst (an approved goal materializing a subtree) costs one notification, not
+one per row, and a listener that throws costs only itself: the cursor has already moved, so
+the row is never resent.
+
+**`readChangesSince`** is the cursor arithmetic, shared by the feed and the RPC: it drains in
+pages of `DEFAULT_CHANGE_BATCH = 200`, honours a `maxRows` cap by returning `more: true`, and
+never reports a `watermark` ahead of the rows it actually returned — a caller that adopts it
+cannot skip rows it was not told about. A cursor at or ahead of the table head (a database
+that was replaced) comes back as the head, so a stale client catches up instead of
+livelocking on an id that will never arrive.
+
+**The wire.** `GET /api/events` opens with
+
+```text
+retry: 3000
+
+event: ready
+data: {"version":"0.24.0","watermark":128}
+
+event: tree-changed
+data: {"projectKey":"/abs/path","watermark":131,"changes":[ …history rows… ]}
+```
+
+`ready` now carries the version and the cursor the stream resumes from, so a reopening tab can
+tell a reconnect from a first connect. A stream may narrow itself with `?project=`; the server
+remembers it and `broadcast(event, data, projectKey?)` only wakes the tabs that care — one
+daemon hosts several workspaces, and a tab open on project A must not refetch because B moved.
+`changes` carries the very same `historyEntrySchema` rows `/api/node/:id` returns, so "what
+happened" has one shape whether it is read live or read from the trail.
+
+**Dashboard client** (`dashboard/src/live.ts`) is a pure module over an injected
+`SseSourceFactory` — the app passes the browser's `EventSource`, tests pass a stand-in, and a
+host without `EventSource` gets a visible `offline` indicator instead of a blank page. Three
+behaviours are deliberate: a short burst is **coalesced** into one callback (one refetch per
+action, not per row); **any** `tree-changed` frame triggers the refetch even when its payload
+does not parse (a tab left open across a plugin update must self-heal its *data*, even when it
+cannot read the details, and the payload is only used to decide whether the open details panel
+needs a refresh); and a **reconnect** refetches, because events sent while the stream was down
+are gone for good. `DashboardApi.eventsUrl()` builds the stream URL with the token in the
+query — `EventSource` cannot set headers (ADR-8).
+
+**Native panel** (`client/tree-panel.tsx`). The SDK has no server→client push: `server.handle`
+is request/response, and the lifecycle hooks are about agents and workspaces. So the panel
+polls an RPC twin of the event, `luck-planner.tree-changes`, and the module `shared/rpc.ts`
+carries the protocol with it: the first call omits `sinceId` and only reads the cursor
+(opening a panel must never replay the trail), every later call passes the previous
+`watermark` back and answers the delta, filtered to the caller's project (ADR-2) even though
+the cursor is global. `PANEL_CHANGE_POLL_MS = 2000`; a non-empty delta reloads the outline and
+refreshes an open details panel. The cursor lives in a ref (it drives no rendering; as state
+it would restart the timer every tick) while a small boolean gates the toolbar's
+`live`/`connecting` word. TanStack Query named in `PLAN.md` turned out to be unnecessary — the
+panel has no query cache to invalidate, and a single watermark poll is less machinery than a
+client library the panel does not otherwise use.
+
+**One rule, two consumers.** `changesTouchNode(changes, nodeId)` in `shared/api.ts` decides
+whether a batch makes a node view stale: a `node` row counts only when it *is* the open node,
+while any other entity (bee, bug, goal, growth) always counts, because those are *linked* to
+nodes and can change what a node view shows. The dashboard tab and the panel call the same
+function, so the two views cannot drift apart.
+
+**Cost, honestly stated.** One indexed `SELECT` per second per plugin install, and a
+worst-case latency of one poll interval between a write and a refresh. Both were chosen over
+the alternatives (a DB trigger writing to a side channel, or `PRAGMA data_version` as a
+cheaper gate) because they keep the mechanism comprehensible and testable end to end.
+
+**Tests.** `tests/change-feed.test.ts` (13) drives the cursor arithmetic, the grouping, the
+re-prime and the failure stop, and proves the acceptance case by writing through a **second
+`LuckPlannerStore` on the same file** — the agent-process model, with no MCP spawn needed.
+`tests/http-lifecycle.test.ts` adds the same write over a real socket (an open SSE stream
+receives `tree-changed`, and a stream opened for another project does not);
+`tests/http-server.test.ts` covers the `ready` cursor and the per-project narrowing;
+`tests/dashboard-live.test.ts` (10) covers decoding, merging, coalescing, close, the
+no-`EventSource` degradation and `changesTouchNode`; `tests/rpc.test.ts` covers the panel's
+priming and delta calls; `tests/dashboard-build.test.ts` proves the built bundle carries
+`/api/events`, `tree-changed` and the `lp-live` indicator. `typecheck` (both configs) and the
+full suite are green: 26 files, 411 tests. The live-daemon walk-through with a real MCP tool
+call and a real browser tab belongs to J2.
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block G is complete — G5 is done.** Stages A1–F2 are complete and released
-as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**, **C (domain
-semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP transport)** are
-closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
+**Status: block G is complete and block H is under way — H1 is done.** Stages A1–F2 are
+complete and released as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**,
+**C (domain semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP
+transport)** are closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
 `/api/tree` → React Flow data adapter with the d3-hierarchy layout and the
 collapse/expand policy, G3 (0.21.0) painted the custom nodes and edges
 (status bars, incident badges, goal frames, bee-edge renderer) — plus the
 `window.fetch` receiver fix that the first real tab exposed — G4
 (0.22.0) wired the interaction: node selection with the blocker trail,
 `/api/node/:id` details panel, FTS search with camera focus, and the
-kind/status/version filters, and G5 (0.23.0) added the growth layer: the
+kind/status/version filters, G5 (0.23.0) added the growth layer: the
 per-node roll-up of its own record plus everything below it (goal records
 included at the node they materialized), the toolbar heat map, the growth bars
-on nodes and goal frames, and the honest "no growth records yet" hint. Next:
-H1 (SSE live updates + cache invalidation) and H2 (optional agent timeline
-rows). A candidate **D4** (config-file MCP registrations for
+on nodes and goal frames, and the honest "no growth records yet" hint, and
+H1 (0.24.0) made both views live: the audit-trail change feed behind the
+`tree-changed` SSE event, the per-project streams with their `ready` cursor,
+the dashboard's coalescing `EventSource` client, and the `tree-changes` RPC the
+native panel polls. Next: H2 (optional agent timeline rows). A candidate **D4**
+(config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
 precede the remaining UI work.
 
@@ -1187,7 +1298,7 @@ precede the remaining UI work.
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
-| H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
+| H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0); optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
 

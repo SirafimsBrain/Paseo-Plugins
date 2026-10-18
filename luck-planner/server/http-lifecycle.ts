@@ -1,4 +1,6 @@
+import { DASHBOARD_EVENT_TREE_CHANGED } from "../shared/api";
 import { DEFAULT_HTTP_PORT, generateAccessToken } from "../shared/settings";
+import { ChangeFeed } from "./change-feed";
 import {
   DEFAULT_DASHBOARD_HOST,
   DashboardHttpServer,
@@ -28,6 +30,11 @@ import type { LuckPlannerStore } from "./store";
  *   with a well-known value; a non-empty setting pins it verbatim.
  * - **Auto-fallback.** A busy configured port falls back to an ephemeral port
  *   (surfaced through `portFallback`) instead of leaving the dashboard down.
+ *
+ * Stage H1 adds the **change feed** here rather than to `contribute`, for the
+ * same lifecycle reason: the feed polls the shared audit trail, so it is only
+ * worth running while the socket that serves the events is up. It starts and
+ * stops with the listener, and its notifications go to the live streams.
  */
 
 /** Subset of the plugin settings the endpoint depends on. */
@@ -72,6 +79,8 @@ export interface DashboardEndpointOptions {
   host?: string;
   log?: (message: string) => void;
   logError?: (message: string) => void;
+  /** Change-feed poll period (stage H1); defaults to `DEFAULT_POLL_MS`. */
+  changePollMs?: number;
 }
 
 /**
@@ -95,8 +104,27 @@ export class DashboardEndpoint {
   /** Active token: pinned from settings, or generated once per session. */
   private token = "";
   private disposed = false;
+  /**
+   * Polls the shared audit trail and pushes `tree-changed` to open streams.
+   * Created once and armed only while a socket is listening, so an endpoint
+   * that is switched off costs nothing.
+   */
+  private readonly feed: ChangeFeed;
 
-  constructor(private readonly options: DashboardEndpointOptions) {}
+  constructor(private readonly options: DashboardEndpointOptions) {
+    this.feed = new ChangeFeed({
+      store: options.store,
+      pollMs: options.changePollMs,
+      onChange: (change) => {
+        this.server?.broadcast(
+          DASHBOARD_EVENT_TREE_CHANGED,
+          change,
+          change.projectKey,
+        );
+      },
+      onError: (message) => this.options.logError?.(`[luck-planner] ${message}`),
+    });
+  }
 
   /**
    * Brings the endpoint in line with `config`. Never rejects and never blocks
@@ -217,6 +245,9 @@ export class DashboardEndpoint {
         token: this.token,
         version: this.options.version ?? resolvePluginVersion(),
         dashboardDir: this.options.dashboardDir ?? resolveDashboardDir(),
+        // The `ready` payload reports the feed's cursor, so a reopening tab
+        // can tell a reconnect from a first connect (stage H1).
+        watermark: () => this.feed.lastId,
       });
       await server.start();
       return server;
@@ -250,6 +281,9 @@ export class DashboardEndpoint {
     }
 
     this.error = null;
+    // Arm the feed only now: it polls the shared trail, so it is worth
+    // running exactly while a socket can deliver what it finds.
+    this.feed.start();
     this.options.log?.(`[luck-planner] dashboard listening on ${this.server?.url ?? "(unknown)"}`);
   }
 
@@ -261,6 +295,8 @@ export class DashboardEndpoint {
   private async stopServer(): Promise<void> {
     const server = this.server;
     this.server = null;
+    // Nothing to notify once the socket that serves the events is gone.
+    this.feed.stop();
     if (!server) return;
     try {
       await server.stop();

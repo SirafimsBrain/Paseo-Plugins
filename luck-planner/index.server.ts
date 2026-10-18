@@ -15,6 +15,7 @@ import {
   nodeDetail,
   nodeSetStatus,
   stats,
+  treeChanges,
   treeGet,
   treeSearch,
 } from "./shared/rpc";
@@ -27,6 +28,7 @@ import {
   sessionActorEnv,
 } from "./server/mcp-launch";
 import { ensureSkillInstalled } from "./server/skill";
+import { readChangesSince } from "./server/change-feed";
 import { LuckPlannerStore } from "./server/store";
 import { DashboardEndpoint } from "./server/http-lifecycle";
 import { growthProgress } from "./shared/growth";
@@ -49,6 +51,9 @@ import { growthProgress } from "./shared/growth";
  *   `accessToken`
  * - F2 (done): `dashboard-status` RPC — where the client should open the
  *   dashboard (live URL with token + project)
+ * - H1 (done): live data — the endpoint's change feed broadcasts
+ *   `tree-changed` over SSE, and `tree-changes` is the polling twin the
+ *   native panel uses
  */
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(luckPlannerSettings);
@@ -357,6 +362,24 @@ export default function contribute(server: PluginServerContext) {
       port: status.boundPort,
       portFallback: status.portFallback,
       error: status.error,
+    };
+  });
+
+  // Stage H1: the native panel polls this while it is mounted (the SDK has no
+  // server→client push). `sinceId` absent = "just tell me the cursor", which is
+  // what a freshly opened panel calls so it never replays the whole trail; the
+  // rows are filtered to the caller's project (ADR-2) even though the cursor is
+  // global. The watermark comes from the shared audit table, so writes made by
+  // agent processes are visible here too.
+  server.handle(treeChanges, (input) => {
+    throwIfDisposed();
+    if (input.sinceId === undefined) {
+      return { watermark: store.latestHistoryId(), changes: [] };
+    }
+    const batch = readChangesSince(store, input.sinceId);
+    return {
+      watermark: batch.watermark,
+      changes: batch.changes.filter((entry) => entry.projectKey === input.projectKey),
     };
   });
 

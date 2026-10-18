@@ -32582,6 +32582,18 @@ var dashboardStatus = defineRpc({
     error: external_exports.string().nullable()
   })
 });
+var treeChanges = defineRpc({
+  name: "luck-planner.tree-changes",
+  input: external_exports.object({
+    projectKey: projectKeySchema,
+    /** Omit to prime the cursor; pass the previous `watermark` to get a delta. */
+    sinceId: external_exports.number().int().nonnegative().optional()
+  }),
+  output: external_exports.object({
+    watermark: external_exports.number().int().nonnegative(),
+    changes: external_exports.array(historyEntrySchema)
+  })
+});
 var RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -32592,7 +32604,8 @@ var RPC_CONTRACT_NAMES = [
   bugReport.name,
   growthGet.name,
   stats.name,
-  dashboardStatus.name
+  dashboardStatus.name,
+  treeChanges.name
 ];
 
 // shared/api.ts
@@ -32601,8 +32614,24 @@ var DASHBOARD_TREE_PATH = "/api/tree";
 var DASHBOARD_NODE_PATH = "/api/node";
 var DASHBOARD_SEARCH_PATH = "/api/search";
 var DASHBOARD_STATS_PATH = "/api/stats";
+var DASHBOARD_EVENTS_PATH = "/api/events";
 var DASHBOARD_TOKEN_PARAM = "token";
 var DASHBOARD_PROJECT_PARAM = "project";
+var readyEventSchema = external_exports.object({
+  version: external_exports.string().min(1),
+  watermark: external_exports.number().int().nonnegative()
+});
+var treeChangedEventSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  /** Highest audit row id included in this event. */
+  watermark: external_exports.number().int().nonnegative(),
+  changes: external_exports.array(historyEntrySchema).min(1)
+});
+function changesTouchNode(changes, nodeId) {
+  return changes.some(
+    (change) => change.entityId === nodeId || change.entityType !== "node"
+  );
+}
 var healthResponseSchema = external_exports.object({
   ok: external_exports.literal(true),
   server: external_exports.literal("luck-planner"),
@@ -32662,6 +32691,18 @@ var DashboardApi = class {
       await this.raw(`${DASHBOARD_HEALTH_PATH}?cacheBust=${Date.now()}`)
     );
     return { version: body.version };
+  }
+  /**
+   * URL of the SSE channel for this tab (stage H1). Carries the token like
+   * every other request — `EventSource` cannot set headers (ADR-8) — and the
+   * project, so the server only pushes this project's changes to this stream.
+   */
+  eventsUrl() {
+    const query = new URLSearchParams({
+      [DASHBOARD_TOKEN_PARAM]: this.token,
+      [DASHBOARD_PROJECT_PARAM]: this.projectKey
+    });
+    return `${this.origin}${DASHBOARD_EVENTS_PATH}?${query.toString()}`;
   }
   async get(pathWithQuery) {
     const sep = pathWithQuery.includes("?") ? "&" : "?";
@@ -33685,6 +33726,87 @@ function parseDashboardParams(search) {
   return {
     token: params.get(DASHBOARD_TOKEN_PARAM) ?? "",
     projectKey: params.get(DASHBOARD_PROJECT_PARAM) ?? ""
+  };
+}
+
+// dashboard/src/live.ts
+var DEFAULT_COALESCE_MS = 150;
+function parseTreeChangedEvent(raw) {
+  try {
+    const parsed = treeChangedEventSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+function parseReadyEvent(raw) {
+  try {
+    const parsed = readyEventSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+function mergeChanges(events) {
+  const first = events[0];
+  let watermark = 0;
+  const changes = [];
+  for (const event of events) {
+    changes.push(...event.changes);
+    if (event.watermark > watermark) watermark = event.watermark;
+  }
+  return { projectKey: first.projectKey, watermark, changes };
+}
+function createChangeStream(options) {
+  const factory = options.factory ?? (typeof globalThis.EventSource === "function" ? (url2) => new globalThis.EventSource(url2) : null);
+  if (factory === null) {
+    options.onStatus?.({ state: "offline", watermark: null });
+    return { close: () => {
+    } };
+  }
+  const coalesceMs = options.coalesceMs ?? DEFAULT_COALESCE_MS;
+  let source = null;
+  let pending = [];
+  let timer2 = null;
+  let closed = false;
+  const flush = () => {
+    timer2 = null;
+    if (pending.length === 0) return;
+    const merged = mergeChanges(pending);
+    pending = [];
+    options.onTreeChanged(merged);
+  };
+  const sourceFactory = factory;
+  source = sourceFactory(options.url);
+  source.addEventListener("open", () => {
+    if (closed) return;
+    options.onStatus?.({ state: "live", watermark: null });
+  });
+  source.addEventListener("error", () => {
+    if (closed) return;
+    options.onStatus?.({ state: "offline", watermark: null });
+  });
+  source.addEventListener("ready", (event) => {
+    if (closed) return;
+    const ready = parseReadyEvent(event.data);
+    options.onStatus?.({ state: "live", watermark: ready?.watermark ?? null });
+  });
+  source.addEventListener("tree-changed", (event) => {
+    if (closed) return;
+    const change = parseTreeChangedEvent(event.data);
+    if (change !== null) pending.push(change);
+    else pending.push({ projectKey: "", watermark: 0, changes: [] });
+    if (timer2 === null) timer2 = setTimeout(flush, coalesceMs);
+  });
+  return {
+    close: () => {
+      closed = true;
+      if (timer2 !== null) clearTimeout(timer2);
+      timer2 = null;
+      pending = [];
+      source?.close();
+      source = null;
+    }
   };
 }
 
@@ -43449,6 +43571,16 @@ function Legend() {
 // dashboard/src/components/Toolbar.tsx
 var import_react7 = __toESM(require_react());
 var import_jsx_runtime7 = __toESM(require_jsx_runtime());
+var LIVE_LABELS = {
+  connecting: "connecting",
+  live: "live",
+  offline: "offline"
+};
+var LIVE_HINTS = {
+  connecting: "Connecting to the change stream\u2026",
+  live: "Live: the server pushes tree-changed events over /api/events (SSE).",
+  offline: "The change stream is down and reconnecting; the data on screen may be stale. Reload the tab if the plugin was restarted."
+};
 function Counter(props) {
   return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-counter", title: props.label, children: [
     /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-counter-value", children: props.value }),
@@ -43570,7 +43702,20 @@ function Toolbar(props) {
         )
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-toolbar-status", role: "status", children: props.statusLine })
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "span",
+        {
+          className: `lp-live lp-live-${props.live}`,
+          title: LIVE_HINTS[props.live],
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
+            LIVE_LABELS[props.live]
+          ]
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
+    ] })
   ] });
 }
 
@@ -43630,6 +43775,10 @@ function App() {
   const [focus, setFocus] = (0, import_react8.useState)(null);
   const focusSeq = (0, import_react8.useRef)(0);
   const [layer, setLayer] = (0, import_react8.useState)("status");
+  const [live, setLive] = (0, import_react8.useState)("connecting");
+  const [detailRefresh, setDetailRefresh] = (0, import_react8.useState)(0);
+  const selectedIdRef = (0, import_react8.useRef)(null);
+  selectedIdRef.current = selectedId;
   (0, import_react8.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
@@ -43661,6 +43810,27 @@ function App() {
     void load();
   }, [load]);
   (0, import_react8.useEffect)(() => {
+    if (client === null) return;
+    let opens = 0;
+    const stream = createChangeStream({
+      url: client.eventsUrl(),
+      onStatus: (status) => {
+        setLive(status.state);
+        if (status.state !== "live") return;
+        opens += 1;
+        if (opens > 1) void load();
+      },
+      onTreeChanged: (event) => {
+        void load();
+        const current = selectedIdRef.current;
+        if (current !== null && changesTouchNode(event.changes, current)) {
+          setDetailRefresh((count2) => count2 + 1);
+        }
+      }
+    });
+    return () => stream.close();
+  }, [client, load]);
+  (0, import_react8.useEffect)(() => {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
@@ -43682,7 +43852,7 @@ function App() {
     return () => {
       stale = true;
     };
-  }, [client, selectedId]);
+  }, [client, selectedId, detailRefresh]);
   const onToggleNode = (0, import_react8.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
@@ -43760,6 +43930,7 @@ function App() {
         projectKey: params.projectKey,
         stats: stats2,
         statusLine,
+        live,
         filters,
         onFiltersChange: setFilters,
         onSearch: (query) => void onSearch(query),

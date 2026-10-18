@@ -1,16 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { changesTouchNode } from "../shared/api";
 import type { Bee } from "../shared/links";
 import type { Bug } from "../shared/links";
 import type { Growth } from "../shared/growth";
 import {
+  PANEL_CHANGE_POLL_MS,
   dashboardStatus,
   growthGet,
   nodeDetail,
   nodeSetStatus,
   stats,
+  treeChanges,
   treeGet,
   treeSearch,
 } from "../shared/rpc";
@@ -76,6 +79,7 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
   const growthGetRpc = useRpc(growthGet);
   const statsRpc = useRpc(stats);
   const dashboardStatusRpc = useRpc(dashboardStatus);
+  const changesRpc = useRpc(treeChanges);
   const paseo = usePaseo();
 
   const [sections, setSections] = useState<TreeSection[]>([]);
@@ -228,6 +232,72 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // Stage H1: live updates. The plugin SDK has no server→client push, so the
+  // panel **polls** the `tree-changes` RPC: one priming call publishes the
+  // audit watermark (opening a panel must never replay the whole trail), then
+  // every tick asks for the delta. A non-empty delta reloads the outline and
+  // refreshes an open details panel.
+  //
+  // The cursor is a ref, not state: it drives no rendering, and as state it
+  // would restart the poll timer on every tick. `live` (state) only says
+  // whether the cursor is armed — the indicator must not claim liveness while
+  // the first call has not answered.
+  // -------------------------------------------------------------------------
+  const watermarkRef = useRef<number | null>(null);
+  const pollingRef = useRef(false);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
+  const [livePrimed, setLivePrimed] = useState(false);
+
+  useEffect(() => {
+    if (!projectRootPath) return;
+    watermarkRef.current = null;
+    setLivePrimed(false);
+    let cancelled = false;
+    void changesRpc({ projectKey: projectRootPath })
+      .then((result) => {
+        if (cancelled) return;
+        watermarkRef.current = result.watermark;
+        setLivePrimed(true);
+      })
+      .catch(() => {
+        // A failed prime leaves the cursor unset; the next panel open retries.
+        if (!cancelled) setLivePrimed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [changesRpc, projectRootPath]);
+
+  useEffect(() => {
+    if (!projectRootPath) return;
+    const timer = setInterval(() => {
+      const since = watermarkRef.current;
+      if (since === null || pollingRef.current) return;
+      pollingRef.current = true;
+      void changesRpc({ projectKey: projectRootPath, sinceId: since })
+        .then((result) => {
+          watermarkRef.current = result.watermark;
+          if (result.changes.length === 0) return;
+          reload();
+          const current = selectedIdRef.current;
+          if (current !== null && changesTouchNode(result.changes, current)) {
+            void openDetail(current);
+          }
+        })
+        .catch(() => {
+          // Transient (a reloading plugin, a busy daemon): the next tick
+          // retries from the same watermark, so nothing is skipped.
+        })
+        .finally(() => {
+          pollingRef.current = false;
+        });
+    }, PANEL_CHANGE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [changesRpc, openDetail, projectRootPath, reload]);
+
   if (!projectRootPath) {
     return (
       <View style={styles.container}>
@@ -257,7 +327,12 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
         ) : counters ? (
           <Text style={{ color: fg, fontSize: font(12) }}>
             {counters.total} leaves · {counters.inProgress} in progress · {counters.done} done ·{" "}
-            {counters.openBugs} open bugs
+            {counters.openBugs} open bugs ·{" "}
+            {/* H1: the panel polls `tree-changes`, so the outline follows
+                agent writes with no manual reload. Worded, not colour-only. */}
+            <Text style={{ color: livePrimed ? success : fgMuted }}>
+              {livePrimed ? "live" : "connecting"}
+            </Text>
           </Text>
         ) : (
           <Text style={{ color: fgMuted, fontSize: font(12) }}>No counters yet</Text>

@@ -254,6 +254,41 @@ export const dashboardStatus = defineRpc({
 /** Output of the `dashboard-status` RPC (shared by the client UI modules). */
 export type DashboardStatus = z.infer<typeof dashboardStatus.output>;
 
+/**
+ * `luck-planner.tree-changes`: the audit rows written after `sinceId`
+ * (stage H1) — the RPC twin of the SSE `tree-changed` event.
+ *
+ * The plugin SDK has no server→client push, so the native panel **polls**
+ * this contract while it is mounted. The protocol is deliberately
+ * watermark-based: the first call omits `sinceId` and only reads the cursor
+ * (opening a panel must never replay the whole trail), every later call
+ * passes it back and answers the delta. Because the cursor is the shared
+ * `history` id, agent processes writing through MCP are visible here too.
+ *
+ * Read-only. `watermark` never runs ahead of `changes`: when more rows are
+ * waiting than one answer carries, the caller resumes from the reported
+ * watermark and sees the rest on its next call.
+ */
+export const treeChanges = defineRpc({
+  name: "luck-planner.tree-changes",
+  input: z.object({
+    projectKey: projectKeySchema,
+    /** Omit to prime the cursor; pass the previous `watermark` to get a delta. */
+    sinceId: z.number().int().nonnegative().optional(),
+  }),
+  output: z.object({
+    watermark: z.number().int().nonnegative(),
+    changes: z.array(historyEntrySchema),
+  }),
+});
+
+/**
+ * How often the native panel asks for changes (stage H1). The panel is a
+ * foreground view of one project, so a 2 s cadence keeps the counters and the
+ * outline honest without turning the daemon's RPC channel into a hot loop.
+ */
+export const PANEL_CHANGE_POLL_MS = 2_000;
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -265,4 +300,5 @@ export const RPC_CONTRACT_NAMES = [
   growthGet.name,
   stats.name,
   dashboardStatus.name,
+  treeChanges.name,
 ] as const;

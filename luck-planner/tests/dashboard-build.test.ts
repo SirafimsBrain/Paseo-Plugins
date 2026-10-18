@@ -87,6 +87,10 @@ describe("dist/dashboard (the built SPA)", () => {
     // class the nodes are tinted with.
     expect(js).toContain("Growth heat");
     expect(js).toContain("lp-node-growthbar");
+    // H1 live updates: the SSE subscription and the toolbar indicator.
+    expect(js).toContain("/api/events");
+    expect(js).toContain("tree-changed");
+    expect(js).toContain("lp-live");
   });
 
   it("rebuilds deterministically", () => {
@@ -203,6 +207,30 @@ describe("the browser API client against the real server", () => {
     // not a generic HTTP failure.
     const anon = new DashboardApi(origin, "lp_wrong", P);
     await expect(anon.stats()).rejects.toThrow(/access token was rejected/i);
+  });
+
+  it("builds the SSE channel URL the tab subscribes to (stage H1)", async () => {
+    const origin = await boot();
+    const client = new DashboardApi(origin, TOKEN, P);
+
+    const url = new URL(client.eventsUrl());
+    expect(url.pathname).toBe("/api/events");
+    // The token travels in the query — `EventSource` cannot set headers.
+    expect(url.searchParams.get("token")).toBe(TOKEN);
+    expect(url.searchParams.get("project")).toBe(P);
+
+    const controller = new AbortController();
+    const res = await fetch(client.eventsUrl(), { signal: controller.signal });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    const head = new TextDecoder().decode(first.value);
+    expect(head).toContain("retry: 3000");
+    expect(head).toContain("event: ready");
+    expect(head).toContain('"version"');
+    controller.abort();
   });
 
   it("calls fetch with the global receiver (window.fetch rejects any other)", async () => {

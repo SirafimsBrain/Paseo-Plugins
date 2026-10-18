@@ -20003,6 +20003,7 @@ var DEFAULT_BUSY_TIMEOUT_MS = 5e3;
 var WRITE_ATTEMPTS = 3;
 var WRITE_RETRY_DELAY_MS = 25;
 var SCHEMA_VERSION = 1;
+var DEFAULT_CHANGE_BATCH = 200;
 function paseoHome() {
   return process.env.PASEO_HOME ?? path.join(os.homedir(), ".paseo");
 }
@@ -20235,6 +20236,40 @@ var LuckPlannerStore = class {
     const rows = this.db.prepare(
       "SELECT * FROM history WHERE project_key = ? AND entity_id = ? ORDER BY id"
     ).all(projectKey, entityId);
+    return rows.map(rowToHistory);
+  }
+  /**
+   * Newest audit row id — the watermark the change feed (stage H1) resumes
+   * from. `history.id` is `AUTOINCREMENT`, so it only ever grows: the
+   * retention prune (stage E4) deletes old rows without ever making this
+   * value go backwards, which is what lets a poller treat it as a cursor.
+   */
+  latestHistoryId() {
+    const row = this.db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM history").get();
+    return row?.id ?? 0;
+  }
+  /**
+   * Audit rows written **after** `sinceId`, oldest first — the change feed
+   * behind the SSE `tree-changed` event and the `tree-changes` RPC (stage H1).
+   *
+   * This is deliberately a read of the shared `history` table instead of an
+   * in-process hook on {@link write}: agents mutate the tree through the
+   * bundled MCP server, a *separate process* with its own connection to this
+   * file, so no hook in the daemon can ever see their writes. Every mutation
+   * appends exactly one row here (the B3 rule), so the table is a complete,
+   * ordered change log — and a `WHERE id > ?` page on the primary key costs
+   * one indexed read, which is why polling it is affordable.
+   *
+   * Clamped at both ends: a `sinceId` ahead of the newest row (a database
+   * that was replaced or reset) reads from the newest row instead of
+   * returning nothing forever, so a stale cursor cannot livelock a client.
+   * Read-only: no fence, no transaction, nothing to audit.
+   */
+  listChangesSince(sinceId, limit = DEFAULT_CHANGE_BATCH) {
+    const latest = this.latestHistoryId();
+    const from = Math.min(Math.max(sinceId, 0), latest);
+    const capped = Math.max(1, Math.trunc(limit));
+    const rows = this.db.prepare("SELECT * FROM history WHERE id > ? ORDER BY id LIMIT ?").all(from, capped);
     return rows.map(rowToHistory);
   }
   /**
@@ -23355,7 +23390,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.23.0";
+var SERVER_VERSION = "0.24.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

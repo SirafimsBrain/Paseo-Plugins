@@ -16,6 +16,7 @@ import {
   dashboardUrl,
   type HealthResponse,
   type NodeResponse,
+  type ReadyEvent,
   type SearchResponse,
   type StatsResponse,
   type TreeResponse,
@@ -231,6 +232,12 @@ export interface DashboardHttpServerOptions {
   version?: string;
   /** SPA root; defaults to `dist/dashboard`. */
   dashboardDir?: string;
+  /**
+   * Audit-row cursor reported in the SSE `ready` payload (stage H1). The
+   * endpoint passes its change feed's watermark, so a reconnecting tab can
+   * tell whether it missed anything; defaults to a constant `0`.
+   */
+  watermark?: () => number;
 }
 
 export class DashboardHttpServer {
@@ -239,13 +246,21 @@ export class DashboardHttpServer {
   private readonly host: string;
   private readonly version: string;
   private readonly dashboardDir: string;
+  private readonly watermark: () => number;
   private readonly options: DashboardHttpServerOptions;
   private server: http.Server | null = null;
   /** Actual bound port — differs from the requested one when 0 was asked. */
   private boundPort: number | null = null;
   private boundAddress: string | null = null;
-  /** Open SSE streams, with the heartbeat timer that keeps each alive. */
-  private readonly sseClients = new Map<http.ServerResponse, NodeJS.Timeout>();
+  /**
+   * Open SSE streams. Each keeps its heartbeat timer and the project it was
+   * opened for (`null` = every project), so a broadcast only wakes the tabs
+   * that care about the project that changed (stage H1).
+   */
+  private readonly sseClients = new Map<
+    http.ServerResponse,
+    { heartbeat: NodeJS.Timeout; projectKey: string | null }
+  >();
 
   constructor(options: DashboardHttpServerOptions) {
     // An empty token would expose the API to any local process; never allow it
@@ -259,6 +274,7 @@ export class DashboardHttpServer {
     this.host = options.host ?? DEFAULT_DASHBOARD_HOST;
     this.version = options.version ?? resolvePluginVersion();
     this.dashboardDir = options.dashboardDir ?? resolveDashboardDir();
+    this.watermark = options.watermark ?? (() => 0);
   }
 
   get listening(): boolean {
@@ -357,12 +373,17 @@ export class DashboardHttpServer {
   }
 
   /**
-   * Pushes one event to every open SSE stream. Stage H1 calls this after a
-   * mutation; F1 only needs it to exist (and is asserted by a direct call).
+   * Pushes one event to every open SSE stream — or, when `projectKey` is
+   * given, only to the streams opened for that project (stage H1: a daemon
+   * can host several workspaces, and a tab for one of them must not refetch
+   * because another project moved).
    */
-  broadcast(event: string, data: unknown): void {
+  broadcast(event: string, data: unknown, projectKey?: string): void {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const res of [...this.sseClients.keys()]) {
+    for (const [res, client] of [...this.sseClients.entries()]) {
+      if (projectKey !== undefined && client.projectKey !== null && client.projectKey !== projectKey) {
+        continue;
+      }
       try {
         res.write(payload);
       } catch {
@@ -404,7 +425,7 @@ export class DashboardHttpServer {
         return;
       }
       if (url.pathname === DASHBOARD_EVENTS_PATH) {
-        this.openSseStream(req, res);
+        this.openSseStream(req, res, url);
         return;
       }
       this.handleApi(url, res);
@@ -610,17 +631,28 @@ export class DashboardHttpServer {
   // SSE
   // -------------------------------------------------------------------------
 
-  private openSseStream(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private openSseStream(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL,
+  ): void {
     res.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-store",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
-    // Reconnect delay and an immediate `ready` so the dashboard knows the
-    // stream is live before the first mutation ever happens (stage H1).
+    // A stream may narrow itself to one project (`?project=`, the way the
+    // dashboard opens it); without it, the client filters the payloads.
+    const requested = url.searchParams.get(DASHBOARD_PROJECT_PARAM);
+    const projectKey = requested !== null && requested.length > 0 ? requested : null;
+    // Reconnect delay and an immediate `ready` carrying the version and the
+    // audit watermark, so the dashboard knows the stream is live before the
+    // first mutation ever happens (stage F1/H1) and can tell a reconnect from
+    // a first connect.
+    const ready: ReadyEvent = { version: this.version, watermark: this.watermark() };
     res.write("retry: 3000\n\n");
-    res.write(`event: ${DASHBOARD_EVENT_READY}\ndata: {}\n\n`);
+    res.write(`event: ${DASHBOARD_EVENT_READY}\ndata: ${JSON.stringify(ready)}\n\n`);
     const heartbeat = setInterval(() => {
       try {
         res.write(": heartbeat\n\n");
@@ -629,7 +661,7 @@ export class DashboardHttpServer {
       }
     }, SSE_HEARTBEAT_MS);
     heartbeat.unref?.();
-    this.sseClients.set(res, heartbeat);
+    this.sseClients.set(res, { heartbeat, projectKey });
 
     const cleanup = (): void => this.closeSseClient(res);
     req.on("close", cleanup);
@@ -637,9 +669,9 @@ export class DashboardHttpServer {
   }
 
   private closeSseClient(res: http.ServerResponse): void {
-    const heartbeat = this.sseClients.get(res);
-    if (heartbeat === undefined) return;
-    clearInterval(heartbeat);
+    const client = this.sseClients.get(res);
+    if (client === undefined) return;
+    clearInterval(client.heartbeat);
     this.sseClients.delete(res);
     try {
       res.end();

@@ -3,7 +3,13 @@ import { goalSchema } from "./goals";
 import { growthSchema } from "./growth";
 import { beeSchema, bugNodeSchema, bugSchema } from "./links";
 import { nodeDetail, stats as statsRpc, treeSearch } from "./rpc";
-import { nodeSchema, projectKeySchema, timestampSchema } from "./tree";
+import {
+  historyEntrySchema,
+  nodeSchema,
+  projectKeySchema,
+  timestampSchema,
+  type HistoryEntry,
+} from "./tree";
 
 /**
  * Read-only dashboard HTTP API (PLAN.md stage F1, `__doc.md` §6).
@@ -31,7 +37,7 @@ export const DASHBOARD_NODE_PATH = "/api/node";
 export const DASHBOARD_SEARCH_PATH = "/api/search";
 /** Panel counters (the toolbar figures). */
 export const DASHBOARD_STATS_PATH = "/api/stats";
-/** SSE channel: heartbeat today, `tree-changed` once stage H1 wires writes. */
+/** SSE channel: `ready` + `tree-changed` per poll (stage H1). */
 export const DASHBOARD_EVENTS_PATH = "/api/events";
 
 /** Query parameter carrying the per-installation access token. */
@@ -67,6 +73,58 @@ export function dashboardUrl(
 export const DASHBOARD_EVENT_READY = "ready";
 /** SSE event sent after a mutation (wired in stage H1). */
 export const DASHBOARD_EVENT_TREE_CHANGED = "tree-changed";
+
+/**
+ * Payload of the SSE `ready` event (stage H1): the version answering the
+ * stream and the audit watermark it is about to continue from. A reopening
+ * tab compares the version with the one it booted with (a plugin update
+ * means "reload the page") and uses the watermark as the baseline for the
+ * `tree-changed` events that follow.
+ */
+export const readyEventSchema = z.object({
+  version: z.string().min(1),
+  watermark: z.number().int().nonnegative(),
+});
+
+/**
+ * Payload of the SSE `tree-changed` event (stage H1): the audit rows written
+ * since the client's watermark, **grouped per project**.
+ *
+ * One event per project per poll, never one per row: a burst of agent writes
+ * (a goal materializing a subtree) costs the dashboard a single refetch, and
+ * the row list still tells it *which* entity moved, so an open details panel
+ * can refresh just that node. `changes` carries the same
+ * {@link historyEntrySchema} rows `/api/node/:id` returns — one shape for
+ * "what happened", read live or read from the trail.
+ */
+export const treeChangedEventSchema = z.object({
+  projectKey: projectKeySchema,
+  /** Highest audit row id included in this event. */
+  watermark: z.number().int().nonnegative(),
+  changes: z.array(historyEntrySchema).min(1),
+});
+
+export type ReadyEvent = z.infer<typeof readyEventSchema>;
+export type TreeChangedEvent = z.infer<typeof treeChangedEventSchema>;
+
+/**
+ * Whether a change batch makes a view of `nodeId` stale (stage H1).
+ *
+ * Both live consumers — the dashboard tab and the native panel — need exactly
+ * this decision, so it lives beside the event contract instead of being written
+ * twice. A **node** row is matched by id, so an unrelated node moving costs a
+ * refetch of nothing; every other entity (bee, bug, goal, growth) is *linked*
+ * to nodes rather than being one, so its rows always count: the link sections
+ * a node view renders may now be wrong.
+ */
+export function changesTouchNode(
+  changes: ReadonlyArray<Pick<HistoryEntry, "entityId" | "entityType">>,
+  nodeId: string,
+): boolean {
+  return changes.some(
+    (change) => change.entityId === nodeId || change.entityType !== "node",
+  );
+}
 
 /**
  * `GET /health` — public liveness probe. No database details (ADR-9); the

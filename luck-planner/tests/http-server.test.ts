@@ -144,6 +144,8 @@ function seedRelations(target: LuckPlannerStore, leafA: Node, leafB: Node): {
 async function boot(options?: {
   dashboard?: boolean;
   token?: string;
+  /** Value the SSE `ready` payload reports (stage H1). */
+  watermark?: number;
 }): Promise<void> {
   store = new LuckPlannerStore({ dbPath: path.join(dir, "luck.db") });
   dashboardDir = path.join(dir, "dashboard");
@@ -161,6 +163,7 @@ async function boot(options?: {
     port: 0,
     version: VERSION,
     dashboardDir,
+    watermark: () => options?.watermark ?? 0,
   });
   await server.start();
   base = server.origin!;
@@ -476,6 +479,52 @@ describe("DashboardHttpServer", () => {
     // The abort lands asynchronously; stop() must still clear the client.
     await server.stop();
     expect(server.sseClientCount).toBe(0);
+  });
+
+  // Stage H1: the `ready` payload carries the cursor a reconnecting tab
+  // resumes from, and a stream opened for one project is not woken by another
+  // project's writes (one daemon hosts several workspaces).
+  it("reports the ready cursor and narrows broadcasts by project", async () => {
+    const other = "/projects/other";
+    await boot({ watermark: 7 });
+
+    const open = async (
+      query: string,
+    ): Promise<{
+      controller: AbortController;
+      reader: SseReader;
+      buffer: { text: string };
+    }> => {
+      const controller = new AbortController();
+      const res = await fetch(`${base}/api/events?token=${TOKEN}${query}`, {
+        signal: controller.signal,
+      });
+      const reader = res.body!.getReader() as unknown as SseReader;
+      const buffer = { text: "" };
+      await readUntil(reader, `event: ${DASHBOARD_EVENT_READY}`, buffer);
+      return { controller, reader, buffer };
+    };
+
+    const mine = await open(`&project=${encodeURIComponent(P)}`);
+    const all = await open("");
+    try {
+      expect(mine.buffer.text).toContain(`"version":"${VERSION}"`);
+      expect(mine.buffer.text).toContain('"watermark":7');
+
+      // Another project's change reaches the unscoped stream only.
+      server.broadcast(DASHBOARD_EVENT_TREE_CHANGED, { projectKey: other }, other);
+      await readUntil(all.reader, `event: ${DASHBOARD_EVENT_TREE_CHANGED}`, all.buffer);
+      expect(all.buffer.text).toContain(`"projectKey":"${other}"`);
+      expect(mine.buffer.text).not.toContain(DASHBOARD_EVENT_TREE_CHANGED);
+
+      // Its own project still arrives.
+      server.broadcast(DASHBOARD_EVENT_TREE_CHANGED, { projectKey: P }, P);
+      await readUntil(mine.reader, `event: ${DASHBOARD_EVENT_TREE_CHANGED}`, mine.buffer);
+      expect(mine.buffer.text).toContain(`"projectKey":"${P}"`);
+    } finally {
+      mine.controller.abort();
+      all.controller.abort();
+    }
   });
 
   it("requires a token and releases the port on stop", async () => {

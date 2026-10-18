@@ -19,6 +19,7 @@ import {
   searchResponseSchema,
   statsResponseSchema,
   treeResponseSchema,
+  DASHBOARD_EVENTS_PATH,
   DASHBOARD_HEALTH_PATH,
   DASHBOARD_NODE_PATH,
   DASHBOARD_PROJECT_PARAM,
@@ -105,6 +106,19 @@ export class DashboardApi implements DashboardClient {
       await this.raw(`${DASHBOARD_HEALTH_PATH}?cacheBust=${Date.now()}`),
     );
     return { version: body.version };
+  }
+
+  /**
+   * URL of the SSE channel for this tab (stage H1). Carries the token like
+   * every other request — `EventSource` cannot set headers (ADR-8) — and the
+   * project, so the server only pushes this project's changes to this stream.
+   */
+  eventsUrl(): string {
+    const query = new URLSearchParams({
+      [DASHBOARD_TOKEN_PARAM]: this.token,
+      [DASHBOARD_PROJECT_PARAM]: this.projectKey,
+    });
+    return `${this.origin}${DASHBOARD_EVENTS_PATH}?${query.toString()}`;
   }
 
   private async get(pathWithQuery: string): Promise<unknown> {
