@@ -197,16 +197,17 @@ function contentTypeFor(file: string): string {
 }
 
 /**
- * Shown at `/` until stage G1 produces the real SPA. It keeps a freshly
- * installed plugin from answering a blank 404 and tells a human where to look;
- * the JSON API below it already works.
+ * Shown at `/` when `dist/dashboard` is absent — e.g. a checkout where the
+ * `build` step never ran (the MCP server works from source, the SPA needs the
+ * bundle). It keeps such an install from answering a blank 404 and tells a
+ * human where to look; the JSON API below it already works.
  */
 const PLACEHOLDER_HTML = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>luck-planner dashboard</title></head>
 <body style="font-family: system-ui, sans-serif; margin: 3rem; line-height: 1.5">
 <h1>luck-planner dashboard</h1>
-<p>The dashboard web app is not built yet (stage G1).</p>
+<p>The dashboard web app is not built in this checkout (run the plugin build).</p>
 <p>The read-only API is live: <code>/health</code>, <code>/api/tree</code>,
 <code>/api/node/:id</code>, <code>/api/search</code>, <code>/api/stats</code>,
 <code>/api/events</code> — each needs the access token as <code>?token=</code>.</p>

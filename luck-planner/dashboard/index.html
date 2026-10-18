@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>luck-planner dashboard</title>
+<!--
+  The dashboard shell (PLAN.md stage G1). Served by the plugin's loopback HTTP
+  server from `dist/dashboard` with an SPA fallback for extensionless paths,
+  so both asset URLs are root-absolute: a deep link like `/tree/leaf/123` must
+  still resolve them against the origin, not against its own path. The access
+  token and the project key arrive as query parameters (ADR-8, stage F2) and
+  are read by the app, never by this file.
+-->
+<link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/assets/dashboard.js"></script>
+</body>
+</html>

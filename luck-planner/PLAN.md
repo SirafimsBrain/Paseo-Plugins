@@ -1,10 +1,10 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **Статус: версия в разработке (`0.18.0`).** Этапы **E4** (settings screen +
-> retention), **F1** (HTTP-сервер дашборда) и **F2** («Открыть дашборд»)
-> выполнены, тесты зелёные.
-> Следующий этап — **G1** (каркас веб-приложения дашборда, React+TS).
-> Этапы A1–F2 закрыты и помечены ниже; G–J не начинались.
+> **Статус: версия в разработке (`0.19.0`).** Этапы **E4** (settings screen +
+> retention), **F1** (HTTP-сервер дашборда), **F2** («Открыть дашборд») и **G1**
+> (каркас веб-приложения дашборда) выполнены, тесты зелёные.
+> Следующий этап — **G2** (data-адаптер `/api/tree` → React Flow + раскладка d3-hierarchy).
+> Этапы A1–G1 закрыты и помечены ниже; G2–J не начинались.
 > Подробности — в [`__doc.md`](./__doc.md) (источник истины).
 
 План основан на:
@@ -261,9 +261,10 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 
 ### Блок G — Dashboard 2D: диаграмма (React Flow)
 
-**G1. Каркас веб-приложения** → `0.19.0`
+**G1. Каркас веб-приложения** ✅ → `0.19.0`
 - `dashboard/`: React+TS, layout — toolbar (поиск, фильтры, переключатель 2D/3D-заглушка), canvas, details-panel, legend. Сборка esbuild → `dist/dashboard` (отдельный entry; ленивая подгрузка не нужна — пока только 2D).
-- Приёмка: страница открывается через F2, консоль браузера без ошибок, стили не завязаны на тему Paseo (собственная тёмная/светлая тема дашборда).
+- Приёмка ✅: страница открывается через F2, консоль браузера без ошибок, стили не завязаны на тему Paseo (собственная тёмная/светлая тема дашборда).
+- Реализация: `dashboard/src/` — `app.tsx` (сетка toolbar/body/legend, живые счётчики из `/api/stats` через типизированный клиент `api.ts`, все ошибки — статусной строкой в toolbar), `theme.ts` + `colors.ts` (собственные палитры; полнота цветов/подписей по enum `shared/tree.ts` закреплена тестом), `params.ts` (разбор `?token=&project=`), компоненты `Toolbar/Canvas/DetailsPanel/Legend`. Сборка — esbuild `platform: browser`, `process.env.NODE_ENV` зафиксирован как `production` (иначе вкладка падает с `ReferenceError: process is not defined`), `dist/dashboard/index.html` + `assets/dashboard.js|css` с root-absolute URL для SPA-фолбэка. Свой `dashboard/tsconfig.json` с DOM-lib (корневой исключает `dashboard/**`), `npm run typecheck` гоняет оба. Тесты: `dashboard-params` (5), `dashboard-theme` (8), `dashboard-build` (7 — реальный сервер отдаёт реальный билд, браузерный клиент против реального store, детерминизм пересборки). 23 файла, 326 тестов зелёные.
 
 **G2. Данные + раскладка** → `0.20.0`
 - Data-адаптер `/api/tree` → React Flow nodes/edges (чистые функции, покрыты vitest без DOM): маппинг kind/status → тип узла, раскладка d3-hierarchy (radial или layered) + авто-зазоры, `collapse/expand` веток, корень-техстек и ствол выделяются формой.

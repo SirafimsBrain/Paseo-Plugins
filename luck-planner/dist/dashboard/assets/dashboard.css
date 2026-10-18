@@ -1,0 +1,224 @@
+/* dashboard/src/dashboard.css */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--lp-bg, #0f1115);
+  color: var(--lp-text, #e6e9ef);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+#root {
+  height: 100%;
+}
+.lp-app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+}
+.lp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: var(--lp-surface, #171a21);
+  border-bottom: 1px solid var(--lp-border, #262b36);
+}
+.lp-toolbar-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.lp-toolbar-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.lp-toolbar-project {
+  color: var(--lp-text-muted, #8b93a3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28ch;
+}
+.lp-toolbar-counters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.lp-counter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+.lp-counter-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lp-counter-label,
+.lp-counter-hint {
+  color: var(--lp-text-muted, #8b93a3);
+  font-size: 11px;
+}
+.lp-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lp-toolbar-search,
+.lp-toolbar-filter {
+  background: var(--lp-bg, #0f1115);
+  color: var(--lp-text, #e6e9ef);
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.lp-toolbar-search:disabled,
+.lp-toolbar-filter:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.lp-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.lp-view-button {
+  background: transparent;
+  color: var(--lp-text-muted, #8b93a3);
+  border: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lp-view-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.lp-view-button-active {
+  background: var(--lp-selection, rgba(91, 157, 255, 0.16));
+  color: var(--lp-accent, #5b9dff);
+  font-weight: 600;
+}
+.lp-toolbar-status {
+  color: var(--lp-text-muted, #8b93a3);
+  font-size: 11px;
+  max-width: 36ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lp-body {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  min-height: 0;
+}
+.lp-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--lp-bg, #0f1115);
+}
+.lp-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--lp-text-muted, #8b93a3);
+  text-align: center;
+  padding: 0 24px;
+}
+.lp-canvas-empty-title {
+  margin: 0;
+  color: var(--lp-text, #e6e9ef);
+  font-weight: 600;
+}
+.lp-canvas-empty-text {
+  margin: 0;
+  max-width: 52ch;
+}
+.lp-canvas-empty code {
+  background: var(--lp-surface, #171a21);
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.lp-details {
+  background: var(--lp-surface, #171a21);
+  border-left: 1px solid var(--lp-border, #262b36);
+  padding: 12px;
+  overflow-y: auto;
+}
+.lp-details-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lp-text-muted, #8b93a3);
+}
+.lp-details-empty {
+  margin: 0;
+  color: var(--lp-text-muted, #8b93a3);
+}
+.lp-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--lp-surface, #171a21);
+  border-top: 1px solid var(--lp-border, #262b36);
+  font-size: 11px;
+  color: var(--lp-text-muted, #8b93a3);
+}
+.lp-legend-title {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.lp-legend-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.lp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.lp-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.lp-legend-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--lp-border, #262b36);
+}
+.lp-legend-note {
+  margin-left: auto;
+  opacity: 0.8;
+}

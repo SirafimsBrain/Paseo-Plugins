@@ -1,10 +1,11 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.18.0`).** Stages **E4** (settings
-> screen), **F1** (read-only dashboard HTTP server) and **F2** ("Open dashboard") are
-> done and all tests are green; the next stage is **G1** (dashboard web-app scaffold).
-> Stages A1–F2 are complete; blocks G–J are otherwise untouched. Nothing in this
-> document is a released API: the roadmap in §7 describes work that is still ahead.
+> **Development status: version in development (`0.19.0`).** Stages **E4** (settings
+> screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard") and
+> **G1** (dashboard web-app scaffold) are done and all tests are green; the next
+> stage is **G2** (data adapter + layout). Stages A1–G1 are complete; blocks G–J are
+> otherwise untouched. Nothing in this document is a released API: the roadmap in §7
+> describes work that is still ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md) (added in stage J1).
@@ -791,21 +792,82 @@ only, so a Node test that imported it would read `undefined`. The rules:
 `browser`/`external`, danger for `unavailable`/`error`), so a refused open says *why* instead
 of failing silently.
 
+### Dashboard web app — scaffold (stage G1 — `dashboard/`)
+
+The 2D/3D dashboards are a standalone React + TypeScript web app (ADR-1), served by the
+F1 HTTP server from `dist/dashboard` and fed by its read-only API. Stage G1 lays the
+chrome — toolbar, canvas region, details panel, legend — and the build pipeline; the
+diagram itself arrives in G2–G5.
+
+**Layout** (`dashboard/src/app.tsx`): a fixed three-row grid — toolbar, body (canvas +
+details panel), legend — so mounting the React Flow viewport in G2 changes nothing about
+the surrounding chrome. What is already live at G1: the app parses `?token=&project=`
+from the URL (stage F2 wrote them there), reads the counters from `/api/stats` through
+the typed client, and surfaces every non-fatal failure as a status line in the toolbar
+(a dashboard that cannot fetch says *why* instead of throwing to the console). The search
+box, the kind/status filters and the 3D half of the view switch render disabled with a
+hint naming the stage that wires them (G4, I4) — a scaffold that lies about its state is
+worse than one that says what is coming.
+
+**Own theming** (`dashboard/src/theme.ts`, `dashboard/src/dashboard.css`). The tab cannot
+see Paseo's theme tokens, so the dashboard ships its own dark/light palette as CSS custom
+properties on `:root`, resolved as *stored choice > `prefers-color-scheme` > dark* and
+applied once on startup. Colours are data (`ThemeTokens`), not scattered hexes, and the
+semantic diagram palette (`dashboard/src/colors.ts`: kind colours, status-bar colours,
+labels and glyphs for every `shared/tree.ts` enum member) is one module shared by the
+legend today and the G3 custom nodes tomorrow, so a legend swatch cannot drift from the
+shape it describes. Every status is labelled in text wherever it appears — colour alone
+never carries state.
+
+**Typed API client** (`dashboard/src/api.ts`). `DashboardApi` wraps the F1 endpoints
+(`tree`, `node`, `search`, `stats`, plus the public `health` probe) against one origin +
+token + project key, and parses every response with the **shared** zod schemas — the same
+objects the server validates with and the native panel uses, so a shape drift breaks at
+the first line that touches the data instead of deep in a layout function. The origin is
+the tab's own (`resolveApiOrigin`): the SPA and the API share the one loopback socket.
+A rejected token becomes an actionable message ("re-open the dashboard from Paseo").
+
+**Build** (`scripts/bundle.mjs`). The same script now produces both artifacts: the MCP
+bundle and `dist/dashboard` (esbuild, `platform: browser`, ESM, `jsx: automatic`,
+`process.env.NODE_ENV` pinned to `production` — without that define a browser tab dies
+with `ReferenceError: process is not defined` before the first render, and the dev build
+would ship). `dashboard/index.html` is copied next to the emitted
+`assets/dashboard.js` + `assets/dashboard.css`; its asset URLs are root-absolute so an
+SPA deep link like `/tree/leaf/123` still resolves them against the origin. `dist/` is
+committed (project rule, as with the MCP bundle), and the F1 placeholder shell now only
+appears when `dist/dashboard` is absent (a checkout whose build never ran).
+
+**TypeScript boundary.** The root `tsconfig.json` excludes `dashboard/**`; the app has
+its own `dashboard/tsconfig.json` with the DOM lib (the plugin client stays DOM-free by
+construction). `npm run typecheck` runs both. The pure modules the vitest suite imports
+(`params.ts`, `theme.ts`, `colors.ts`) touch no DOM APIs, so they typecheck under either
+configuration.
+
+**Tests** — `tests/dashboard-params.test.ts` (5: token/project parsing, absent/unknown
+parameters, encoded project paths), `tests/dashboard-theme.test.ts` (8: preference rule,
+both palettes complete, the colour/label/glyph coverage guard over both enums) and
+`tests/dashboard-build.test.ts` (7: the built shell + asset pair with root-absolute
+URLs; production build with no live `process.env`; byte-identical rebuild; the real
+`DashboardHttpServer` serving the real `dist/dashboard` — shell, assets with the right
+content types, SPA fallback; the browser client round-tripping stats/tree/node against
+that real server + store, with the bad-token message pinned). Tab-level acceptance that
+needs a real browser (console clean, theme applied) stays manual per PLAN rule 4.
+`typecheck` (both configs) and the full suite are green: 23 files, 326 tests.
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block F (HTTP transport) is closed — F1 and F2 are done.** Stages A1–E4 are
-complete and released as tagged versions up to `luck-planner@0.16.0`; blocks **B (storage)**,
-**C (domain semantics)**, **D (agent access)** and **E (UI transport)** are closed. F1
-(0.17.0) delivered the read-only dashboard HTTP server on loopback (ADR-9) and F2 (0.18.0)
-made it reachable — panel button + ⌘K screen, in-app browser with an external fallback.
-**Block G starts with G1** (dashboard web-app scaffold: React + TS, toolbar/canvas/details,
-own theming), which is the first stage that produces `dist/dashboard` instead of the
-placeholder. A candidate **D4** (config-file MCP registrations for OpenCode/Kilo/Cline/Cursor/
-Codex, the memory-flash 0.8.1 fix) may still precede the remaining UI work.
+**Status: block G has started — G1 is done.** Stages A1–F2 are complete and released as
+tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**, **C (domain
+semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP transport)** are
+closed. G1 (0.19.0) delivered the dashboard web-app scaffold: toolbar/canvas/details/
+legend chrome, the dashboard's own dark/light theming, the typed browser API client and
+the `dist/dashboard` build. A candidate **D4** (config-file MCP registrations for
+OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still precede the
+remaining UI work.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
@@ -815,7 +877,7 @@ Codex, the memory-flash 0.8.1 fix) may still precede the remaining UI work.
 | D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
-| G | G1–G5 | 0.19.0–0.23.0 | 2D dashboard (React Flow): scaffold, adapter + layout, nodes, interaction, growth layer |
+| G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout, nodes, interaction, growth layer |
 | H | H1–H2 | 0.24.0–0.25.0 | SSE live updates; optional timeline rows |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
