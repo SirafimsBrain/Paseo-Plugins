@@ -13,10 +13,12 @@
 > (bees, bugs, goals and growth in 3D, with the animation frame budget) and
 > **I4** (3D interaction: picking into the shared details panel, the selection
 > highlight, the camera flight from the search, the filters in 3D and the
-> remembered 2D/3D choice) and **J1** (the plugin's English README and the
-> link from the repository README) are done and all tests are green; the next
-> stage is **J2** (the live-daemon end-to-end acceptance).
-> Stages A1–I4 and J1 are complete; J2 is untouched. Nothing in
+> remembered 2D/3D choice), **J1** (the plugin's English README and the link
+> from the repository README) and **J2** (the live-daemon acceptance — the
+> install, the MCP round trip, the goal approval, the dashboard in the host's
+> browser, the SSE, the themes and the measurements) are done and all tests
+> are green.
+> Stages A1–I4, J1 and J2 are complete. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -1785,8 +1787,15 @@ does, the install, the eight MCP tools, the 2D and 3D dashboards, the panel,
 the skill, the settings, where the data lives and the known limitations — and
 linked it from the repository README (Plugins, Installation, the build table
 and the compatibility table), with a `__doc.md §10 Compatibility` section that
-states plainly what is verified and what is not (the live-daemon install is
-still open — that is J2). Next: **J2** (the live-daemon e2e checklist).
+states plainly what is verified and what is not. J2 ran the **live-daemon
+acceptance** on Paseo 0.12.0 (§10) — the install from the git source, the
+MCP round trip against the published entry, the goal approval, the dashboard
+in the host's browser (2D and 3D, the G4/I4 scenario), the SSE, the themes,
+the console and the measurements (60 fps, 6 draw calls, 1 773 KiB first load,
+2 114 KiB lazy 3D chunk). It also exposed three real defects that no
+artifact test could see: the host's CommonJS build has no `import.meta.url`
+(§10.1), the plugin's files are not next to its code (§10.2) and the
+published MCP entry died with the revision it pointed into (§10.3, §10.4).
 A candidate **D4**
 (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
@@ -1803,7 +1812,7 @@ precede the remaining UI work.
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle ✅ (0.29.0) |
-| J | J1–J2 | — | README.md + root README link ✅ (J1, 0.29.0), final e2e acceptance on a live daemon (J2) |
+| J | J1–J2 | — | README.md + root README link ✅ (J1, 0.29.0), final e2e acceptance on a live daemon ✅ (J2, 0.29.1–0.29.4 — three defects the live install exposed, all now pinned by tests) |
 
 Blocks B–D have file-disjoint boundaries and may be delegated to different agents.
 
@@ -1868,13 +1877,51 @@ Verified on 2026-10-19 in the plugin's development environment with
 - The dashboard bundle is a static ESM app served by the plugin's own
   loopback HTTP server; it needs no CDN, no network and no external asset.
 
-**Not verified yet, and stated plainly:** the plugin has never been installed
-into a *running* Paseo daemon (`paseo plugin add` → `running` → a real agent
-calling a real tool → the dashboard openable in the host's browser). The J2
-checklist covers exactly that walk, together with the FPS and bundle-size
-measurements on a live 5–10k-node project and the console being clean in the
-Paseo tab. Everything above is a statement about the *code*; the daemon
-install is a statement about the *host*, and it is still open.
+**Verified on a running daemon (stage J2, 2026-10-19, Paseo 0.12.0).** The
+plugin was installed from the git source on a live daemon
+(`paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:luck-planner`),
+which builds it in its managed clone (`npm ci`, `npm run bundle`) and loads it
+from there. The checklist and its results:
+
+| # | Check | Result |
+| - | ----- | ------ |
+| 1 | install from the git source → `running` | ✅ `paseo plugin ls` shows `running`, no error column |
+| 2 | `paseo plugin logs luck-planner` | ✅ only the host's own `DeprecationWarning`s; the plugin logs its MCP entry, the skill and the dashboard URL |
+| 3 | the dashboard answers | ✅ `GET /health` → `{"ok":true,"version":"0.29.4"}`; `GET /` serves the built app (not the placeholder) |
+| 4 | an agent through MCP | ✅ the **published** entry (`~/.paseo/plugins/luck-planner/mcp-server.js`) spoke JSON-RPC: `initialize` (name `luck-planner`, version 0.29.4), `tools/list` (all eight tools), `luck_tree_search`, `luck_tree_get_context`, `luck_tree_upsert_leaf` (four leaves with statuses), `luck_tree_add_bee`, `luck_tree_report_bug`, `luck_tree_set_goal` (`create` + `propose`), `luck_tree_update_growth` |
+| 5 | the human approves a goal | ✅ the *store* refuses a draft ("only a proposed goal may be approved") and approves the proposed one — the same call the panel's `luck-planner.goal-approve` RPC makes. The goal materialized into the tree and its ring appears in the 3D scene. The panel's **click** itself is a native-surface action with no automation surface; it stays a manual step |
+| 6 | the dashboard in the host's browser | ✅ the Paseo workspace browser against the live `127.0.0.1:8899`: the 2D diagram, the details panel, the legend, the live counters |
+| 7 | the G4 scenario in 2D | ✅ the search found the leaf ("2 matches — showing …"), the details panel filled with the path, version and revision; clicking another node switched the panel |
+| 8 | the I4 scenario in 3D | ✅ the switch mounted the scene (1097×645, a live WebGL context, status `live`); a click on a leaf filled **the same** details panel, and the 3D label named the node |
+| 9 | the switch keeps the selection | ✅ 2D → 3D → the details panel still showed the selected node, and the 3D label appeared with it |
+| 10 | the SSE updates both views | ✅ with the tab open, a leaf written through MCP moved the 2D counters (8 → 15 → 16 nodes) and the 3D scene (11 → 12 instanced leaves) — no reload |
+| 11 | the themes | ✅ dark (`--lp-bg: #0f1115`) and light (`#f6f7f9`, `--lp-surface: #ffffff`) — the stored choice wins over the OS preference |
+| 12 | the browser console | ✅ one message, from three.js itself (`THREE.Clock: This module has been deprecated`) — a library deprecation, not an error of this plugin. The host's own automation does not expose the console content, so the check was done with a probe installed in the *installed* checkout (removed afterwards) |
+| 13 | the frame rate | ✅ **60 fps** in the live 3D scene (rAF ticks over two seconds) with 16 nodes, 2 bees, 2 incident markers, a goal ring and the selection ring — 6 draw calls |
+
+Measurements (the numbers the roadmap asked for):
+
+| What | Size |
+| ---- | ---- |
+| the standalone MCP server (`dist/mcp-server.js`) | 869 KiB — no runtime dependency beyond Node's built-ins |
+| the dashboard's **first load** (`dashboard.js` + the shared chunks) | 1 773 KiB |
+| the **lazy** 3D chunk (`dashboard-3d.js`) | 2 114 KiB — downloaded only when 3D is opened |
+| the dashboard CSS | 29 KiB |
+| the live tree in the acceptance | 16 nodes, 2 bees, 2 open incidents, 1 materialized goal |
+
+The 10 000-node budget stays a *measured* claim from the suite (an overlay
+build under 500 ms, 60 frames of animation under 300 ms, a 10k-node layout in
+about 90 ms) — the live tree above is a real project, not a synthetic one, and
+the two are different kinds of evidence.
+
+**What the acceptance cost, and what it bought.** Three real defects, all of
+them invisible to the artifact tests, because they only exist in the *host's*
+build and in the *daemon's* lifecycle: the CommonJS `import.meta` trap
+(§10.1), the files-not-next-to-the-code trap (§10.2) and the MCP entry that
+died with the revision it pointed into (§10.3, §10.4). Each one is now
+pinned by a test that reproduces the host's build rather than describing it.
+
+
 
 ### 10.1 The CommonJS trap (0.29.1) — the live install found it
 
