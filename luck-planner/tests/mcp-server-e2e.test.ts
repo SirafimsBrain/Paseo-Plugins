@@ -9,10 +9,13 @@ import { fileURLToPath } from "node:url";
 /**
  * Stage D2 acceptance (PLAN.md): a real spawn of the built
  * `dist/mcp-server.js` — initialize handshake, tools/list and tools/call
- * over stdio — plus the determinism of a repeated `npm run bundle`. The
- * bundle is produced by `scripts/bundle.mjs` (wired into `pretest`, and
- * re-run by the determinism test below, so the spawn always sees a fresh
- * build even when vitest is invoked directly).
+ * over stdio — plus the determinism of `scripts/bundle.mjs`. The bundle is
+ * produced by `pretest` (and by the plugin's build step), and the determinism
+ * test rebuilds it into *temp* roots, never into `dist/`: parallel test files
+ * read the built dashboard graph, and the chunk sweep of a rebuild inside the
+ * shared directory used to unlink files under them. Instead of re-creating
+ * the artifact, the test asserts that the committed one **is** a fresh build,
+ * so a stale `dist/` fails loudly rather than being silently patched.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -142,20 +145,36 @@ describe("MCP server end-to-end (real process)", () => {
     }
   }, 30000);
 
-  it("rebuilds the bundle deterministically", () => {
-    const hash = (): string => {
-      execFileSync(process.execPath, [path.join(ROOT, "scripts", "bundle.mjs")], {
-        cwd: ROOT,
-        stdio: "pipe",
-      });
-      return createHash("sha256")
-        .update(fs.readFileSync(SERVER_BUNDLE))
-        .digest("hex");
-    };
-    const first = hash();
-    const second = hash();
-    expect(second).toBe(first);
-  }, 60000);
+  it("rebuilds the bundle deterministically, without touching the committed artifact", () => {
+    // The build goes to temp roots (see `scripts/bundle.mjs --outdir`): a
+    // rebuild of the shared `dist/` here would race the parallel test files
+    // that read `dist/dashboard/assets/chunk-*.js`.
+    const first = fs.mkdtempSync(path.join(os.tmpdir(), "luck-planner-mcp-a-"));
+    const second = fs.mkdtempSync(path.join(os.tmpdir(), "luck-planner-mcp-b-"));
+    try {
+      const build = (outRoot: string): string => {
+        execFileSync(
+          process.execPath,
+          [path.join(ROOT, "scripts", "bundle.mjs"), "--outdir", outRoot],
+          { cwd: ROOT, stdio: "pipe" },
+        );
+        return createHash("sha256")
+          .update(fs.readFileSync(path.join(outRoot, "dist", "mcp-server.js")))
+          .digest("hex");
+      };
+      const digestA = build(first);
+      const digestB = build(second);
+      expect(digestB).toBe(digestA);
+      // The committed bundle is that very build — which is what makes the
+      // spawn below (and on a fresh clone) meaningful.
+      expect(
+        createHash("sha256").update(fs.readFileSync(SERVER_BUNDLE)).digest("hex"),
+      ).toBe(digestA);
+    } finally {
+      fs.rmSync(first, { recursive: true, force: true });
+      fs.rmSync(second, { recursive: true, force: true });
+    }
+  }, 120000);
 
   it("handshakes, lists the documented tools and round-trips a goal", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "luck-e2e-"));

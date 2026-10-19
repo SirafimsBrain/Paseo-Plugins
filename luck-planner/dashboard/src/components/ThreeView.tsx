@@ -10,8 +10,10 @@
  * Stage I2 adds the data path: the app builds the radial layout
  * (`dashboard/src/tree-3d.ts`, pure) from the loaded tree and hands it to
  * this component, which forwards it into the mounted scene through
- * `handle.setModel` — once when the scene appears, and again on every layout
- * change, without ever remounting the renderer.
+ * `handle.setScene` — once when the scene appears, and again on every layout
+ * change, without ever remounting the renderer. Stage I3 rides in the same
+ * pair: the overlay (`dashboard/src/overlay-3d.ts`) is passed alongside the
+ * layout, because a model and the links on it are one view of one payload.
  *
  * Every outcome is reported through `onSceneState`, which keeps the app's
  * single status line honest: "Loading the 3D view…" while the chunk arrives,
@@ -23,6 +25,7 @@
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type { Scene3DHandle } from "../dashboard-3d";
+import type { Scene3DOverlay } from "../overlay-3d";
 import type { Scene3DModel } from "../tree-3d";
 import {
   THREE_LOADING_STATUS,
@@ -44,6 +47,12 @@ export interface ThreeViewProps {
    */
   readonly model: Scene3DModel | null;
   /**
+   * The link/incident/goal/growth overlays of the same payload (stage I3),
+   * computed by `dashboard/src/overlay-3d.ts`. Forwarded together with the
+   * model — they describe one view of one payload.
+   */
+  readonly overlay: Scene3DOverlay | null;
+  /**
    * Reports the state change. `loading` carries its status text, `ready`
    * clears the line, `failed` carries the reason — and the app falls back to
    * 2D on that state (the I1 fallback, second half).
@@ -59,8 +68,10 @@ export function ThreeView(props: ThreeViewProps): ReactElement {
   // model effect must not re-run the mount either.
   const stateRef = useRef(props.onSceneState);
   stateRef.current = props.onSceneState;
-  const modelRef = useRef(props.model);
-  modelRef.current = props.model;
+  // The scene arrives as a pair (layout + overlay); both are read from refs so
+  // the mount effect keeps running exactly once.
+  const sceneRef = useRef({ model: props.model, overlay: props.overlay });
+  sceneRef.current = { model: props.model, overlay: props.overlay };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -78,9 +89,13 @@ export function ThreeView(props: ThreeViewProps): ReactElement {
     import("../dashboard-3d")
       .then((module) => {
         if (cancelled) return;
-        const handle = module.mountScene3D(container);
+        const handle = module.mountScene3D(container, (detail) => {
+          // A renderer that dies after the probe passed (lost context, driver
+          // eviction): the scene reports it, the app leaves 3D.
+          if (!cancelled) stateRef.current("failed", threeFailedStatus(detail));
+        });
         handleRef.current = handle;
-        handle.setModel(modelRef.current);
+        handle.setScene(sceneRef.current.model, sceneRef.current.overlay);
         stateRef.current("ready", "");
       })
       .catch((cause: unknown) => {
@@ -98,12 +113,12 @@ export function ThreeView(props: ThreeViewProps): ReactElement {
     };
   }, [props.webgl.ok]);
 
-  // Data path (I2): forward every layout change into the mounted scene. Before
-  // the chunk arrived the handle is null — the mount effect seeds the model
-  // from the ref, so nothing is lost.
+  // Data path (I2/I3): forward every layout/overlay change into the mounted
+  // scene. Before the chunk arrived the handle is null — the mount effect
+  // seeds the scene from the ref, so nothing is lost.
   useEffect(() => {
-    handleRef.current?.setModel(props.model);
-  }, [props.model]);
+    handleRef.current?.setScene(props.model, props.overlay);
+  }, [props.model, props.overlay]);
 
   return (
     <div

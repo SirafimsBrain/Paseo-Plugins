@@ -403,11 +403,7 @@ export function buildGraph(
   // branch still reports the progress of what it hides. A goal's own record
   // joins the roll-up at the node it materialized, so the heat map covers
   // plan progress and fact progress with one number.
-  const nodeGrowth = nodeGrowthRollups(
-    index,
-    growthRecordsBySubject(input.growth, "node"),
-    goalRecordsByMaterializedRoot(input),
-  );
+  const nodeGrowth = growthRollups(input);
 
   // Nested layout input, visible nodes only.
   interface LayoutInput {
@@ -595,6 +591,23 @@ function addRecords(
 }
 
 /**
+ * Growth roll-ups of one payload, keyed by node id (G5).
+ *
+ * Exported so the *second* consumer of the same numbers — the 3D overlay
+ * (stage I3) — keys its glow rings to exactly the roll-up the 2D heat layer
+ * paints: the two views can never disagree about "how much of this subtree is
+ * done", because there is one computation, not two. `indexTree` runs over the
+ * full payload, so collapsing a branch in 2D does not change a single ratio.
+ */
+export function growthRollups(input: TreeResponse): Map<string, GrowthRollup> {
+  return nodeGrowthRollups(
+    indexTree(input.nodes),
+    growthRecordsBySubject(input.growth, "node"),
+    goalRecordsByMaterializedRoot(input),
+  );
+}
+
+/**
  * One roll-up per node that has growth data in its subtree (G5): the node's
  * own records — plus any goal materialized *at* this node — merged with the
  * roll-ups of its children, computed in one iterative post-order pass. Nodes
@@ -774,8 +787,13 @@ function buildGoalFrames(
  * Open/investigating incident ids per node id (sorted, deduplicated) — the
  * G3 badge count is the array length and the G4 selection follows them to
  * the other leaves the incident touches.
+ *
+ * Exported for the 3D overlay (stage I3), which paints one pulsing marker per
+ * blocking incident per leaf: it must not invent its own definition of
+ * "blocking", so it reads this one (the same `open` + `investigating` pair
+ * `store.stats()` counts).
  */
-function openBugIdsByNode(input: TreeResponse): Map<string, string[]> {
+export function openBugIdsByNode(input: TreeResponse): Map<string, string[]> {
   const openStatuses = new Set(["open", "investigating"]);
   const bugsById = new Map(input.bugs.map((bug) => [bug.id, bug]));
   const ids = new Map<string, Set<string>>();

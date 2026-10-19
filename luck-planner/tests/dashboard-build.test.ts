@@ -6,8 +6,10 @@
  * name:
  *
  * 1. `scripts/bundle.mjs` writes `dist/dashboard/index.html` + the asset pair
- *    the shell links (`assets/dashboard.js`, `assets/dashboard.css`), and the
- *    rebuild is byte-identical (the same determinism rule the MCP bundle has).
+ *    the shell links (`assets/dashboard.js`, `assets/dashboard.css`), the
+ *    committed artifact matches a *fresh* deterministic build (file set
+ *    included), and that build is reproducible in a temp root — never in the
+ *    shared `dist/`, which parallel test files read.
  * 2. The bundle is a *production* React build: it must not carry a live
  *    `process.env` reference, which would kill the tab with a
  *    `ReferenceError: process is not defined` before the first render.
@@ -97,22 +99,58 @@ describe("dist/dashboard (the built SPA)", () => {
     expect(js).toContain("lp-live");
   });
 
-  it("rebuilds deterministically", () => {
-    const hashDashboard = (): string => {
-      execFileSync(process.execPath, [path.join(ROOT, "scripts", "bundle.mjs")], {
-        cwd: ROOT,
-        stdio: "pipe",
-      });
-      return createHash("sha256")
-        .update(fs.readFileSync(APP_JS))
-        .update(fs.readFileSync(APP_CSS))
-        .update(fs.readFileSync(INDEX_FILE))
-        .update(fs.readFileSync(SCENE_JS))
-        .digest("hex");
-    };
-    expect(hashDashboard()).toBe(hashDashboard());
-  }, 60000);
+  it("rebuilds deterministically, without touching the committed artifact", () => {
+    // The rebuild runs into *temp* roots, never into the shared `dist/`:
+    // vitest runs test files in parallel, and the chunk sweep would briefly
+    // unlink `chunk-*.js` under the sibling suites that read the built graph
+    // (`dashboard-3d.test.ts`) — a genuinely flaky failure, fixed by keeping
+    // every write out of the artifact the other files read. `pretest` still
+    // rebuilds `dist/` before the suite, so those readers see a fresh build.
+    const first = fs.mkdtempSync(path.join(os.tmpdir(), "luck-planner-build-a-"));
+    const second = fs.mkdtempSync(path.join(os.tmpdir(), "luck-planner-build-b-"));
+    try {
+      for (const outRoot of [first, second]) {
+        execFileSync(
+          process.execPath,
+          [path.join(ROOT, "scripts", "bundle.mjs"), "--outdir", outRoot],
+          { cwd: ROOT, stdio: "pipe" },
+        );
+      }
+      const digestA = hashTree(path.join(first, "dist"));
+      const digestB = hashTree(path.join(second, "dist"));
+      expect(digestB).toBe(digestA);
+      // …and the committed artifact *is* that build, file set included: a
+      // byte-identical rebuild is what makes shipping `dist/` in the repo
+      // honest, and comparing trees also catches a stale `chunk-*.js` left
+      // behind by an older stage.
+      expect(hashTree(path.join(ROOT, "dist"))).toBe(digestA);
+    } finally {
+      fs.rmSync(first, { recursive: true, force: true });
+      fs.rmSync(second, { recursive: true, force: true });
+    }
+  }, 120000);
 });
+
+/** Sorted recursive digest of one output tree (relative paths + bytes). */
+function hashTree(root: string): string {
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else files.push(full);
+    }
+  };
+  walk(root);
+  files.sort();
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(path.relative(root, file));
+    hash.update("\0");
+    hash.update(fs.readFileSync(file));
+  }
+  return hash.digest("hex");
+}
 
 /** Boots a real server over a real store, serving the real dist/dashboard. */
 async function boot(): Promise<string> {

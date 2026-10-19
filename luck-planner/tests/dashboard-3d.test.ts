@@ -228,6 +228,41 @@ describe("the lazy 3D chunk in dist/dashboard", () => {
     expect(scene).not.toContain("buildScene3D");
   });
 
+  it("keeps the I3 overlay app-side and its rendering behind the dynamic import", () => {
+    // Same split as I2, one layer up: the pure overlay (arcs, markers, rings,
+    // halos — and the per-frame math) is app-side, while the shapes that draw
+    // it are lazy. The scene must not carry the overlay *builder*: if it did,
+    // the math would be recomputed inside the render loop.
+    const appGraph = [
+      fs.readFileSync(APP_JS, "utf8"),
+      ...fs
+        .readdirSync(ASSETS_DIR)
+        .filter((name) => name.startsWith("chunk-chunk-"))
+        .map((name) => fs.readFileSync(path.join(ASSETS_DIR, name), "utf8")),
+    ].join("\n");
+    const scene = fs.readFileSync(SCENE_JS, "utf8");
+    expect(appGraph).toContain("buildSceneOverlay");
+    expect(appGraph).toContain("beeArcPoint"); // the frame math travels with the app
+    expect(scene).not.toContain("buildSceneOverlay");
+
+    // Each overlay type draws with its own shape: bee particles, bug
+    // octahedra, goal rings, growth halos, and the hover tooltip.
+    for (const marker of [
+      "BeeSwarm",
+      "BugMarkers",
+      "GoalRings",
+      "GrowthHalos",
+      "octahedronGeometry",
+      "torusGeometry",
+      "Html",
+      "beeArcPoint",
+      "bugPulseScale",
+      "growthGlow",
+    ]) {
+      expect(scene, marker).toContain(marker);
+    }
+  });
+
   it("index.html never links the 3D chunk eagerly", () => {
     const html = fs.readFileSync(INDEX_HTML, "utf8");
     expect(html).not.toContain("dashboard-3d");
@@ -267,6 +302,39 @@ describe("source contracts", () => {
     // The spike scene itself: lights, grid and orbit controls.
     expect(source).toContain("<OrbitControls");
     expect(source).toContain("<gridHelper");
+  });
+
+  it("the loader forwards the I3 overlay with the layout, type-import only", () => {
+    // The overlay must reach the scene through the same seam as the model:
+    // a *type* import plus the imperative handle. A value import of the
+    // overlay module from the scene side would duplicate the math in the
+    // lazy chunk and break the app-side contract asserted by the bundle test.
+    const loader = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "ThreeView.tsx"),
+      "utf8",
+    );
+    expect(loader).toMatch(
+      /import type \{[^}]*Scene3DOverlay[^}]*\} from "\.\.\/overlay-3d"/,
+    );
+    expect(loader).toContain("setScene(");
+    const scene = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "dashboard-3d.tsx"),
+      "utf8",
+    );
+    expect(scene).toContain("setScene(model: Scene3DModel | null");
+  });
+
+  it("the scene never walks the node list (the I3 frame budget)", () => {
+    // Growth halos, leaf sprites and the tree itself are positioned once per
+    // model, and the per-frame loops iterate the *link* arrays. If the scene
+    // ever read `model.nodes` — in a frame callback or at build time — the
+    // per-frame cost would start growing with the tree; `overlay-3d.ts`
+    // pins the measured budget, this pins the structure behind it.
+    const scene = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "dashboard-3d.tsx"),
+      "utf8",
+    );
+    expect(scene).not.toContain("model.nodes");
   });
 
   it("the app gates every 3D request through planViewSwitch", () => {

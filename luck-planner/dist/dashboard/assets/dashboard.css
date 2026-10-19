@@ -741,6 +741,18 @@ body {
   overflow: hidden;
   background: var(--lp-bg, #0f1115);
 }
+.lp-tip {
+  max-width: 240px;
+  padding: 4px 7px;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 6px;
+  background: var(--lp-surface, #161a22);
+  color: var(--lp-text, #e6e9ef);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  pointer-events: none;
+}
 .lp-canvas-empty {
   position: absolute;
   inset: 0;

@@ -25,15 +25,29 @@
  *
  * Runs on every plugin install/update via the `build` step, and before the
  * test suite via `pretest`, so the e2e spawn always sees a fresh bundle.
+ *
+ * `--outdir <dir>` redirects the whole output tree (both entries) to another
+ * root, keeping the `dist/` layout underneath it. The determinism test uses
+ * it to build into a temp directory: a test that rewrote the shared
+ * `dist/dashboard` while sibling test files were reading it raced the chunk
+ * sweep (vitest runs files in parallel), so no test writes the committed
+ * artifact any more — the default path is what installs and `pretest` use.
  */
 import { build } from "esbuild";
 import { copyFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-mkdirSync(join(root, "dist"), { recursive: true });
+/** Output root: the plugin itself, or whatever `--outdir` names. */
+const outFlag = process.argv.indexOf("--outdir");
+const outRoot =
+  outFlag >= 0 && process.argv[outFlag + 1] !== undefined
+    ? resolve(process.argv[outFlag + 1])
+    : root;
+
+mkdirSync(join(outRoot, "dist"), { recursive: true });
 
 await build({
   entryPoints: [join(root, "server", "mcp-server.ts")],
@@ -41,7 +55,7 @@ await build({
   platform: "node",
   target: "node22",
   format: "esm",
-  outfile: join(root, "dist", "mcp-server.js"),
+  outfile: join(outRoot, "dist", "mcp-server.js"),
   banner: {
     // ESM shims for CJS built-ins under esbuild's platform=node.
     js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);",
@@ -55,7 +69,7 @@ console.log("dist/mcp-server.js written");
 
 // ── Dashboard SPA (stage G1) ──────────────────────────────────────────────
 
-const dashboardAssets = join(root, "dist", "dashboard", "assets");
+const dashboardAssets = join(outRoot, "dist", "dashboard", "assets");
 mkdirSync(dashboardAssets, { recursive: true });
 
 // Stage I2: code splitting names chunks by content hash, and esbuild never
@@ -102,7 +116,7 @@ await build({
 
 copyFileSync(
   join(root, "dashboard", "index.html"),
-  join(root, "dist", "dashboard", "index.html"),
+  join(outRoot, "dist", "dashboard", "index.html"),
 );
 
 console.log("dist/dashboard written");

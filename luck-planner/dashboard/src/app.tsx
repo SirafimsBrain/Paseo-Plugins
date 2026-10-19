@@ -27,6 +27,11 @@
  *   (`dashboard/src/tree-3d.ts` — depth becomes height, siblings fan around
  *   the trunk axis) which the scene draws as sphere/tubes/sprites; the model
  *   is rebuilt on every tree refetch and handed to the live scene.
+ * - **I3 3D overlays**: the same payload also feeds a pure overlay
+ *   (`dashboard/src/overlay-3d.ts`) — bee arcs with their particles, blocking
+ *   incidents, goal rings and (in the growth layer) growth halos. The overlay
+ *   is rebuilt with the model and the layer, and travels with the model into
+ *   the scene as one view.
  *
  * State rules kept deliberately small so later stages can extend them
  * without a rewrite: one `load()` effect keyed on the resolved client, one
@@ -56,6 +61,7 @@ import {
 } from "./graph";
 import { parseDashboardParams } from "./params";
 import { createChangeStream } from "./live";
+import { buildSceneOverlay } from "./overlay-3d";
 import { buildScene3D } from "./tree-3d";
 import {
   detectWebGL,
@@ -380,6 +386,17 @@ export function App(): ReactElement {
     [tree],
   );
 
+  // I3 3D overlays: bees, blocking incidents, goal rings and — in the growth
+  // layer only, exactly like the 2D heat layer — the growth halos. Rebuilt
+  // when the layer changes because the layer *is* part of the overlay.
+  const scene3dOverlay = useMemo(
+    () =>
+      tree === null || scene3dModel === null
+        ? null
+        : buildSceneOverlay(tree, scene3dModel, { layer }),
+    [tree, scene3dModel, layer],
+  );
+
   const resolveName = useCallback(
     (id: string): string => {
       const node = tree?.nodes.find((candidate) => candidate.id === id);
@@ -408,7 +425,12 @@ export function App(): ReactElement {
       />
       <div className="lp-body">
         {view === "3d" ? (
-          <ThreeView webgl={webgl} model={scene3dModel} onSceneState={onSceneState} />
+          <ThreeView
+            webgl={webgl}
+            model={scene3dModel}
+            overlay={scene3dOverlay}
+            onSceneState={onSceneState}
+          />
         ) : (
           <Canvas
             graph={graph}

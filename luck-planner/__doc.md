@@ -1,6 +1,6 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.27.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.28.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection
@@ -9,10 +9,11 @@
 > `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls),
 > **H2** (agent timeline rows for the two key audit facts), **I1** (the WebGL
 > spike: probe + fallback, lazy `dashboard-3d.js` entry, empty scene with
-> OrbitControls) and **I2** (the 3D tree: radial layout + geometry) are done
-> and all tests are green; the next stage is **I3** (bees, bugs, goals and
-> growth in 3D).
-> Stages A1–I2 are complete; I3–J are otherwise untouched. Nothing in
+> OrbitControls), **I2** (the 3D tree: radial layout + geometry) and **I3**
+> (bees, bugs, goals and growth in 3D, with the animation frame budget) are done
+> and all tests are green; the next stage is **I4** (3D interaction: picking,
+> labels, filters and the 2D/3D toggle).
+> Stages A1–I3 are complete; I4–J are otherwise untouched. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -1365,16 +1366,28 @@ the 2D diagram and installs `WEBGL_UNAVAILABLE_HINT` in the status line (the
 `--disable-webgl` acceptance), and returning to 2D is always silent.
 
 **Mounting.** `dashboard-3d.tsx` exports an imperative
-`mountScene3D(container) → { dispose() }` instead of a global: the caller
-owns the container, `dispose()` is idempotent, unmounts the r3f root and
-empties the cell, so switching back to 2D leaves no renderer, animation loop
-or canvas behind. The spike scene is ambient + directional light, a 20-unit
-grid, axes and `OrbitControls` — enough to answer "does WebGL render in this
-tab". `ThreeView.tsx` is the only thing the first chunk knows about the
-scene: it imports the *type* only (a value import would drag the whole scene
-graph into the eager bundle), dynamically imports the chunk on mount, and
-reports `loading → ready` / `failed` through the app's status line; `failed`
-sends the tab back to 2D.
+`mountScene3D(container, onError?) → { dispose() }` instead of a global: the
+caller owns the container, `dispose()` is idempotent, unmounts the scene's
+React root and empties the cell, so switching back to 2D leaves no renderer,
+animation loop or canvas behind. The root is a plain **ReactDOM** root around
+r3f's `<Canvas>` — *not* r3f's own `createRoot(container)`, which is a
+different API: it expects a **canvas** element and hands it straight to
+`new WebGLRenderer`, while `<Canvas>` is the component that creates the canvas,
+measures its parent (`react-use-measure`) and keeps the renderer in step with
+resizes. Passing the container div to r3f's `createRoot` looked plausible and
+died on the first frame with "canvas.getContext is not a function" — a real bug
+that shipped with I1 and survived I2, because neither stage had ever run in a
+browser; stage I3's live check (below) found it. `onError` plus a small error
+boundary around the canvas turn a renderer failure that happens *after* the
+probe passed (a lost context, a driver that evicts one) into the same status
+line and 2D fallback the probe's own `false` answer produces, instead of an
+uncaught React error over a dead cell. The spike scene is ambient + directional
+light, a 20-unit grid, axes and `OrbitControls` — enough to answer "does WebGL
+render in this tab". `ThreeView.tsx` is the only thing the first chunk knows
+about the scene: it imports the *type* only (a value import would drag the
+whole scene graph into the eager bundle), dynamically imports the chunk on
+mount, and reports `loading → ready` / `failed` through the app's status line;
+`failed` sends the tab back to 2D.
 
 **Tests.** `tests/dashboard-3d.test.ts` (18): the probe against fakes (WebGL2,
 WebGL1 floor, experimental floor, no context, no canvas, throwing factory,
@@ -1386,9 +1399,9 @@ dynamic import reaches it, no three markers leak into the eager chunk,
 `planViewSwitch`). The determinism test in `tests/dashboard-build.test.ts`
 now hashes the 3D chunk as well. `typecheck` (both configs) and the full
 suite are green. Rendering in a real tab — the Paseo workspace browser
-(Electron) and an external browser — is a J2 manual check: this build
-environment has no browser, and repo rule 4 keeps tab-level checks manual by
-design.
+(Electron) and an external browser — was deferred to the J2 checklist; the
+live check performed during I3 (see its section) opened the tab against a real
+server and is what found the `createRoot(div)` bug this section now describes.
 
 ### The 3D tree — layout and geometry (stage I2 — `dashboard/src/tree-3d.ts`, `dashboard/src/dashboard-3d.tsx`, `dashboard/src/components/ThreeView.tsx`, `dashboard/src/app.tsx`)
 
@@ -1436,7 +1449,7 @@ I4) and hands it to `ThreeView`, which forwards it through `handle.setModel`
 — seeded once when the lazy chunk lands, then on every layout change,
 without ever remounting the renderer. `mountScene3D` gained a tiny external
 store (`useSyncExternalStore`) behind that setter; `dispose()` is unchanged:
-idempotent, unmounts the r3f root, empties the cell.
+idempotent, unmounts the scene's root, empties the cell.
 
 **Tests.** `tests/dashboard-tree-3d.test.ts` (13) builds fixtures through a
 real `LuckPlannerStore` (root→trunk→branch→leaf, seven leaves across three
@@ -1459,13 +1472,158 @@ contains no layout function at all. `typecheck` (both configs) and the full
 suite are green. FPS and the 5–10k render measurements belong to J2.
 
 
+### Bees, bugs, goals and growth in 3D (stage I3 — `dashboard/src/overlay-3d.ts`, `dashboard/src/dashboard-3d.tsx`, `dashboard/src/app.tsx`, `dashboard/src/components/ThreeView.tsx`, `dashboard/src/graph.ts`)
+
+The tree gets its domain layers. Everything that is *attached* to the nodes —
+influence links, blocking incidents, approved goals, growth progress — is drawn
+in its own shape, from its own rows, with its own tooltip; the acceptance is
+"each link type distinguishable by eye" and "the animation does not degrade FPS
+at 1000 nodes".
+
+**One pure module, four projections.** `dashboard/src/overlay-3d.ts` is
+three-free and DOM-free, so it lives in the eagerly loaded chunk beside
+`graph.ts` (the bundle test pins that split) and is testable in plain Node: the
+scene renders its arrays and never computes a position, a phase or a ratio —
+the I2 boundary, one layer up. It is a pure function of one `/api/tree` payload
+plus the I2 layout (`buildScene3D`), and it drops rather than draws anything
+whose anchor is missing from the layout (a link to a leaf that left a pruned
+payload, an attachment to an unknown node, a goal that never materialized) —
+the overlay describes what is on screen, never a phantom at the origin.
+
+- **Bees — curved arcs.** Every influence link becomes a quadratic Bézier from
+  one leaf's position to the other's. The *arc* is the point: the tree itself
+  is straight tubes, so a curved flight path reads as a relation rather than a
+  branch. The control point sits above the chord's midpoint by a lift
+  proportional to the chord (clamped between `beeMinLift` and `beeMaxLift`),
+  pushed slightly outward from the trunk axis so arcs bow around the tree, and
+  bees that share a pair of leaves take successive **lanes** — the lane key is
+  the *canonical* pair (`source|target`, sorted), so A→B and B→A are one pair
+  with two lanes and their arcs cannot overlap.
+- **Bugs — pulsing markers.** One marker per *blocking* incident (`open` +
+  `investigating`) per attached node, floating `bugLift` above it. The
+  definition of "blocking" is not re-derived here: `graph.ts` exported its
+  `openBugIdsByNode` (which `buildGraph` had as a private helper) so the 3D view
+  reads the same rule the 2D badge and `store.stats()` use. One incident pulses
+  in one phase (`hashUnit(bug.id)`) on all the leaves it blocks, so one problem
+  reads as one problem.
+- **Goals — floating rings.** For a goal that materialized (ADR-7), the
+  subtree's nodes are walked (cycle-safe) into a bounding box: the ring centres
+  on the box in x/z, floats above the *highest node of that subtree*, and its
+  radius is half the box diagonal plus a margin (floored, so a one-node goal
+  still gets a readable ring). The ring carries the roll-up of the materialized
+  root — the same number the 2D goal frame and the node heat use.
+- **Growth — glow halos.** One additive-blended ring per node whose subtree has
+  growth data, scaled and tinted by the shared heat ramp; a node with no data
+  anywhere below it gets **no** halo, keeping "no data" distinct from "0 %
+  done". Whether the halos exist is the toolbar's layer switch — the one place
+  that decides growth is on screen (the G5 rule), which 3D follows instead of
+  inventing a second switch; bees, bugs and goals are links, not a layer, so
+  they are always drawn, as in 2D.
+
+**One computation, two views.** The growth roll-up was extracted from
+`buildGraph` into `graph.ts#growthRollups(input)` and is now imported by both
+the 2D adapter and the 3D overlay, so the two views cannot disagree about "how
+much of this subtree is done"; the overlay test asserts the equality instead of
+trusting it (same node set, same ratios, same goal progress and node counts as
+the 2D frames).
+
+**Animation is a pure function of time, and it is O(links).** The frame math
+lives in the same module — `beeProgress` (cycle position) and `beeArcPoint`
+(quadratic Bézier into a caller-owned out-vector, allocation-free, the reason a
+swarm does not become 60 fps of garbage) per bee, `bugPulseScale` per bug,
+`growthGlow` (one breathing opacity for the whole growth layer) and `haloScale`
+(baked into the instance matrices at build time). Every phase comes from
+`hashUnit(id)` — FNV-1a, never `Math.random()` — so the H1 SSE refetches do not
+reshuffle the swarm and a fixture test can pin an animation. Consequently
+nothing per frame walks the node list: bees and bug markers are one
+`InstancedMesh` each, growth halos one more (positioned once, only the shared
+material's opacity moves), goal rings individual meshes because goals are few
+by nature. The I3 budget test builds a 10k-node payload with 200 bees, 50
+incidents and 1000 growth records and measures both the build and 60 frames of
+that pure math; a source contract asserts the scene never reads `model.nodes`.
+
+**Hovering, and the tooltip.** The scene owns one hover state and mounts exactly
+one drei `<Html>` while something is hovered — the content of the tooltip is
+text from the pure module (`beeTipText`, `bugTipText`, `goalTipText`, all
+tested), so "status and revision in the tooltip" is a contract, not markup. A
+hovered bee **freezes** at its current arc fraction: a tooltip that drifts away
+from the pointer is unreadable, and the frozen particle is an honest marker of
+which link is described. The big instanced meshes (leaf sprites, halos) set
+`raycast={() => null}` so a pointer move does not re-test 10k instances for a
+hit nobody can act on — I4, which makes nodes clickable, has to revisit that
+deliberately.
+
+**The data path.** `app.tsx` builds the overlay in a memo keyed on the tree
+*and* the layer (the layer is part of the overlay, since it decides the halos)
+and hands it to `ThreeView` together with the layout; the handle's
+`setModel(...)` became `setScene(model, overlay)` because a model and the links
+on it are one view of one payload — two setters could render an overlay against
+a previous tree. Remounts are still impossible: the store behind
+`useSyncExternalStore` just carries the pair.
+
+**Tests.** `tests/dashboard-overlay-3d.test.ts` (22) builds its fixtures through
+a real `LuckPlannerStore` (two bees on one leaf pair in opposite directions, one
+on another pair, a blocking incident on two leaves, a resolved one, an approved
+goal with its own growth record, a 2/3 growth record on a branch) and pins:
+arc endpoints equal to the layout positions with the apex above the chord, lanes
+exactly `beeLaneSpacing` apart, a bee to a missing leaf dropped; the animation
+(`beeProgress` in `[0, 1)`, starting from the bee's own phase, periodic, and
+`beeArcPoint` exact at u = 0/1, above both endpoints in the middle, writing into
+the given vector); markers only for blocking incidents, lifted, phase-shared per
+incident, pulsing inside the amplitude window with the right period; the goal
+ring's centre, radius, `nodeCount` and roll-up agreeing with the 2D frame; the
+growth halos matching the 2D heat map node-for-node and ratio-for-ratio
+(including the parent roll-up and the dark leaf); determinism of two builds, the
+empty project, `hashUnit` and `truncate`; and the frame budget (10k nodes: the
+overlay build under 500 ms, 60 frames of animation under 300 ms). The bundle
+markers in `tests/dashboard-3d.test.ts` pin the split (`buildSceneOverlay` and
+the frame math in the app graph, no overlay *builder* in the lazy chunk, the
+four shapes and `Html` only behind the dynamic import) plus two source
+contracts: the loader type-imports the overlay and calls `setScene`, and the
+scene never touches `model.nodes`.
+
+**The first live check, and the bug it found.** Every stage of block I had been
+verified against built artifacts and pure modules — there was no browser in the
+harness, and repo rule 4 keeps tab-level checks manual. Stage I3 was the first
+to run in one: the Paseo workspace browser (Electron 44 / Chromium 152, driven
+through the app's browser-automation host) was pointed at a **real** server —
+`DashboardHttpServer` over a seeded `LuckPlannerStore` on an ephemeral port,
+token in the query — and driven through the tab's own toolbar, not a stand-in.
+Two things came out of it. First, the 2D dashboard renders a real payload (its
+stats, filters and live badge come from the seeded store), so the HTTP server,
+the token, the SSE channel and the app shell work end to end outside vitest.
+Second, and the reason the check was worth the detour: pressing **3D** never
+showed a scene. The probe answered `true`, the lazy chunk loaded, and the mount
+threw `canvas.getContext is not a function` — r3f's `createRoot` had been
+handed the container `div` since I1. The fix is the ReactDOM-root mount
+described in the I1 section, now with the `onError` path it needed; after it the
+tab mounts a canvas, the status line reads `live`, and a scripted
+`document.createElement("canvas").getContext("webgl2")` in the same tab
+confirms a real context. What the check could *not* do: the automation host
+opens tabs in the background and never paints them, so `screenshot` answered
+"not painted" — the shapes' legibility, the FPS figures on a live 5–10k tree,
+the tooltip's look and the same walk in an external browser (plus the
+`--disable-webgl` fallback line) stay on the J2 manual checklist.
+
+**A flaky suite, fixed at the root.** `tests/dashboard-build.test.ts` and
+`tests/mcp-server-e2e.test.ts` used to verify build determinism by *rebuilding*
+the shared `dist/` while sibling test files (run in parallel by vitest) read
+`dist/dashboard/assets/chunk-*.js`; the chunk sweep would briefly unlink files
+under a reader, which reproduced as a random failure in the I2 marker test.
+`scripts/bundle.mjs` now accepts `--outdir <dir>` (the install/`pretest` default
+is unchanged), both determinism tests build into temp roots, and they compare
+the committed artifact with a fresh build — the file set included, so a stale
+`chunk-*.js` can no longer hide in the repository. Four consecutive full-suite
+runs are green afterwards.
+
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: blocks G and H are complete.** Stages A1–F2 are
+**Status: blocks G and H are complete, block I is in progress.** Stages A1–F2 are
 complete and released as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**,
 **C (domain semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP
 transport)** are closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
@@ -1493,7 +1651,16 @@ and I2 (0.27.0) drew the tree itself: a pure radial layout module (depth →
 height, siblings → angles, tube radius ∝ √subtree leaves) feeding a scene of
 sphere apexes, quaternion-oriented tubes and a single instanced billboard
 mesh for every leaf, wired app → ThreeView → `handle.setModel` without
-remounts. Next: **I3** (bees, bugs, goals and growth in 3D). A candidate **D4**
+remounts, and I3 (0.28.0) dressed it: the pure overlay module of bee arcs,
+blocking-incident markers, goal rings and growth halos, the per-frame math that
+is O(links) instead of O(nodes) (instanced swarms, one breathing opacity,
+`hashUnit` phases instead of `Math.random()`), the hover tooltip carrying a
+bee's status and revision, and the shared `growthRollups` that now makes 2D and
+3D read one number — plus the test-infrastructure fix that moved the
+determinism rebuilds out of the shared `dist/`. Next: **I4** (3D interaction:
+OrbitControls tuning, raycast picking into the shared details panel, drei labels
+for the focused node, camera focus from search, filters and the 2D/3D toggle).
+A candidate **D4**
 (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
 precede the remaining UI work.
@@ -1508,7 +1675,7 @@ precede the remaining UI work.
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
-| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), effects, interaction + toggle |
+| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
 
 Blocks B–D have file-disjoint boundaries and may be delegated to different agents.
@@ -1541,6 +1708,7 @@ from):
 | WebGL unavailable in the workspace browser on some client | Spike I1 before writing the scene; fall back to 2D with an explanation |
 | React Flow degrades above ~1000 nodes | Collapse/expand by default (G2), filters, synthetic-canvas measurement in the G2 acceptance |
 | 3D bundle bloats the first chunk | Separate lazy entry `dashboard-3d.js` (I1), loaded only on toggle |
+| 3D overlay animation drops frames on big trees | Per-frame work is O(links) with preallocated vectors (I3); the large sets are instanced and positioned once, only one material uniform moves; upcoming I4 picking must keep the 10k meshes out of the raycast path |
 | Concurrent SQLite access (agents + UI + HTTP) | WAL + busy timeout + write-retry from stage B2; one owning process |
 | Plugin update breaks agents' MCP entry path | Revision-independent publication from stage D2 (memory-flash 0.7.1 lesson) |
 | HTTP layer as an attack vector | 127.0.0.1 + token + read-only API (ADR-8, ADR-9) |
