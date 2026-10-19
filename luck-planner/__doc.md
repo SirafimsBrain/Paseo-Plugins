@@ -676,12 +676,15 @@ gets a real actor, and agents get a written protocol for keeping the tree. Verif
   `draft`), and `luck-planner_luck_tree_history` (actor = its own agent id), and reported
   the results. **Known provider limitation:** on **OpenCode** the session-delivered entry
   appeared in the initial catalog and then disappeared after the provider rebuilt its tool
-  catalog mid-session (memory-flash 0.8.1 lesson: for OpenCode/Kilo a registration in the
-  provider's own MCP config file is strictly more reliable than the session-level entry);
+  catalog mid-session (the memory-flash lesson, 0.8.0 + 0.8.2: for OpenCode/Kilo
+  a registration in the provider's own MCP config file is strictly more reliable
+  than the session-level entry);
   Cline/Cursor/Codex CLI ignore session-delivered MCP servers altogether. Porting
   memory-flash's config-file registrations (`opencode`/`kilo`/`cline`/`cursor`/`codex`) is
-  the candidate follow-up stage **D4**; `mcpServerCommand()`/`injectedMcpConfig()` are the
-  single source those writers will reuse.
+  the candidate follow-up stage **D4** — this plugin would reuse the *approach*
+  (memory-flash itself is not touched; it already ships that solution), and
+  `mcpServerCommand()`/`injectedMcpConfig()` are the single source those
+  writers will reuse.
 
 ### Dashboard HTTP server (stage F1 — `server/http-server.ts`, `server/http-lifecycle.ts`, `shared/api.ts`)
 
@@ -1797,9 +1800,13 @@ artifact test could see: the host's CommonJS build has no `import.meta.url`
 (§10.1), the plugin's files are not next to its code (§10.2) and the
 published MCP entry died with the revision it pointed into (§10.3, §10.4).
 A candidate **D4**
-(config-file MCP registrations for
-OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
-precede the remaining UI work.
+remains: registering the plugin in the agents' own MCP config files
+(OpenCode, Kilo, Cline, Cursor, Codex CLI) — the approach memory-flash took in
+0.8.0 and hardened in 0.8.2, for the same two reasons: OpenCode evicts an idle
+directory and takes the session-injected entry with it, and Cline/Cursor/Codex
+CLI ignore session-delivered MCP servers altogether. It changes **this** plugin
+only: the writers reuse `mcpServerCommand()`/`injectedMcpConfig()`, and
+memory-flash itself is not touched — it already ships that solution.
 
 | Block | Stages | Versions | Content |
 | --- | --- | --- | --- |
