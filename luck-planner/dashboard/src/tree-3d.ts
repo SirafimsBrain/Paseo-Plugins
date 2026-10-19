@@ -31,7 +31,7 @@
  */
 import { hierarchy, tree as d3tree } from "d3-hierarchy";
 import type { LeafStatus, Node as TreeNode, NodeKind } from "../../shared/tree";
-import { indexTree } from "./graph";
+import { indexTree, matchingWithAncestors, type GraphFilter } from "./graph";
 
 /** Vertical step and ring radii of the cone — the whole silhouette. */
 export const LAYOUT_3D = {
@@ -56,6 +56,13 @@ export const LAYOUT_3D = {
 /** One positioned node of the scene. */
 export interface SceneNode3D {
   readonly id: string;
+  /**
+   * The parent node's id, or `null` for an apex node. Added in stage I4: the
+   * selection highlight needs to know which tubes hang off the selected node
+   * ("the edges touching it", the 2D canvas' rule), and the 3D layout has no
+   * other place to keep the relation.
+   */
+  readonly parentId: string | null;
   readonly kind: NodeKind;
   readonly name: string;
   /** Leaf status as stored (non-leaf nodes carry their own status too). */
@@ -141,6 +148,17 @@ export function subtreeLeafCounts(index: ReturnType<typeof indexTree>): Map<stri
   return counts;
 }
 
+/** Options of {@link buildScene3D}. */
+export interface BuildSceneOptions {
+  /**
+   * Toolbar filters (G4). The 3D tree shows the nodes the 2D diagram shows:
+   * a node survives when it matches the filter or has a matching descendant,
+   * and the path to the root stays as context. The rule is the 2D adapter's
+   * own (`matchingWithAncestors`), so both views narrow identically.
+   */
+  filter?: GraphFilter;
+}
+
 /**
  * Builds the radial 3D layout for a project's nodes.
  *
@@ -149,8 +167,16 @@ export function subtreeLeafCounts(index: ReturnType<typeof indexTree>): Map<stri
  * defensive rule) still form one hierarchy; the wrap level is dropped again
  * when the model is emitted, so real roots sit at the cone's apex.
  */
-export function buildScene3D(nodes: readonly TreeNode[]): Scene3DModel {
-  const index = indexTree(nodes);
+export function buildScene3D(
+  nodes: readonly TreeNode[],
+  options: BuildSceneOptions = {},
+): Scene3DModel {
+  const survivors = matchingWithAncestors(nodes, options.filter);
+  const visible =
+    survivors.size === nodes.length
+      ? nodes
+      : nodes.filter((node) => survivors.has(node.id));
+  const index = indexTree(visible);
   const leafCounts = subtreeLeafCounts(index);
   const virtual = { id: "__lp_forest__" } as TreeNode;
   const hroot = hierarchy(virtual, (node) =>
@@ -201,6 +227,7 @@ export function buildScene3D(nodes: readonly TreeNode[]): Scene3DModel {
     const isRoot = parent === null || parent.depth === 0;
     const entry: SceneNode3D = {
       id: source.id,
+      parentId: parent === null || parent.depth === 0 ? null : parent.data.id,
       kind: source.kind,
       name: source.name,
       status: source.status,

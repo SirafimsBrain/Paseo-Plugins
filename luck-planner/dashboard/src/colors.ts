@@ -132,6 +132,13 @@ export const BEE_STATUS_LABELS: Record<BeeStatus, string> = {
 export const BUG_BADGE_COLOR = "#e05d5d";
 
 /**
+ * The selected node in the 3D scene (stage I4): its marker, its ring and the
+ * tubes that touch it. A bright, near-white tone — the scene is always dark,
+ * and the selection must be the first thing the eye finds.
+ */
+export const SELECTION_COLOR = "#eef2ff";
+
+/**
  * Stroke/label colour of a growth record's own status (stage G5), next to the
  * step counter — the same vocabulary the rest of the diagram uses: blue while
  * growing, amber when stalled, green when done.

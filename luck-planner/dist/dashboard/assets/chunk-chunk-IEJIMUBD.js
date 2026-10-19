@@ -32436,6 +32436,7 @@ var BEE_STATUS_LABELS = {
   cancelled: "Cancelled"
 };
 var BUG_BADGE_COLOR = "#e05d5d";
+var SELECTION_COLOR = "#eef2ff";
 var GROWTH_STATUS_COLORS = {
   active: "#5b9dff",
   stalled: "#e0a84f",
@@ -33180,13 +33181,25 @@ function nodeGrowthRollups(index, byNode, byMaterializedRoot) {
 }
 function applyFilter(nodes, visible, index, filter) {
   if (!isFilterActive(filter)) return new Set(visible);
+  return matchingWithAncestors(nodes, filter, {
+    isVisible: (id) => visible.has(id),
+    index
+  });
+}
+function matchingWithAncestors(nodes, filter, options = {}) {
   const keep = /* @__PURE__ */ new Set();
+  if (!isFilterActive(filter)) {
+    for (const node2 of nodes) keep.add(node2.id);
+    return keep;
+  }
+  const index = options.index ?? indexTree(nodes);
+  const isVisible = options.isVisible ?? (() => true);
   for (const node2 of nodes) {
-    if (!visible.has(node2.id)) continue;
+    if (!isVisible(node2.id)) continue;
     if (!matchesFilter(node2, filter)) continue;
     keep.add(node2.id);
     let parentId = node2.parentId;
-    while (parentId !== null && visible.has(parentId) && !keep.has(parentId)) {
+    while (parentId !== null && isVisible(parentId) && !keep.has(parentId)) {
       keep.add(parentId);
       parentId = index.byId.get(parentId)?.parentId ?? null;
     }
@@ -33377,11 +33390,23 @@ function buildBeeArcs(input2, positions) {
     const key = bee.sourceLeafId < bee.targetLeafId ? `${bee.sourceLeafId}|${bee.targetLeafId}` : `${bee.targetLeafId}|${bee.sourceLeafId}`;
     const lane = lanes.get(key) ?? 0;
     lanes.set(key, lane + 1);
-    arcs.push(beeArc(bee.id, bee.status, bee.impact, bee.revision, from, to, lane));
+    arcs.push(
+      beeArc(
+        bee.id,
+        bee.sourceLeafId,
+        bee.targetLeafId,
+        bee.status,
+        bee.impact,
+        bee.revision,
+        from,
+        to,
+        lane
+      )
+    );
   }
   return arcs;
 }
-function beeArc(id, status, impact, revision, from, to, lane) {
+function beeArc(id, sourceId, targetId, status, impact, revision, from, to, lane) {
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const dz = to[2] - from[2];
@@ -33405,6 +33430,8 @@ function beeArc(id, status, impact, revision, from, to, lane) {
     status,
     impact,
     revision,
+    sourceId,
+    targetId,
     from,
     to,
     control,
@@ -33424,6 +33451,17 @@ function beeArcPoint(bee, u, out) {
   out.y = a * bee.from[1] + b * bee.control[1] + c * bee.to[1];
   out.z = a * bee.from[2] + b * bee.control[2] + c * bee.to[2];
   return out;
+}
+function beeArcPoints(bee, samples) {
+  const count2 = Math.max(2, Math.floor(samples));
+  const points = [];
+  const scratch = { x: 0, y: 0, z: 0 };
+  for (let index = 0; index < count2; index += 1) {
+    const u = index / (count2 - 1);
+    beeArcPoint(bee, u, scratch);
+    points.push([scratch.x, scratch.y, scratch.z]);
+  }
+  return points;
 }
 function buildBugMarkers(input2, positions) {
   const blocking = /* @__PURE__ */ new Set(["open", "investigating"]);
@@ -33602,8 +33640,10 @@ function subtreeLeafCounts(index) {
   }
   return counts;
 }
-function buildScene3D(nodes) {
-  const index = indexTree(nodes);
+function buildScene3D(nodes, options = {}) {
+  const survivors = matchingWithAncestors(nodes, options.filter);
+  const visible = survivors.size === nodes.length ? nodes : nodes.filter((node2) => survivors.has(node2.id));
+  const index = indexTree(visible);
   const leafCounts = subtreeLeafCounts(index);
   const virtual = { id: "__lp_forest__" };
   const hroot = hierarchy(
@@ -33639,6 +33679,7 @@ function buildScene3D(nodes) {
     const isRoot = parent === null || parent.depth === 0;
     const entry = {
       id: source.id,
+      parentId: parent === null || parent.depth === 0 ? null : parent.data.id,
       kind: source.kind,
       name: source.name,
       status: source.status,
@@ -33668,6 +33709,106 @@ function buildScene3D(nodes) {
     radius: ringRadius(maxDepth)
   };
 }
+
+// dashboard/src/pick-3d.ts
+function pickNode(ray, candidates) {
+  let dx = ray.direction[0];
+  let dy = ray.direction[1];
+  let dz = ray.direction[2];
+  const length = Math.hypot(dx, dy, dz);
+  if (length === 0) return null;
+  dx /= length;
+  dy /= length;
+  dz /= length;
+  const ox = ray.origin[0];
+  const oy = ray.origin[1];
+  const oz = ray.origin[2];
+  let best = null;
+  for (const candidate of candidates) {
+    const mx = ox - candidate.position[0];
+    const my = oy - candidate.position[1];
+    const mz = oz - candidate.position[2];
+    const b = mx * dx + my * dy + mz * dz;
+    const c = mx * mx + my * my + mz * mz - candidate.radius * candidate.radius;
+    const discriminant = b * b - c;
+    if (discriminant < 0) continue;
+    const root = Math.sqrt(discriminant);
+    let distance = -b - root;
+    if (distance < 0) distance = -b + root;
+    if (distance < 0) continue;
+    if (best === null || distance < best.distance) {
+      best = { id: candidate.id, distance };
+    }
+  }
+  return best;
+}
+function pickRadius(node2) {
+  if (node2.isLeaf) return LAYOUT_3D.leafMarker * 1.15;
+  if (node2.isRoot) return LAYOUT_3D.rootRadius * 1.05;
+  return Math.max(tubeRadius(node2.leaves) * 2.4, 0.3);
+}
+function pickCandidates(model) {
+  return model.nodes.map((node2) => ({
+    id: node2.id,
+    position: node2.position,
+    radius: pickRadius(node2)
+  }));
+}
+var EMPTY_HIGHLIGHT = {
+  selectedId: null,
+  relatedNodeIds: /* @__PURE__ */ new Set(),
+  incidentIds: /* @__PURE__ */ new Set(),
+  beeIds: /* @__PURE__ */ new Set(),
+  edgeIds: /* @__PURE__ */ new Set()
+};
+function selectionHighlight(model, overlay, selectedId) {
+  if (selectedId === null) return EMPTY_HIGHLIGHT;
+  const incidentIds = /* @__PURE__ */ new Set();
+  for (const bug of overlay.bugs) {
+    if (bug.nodeId === selectedId) incidentIds.add(bug.id);
+  }
+  const relatedNodeIds = /* @__PURE__ */ new Set();
+  if (incidentIds.size > 0) {
+    for (const bug of overlay.bugs) {
+      if (bug.nodeId !== selectedId && incidentIds.has(bug.id)) {
+        relatedNodeIds.add(bug.nodeId);
+      }
+    }
+  }
+  const beeIds = /* @__PURE__ */ new Set();
+  for (const bee of overlay.bees) {
+    if (bee.sourceId === selectedId || bee.targetId === selectedId) {
+      beeIds.add(bee.id);
+    }
+  }
+  const edgeIds = /* @__PURE__ */ new Set();
+  for (const node2 of model.nodes) {
+    if (node2.id === selectedId) {
+      edgeIds.add(node2.id);
+    } else if (node2.parentId === selectedId) {
+      edgeIds.add(node2.id);
+    }
+  }
+  return { selectedId, relatedNodeIds, incidentIds, beeIds, edgeIds };
+}
+function focusTarget(model, nodeId) {
+  for (const node2 of model.nodes) {
+    if (node2.id !== nodeId) continue;
+    return {
+      position: node2.position,
+      distance: Math.min(40, Math.max(2.5, model.radius * 0.45))
+    };
+  }
+  return null;
+}
+var EMPTY_INTERACTION = {
+  selectedId: null,
+  selectedLabel: null,
+  selectedPosition: null,
+  candidates: [],
+  highlight: EMPTY_HIGHLIGHT,
+  focus: null
+};
 
 export {
   require_react,
@@ -33705,6 +33846,7 @@ export {
   BEE_STATUS_COLORS,
   BEE_STATUS_LABELS,
   BUG_BADGE_COLOR,
+  SELECTION_COLOR,
   GROWTH_STATUS_COLORS,
   GROWTH_STATUS_LABELS,
   HEAT_RAMP,
@@ -33727,6 +33869,7 @@ export {
   buildSceneOverlay,
   beeProgress,
   beeArcPoint,
+  beeArcPoints,
   bugPulseScale,
   haloScale,
   growthGlow,
@@ -33735,6 +33878,11 @@ export {
   goalTipText,
   LAYOUT_3D,
   buildScene3D,
+  pickNode,
+  pickCandidates,
+  selectionHighlight,
+  focusTarget,
+  EMPTY_INTERACTION,
   require_jsx_runtime,
   require_with_selector
 };

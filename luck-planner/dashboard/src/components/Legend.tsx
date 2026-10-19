@@ -90,6 +90,8 @@ export function Legend(): ReactElement {
         under a node counts completed steps (its own record plus everything
         below it) · in 3D the same palette: 🐝 fly along arcs, 🐞 pulse on
         their leaves, 🎯 rings float over their subtree, growth glows as rings
+        · a click selects in both views; in 3D the selected node wears a
+        white ring and its links are drawn as curves
       </span>
     </footer>
   );

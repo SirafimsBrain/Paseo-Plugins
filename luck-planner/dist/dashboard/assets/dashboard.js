@@ -4,6 +4,8 @@ import {
   BEE_STATUS_LABELS,
   BUG_BADGE_COLOR,
   EMPTY_GRAPH,
+  EMPTY_INTERACTION,
+  EMPTY_OVERLAY,
   GOAL_STATUS_COLORS,
   GOAL_STATUS_LABELS,
   GRAPH_LAYERS,
@@ -32,6 +34,7 @@ import {
   defaultCollapsedIds,
   edgeTouchesNode,
   external_exports,
+  focusTarget,
   goalSchema,
   goalStepSchema,
   graphNodeCenter,
@@ -45,6 +48,7 @@ import {
   leafStatusSchema,
   nodeKindSchema,
   nodeSchema,
+  pickCandidates,
   projectKeySchema,
   relatedByOpenBug,
   require_client,
@@ -52,10 +56,11 @@ import {
   require_react,
   require_react_dom,
   require_with_selector,
+  selectionHighlight,
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-YT3CSXRB.js";
+} from "./chunk-chunk-IEJIMUBD.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
@@ -534,6 +539,44 @@ function createChangeStream(options) {
       source = null;
     }
   };
+}
+
+// dashboard/src/view-state.ts
+var VIEW_PARAM = "view";
+var VIEW_STORAGE_KEY = "luck-planner:view";
+var VIEWS = ["2d", "3d"];
+function isView(value) {
+  return value !== null && value !== void 0 && VIEWS.includes(value);
+}
+function readViewParam(search) {
+  const params = new URLSearchParams(search);
+  const value = params.get(VIEW_PARAM);
+  return isView(value) ? value : null;
+}
+function readStoredView(storage) {
+  if (storage === null) return null;
+  try {
+    const value = storage.getItem(VIEW_STORAGE_KEY);
+    return isView(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+function writeStoredView(storage, view) {
+  if (storage === null) return;
+  try {
+    storage.setItem(VIEW_STORAGE_KEY, view);
+  } catch {
+  }
+}
+function initialView(search, storage) {
+  return readViewParam(search) ?? readStoredView(storage) ?? "2d";
+}
+function viewSearch(search, view) {
+  const params = new URLSearchParams(search);
+  params.set(VIEW_PARAM, view);
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
 }
 
 // dashboard/src/webgl.ts
@@ -10343,7 +10386,7 @@ function Legend() {
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree \xB7 the growth bar under a node counts completed steps (its own record plus everything below it) \xB7 in 3D the same palette: \u{1F41D} fly along arcs, \u{1F41E} pulse on their leaves, \u{1F3AF} rings float over their subtree, growth glows as rings" })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree \xB7 the growth bar under a node counts completed steps (its own record plus everything below it) \xB7 in 3D the same palette: \u{1F41D} fly along arcs, \u{1F41E} pulse on their leaves, \u{1F3AF} rings float over their subtree, growth glows as rings \xB7 a click selects in both views; in 3D the selected node wears a white ring and its links are drawn as curves" })
   ] });
 }
 
@@ -10355,8 +10398,12 @@ function ThreeView(props) {
   const handleRef = (0, import_react7.useRef)(null);
   const stateRef = (0, import_react7.useRef)(props.onSceneState);
   stateRef.current = props.onSceneState;
-  const sceneRef = (0, import_react7.useRef)({ model: props.model, overlay: props.overlay });
-  sceneRef.current = { model: props.model, overlay: props.overlay };
+  const selectRef = (0, import_react7.useRef)(props.onSelectNode);
+  selectRef.current = props.onSelectNode;
+  const sceneRef = (0, import_react7.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
+  sceneRef.current = { model: props.model, overlay: props.overlay, fitKey: props.fitKey };
+  const interactionRef = (0, import_react7.useRef)(props.interaction);
+  interactionRef.current = props.interaction;
   (0, import_react7.useEffect)(() => {
     const container2 = containerRef.current;
     if (container2 === null) return;
@@ -10368,11 +10415,21 @@ function ThreeView(props) {
     stateRef.current("loading", THREE_LOADING_STATUS);
     import("./dashboard-3d.js").then((module) => {
       if (cancelled) return;
-      const handle = module.mountScene3D(container2, (detail) => {
-        if (!cancelled) stateRef.current("failed", threeFailedStatus(detail));
+      const handle = module.mountScene3D(container2, {
+        onError: (detail) => {
+          if (!cancelled) stateRef.current("failed", threeFailedStatus(detail));
+        },
+        onSelect: (id2) => {
+          if (!cancelled) selectRef.current(id2);
+        }
       });
       handleRef.current = handle;
-      handle.setScene(sceneRef.current.model, sceneRef.current.overlay);
+      handle.setScene(
+        sceneRef.current.model,
+        sceneRef.current.overlay,
+        sceneRef.current.fitKey
+      );
+      handle.setInteraction(interactionRef.current);
       stateRef.current("ready", "");
     }).catch((cause) => {
       if (cancelled) return;
@@ -10388,8 +10445,11 @@ function ThreeView(props) {
     };
   }, [props.webgl.ok]);
   (0, import_react7.useEffect)(() => {
-    handleRef.current?.setScene(props.model, props.overlay);
-  }, [props.model, props.overlay]);
+    handleRef.current?.setScene(props.model, props.overlay, props.fitKey);
+  }, [props.model, props.overlay, props.fitKey]);
+  (0, import_react7.useEffect)(() => {
+    handleRef.current?.setInteraction(props.interaction);
+  }, [props.interaction]);
   return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
     "div",
     {
@@ -10584,6 +10644,22 @@ function filterExcludesNode(filters, node) {
   };
 }
 var GROWTH_EMPTY_HINT = "No growth records in this project yet \u2014 the heat layer stays neutral (agents write them with luck_tree_update_growth).";
+var SCENE_EMPTY_HINT = "No nodes match the filters \u2014 the 3D tree is empty. Loosen or clear the kind/status/version filters.";
+function safeStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+function syncViewToUrl(view) {
+  const search = viewSearch(window.location.search, view);
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${search}${window.location.hash}`
+  );
+}
 function App() {
   const params = (0, import_react9.useMemo)(() => parseDashboardParams(window.location.search), []);
   const client = (0, import_react9.useMemo)(
@@ -10609,8 +10685,12 @@ function App() {
   const [focus, setFocus] = (0, import_react9.useState)(null);
   const focusSeq = (0, import_react9.useRef)(0);
   const [layer, setLayer] = (0, import_react9.useState)("status");
-  const [view, setView] = (0, import_react9.useState)("2d");
   const webgl = (0, import_react9.useMemo)(() => detectWebGL(), []);
+  const storage = (0, import_react9.useMemo)(() => safeStorage(), []);
+  const [view, setView] = (0, import_react9.useState)(() => {
+    const wanted = initialView(window.location.search, storage);
+    return planViewSwitch(webgl, wanted).view;
+  });
   const [live, setLive] = (0, import_react9.useState)("connecting");
   const [detailRefresh, setDetailRefresh] = (0, import_react9.useState)(0);
   const selectedIdRef = (0, import_react9.useRef)(null);
@@ -10716,9 +10796,17 @@ function App() {
       const plan = planViewSwitch(webgl, target);
       setView(plan.view);
       if (plan.status !== null) setStatusLine(plan.status);
+      writeStoredView(storage, plan.view);
+      syncViewToUrl(plan.view);
     },
-    [webgl]
+    [storage, webgl]
   );
+  (0, import_react9.useEffect)(() => {
+    const wanted = initialView(window.location.search, storage);
+    const plan = planViewSwitch(webgl, wanted);
+    if (plan.status !== null) setStatusLine(plan.status);
+    syncViewToUrl(plan.view);
+  }, [storage, webgl]);
   const onSceneState = (0, import_react9.useCallback)(
     (state, status) => {
       setStatusLine(status);
@@ -10767,13 +10855,60 @@ function App() {
     [tree, collapsedIds, filters, layer]
   );
   const scene3dModel = (0, import_react9.useMemo)(
-    () => tree === null ? null : buildScene3D(tree.nodes),
-    [tree]
+    () => tree === null ? null : buildScene3D(tree.nodes, { filter: filters }),
+    [tree, filters]
   );
   const scene3dOverlay = (0, import_react9.useMemo)(
     () => tree === null || scene3dModel === null ? null : buildSceneOverlay(tree, scene3dModel, { layer }),
     [tree, scene3dModel, layer]
   );
+  const scene3dFitKey = (0, import_react9.useMemo)(
+    () => tree === null ? "" : `${tree.nodes.length}:${tree.nodes[0]?.id ?? ""}`,
+    [tree]
+  );
+  const scene3dCandidates = (0, import_react9.useMemo)(
+    () => scene3dModel === null ? [] : pickCandidates(scene3dModel),
+    [scene3dModel]
+  );
+  const scene3dInteraction = (0, import_react9.useMemo)(() => {
+    if (tree === null || scene3dModel === null) return EMPTY_INTERACTION;
+    const selected2 = selectedId === null ? null : tree.nodes.find((node) => node.id === selectedId) ?? null;
+    const position = selectedId === null ? null : scene3dModel.nodes.find((node) => node.id === selectedId)?.position ?? null;
+    const label = selected2 === null ? null : `${selected2.name} \u2014 ${KIND_LABELS[selected2.kind]} \xB7 ${STATUS_LABELS[selected2.status]}`;
+    const target = focus === null ? null : focusTarget(scene3dModel, focus.nodeId);
+    return {
+      selectedId,
+      selectedLabel: label,
+      selectedPosition: position,
+      candidates: scene3dCandidates,
+      highlight: selectionHighlight(
+        scene3dModel,
+        scene3dOverlay ?? EMPTY_OVERLAY,
+        selectedId
+      ),
+      focus: focus === null || target === null ? null : {
+        nodeId: focus.nodeId,
+        seq: focus.seq,
+        position: target.position,
+        distance: target.distance
+      }
+    };
+  }, [
+    focus,
+    scene3dCandidates,
+    scene3dModel,
+    scene3dOverlay,
+    selectedId,
+    tree
+  ]);
+  const scene3dEmpty = scene3dModel !== null && scene3dModel.nodes.length === 0;
+  (0, import_react9.useEffect)(() => {
+    if (view !== "3d") return;
+    setStatusLine((previous) => {
+      if (scene3dEmpty) return SCENE_EMPTY_HINT;
+      return previous === SCENE_EMPTY_HINT ? "" : previous;
+    });
+  }, [scene3dEmpty, view]);
   const resolveName = (0, import_react9.useCallback)(
     (id2) => {
       const node = tree?.nodes.find((candidate) => candidate.id === id2);
@@ -10807,6 +10942,9 @@ function App() {
           webgl,
           model: scene3dModel,
           overlay: scene3dOverlay,
+          fitKey: scene3dFitKey,
+          interaction: scene3dInteraction,
+          onSelectNode: setSelectedId,
           onSceneState
         }
       ) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(

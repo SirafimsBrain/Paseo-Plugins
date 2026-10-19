@@ -1,6 +1,6 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.28.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.29.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection
@@ -9,11 +9,13 @@
 > `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls),
 > **H2** (agent timeline rows for the two key audit facts), **I1** (the WebGL
 > spike: probe + fallback, lazy `dashboard-3d.js` entry, empty scene with
-> OrbitControls), **I2** (the 3D tree: radial layout + geometry) and **I3**
-> (bees, bugs, goals and growth in 3D, with the animation frame budget) are done
-> and all tests are green; the next stage is **I4** (3D interaction: picking,
-> labels, filters and the 2D/3D toggle).
-> Stages A1–I3 are complete; I4–J are otherwise untouched. Nothing in
+> OrbitControls), **I2** (the 3D tree: radial layout + geometry), **I3**
+> (bees, bugs, goals and growth in 3D, with the animation frame budget) and
+> **I4** (3D interaction: picking into the shared details panel, the selection
+> highlight, the camera flight from the search, the filters in 3D and the
+> remembered 2D/3D choice) are done and all tests are green; the next stage is
+> **J1** (the plugin's English README and the link from the root README).
+> Stages A1–I4 are complete; J1–J2 are otherwise untouched. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -1616,6 +1618,118 @@ the committed artifact with a fresh build — the file set included, so a stale
 `chunk-*.js` can no longer hide in the repository. Four consecutive full-suite
 runs are green afterwards.
 
+### Interaction in 3D, and the remembered 2D/3D choice (stage I4 — `dashboard/src/pick-3d.ts`, `dashboard/src/view-state.ts`, `dashboard/src/dashboard-3d.tsx`, `dashboard/src/components/ThreeView.tsx`, `dashboard/src/app.tsx`, `dashboard/src/tree-3d.ts`, `dashboard/src/graph.ts`)
+
+The 3D view stops being a picture. A click selects a node and fills the
+*same* details panel the 2D diagram fills, the selection shows what the node
+is connected to, the search flies the camera to the node it found, the
+toolbar filters narrow the 3D tree by the same rule the 2D diagram uses, and
+the 2D/3D choice survives a reload.
+
+**The decisions are pure, the scene draws them.** `dashboard/src/pick-3d.ts`
+holds everything the interaction *decides*: which node a ray hits
+(`pickNode` — a ray/sphere test, nearest hit wins), what the selection
+highlights (`selectionHighlight` — the nodes sharing a blocking incident, the
+bees of the node, the tubes touching it), and where the camera flies
+(`focusTarget`). The scene receives one `SceneInteraction` object and renders
+it: the ring, the label, the highlighted links, the ray. The scene never
+looks a node up by id — that stays in the app, the only place that knows the
+tree. The module sits in the eager chunk next to `graph.ts` and `tree-3d.ts`,
+so the decisions are testable in plain Node and the lazy chunk carries only
+the drawing.
+
+**Why the picking is ours and not three.js'.** r3f raycasts every
+interactive object on every pointer *move*, and the 10 000-instance leaf
+mesh is deliberately not interactive (`raycast={() => null}` — the I3 rule).
+One click therefore costs one ray/sphere test over a flat candidate list:
+exact, cheap, and predictable. The candidates (`pickCandidates`) carry a
+radius by *kind* — the sprite's half-edge for a leaf, the sphere's radius
+for an apex, a small "joint" around the point where an inner node's children
+hang. A drag is an orbit, not a click: the pointer's travel decides, so the
+user can spin the tree without clearing the selection, and a click on empty
+space clears it (the 2D canvas' pane click).
+
+**The highlight mirrors the 2D canvas, item by item.** The 2D decorates the
+selected node, the nodes sharing an open incident with it (`relatedByOpenBug`)
+and every edge touching it (`edgeTouchesNode`). The 3D highlight is the same
+three sets, computed from the same overlay the scene draws: the selected leaf
+and the incident siblings get their own colours, the tubes that touch the node
+are painted in the selection colour, and the influence links of the node are
+drawn *as curves* along the very arcs the bees fly (a particle alone says
+"something flies here"; a curve says "this fact depends on that one"). The
+test compares the 3D set with the 2D set instead of trusting both.
+
+**The camera flies to a node, it does not spin around it.** A search request
+carries the node's position and a distance (`focusTarget`: a fraction of the
+tree's radius, clamped), and the scene keeps the current viewing direction
+while it moves the camera *and* the orbit target — 0.7 s of smoothstep. The
+camera re-frames only when the *data* changes (a `fitKey` the app computes
+from the payload), never when the model is rebuilt: a live refetch or a
+filter that narrows the tree must not yank the view out of the user's hands.
+
+**The filters reach the 3D tree.** `buildScene3D(nodes, { filter })` applies
+the 2D adapter's own rule (`matchingWithAncestors`, extracted from
+`buildGraph`): a node survives when it matches the filter or has a matching
+descendant, and the path to the root stays as context. One rule, two views —
+the collapse state stays a 2D-canvas concern, and the 3D tree of a filtered
+project shows exactly the nodes the diagram shows.
+
+**The 2D/3D choice is remembered.** `dashboard/src/view-state.ts` is the whole
+rule: the URL (`?view=3d`) wins, the tab's own `localStorage` is the
+fallback, and 2D is the default. The URL always carries the view, so a
+copied link opens in the diagram the sender was looking at, while the token
+and the project parameter survive the rewrite. WebGL is not consulted here:
+whether 3D *can* be shown is the probe's and `planViewSwitch`'s business
+(stage I1) — this module only remembers the wish, and a tab that asks for 3D
+without WebGL stays on 2D and says why.
+
+**The instancing pass.** Before I4, every edge was its own `<mesh>`: one
+draw call *and* one React element per edge, thousands of them in a real
+project. The tubes are now one instanced mesh — a unit cylinder scaled per
+instance by `(radius, length, radius)` and rotated by a quaternion, so the
+thickness still follows the subtree leaf count. A 92-node fixture with 91
+tubes and 75 leaves renders in **7 draw calls** (10 with the selection's
+highlighted arcs). The billboard loop of the leaf sprites now skips the frame
+when the camera stands still: an idle scene rewrites no matrices.
+
+**A bug the live check found.** drei's `<Html>` portals its content into the
+DOM in a layout effect guarded by the group's ref; mounted in the *very
+first* render of the scene, that ref is not attached yet, the portal is
+skipped — and never happens again, so the label stays invisible forever. The
+case is not hypothetical: it is exactly "the tab opens in 3D with a node
+already selected" (switching back from 2D keeps the selection), which is the
+I4 acceptance scenario. The scene now announces its first frame
+(`SceneReady`) and mounts the HTML overlays after it.
+
+**The live check.** The Paseo workspace browser (Electron/Chromium) against a
+real `DashboardHttpServer` over a seeded `LuckPlannerStore`: a click on a
+leaf selects it and the shared details panel answers with its version,
+revision, incidents and links; the leaf wears the selection colour, its tube
+is painted in it and its two influence links are drawn as curves; a search
+flies the camera (the position and the orbit target move to the node) and the
+label names the hit; switching 2D → 3D keeps the selection *and* the label;
+the status filter cuts the 3D tree from 75 leaves to the 14 that match. The
+host cannot paint its background tabs, so the *look* of the scene (legibility
+of the four shapes, the FPS on a live 5–10k tree) stays on the J2 checklist.
+
+**Tests.** `tests/dashboard-pick-3d.test.ts` (24) builds its fixtures through
+a real store: the ray test (the hit, the miss, the nearest hit in front, a
+node behind the origin, a non-unit direction, a ray starting inside a
+sphere, a zero-length direction), the candidates (one per node, sized by
+kind), the highlight (the incident siblings — compared with the 2D adapter's
+own set, the bees in both directions, the node's and its children's tubes, the
+empty selection), the focus target, the filters in 3D (the same node set the
+2D graph shows, the ancestor path kept, no filter = every node) and the view
+state (the URL, the storage, a hostile storage, the precedence, the rewrite
+that keeps the token). `tests/dashboard-3d.test.ts` gains the I4 contracts:
+the picking decisions stay in the app graph while the drawing stays lazy, the
+tubes are one instanced mesh (no per-edge element list), the scene picks with
+the pure picker, the loader forwards the interaction and reports a picked
+node, both views select through the same setter and fill the same panel, the
+view is remembered in the URL and the storage, the filters reach the layout,
+and the HTML overlays wait for the first frame. `typecheck` (both configs) and
+the full suite: 31 files, 536 tests, green.
+
 
 ## 7. Roadmap (stage map)
 
@@ -1623,7 +1737,7 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: blocks G and H are complete, block I is in progress.** Stages A1–F2 are
+**Status: blocks G, H and I are complete.** Stages A1–F2 are
 complete and released as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**,
 **C (domain semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP
 transport)** are closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
@@ -1657,9 +1771,16 @@ is O(links) instead of O(nodes) (instanced swarms, one breathing opacity,
 `hashUnit` phases instead of `Math.random()`), the hover tooltip carrying a
 bee's status and revision, and the shared `growthRollups` that now makes 2D and
 3D read one number — plus the test-infrastructure fix that moved the
-determinism rebuilds out of the shared `dist/`. Next: **I4** (3D interaction:
-OrbitControls tuning, raycast picking into the shared details panel, drei labels
-for the focused node, camera focus from search, filters and the 2D/3D toggle).
+determinism rebuilds out of the shared `dist/`, and I4 (0.29.0) made the
+scene interactive: a click picks a node with a pure ray/sphere test (the
+10 000-instance meshes stay out of the renderer's raycast path) and fills the
+*same* details panel the 2D diagram fills, the selection shows the incident
+siblings, the links (drawn as curves) and the tubes that touch it, a search
+flies the camera to the node, the toolbar filters narrow the 3D tree by the
+2D adapter's own rule, the 2D/3D choice is remembered in the URL and in the
+tab's storage, and the tubes became one instanced mesh (7 draw calls for a
+92-node fixture). Next: **J1** (the plugin's English README + the link from
+the root README) and **J2** (the live-daemon e2e checklist).
 A candidate **D4**
 (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
@@ -1675,7 +1796,7 @@ precede the remaining UI work.
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
-| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle |
+| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle ✅ (0.29.0) |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
 
 Blocks B–D have file-disjoint boundaries and may be delegated to different agents.
@@ -1708,7 +1829,7 @@ from):
 | WebGL unavailable in the workspace browser on some client | Spike I1 before writing the scene; fall back to 2D with an explanation |
 | React Flow degrades above ~1000 nodes | Collapse/expand by default (G2), filters, synthetic-canvas measurement in the G2 acceptance |
 | 3D bundle bloats the first chunk | Separate lazy entry `dashboard-3d.js` (I1), loaded only on toggle |
-| 3D overlay animation drops frames on big trees | Per-frame work is O(links) with preallocated vectors (I3); the large sets are instanced and positioned once, only one material uniform moves; upcoming I4 picking must keep the 10k meshes out of the raycast path |
+| 3D overlay animation drops frames on big trees | Per-frame work is O(links) with preallocated vectors (I3); the large sets are instanced and positioned once, only one material uniform moves; I4 picking keeps the 10k meshes out of the raycast path (one ray/sphere test per click) and the idle billboard loop rewrites nothing |
 | Concurrent SQLite access (agents + UI + HTTP) | WAL + busy timeout + write-retry from stage B2; one owning process |
 | Plugin update breaks agents' MCP entry path | Revision-independent publication from stage D2 (memory-flash 0.7.1 lesson) |
 | HTTP layer as an attack vector | 127.0.0.1 + token + read-only API (ADR-8, ADR-9) |

@@ -254,7 +254,7 @@ export interface BuildGraphOptions {
   layer?: GraphLayer;
 }
 /** Flat index of the tree: roots, sorted children and the node lookup. */
-interface TreeIndex {
+export interface TreeIndex {
   byId: Map<string, TreeNode>;
   childrenOf: Map<string, TreeNode[]>;
   roots: TreeNode[];
@@ -683,14 +683,50 @@ function applyFilter(
   filter: GraphFilter | undefined,
 ): Set<string> {
   if (!isFilterActive(filter)) return new Set(visible);
+  return matchingWithAncestors(nodes, filter, {
+    isVisible: (id) => visible.has(id),
+    index,
+  });
+}
 
+/**
+ * The nodes that survive the toolbar filters (G4), plus the path to the root
+ * that keeps them readable as a tree.
+ *
+ * A node survives when it *matches* the filter; its ancestors are added as
+ * context, so a filtered leaf still hangs from a branch instead of floating
+ * alone. The rule is shared with the 3D layout (stage I4), so both views show
+ * the same tree for the same filter — one rule, not two.
+ *
+ * `isVisible` narrows the walk to the nodes the 2D canvas currently shows
+ * (a collapsed branch stops the context chain); the 3D view has no collapse
+ * and passes none.
+ */
+export function matchingWithAncestors(
+  nodes: readonly TreeNode[],
+  filter: GraphFilter | undefined,
+  options: {
+    /** Only these nodes (and their visible ancestors) may be kept. */
+    isVisible?: (id: string) => boolean;
+    /** A pre-built index — the caller usually has one. */
+    index?: TreeIndex;
+  } = {},
+): Set<string> {
   const keep = new Set<string>();
+  if (!isFilterActive(filter)) {
+    for (const node of nodes) keep.add(node.id);
+    return keep;
+  }
+  const index = options.index ?? indexTree(nodes);
+  const isVisible = options.isVisible ?? ((): boolean => true);
   for (const node of nodes) {
-    if (!visible.has(node.id)) continue;
+    // The node itself must be visible: a collapsed branch does not come back
+    // because it happens to match the filter ("collapse wins", G4).
+    if (!isVisible(node.id)) continue;
     if (!matchesFilter(node, filter)) continue;
     keep.add(node.id);
     let parentId = node.parentId;
-    while (parentId !== null && visible.has(parentId) && !keep.has(parentId)) {
+    while (parentId !== null && isVisible(parentId) && !keep.has(parentId)) {
       keep.add(parentId);
       parentId = index.byId.get(parentId)?.parentId ?? null;
     }

@@ -1,13 +1,16 @@
 import {
   BEE_STATUS_COLORS,
   BUG_BADGE_COLOR,
+  EMPTY_INTERACTION,
   EMPTY_OVERLAY,
   GOAL_STATUS_COLORS,
   KIND_COLORS,
   LAYOUT_3D,
   OVERLAY_3D,
+  SELECTION_COLOR,
   STATUS_COLORS,
   beeArcPoint,
+  beeArcPoints,
   beeProgress,
   beeTipText,
   bugPulseScale,
@@ -16,11 +19,12 @@ import {
   growthGlow,
   haloScale,
   heatColor,
+  pickNode,
   require_client,
   require_jsx_runtime,
   require_react,
   require_with_selector
-} from "./chunk-chunk-YT3CSXRB.js";
+} from "./chunk-chunk-IEJIMUBD.js";
 import {
   __commonJS,
   __export,
@@ -35414,13 +35418,13 @@ function WebGLGeometries(gl, attributes, info, bindingStates) {
     const indices = [];
     const geometryIndex = geometry.index;
     const geometryPosition = geometry.attributes.position;
-    let version = 0;
+    let version2 = 0;
     if (geometryPosition === void 0) {
       return;
     }
     if (geometryIndex !== null) {
       const array = geometryIndex.array;
-      version = geometryIndex.version;
+      version2 = geometryIndex.version;
       for (let i2 = 0, l2 = array.length; i2 < l2; i2 += 3) {
         const a = array[i2 + 0];
         const b2 = array[i2 + 1];
@@ -35429,7 +35433,7 @@ function WebGLGeometries(gl, attributes, info, bindingStates) {
       }
     } else {
       const array = geometryPosition.array;
-      version = geometryPosition.version;
+      version2 = geometryPosition.version;
       for (let i2 = 0, l2 = array.length / 3 - 1; i2 < l2; i2 += 3) {
         const a = i2 + 0;
         const b2 = i2 + 1;
@@ -35438,7 +35442,7 @@ function WebGLGeometries(gl, attributes, info, bindingStates) {
       }
     }
     const attribute = new (geometryPosition.count >= 65535 ? Uint32BufferAttribute : Uint16BufferAttribute)(indices, 1);
-    attribute.version = version;
+    attribute.version = version2;
     const previousAttribute = wireframeAttributes.get(geometry);
     if (previousAttribute) attributes.remove(previousAttribute);
     wireframeAttributes.set(geometry, attribute);
@@ -38382,7 +38386,7 @@ var _lightPositionWorld2 = /* @__PURE__ */ new Vector3();
 var _lookTarget2 = /* @__PURE__ */ new Vector3();
 function WebGLShadowMap(renderer, objects, capabilities) {
   let _frustum2 = new Frustum();
-  const _shadowMapSize = new Vector2(), _viewportSize = new Vector2(), _viewport = new Vector4(), _depthMaterial = new MeshDepthMaterial(), _distanceMaterial = new MeshDistanceMaterial(), _materialCache = {}, _maxTextureSize = capabilities.maxTextureSize;
+  const _shadowMapSize = new Vector2(), _viewportSize = new Vector2(), _viewport2 = new Vector4(), _depthMaterial = new MeshDepthMaterial(), _distanceMaterial = new MeshDistanceMaterial(), _materialCache = {}, _maxTextureSize = capabilities.maxTextureSize;
   const shadowSide = { [FrontSide]: BackSide, [BackSide]: FrontSide, [DoubleSide]: DoubleSide };
   const shadowMaterialVertical = new ShaderMaterial({
     defines: {
@@ -38555,13 +38559,13 @@ function WebGLShadowMap(renderer, objects, capabilities) {
             renderer.clear();
           }
           const viewport = shadow.getViewport(face);
-          _viewport.set(
+          _viewport2.set(
             _viewportSize.x * viewport.x,
             _viewportSize.y * viewport.y,
             _viewportSize.x * viewport.z,
             _viewportSize.y * viewport.w
           );
-          _state.viewport(_viewport);
+          _state.viewport(_viewport2);
         }
         _frustum2 = shadow.getFrustum(face);
         renderObject(scene, camera, shadowCamera, light, this.type);
@@ -38918,14 +38922,14 @@ function WebGLState(gl, extensions) {
   let currentPolygonOffsetUnits = null;
   const maxTextures = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS);
   let lineWidthAvailable = false;
-  let version = 0;
+  let version2 = 0;
   const glVersion = gl.getParameter(gl.VERSION);
   if (glVersion.indexOf("WebGL") !== -1) {
-    version = parseFloat(/^WebGL (\d)/.exec(glVersion)[1]);
-    lineWidthAvailable = version >= 1;
+    version2 = parseFloat(/^WebGL (\d)/.exec(glVersion)[1]);
+    lineWidthAvailable = version2 >= 1;
   } else if (glVersion.indexOf("OpenGL ES") !== -1) {
-    version = parseFloat(/^OpenGL ES (\d)/.exec(glVersion)[1]);
-    lineWidthAvailable = version >= 2;
+    version2 = parseFloat(/^OpenGL ES (\d)/.exec(glVersion)[1]);
+    lineWidthAvailable = version2 >= 2;
   }
   let currentTextureSlot = null;
   let currentBoundTextures = {};
@@ -42677,14 +42681,14 @@ var WebGLRenderer = class {
     let _pixelRatio = 1;
     let _opaqueSort = null;
     let _transparentSort = null;
-    const _viewport = new Vector4(0, 0, _width, _height);
+    const _viewport2 = new Vector4(0, 0, _width, _height);
     const _scissor = new Vector4(0, 0, _width, _height);
     let _scissorTest = false;
     const _frustum2 = new Frustum();
     let _clippingEnabled = false;
     let _localClippingEnabled = false;
     const _projScreenMatrix3 = new Matrix4();
-    const _vector3 = new Vector3();
+    const _vector32 = new Vector3();
     const _vector42 = new Vector4();
     const _emptyScene = { background: null, fog: null, environment: null, overrideMaterial: null, isScene: true };
     let _renderBackground = false;
@@ -42852,15 +42856,15 @@ var WebGLRenderer = class {
       return target.copy(_currentViewport);
     };
     this.getViewport = function(target) {
-      return target.copy(_viewport);
+      return target.copy(_viewport2);
     };
     this.setViewport = function(x2, y, width, height) {
       if (x2.isVector4) {
-        _viewport.set(x2.x, x2.y, x2.z, x2.w);
+        _viewport2.set(x2.x, x2.y, x2.z, x2.w);
       } else {
-        _viewport.set(x2, y, width, height);
+        _viewport2.set(x2, y, width, height);
       }
-      state2.viewport(_currentViewport.copy(_viewport).multiplyScalar(_pixelRatio).round());
+      state2.viewport(_currentViewport.copy(_viewport2).multiplyScalar(_pixelRatio).round());
     };
     this.getScissor = function(target) {
       return target.copy(_scissor);
@@ -43719,7 +43723,7 @@ var WebGLRenderer = class {
         p_uniforms.setValue(_gl, "viewMatrix", camera.matrixWorldInverse);
         const uCamPos = p_uniforms.map.cameraPosition;
         if (uCamPos !== void 0) {
-          uCamPos.setValue(_gl, _vector3.setFromMatrixPosition(camera.matrixWorld));
+          uCamPos.setValue(_gl, _vector32.setFromMatrixPosition(camera.matrixWorld));
         }
         if (capabilities.logarithmicDepthBuffer) {
           p_uniforms.setValue(
@@ -43920,7 +43924,7 @@ var WebGLRenderer = class {
         _currentScissor.copy(renderTarget.scissor);
         _currentScissorTest = renderTarget.scissorTest;
       } else {
-        _currentViewport.copy(_viewport).multiplyScalar(_pixelRatio).floor();
+        _currentViewport.copy(_viewport2).multiplyScalar(_pixelRatio).floor();
         _currentScissor.copy(_scissor).multiplyScalar(_pixelRatio).floor();
         _currentScissorTest = _scissorTest;
       }
@@ -53014,6 +53018,12 @@ var Html = /* @__PURE__ */ React4.forwardRef(({
   })));
 });
 
+// node_modules/three-stdlib/_polyfill/constants.js
+var version = /* @__PURE__ */ (() => parseInt(REVISION.replace(/\D+/g, "")))();
+
+// node_modules/three-stdlib/_polyfill/uv1.js
+var UV1 = version >= 125 ? "uv1" : "uv2";
+
 // node_modules/three-stdlib/controls/EventDispatcher.js
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
@@ -53921,9 +53931,1047 @@ var OrbitControls = class extends EventDispatcher2 {
   }
 };
 
-// node_modules/@react-three/drei/core/OrbitControls.js
+// node_modules/three-stdlib/lines/LineSegmentsGeometry.js
+var _box2 = /* @__PURE__ */ new Box3();
+var _vector3 = /* @__PURE__ */ new Vector3();
+var LineSegmentsGeometry = class extends InstancedBufferGeometry {
+  constructor() {
+    super();
+    this.isLineSegmentsGeometry = true;
+    this.type = "LineSegmentsGeometry";
+    const positions = [-1, 2, 0, 1, 2, 0, -1, 1, 0, 1, 1, 0, -1, 0, 0, 1, 0, 0, -1, -1, 0, 1, -1, 0];
+    const uvs = [-1, 2, 1, 2, -1, 1, 1, 1, -1, -1, 1, -1, -1, -2, 1, -2];
+    const index = [0, 2, 1, 2, 3, 1, 2, 4, 3, 4, 5, 3, 4, 6, 5, 6, 7, 5];
+    this.setIndex(index);
+    this.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    this.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  }
+  applyMatrix4(matrix) {
+    const start = this.attributes.instanceStart;
+    const end = this.attributes.instanceEnd;
+    if (start !== void 0) {
+      start.applyMatrix4(matrix);
+      end.applyMatrix4(matrix);
+      start.needsUpdate = true;
+    }
+    if (this.boundingBox !== null) {
+      this.computeBoundingBox();
+    }
+    if (this.boundingSphere !== null) {
+      this.computeBoundingSphere();
+    }
+    return this;
+  }
+  setPositions(array) {
+    let lineSegments;
+    if (array instanceof Float32Array) {
+      lineSegments = array;
+    } else if (Array.isArray(array)) {
+      lineSegments = new Float32Array(array);
+    }
+    const instanceBuffer = new InstancedInterleavedBuffer(lineSegments, 6, 1);
+    this.setAttribute("instanceStart", new InterleavedBufferAttribute(instanceBuffer, 3, 0));
+    this.setAttribute("instanceEnd", new InterleavedBufferAttribute(instanceBuffer, 3, 3));
+    this.computeBoundingBox();
+    this.computeBoundingSphere();
+    return this;
+  }
+  setColors(array, itemSize = 3) {
+    let colors;
+    if (array instanceof Float32Array) {
+      colors = array;
+    } else if (Array.isArray(array)) {
+      colors = new Float32Array(array);
+    }
+    const instanceColorBuffer = new InstancedInterleavedBuffer(colors, itemSize * 2, 1);
+    this.setAttribute("instanceColorStart", new InterleavedBufferAttribute(instanceColorBuffer, itemSize, 0));
+    this.setAttribute("instanceColorEnd", new InterleavedBufferAttribute(instanceColorBuffer, itemSize, itemSize));
+    return this;
+  }
+  fromWireframeGeometry(geometry) {
+    this.setPositions(geometry.attributes.position.array);
+    return this;
+  }
+  fromEdgesGeometry(geometry) {
+    this.setPositions(geometry.attributes.position.array);
+    return this;
+  }
+  fromMesh(mesh) {
+    this.fromWireframeGeometry(new WireframeGeometry(mesh.geometry));
+    return this;
+  }
+  fromLineSegments(lineSegments) {
+    const geometry = lineSegments.geometry;
+    this.setPositions(geometry.attributes.position.array);
+    return this;
+  }
+  computeBoundingBox() {
+    if (this.boundingBox === null) {
+      this.boundingBox = new Box3();
+    }
+    const start = this.attributes.instanceStart;
+    const end = this.attributes.instanceEnd;
+    if (start !== void 0 && end !== void 0) {
+      this.boundingBox.setFromBufferAttribute(start);
+      _box2.setFromBufferAttribute(end);
+      this.boundingBox.union(_box2);
+    }
+  }
+  computeBoundingSphere() {
+    if (this.boundingSphere === null) {
+      this.boundingSphere = new Sphere();
+    }
+    if (this.boundingBox === null) {
+      this.computeBoundingBox();
+    }
+    const start = this.attributes.instanceStart;
+    const end = this.attributes.instanceEnd;
+    if (start !== void 0 && end !== void 0) {
+      const center = this.boundingSphere.center;
+      this.boundingBox.getCenter(center);
+      let maxRadiusSq = 0;
+      for (let i2 = 0, il = start.count; i2 < il; i2++) {
+        _vector3.fromBufferAttribute(start, i2);
+        maxRadiusSq = Math.max(maxRadiusSq, center.distanceToSquared(_vector3));
+        _vector3.fromBufferAttribute(end, i2);
+        maxRadiusSq = Math.max(maxRadiusSq, center.distanceToSquared(_vector3));
+      }
+      this.boundingSphere.radius = Math.sqrt(maxRadiusSq);
+      if (isNaN(this.boundingSphere.radius)) {
+        console.error(
+          "THREE.LineSegmentsGeometry.computeBoundingSphere(): Computed radius is NaN. The instanced position data is likely to have NaN values.",
+          this
+        );
+      }
+    }
+  }
+  toJSON() {
+  }
+  applyMatrix(matrix) {
+    console.warn("THREE.LineSegmentsGeometry: applyMatrix() has been renamed to applyMatrix4().");
+    return this.applyMatrix4(matrix);
+  }
+};
+
+// node_modules/three-stdlib/lines/LineGeometry.js
+var LineGeometry = class extends LineSegmentsGeometry {
+  constructor() {
+    super();
+    this.isLineGeometry = true;
+    this.type = "LineGeometry";
+  }
+  setPositions(array) {
+    const length = array.length - 3;
+    const points = new Float32Array(2 * length);
+    for (let i2 = 0; i2 < length; i2 += 3) {
+      points[2 * i2] = array[i2];
+      points[2 * i2 + 1] = array[i2 + 1];
+      points[2 * i2 + 2] = array[i2 + 2];
+      points[2 * i2 + 3] = array[i2 + 3];
+      points[2 * i2 + 4] = array[i2 + 4];
+      points[2 * i2 + 5] = array[i2 + 5];
+    }
+    super.setPositions(points);
+    return this;
+  }
+  setColors(array, itemSize = 3) {
+    const length = array.length - itemSize;
+    const colors = new Float32Array(2 * length);
+    if (itemSize === 3) {
+      for (let i2 = 0; i2 < length; i2 += itemSize) {
+        colors[2 * i2] = array[i2];
+        colors[2 * i2 + 1] = array[i2 + 1];
+        colors[2 * i2 + 2] = array[i2 + 2];
+        colors[2 * i2 + 3] = array[i2 + 3];
+        colors[2 * i2 + 4] = array[i2 + 4];
+        colors[2 * i2 + 5] = array[i2 + 5];
+      }
+    } else {
+      for (let i2 = 0; i2 < length; i2 += itemSize) {
+        colors[2 * i2] = array[i2];
+        colors[2 * i2 + 1] = array[i2 + 1];
+        colors[2 * i2 + 2] = array[i2 + 2];
+        colors[2 * i2 + 3] = array[i2 + 3];
+        colors[2 * i2 + 4] = array[i2 + 4];
+        colors[2 * i2 + 5] = array[i2 + 5];
+        colors[2 * i2 + 6] = array[i2 + 6];
+        colors[2 * i2 + 7] = array[i2 + 7];
+      }
+    }
+    super.setColors(colors, itemSize);
+    return this;
+  }
+  fromLine(line) {
+    const geometry = line.geometry;
+    this.setPositions(geometry.attributes.position.array);
+    return this;
+  }
+};
+
+// node_modules/three-stdlib/lines/LineMaterial.js
+var LineMaterial = class extends ShaderMaterial {
+  constructor(parameters) {
+    super({
+      type: "LineMaterial",
+      uniforms: UniformsUtils.clone(
+        UniformsUtils.merge([
+          UniformsLib.common,
+          UniformsLib.fog,
+          {
+            worldUnits: { value: 1 },
+            linewidth: { value: 1 },
+            resolution: { value: new Vector2(1, 1) },
+            dashOffset: { value: 0 },
+            dashScale: { value: 1 },
+            dashSize: { value: 1 },
+            gapSize: { value: 1 }
+            // todo FIX - maybe change to totalSize
+          }
+        ])
+      ),
+      vertexShader: (
+        /* glsl */
+        `
+				#include <common>
+				#include <fog_pars_vertex>
+				#include <logdepthbuf_pars_vertex>
+				#include <clipping_planes_pars_vertex>
+
+				uniform float linewidth;
+				uniform vec2 resolution;
+
+				attribute vec3 instanceStart;
+				attribute vec3 instanceEnd;
+
+				#ifdef USE_COLOR
+					#ifdef USE_LINE_COLOR_ALPHA
+						varying vec4 vLineColor;
+						attribute vec4 instanceColorStart;
+						attribute vec4 instanceColorEnd;
+					#else
+						varying vec3 vLineColor;
+						attribute vec3 instanceColorStart;
+						attribute vec3 instanceColorEnd;
+					#endif
+				#endif
+
+				#ifdef WORLD_UNITS
+
+					varying vec4 worldPos;
+					varying vec3 worldStart;
+					varying vec3 worldEnd;
+
+					#ifdef USE_DASH
+
+						varying vec2 vUv;
+
+					#endif
+
+				#else
+
+					varying vec2 vUv;
+
+				#endif
+
+				#ifdef USE_DASH
+
+					uniform float dashScale;
+					attribute float instanceDistanceStart;
+					attribute float instanceDistanceEnd;
+					varying float vLineDistance;
+
+				#endif
+
+				void trimSegment( const in vec4 start, inout vec4 end ) {
+
+					// trim end segment so it terminates between the camera plane and the near plane
+
+					// conservative estimate of the near plane
+					float a = projectionMatrix[ 2 ][ 2 ]; // 3nd entry in 3th column
+					float b = projectionMatrix[ 3 ][ 2 ]; // 3nd entry in 4th column
+					float nearEstimate = - 0.5 * b / a;
+
+					float alpha = ( nearEstimate - start.z ) / ( end.z - start.z );
+
+					end.xyz = mix( start.xyz, end.xyz, alpha );
+
+				}
+
+				void main() {
+
+					#ifdef USE_COLOR
+
+						vLineColor = ( position.y < 0.5 ) ? instanceColorStart : instanceColorEnd;
+
+					#endif
+
+					#ifdef USE_DASH
+
+						vLineDistance = ( position.y < 0.5 ) ? dashScale * instanceDistanceStart : dashScale * instanceDistanceEnd;
+						vUv = uv;
+
+					#endif
+
+					float aspect = resolution.x / resolution.y;
+
+					// camera space
+					vec4 start = modelViewMatrix * vec4( instanceStart, 1.0 );
+					vec4 end = modelViewMatrix * vec4( instanceEnd, 1.0 );
+
+					#ifdef WORLD_UNITS
+
+						worldStart = start.xyz;
+						worldEnd = end.xyz;
+
+					#else
+
+						vUv = uv;
+
+					#endif
+
+					// special case for perspective projection, and segments that terminate either in, or behind, the camera plane
+					// clearly the gpu firmware has a way of addressing this issue when projecting into ndc space
+					// but we need to perform ndc-space calculations in the shader, so we must address this issue directly
+					// perhaps there is a more elegant solution -- WestLangley
+
+					bool perspective = ( projectionMatrix[ 2 ][ 3 ] == - 1.0 ); // 4th entry in the 3rd column
+
+					if ( perspective ) {
+
+						if ( start.z < 0.0 && end.z >= 0.0 ) {
+
+							trimSegment( start, end );
+
+						} else if ( end.z < 0.0 && start.z >= 0.0 ) {
+
+							trimSegment( end, start );
+
+						}
+
+					}
+
+					// clip space
+					vec4 clipStart = projectionMatrix * start;
+					vec4 clipEnd = projectionMatrix * end;
+
+					// ndc space
+					vec3 ndcStart = clipStart.xyz / clipStart.w;
+					vec3 ndcEnd = clipEnd.xyz / clipEnd.w;
+
+					// direction
+					vec2 dir = ndcEnd.xy - ndcStart.xy;
+
+					// account for clip-space aspect ratio
+					dir.x *= aspect;
+					dir = normalize( dir );
+
+					#ifdef WORLD_UNITS
+
+						// get the offset direction as perpendicular to the view vector
+						vec3 worldDir = normalize( end.xyz - start.xyz );
+						vec3 offset;
+						if ( position.y < 0.5 ) {
+
+							offset = normalize( cross( start.xyz, worldDir ) );
+
+						} else {
+
+							offset = normalize( cross( end.xyz, worldDir ) );
+
+						}
+
+						// sign flip
+						if ( position.x < 0.0 ) offset *= - 1.0;
+
+						float forwardOffset = dot( worldDir, vec3( 0.0, 0.0, 1.0 ) );
+
+						// don't extend the line if we're rendering dashes because we
+						// won't be rendering the endcaps
+						#ifndef USE_DASH
+
+							// extend the line bounds to encompass  endcaps
+							start.xyz += - worldDir * linewidth * 0.5;
+							end.xyz += worldDir * linewidth * 0.5;
+
+							// shift the position of the quad so it hugs the forward edge of the line
+							offset.xy -= dir * forwardOffset;
+							offset.z += 0.5;
+
+						#endif
+
+						// endcaps
+						if ( position.y > 1.0 || position.y < 0.0 ) {
+
+							offset.xy += dir * 2.0 * forwardOffset;
+
+						}
+
+						// adjust for linewidth
+						offset *= linewidth * 0.5;
+
+						// set the world position
+						worldPos = ( position.y < 0.5 ) ? start : end;
+						worldPos.xyz += offset;
+
+						// project the worldpos
+						vec4 clip = projectionMatrix * worldPos;
+
+						// shift the depth of the projected points so the line
+						// segments overlap neatly
+						vec3 clipPose = ( position.y < 0.5 ) ? ndcStart : ndcEnd;
+						clip.z = clipPose.z * clip.w;
+
+					#else
+
+						vec2 offset = vec2( dir.y, - dir.x );
+						// undo aspect ratio adjustment
+						dir.x /= aspect;
+						offset.x /= aspect;
+
+						// sign flip
+						if ( position.x < 0.0 ) offset *= - 1.0;
+
+						// endcaps
+						if ( position.y < 0.0 ) {
+
+							offset += - dir;
+
+						} else if ( position.y > 1.0 ) {
+
+							offset += dir;
+
+						}
+
+						// adjust for linewidth
+						offset *= linewidth;
+
+						// adjust for clip-space to screen-space conversion // maybe resolution should be based on viewport ...
+						offset /= resolution.y;
+
+						// select end
+						vec4 clip = ( position.y < 0.5 ) ? clipStart : clipEnd;
+
+						// back to clip space
+						offset *= clip.w;
+
+						clip.xy += offset;
+
+					#endif
+
+					gl_Position = clip;
+
+					vec4 mvPosition = ( position.y < 0.5 ) ? start : end; // this is an approximation
+
+					#include <logdepthbuf_vertex>
+					#include <clipping_planes_vertex>
+					#include <fog_vertex>
+
+				}
+			`
+      ),
+      fragmentShader: (
+        /* glsl */
+        `
+				uniform vec3 diffuse;
+				uniform float opacity;
+				uniform float linewidth;
+
+				#ifdef USE_DASH
+
+					uniform float dashOffset;
+					uniform float dashSize;
+					uniform float gapSize;
+
+				#endif
+
+				varying float vLineDistance;
+
+				#ifdef WORLD_UNITS
+
+					varying vec4 worldPos;
+					varying vec3 worldStart;
+					varying vec3 worldEnd;
+
+					#ifdef USE_DASH
+
+						varying vec2 vUv;
+
+					#endif
+
+				#else
+
+					varying vec2 vUv;
+
+				#endif
+
+				#include <common>
+				#include <fog_pars_fragment>
+				#include <logdepthbuf_pars_fragment>
+				#include <clipping_planes_pars_fragment>
+
+				#ifdef USE_COLOR
+					#ifdef USE_LINE_COLOR_ALPHA
+						varying vec4 vLineColor;
+					#else
+						varying vec3 vLineColor;
+					#endif
+				#endif
+
+				vec2 closestLineToLine(vec3 p1, vec3 p2, vec3 p3, vec3 p4) {
+
+					float mua;
+					float mub;
+
+					vec3 p13 = p1 - p3;
+					vec3 p43 = p4 - p3;
+
+					vec3 p21 = p2 - p1;
+
+					float d1343 = dot( p13, p43 );
+					float d4321 = dot( p43, p21 );
+					float d1321 = dot( p13, p21 );
+					float d4343 = dot( p43, p43 );
+					float d2121 = dot( p21, p21 );
+
+					float denom = d2121 * d4343 - d4321 * d4321;
+
+					float numer = d1343 * d4321 - d1321 * d4343;
+
+					mua = numer / denom;
+					mua = clamp( mua, 0.0, 1.0 );
+					mub = ( d1343 + d4321 * ( mua ) ) / d4343;
+					mub = clamp( mub, 0.0, 1.0 );
+
+					return vec2( mua, mub );
+
+				}
+
+				void main() {
+
+					#include <clipping_planes_fragment>
+
+					#ifdef USE_DASH
+
+						if ( vUv.y < - 1.0 || vUv.y > 1.0 ) discard; // discard endcaps
+
+						if ( mod( vLineDistance + dashOffset, dashSize + gapSize ) > dashSize ) discard; // todo - FIX
+
+					#endif
+
+					float alpha = opacity;
+
+					#ifdef WORLD_UNITS
+
+						// Find the closest points on the view ray and the line segment
+						vec3 rayEnd = normalize( worldPos.xyz ) * 1e5;
+						vec3 lineDir = worldEnd - worldStart;
+						vec2 params = closestLineToLine( worldStart, worldEnd, vec3( 0.0, 0.0, 0.0 ), rayEnd );
+
+						vec3 p1 = worldStart + lineDir * params.x;
+						vec3 p2 = rayEnd * params.y;
+						vec3 delta = p1 - p2;
+						float len = length( delta );
+						float norm = len / linewidth;
+
+						#ifndef USE_DASH
+
+							#ifdef USE_ALPHA_TO_COVERAGE
+
+								float dnorm = fwidth( norm );
+								alpha = 1.0 - smoothstep( 0.5 - dnorm, 0.5 + dnorm, norm );
+
+							#else
+
+								if ( norm > 0.5 ) {
+
+									discard;
+
+								}
+
+							#endif
+
+						#endif
+
+					#else
+
+						#ifdef USE_ALPHA_TO_COVERAGE
+
+							// artifacts appear on some hardware if a derivative is taken within a conditional
+							float a = vUv.x;
+							float b = ( vUv.y > 0.0 ) ? vUv.y - 1.0 : vUv.y + 1.0;
+							float len2 = a * a + b * b;
+							float dlen = fwidth( len2 );
+
+							if ( abs( vUv.y ) > 1.0 ) {
+
+								alpha = 1.0 - smoothstep( 1.0 - dlen, 1.0 + dlen, len2 );
+
+							}
+
+						#else
+
+							if ( abs( vUv.y ) > 1.0 ) {
+
+								float a = vUv.x;
+								float b = ( vUv.y > 0.0 ) ? vUv.y - 1.0 : vUv.y + 1.0;
+								float len2 = a * a + b * b;
+
+								if ( len2 > 1.0 ) discard;
+
+							}
+
+						#endif
+
+					#endif
+
+					vec4 diffuseColor = vec4( diffuse, alpha );
+					#ifdef USE_COLOR
+						#ifdef USE_LINE_COLOR_ALPHA
+							diffuseColor *= vLineColor;
+						#else
+							diffuseColor.rgb *= vLineColor;
+						#endif
+					#endif
+
+					#include <logdepthbuf_fragment>
+
+					gl_FragColor = diffuseColor;
+
+					#include <tonemapping_fragment>
+					#include <${version >= 154 ? "colorspace_fragment" : "encodings_fragment"}>
+					#include <fog_fragment>
+					#include <premultiplied_alpha_fragment>
+
+				}
+			`
+      ),
+      clipping: true
+      // required for clipping support
+    });
+    this.isLineMaterial = true;
+    this.onBeforeCompile = function() {
+      if (this.transparent) {
+        this.defines.USE_LINE_COLOR_ALPHA = "1";
+      } else {
+        delete this.defines.USE_LINE_COLOR_ALPHA;
+      }
+    };
+    Object.defineProperties(this, {
+      color: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.diffuse.value;
+        },
+        set: function(value) {
+          this.uniforms.diffuse.value = value;
+        }
+      },
+      worldUnits: {
+        enumerable: true,
+        get: function() {
+          return "WORLD_UNITS" in this.defines;
+        },
+        set: function(value) {
+          if (value === true) {
+            this.defines.WORLD_UNITS = "";
+          } else {
+            delete this.defines.WORLD_UNITS;
+          }
+        }
+      },
+      linewidth: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.linewidth.value;
+        },
+        set: function(value) {
+          this.uniforms.linewidth.value = value;
+        }
+      },
+      dashed: {
+        enumerable: true,
+        get: function() {
+          return Boolean("USE_DASH" in this.defines);
+        },
+        set(value) {
+          if (Boolean(value) !== Boolean("USE_DASH" in this.defines)) {
+            this.needsUpdate = true;
+          }
+          if (value === true) {
+            this.defines.USE_DASH = "";
+          } else {
+            delete this.defines.USE_DASH;
+          }
+        }
+      },
+      dashScale: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.dashScale.value;
+        },
+        set: function(value) {
+          this.uniforms.dashScale.value = value;
+        }
+      },
+      dashSize: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.dashSize.value;
+        },
+        set: function(value) {
+          this.uniforms.dashSize.value = value;
+        }
+      },
+      dashOffset: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.dashOffset.value;
+        },
+        set: function(value) {
+          this.uniforms.dashOffset.value = value;
+        }
+      },
+      gapSize: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.gapSize.value;
+        },
+        set: function(value) {
+          this.uniforms.gapSize.value = value;
+        }
+      },
+      opacity: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.opacity.value;
+        },
+        set: function(value) {
+          this.uniforms.opacity.value = value;
+        }
+      },
+      resolution: {
+        enumerable: true,
+        get: function() {
+          return this.uniforms.resolution.value;
+        },
+        set: function(value) {
+          this.uniforms.resolution.value.copy(value);
+        }
+      },
+      alphaToCoverage: {
+        enumerable: true,
+        get: function() {
+          return Boolean("USE_ALPHA_TO_COVERAGE" in this.defines);
+        },
+        set: function(value) {
+          if (Boolean(value) !== Boolean("USE_ALPHA_TO_COVERAGE" in this.defines)) {
+            this.needsUpdate = true;
+          }
+          if (value === true) {
+            this.defines.USE_ALPHA_TO_COVERAGE = "";
+            this.extensions.derivatives = true;
+          } else {
+            delete this.defines.USE_ALPHA_TO_COVERAGE;
+            this.extensions.derivatives = false;
+          }
+        }
+      }
+    });
+    this.setValues(parameters);
+  }
+};
+
+// node_modules/three-stdlib/lines/LineSegments2.js
+var _viewport = /* @__PURE__ */ new Vector4();
+var _start2 = /* @__PURE__ */ new Vector3();
+var _end2 = /* @__PURE__ */ new Vector3();
+var _start4 = /* @__PURE__ */ new Vector4();
+var _end4 = /* @__PURE__ */ new Vector4();
+var _ssOrigin = /* @__PURE__ */ new Vector4();
+var _ssOrigin3 = /* @__PURE__ */ new Vector3();
+var _mvMatrix = /* @__PURE__ */ new Matrix4();
+var _line = /* @__PURE__ */ new Line3();
+var _closestPoint = /* @__PURE__ */ new Vector3();
+var _box4 = /* @__PURE__ */ new Box3();
+var _sphere2 = /* @__PURE__ */ new Sphere();
+var _clipToWorldVector = /* @__PURE__ */ new Vector4();
+var _ray3;
+var _lineWidth;
+function getWorldSpaceHalfWidth(camera, distance, resolution) {
+  _clipToWorldVector.set(0, 0, -distance, 1).applyMatrix4(camera.projectionMatrix);
+  _clipToWorldVector.multiplyScalar(1 / _clipToWorldVector.w);
+  _clipToWorldVector.x = _lineWidth / resolution.width;
+  _clipToWorldVector.y = _lineWidth / resolution.height;
+  _clipToWorldVector.applyMatrix4(camera.projectionMatrixInverse);
+  _clipToWorldVector.multiplyScalar(1 / _clipToWorldVector.w);
+  return Math.abs(Math.max(_clipToWorldVector.x, _clipToWorldVector.y));
+}
+function raycastWorldUnits(lineSegments, intersects2) {
+  const matrixWorld = lineSegments.matrixWorld;
+  const geometry = lineSegments.geometry;
+  const instanceStart = geometry.attributes.instanceStart;
+  const instanceEnd = geometry.attributes.instanceEnd;
+  const segmentCount = Math.min(geometry.instanceCount, instanceStart.count);
+  for (let i2 = 0, l2 = segmentCount; i2 < l2; i2++) {
+    _line.start.fromBufferAttribute(instanceStart, i2);
+    _line.end.fromBufferAttribute(instanceEnd, i2);
+    _line.applyMatrix4(matrixWorld);
+    const pointOnLine = new Vector3();
+    const point = new Vector3();
+    _ray3.distanceSqToSegment(_line.start, _line.end, point, pointOnLine);
+    const isInside = point.distanceTo(pointOnLine) < _lineWidth * 0.5;
+    if (isInside) {
+      intersects2.push({
+        point,
+        pointOnLine,
+        distance: _ray3.origin.distanceTo(point),
+        object: lineSegments,
+        face: null,
+        faceIndex: i2,
+        uv: null,
+        [UV1]: null
+      });
+    }
+  }
+}
+function raycastScreenSpace(lineSegments, camera, intersects2) {
+  const projectionMatrix = camera.projectionMatrix;
+  const material = lineSegments.material;
+  const resolution = material.resolution;
+  const matrixWorld = lineSegments.matrixWorld;
+  const geometry = lineSegments.geometry;
+  const instanceStart = geometry.attributes.instanceStart;
+  const instanceEnd = geometry.attributes.instanceEnd;
+  const segmentCount = Math.min(geometry.instanceCount, instanceStart.count);
+  const near = -camera.near;
+  _ray3.at(1, _ssOrigin);
+  _ssOrigin.w = 1;
+  _ssOrigin.applyMatrix4(camera.matrixWorldInverse);
+  _ssOrigin.applyMatrix4(projectionMatrix);
+  _ssOrigin.multiplyScalar(1 / _ssOrigin.w);
+  _ssOrigin.x *= resolution.x / 2;
+  _ssOrigin.y *= resolution.y / 2;
+  _ssOrigin.z = 0;
+  _ssOrigin3.copy(_ssOrigin);
+  _mvMatrix.multiplyMatrices(camera.matrixWorldInverse, matrixWorld);
+  for (let i2 = 0, l2 = segmentCount; i2 < l2; i2++) {
+    _start4.fromBufferAttribute(instanceStart, i2);
+    _end4.fromBufferAttribute(instanceEnd, i2);
+    _start4.w = 1;
+    _end4.w = 1;
+    _start4.applyMatrix4(_mvMatrix);
+    _end4.applyMatrix4(_mvMatrix);
+    const isBehindCameraNear = _start4.z > near && _end4.z > near;
+    if (isBehindCameraNear) {
+      continue;
+    }
+    if (_start4.z > near) {
+      const deltaDist = _start4.z - _end4.z;
+      const t2 = (_start4.z - near) / deltaDist;
+      _start4.lerp(_end4, t2);
+    } else if (_end4.z > near) {
+      const deltaDist = _end4.z - _start4.z;
+      const t2 = (_end4.z - near) / deltaDist;
+      _end4.lerp(_start4, t2);
+    }
+    _start4.applyMatrix4(projectionMatrix);
+    _end4.applyMatrix4(projectionMatrix);
+    _start4.multiplyScalar(1 / _start4.w);
+    _end4.multiplyScalar(1 / _end4.w);
+    _start4.x *= resolution.x / 2;
+    _start4.y *= resolution.y / 2;
+    _end4.x *= resolution.x / 2;
+    _end4.y *= resolution.y / 2;
+    _line.start.copy(_start4);
+    _line.start.z = 0;
+    _line.end.copy(_end4);
+    _line.end.z = 0;
+    const param = _line.closestPointToPointParameter(_ssOrigin3, true);
+    _line.at(param, _closestPoint);
+    const zPos = MathUtils.lerp(_start4.z, _end4.z, param);
+    const isInClipSpace = zPos >= -1 && zPos <= 1;
+    const isInside = _ssOrigin3.distanceTo(_closestPoint) < _lineWidth * 0.5;
+    if (isInClipSpace && isInside) {
+      _line.start.fromBufferAttribute(instanceStart, i2);
+      _line.end.fromBufferAttribute(instanceEnd, i2);
+      _line.start.applyMatrix4(matrixWorld);
+      _line.end.applyMatrix4(matrixWorld);
+      const pointOnLine = new Vector3();
+      const point = new Vector3();
+      _ray3.distanceSqToSegment(_line.start, _line.end, point, pointOnLine);
+      intersects2.push({
+        point,
+        pointOnLine,
+        distance: _ray3.origin.distanceTo(point),
+        object: lineSegments,
+        face: null,
+        faceIndex: i2,
+        uv: null,
+        [UV1]: null
+      });
+    }
+  }
+}
+var LineSegments2 = class extends Mesh {
+  constructor(geometry = new LineSegmentsGeometry(), material = new LineMaterial({ color: Math.random() * 16777215 })) {
+    super(geometry, material);
+    this.isLineSegments2 = true;
+    this.type = "LineSegments2";
+  }
+  // for backwards-compatibility, but could be a method of LineSegmentsGeometry...
+  computeLineDistances() {
+    const geometry = this.geometry;
+    const instanceStart = geometry.attributes.instanceStart;
+    const instanceEnd = geometry.attributes.instanceEnd;
+    const lineDistances = new Float32Array(2 * instanceStart.count);
+    for (let i2 = 0, j2 = 0, l2 = instanceStart.count; i2 < l2; i2++, j2 += 2) {
+      _start2.fromBufferAttribute(instanceStart, i2);
+      _end2.fromBufferAttribute(instanceEnd, i2);
+      lineDistances[j2] = j2 === 0 ? 0 : lineDistances[j2 - 1];
+      lineDistances[j2 + 1] = lineDistances[j2] + _start2.distanceTo(_end2);
+    }
+    const instanceDistanceBuffer = new InstancedInterleavedBuffer(lineDistances, 2, 1);
+    geometry.setAttribute("instanceDistanceStart", new InterleavedBufferAttribute(instanceDistanceBuffer, 1, 0));
+    geometry.setAttribute("instanceDistanceEnd", new InterleavedBufferAttribute(instanceDistanceBuffer, 1, 1));
+    return this;
+  }
+  raycast(raycaster, intersects2) {
+    const worldUnits = this.material.worldUnits;
+    const camera = raycaster.camera;
+    if (camera === null && !worldUnits) {
+      console.error(
+        'LineSegments2: "Raycaster.camera" needs to be set in order to raycast against LineSegments2 while worldUnits is set to false.'
+      );
+    }
+    const threshold = raycaster.params.Line2 !== void 0 ? raycaster.params.Line2.threshold || 0 : 0;
+    _ray3 = raycaster.ray;
+    const matrixWorld = this.matrixWorld;
+    const geometry = this.geometry;
+    const material = this.material;
+    _lineWidth = material.linewidth + threshold;
+    if (geometry.boundingSphere === null) {
+      geometry.computeBoundingSphere();
+    }
+    _sphere2.copy(geometry.boundingSphere).applyMatrix4(matrixWorld);
+    let sphereMargin;
+    if (worldUnits) {
+      sphereMargin = _lineWidth * 0.5;
+    } else {
+      const distanceToSphere = Math.max(camera.near, _sphere2.distanceToPoint(_ray3.origin));
+      sphereMargin = getWorldSpaceHalfWidth(camera, distanceToSphere, material.resolution);
+    }
+    _sphere2.radius += sphereMargin;
+    if (_ray3.intersectsSphere(_sphere2) === false) {
+      return;
+    }
+    if (geometry.boundingBox === null) {
+      geometry.computeBoundingBox();
+    }
+    _box4.copy(geometry.boundingBox).applyMatrix4(matrixWorld);
+    let boxMargin;
+    if (worldUnits) {
+      boxMargin = _lineWidth * 0.5;
+    } else {
+      const distanceToBox = Math.max(camera.near, _box4.distanceToPoint(_ray3.origin));
+      boxMargin = getWorldSpaceHalfWidth(camera, distanceToBox, material.resolution);
+    }
+    _box4.expandByScalar(boxMargin);
+    if (_ray3.intersectsBox(_box4) === false) {
+      return;
+    }
+    if (worldUnits) {
+      raycastWorldUnits(this, intersects2);
+    } else {
+      raycastScreenSpace(this, camera, intersects2);
+    }
+  }
+  onBeforeRender(renderer) {
+    const uniforms = this.material.uniforms;
+    if (uniforms && uniforms.resolution) {
+      renderer.getViewport(_viewport);
+      this.material.uniforms.resolution.value.set(_viewport.z, _viewport.w);
+    }
+  }
+};
+
+// node_modules/three-stdlib/lines/Line2.js
+var Line2 = class extends LineSegments2 {
+  constructor(geometry = new LineGeometry(), material = new LineMaterial({ color: Math.random() * 16777215 })) {
+    super(geometry, material);
+    this.isLine2 = true;
+    this.type = "Line2";
+  }
+};
+
+// node_modules/@react-three/drei/core/Line.js
 var React5 = __toESM(require_react());
-var OrbitControls2 = /* @__PURE__ */ React5.forwardRef(({
+var Line4 = /* @__PURE__ */ React5.forwardRef(function Line5({
+  points,
+  color = 16777215,
+  vertexColors,
+  linewidth,
+  lineWidth,
+  segments,
+  dashed,
+  ...rest
+}, ref) {
+  var _vertexColors$, _ref;
+  const size = useThree((state2) => state2.size);
+  const line2 = React5.useMemo(() => segments ? new LineSegments2() : new Line2(), [segments]);
+  const [lineMaterial] = React5.useState(() => new LineMaterial());
+  const itemSize = (vertexColors == null || (_vertexColors$ = vertexColors[0]) == null ? void 0 : _vertexColors$.length) === 4 ? 4 : 3;
+  const lineGeom = React5.useMemo(() => {
+    const geom = segments ? new LineSegmentsGeometry() : new LineGeometry();
+    const pValues = points.map((p3) => {
+      const isArray = Array.isArray(p3);
+      return p3 instanceof Vector3 || p3 instanceof Vector4 ? [p3.x, p3.y, p3.z] : p3 instanceof Vector2 ? [p3.x, p3.y, 0] : isArray && p3.length === 3 ? [p3[0], p3[1], p3[2]] : isArray && p3.length === 2 ? [p3[0], p3[1], 0] : p3;
+    });
+    geom.setPositions(pValues.flat());
+    if (vertexColors) {
+      color = 16777215;
+      const cValues = vertexColors.map((c) => c instanceof Color ? c.toArray() : c);
+      geom.setColors(cValues.flat(), itemSize);
+    }
+    return geom;
+  }, [points, segments, vertexColors, itemSize]);
+  React5.useLayoutEffect(() => {
+    line2.computeLineDistances();
+  }, [points, line2]);
+  React5.useLayoutEffect(() => {
+    if (dashed) {
+      lineMaterial.defines.USE_DASH = "";
+    } else {
+      delete lineMaterial.defines.USE_DASH;
+    }
+    lineMaterial.needsUpdate = true;
+  }, [dashed, lineMaterial]);
+  React5.useEffect(() => {
+    return () => {
+      lineGeom.dispose();
+      lineMaterial.dispose();
+    };
+  }, [lineGeom]);
+  return /* @__PURE__ */ React5.createElement("primitive", _extends({
+    object: line2,
+    ref
+  }, rest), /* @__PURE__ */ React5.createElement("primitive", {
+    object: lineGeom,
+    attach: "geometry"
+  }), /* @__PURE__ */ React5.createElement("primitive", _extends({
+    object: lineMaterial,
+    attach: "material",
+    color,
+    vertexColors: Boolean(vertexColors),
+    resolution: [size.width, size.height],
+    linewidth: (_ref = linewidth !== null && linewidth !== void 0 ? linewidth : lineWidth) !== null && _ref !== void 0 ? _ref : 1,
+    dashed,
+    transparent: itemSize === 4
+  }, rest)));
+});
+
+// node_modules/@react-three/drei/core/OrbitControls.js
+var React6 = __toESM(require_react());
+var OrbitControls2 = /* @__PURE__ */ React6.forwardRef(({
   makeDefault,
   camera,
   regress,
@@ -53945,18 +54993,18 @@ var OrbitControls2 = /* @__PURE__ */ React5.forwardRef(({
   const performance2 = useThree((state2) => state2.performance);
   const explCamera = camera || defaultCamera;
   const explDomElement = domElement || events.connected || gl.domElement;
-  const controls = React5.useMemo(() => new OrbitControls(explCamera), [explCamera]);
+  const controls = React6.useMemo(() => new OrbitControls(explCamera), [explCamera]);
   useFrame(() => {
     if (controls.enabled) controls.update();
   }, -1);
-  React5.useEffect(() => {
+  React6.useEffect(() => {
     if (keyEvents) {
       controls.connect(keyEvents === true ? explDomElement : keyEvents);
     }
     controls.connect(explDomElement);
     return () => void controls.dispose();
   }, [keyEvents, explDomElement, regress, controls, invalidate2]);
-  React5.useEffect(() => {
+  React6.useEffect(() => {
     const callback = (e2) => {
       invalidate2();
       if (regress) performance2.regress();
@@ -53977,7 +55025,7 @@ var OrbitControls2 = /* @__PURE__ */ React5.forwardRef(({
       controls.removeEventListener("change", callback);
     };
   }, [onChange, onStart, onEnd, controls, invalidate2, setEvents]);
-  React5.useEffect(() => {
+  React6.useEffect(() => {
     if (makeDefault) {
       const old = get().controls;
       set({
@@ -53988,7 +55036,7 @@ var OrbitControls2 = /* @__PURE__ */ React5.forwardRef(({
       });
     }
   }, [makeDefault, controls]);
-  return /* @__PURE__ */ React5.createElement("primitive", _extends({
+  return /* @__PURE__ */ React6.createElement("primitive", _extends({
     ref,
     object: controls,
     enableDamping
@@ -54042,12 +55090,33 @@ function createSceneStore(initial) {
       if (current === state2) return;
       current = state2;
       for (const listener of [...listeners]) listener();
+    },
+    callbacks: {
+      onSelect: () => {
+      },
+      onError: () => {
+      }
     }
   };
 }
 function SceneView(props) {
   const state2 = (0, import_react5.useSyncExternalStore)(props.store.subscribe, props.store.get);
-  return state2.model === null ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SpikeScene, {}) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(TreeScene, { model: state2.model, overlay: state2.overlay });
+  const onSelect = (0, import_react5.useCallback)(
+    (id) => {
+      props.store.callbacks.onSelect(id);
+    },
+    [props.store]
+  );
+  return state2.model === null ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SpikeScene, {}) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    TreeScene,
+    {
+      model: state2.model,
+      overlay: state2.overlay,
+      interaction: state2.interaction,
+      fitKey: state2.fitKey,
+      onSelect
+    }
+  );
 }
 function SpikeScene() {
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
@@ -54064,30 +55133,48 @@ function TreeScene(props) {
   const onHover = (0, import_react5.useCallback)((info) => {
     setHover(info);
   }, []);
+  const [sceneReady, setSceneReady] = (0, import_react5.useState)(false);
+  const onSceneReady = (0, import_react5.useCallback)(() => {
+    setSceneReady(true);
+  }, []);
   const grid = (0, import_react5.useMemo)(() => {
     const size = Math.max(20, Math.ceil(props.model.radius * 2.2 / 10) * 10);
     return { size, divisions: size / 2 };
   }, [props.model]);
+  const highlight = props.interaction.highlight;
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("color", { attach: "background", args: ["#10131a"] }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ambientLight", { intensity: 0.7 }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("directionalLight", { position: [5, 8, 4], intensity: 1.2 }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("gridHelper", { args: [grid.size, grid.divisions] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CameraFit, { model: props.model }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CameraFit, { model: props.model, fitKey: props.fitKey }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CameraFocus, { focus: props.interaction.focus }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SceneReady, { onReady: onSceneReady }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Picker, { candidates: props.interaction.candidates, onSelect: props.onSelect }),
     props.model.roots.map((root) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RootSphere, { node: root }, root.id)),
-    props.model.edges.map((edge) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Tube, { edge }, edge.id)),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LeafSprites, { nodes: props.model.leaves }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Tubes, { edges: props.model.edges, highlighted: highlight.edgeIds }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LeafSprites, { nodes: props.model.leaves, highlight }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(HighlightedLinks, { bees: props.overlay.bees, ids: highlight.beeIds }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GoalRings, { goals: props.overlay.goals, onHover }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GrowthHalos, { halos: props.overlay.growth }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BugMarkers, { bugs: props.overlay.bugs, onHover }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BeeSwarm, { bees: props.overlay.bees, onHover }),
-    hover === null ? null : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Html, { position: hover.position, center: true, distanceFactor: 18, className: "lp-tip", children: hover.text }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      SelectionMarker,
+      {
+        position: props.interaction.selectedPosition,
+        label: props.interaction.selectedLabel,
+        ready: sceneReady
+      }
+    ),
+    hover === null || !sceneReady ? null : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Html, { position: hover.position, center: true, distanceFactor: 18, className: "lp-tip", children: hover.text }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OrbitControls2, { makeDefault: true, target: [0, props.model.height * 0.45, 0] })
   ] });
 }
 function CameraFit(props) {
   const camera = useThree((state2) => state2.camera);
   const controls = useThree((state2) => state2.controls);
+  const fitKey = props.fitKey;
   (0, import_react5.useEffect)(() => {
     const model = props.model;
     const span = Math.max(model.radius, model.height * 0.5, 4);
@@ -54099,7 +55186,112 @@ function CameraFit(props) {
       controls.target.copy(target);
       controls.update();
     }
-  }, [props.model, camera, controls]);
+  }, [fitKey, props.model, camera, controls]);
+  return null;
+}
+function CameraFocus(props) {
+  const camera = useThree((state2) => state2.camera);
+  const controls = useThree((state2) => state2.controls);
+  const focusRef = (0, import_react5.useRef)(props.focus);
+  focusRef.current = props.focus;
+  const seq = props.focus?.seq ?? 0;
+  const pending = (0, import_react5.useRef)(null);
+  const flight = (0, import_react5.useRef)(null);
+  const scratch = (0, import_react5.useRef)(new Vector3());
+  (0, import_react5.useEffect)(() => {
+    const focus = focusRef.current;
+    if (focus === null) return;
+    const target = new Vector3(focus.position[0], focus.position[1], focus.position[2]);
+    const currentTarget = controls?.target.clone() ?? new Vector3();
+    const direction = camera.position.clone().sub(currentTarget);
+    if (direction.lengthSq() < 1e-6) direction.set(1, 0.6, 1);
+    direction.normalize();
+    pending.current = {
+      from: camera.position.clone(),
+      to: target.clone().add(direction.multiplyScalar(focus.distance)),
+      fromTarget: currentTarget,
+      toTarget: target
+    };
+  }, [seq, camera, controls]);
+  useFrame(({ clock }) => {
+    if (pending.current !== null) {
+      flight.current = { ...pending.current, started: clock.elapsedTime };
+      pending.current = null;
+    }
+    const current = flight.current;
+    if (current === null) return;
+    const progress = Math.min(1, (clock.elapsedTime - current.started) / 0.7);
+    const eased = progress * progress * (3 - 2 * progress);
+    camera.position.lerpVectors(current.from, current.to, eased);
+    const target = scratch.current.lerpVectors(current.fromTarget, current.toTarget, eased);
+    if (controls) {
+      controls.target.copy(target);
+      controls.update();
+    } else {
+      camera.lookAt(target);
+    }
+    if (progress >= 1) flight.current = null;
+  });
+  return null;
+}
+function Picker(props) {
+  const gl = useThree((state2) => state2.gl);
+  const camera = useThree((state2) => state2.camera);
+  const candidatesRef = (0, import_react5.useRef)(props.candidates);
+  candidatesRef.current = props.candidates;
+  const onSelectRef = (0, import_react5.useRef)(props.onSelect);
+  onSelectRef.current = props.onSelect;
+  (0, import_react5.useEffect)(() => {
+    const canvas = gl.domElement;
+    let downX = 0;
+    let downY = 0;
+    let dragged = false;
+    const onPointerDown = (event) => {
+      downX = event.clientX;
+      downY = event.clientY;
+      dragged = false;
+    };
+    const onPointerMove = (event) => {
+      if (Math.abs(event.clientX - downX) > 4 || Math.abs(event.clientY - downY) > 4) {
+        dragged = true;
+      }
+    };
+    const onClick = (event) => {
+      if (dragged) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const ndc = new Vector2(
+        (event.clientX - rect.left) / rect.width * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      const raycaster = new Raycaster();
+      raycaster.setFromCamera(ndc, camera);
+      const hit = pickNode(
+        {
+          origin: [
+            raycaster.ray.origin.x,
+            raycaster.ray.origin.y,
+            raycaster.ray.origin.z
+          ],
+          direction: [
+            raycaster.ray.direction.x,
+            raycaster.ray.direction.y,
+            raycaster.ray.direction.z
+          ]
+        },
+        candidatesRef.current
+      );
+      onSelectRef.current(hit === null ? null : hit.id);
+    };
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("click", onClick);
+    return () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("click", onClick);
+    };
+  }, [gl, camera]);
   return null;
 }
 function RootSphere(props) {
@@ -54108,36 +55300,60 @@ function RootSphere(props) {
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshStandardMaterial", { color: KIND_COLORS[props.node.kind] })
   ] });
 }
-function Tube(props) {
-  const placement = (0, import_react5.useMemo)(() => {
-    const from = new Vector3(...props.edge.from);
-    const to = new Vector3(...props.edge.to);
-    const direction = to.clone().sub(from);
-    const length = direction.length();
-    const midpoint = from.clone().add(direction.multiplyScalar(0.5));
-    const quaternion = new Quaternion().setFromUnitVectors(
-      new Vector3(0, 1, 0),
-      direction.clone().normalize()
-    );
-    return {
-      position: midpoint.toArray(),
-      quaternion: quaternion.toArray(),
-      length: Math.max(length, 1e-3)
-    };
-  }, [props.edge]);
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("mesh", { position: placement.position, quaternion: placement.quaternion, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-      "cylinderGeometry",
-      {
-        args: [props.edge.radius, props.edge.radius, placement.length, 8]
-      }
-    ),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshStandardMaterial", { color: KIND_COLORS[props.edge.kind] })
-  ] });
+function Tubes(props) {
+  const meshRef = (0, import_react5.useRef)(null);
+  const edges = props.edges;
+  const highlighted = props.highlighted;
+  (0, import_react5.useEffect)(() => {
+    const mesh = meshRef.current;
+    if (mesh === null) return;
+    const matrix = new Matrix4();
+    const from = new Vector3();
+    const to = new Vector3();
+    const direction = new Vector3();
+    const position = new Vector3();
+    const scale = new Vector3();
+    const quaternion = new Quaternion();
+    const up = new Vector3(0, 1, 0);
+    const color = new Color();
+    for (let index = 0; index < edges.length; index += 1) {
+      const edge = edges[index];
+      from.set(edge.from[0], edge.from[1], edge.from[2]);
+      to.set(edge.to[0], edge.to[1], edge.to[2]);
+      direction.subVectors(to, from);
+      const length = Math.max(direction.length(), 1e-3);
+      position.addVectors(from, to).multiplyScalar(0.5);
+      quaternion.setFromUnitVectors(up, direction.normalize());
+      scale.set(edge.radius, length, edge.radius);
+      matrix.compose(position, quaternion, scale);
+      mesh.setMatrixAt(index, matrix);
+      mesh.setColorAt(
+        index,
+        color.set(highlighted.has(edge.id) ? SELECTION_COLOR : KIND_COLORS[edge.kind])
+      );
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+  }, [edges, highlighted]);
+  if (edges.length === 0) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+    "instancedMesh",
+    {
+      ref: meshRef,
+      args: [void 0, void 0, edges.length],
+      frustumCulled: false,
+      raycast: () => null,
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("cylinderGeometry", { args: [1, 1, 1, 8] }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshStandardMaterial", {})
+      ]
+    }
+  );
 }
 function LeafSprites(props) {
   const meshRef = (0, import_react5.useRef)(null);
   const nodes = props.nodes;
+  const highlight = props.highlight;
   (0, import_react5.useEffect)(() => {
     const mesh = meshRef.current;
     if (mesh === null) return;
@@ -54147,11 +55363,11 @@ function LeafSprites(props) {
       const node = nodes[index];
       matrix.makeTranslation(node.position[0], node.position[1], node.position[2]);
       mesh.setMatrixAt(index, matrix);
-      mesh.setColorAt(index, color.set(STATUS_COLORS[node.status]));
+      mesh.setColorAt(index, color.set(leafColor(node, highlight)));
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
-  }, [nodes]);
+  }, [nodes, highlight]);
   const scratch = (0, import_react5.useMemo)(
     () => ({
       matrix: new Matrix4(),
@@ -54160,9 +55376,14 @@ function LeafSprites(props) {
     }),
     []
   );
+  const lastQuaternion = (0, import_react5.useRef)(null);
   useFrame(({ camera }) => {
     const mesh = meshRef.current;
     if (mesh === null) return;
+    if (lastQuaternion.current !== null && lastQuaternion.current.equals(camera.quaternion)) {
+      return;
+    }
+    lastQuaternion.current = camera.quaternion.clone();
     for (let index = 0; index < nodes.length; index += 1) {
       const node = nodes[index];
       scratch.position.set(node.position[0], node.position[1], node.position[2]);
@@ -54185,6 +55406,62 @@ function LeafSprites(props) {
       ]
     }
   );
+}
+function leafColor(node, highlight) {
+  if (highlight.selectedId === node.id) return SELECTION_COLOR;
+  if (highlight.relatedNodeIds.has(node.id)) return BUG_BADGE_COLOR;
+  return STATUS_COLORS[node.status];
+}
+function SceneReady(props) {
+  const announced = (0, import_react5.useRef)(false);
+  useFrame(() => {
+    if (announced.current) return;
+    announced.current = true;
+    props.onReady();
+  });
+  return null;
+}
+function SelectionMarker(props) {
+  if (props.position === null) return null;
+  const ring = [
+    props.position[0],
+    props.position[1] + 0.03,
+    props.position[2]
+  ];
+  const label = [
+    props.position[0],
+    props.position[1] + LAYOUT_3D.leafMarker * 2.2,
+    props.position[2]
+  ];
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("mesh", { position: ring, rotation: [-Math.PI / 2, 0, 0], raycast: () => null, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("torusGeometry", { args: [LAYOUT_3D.leafMarker * 1.8, 0.05, 8, 32] }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshBasicMaterial", { color: SELECTION_COLOR, toneMapped: false })
+    ] }),
+    props.label === null || !props.ready ? null : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Html, { position: label, center: true, distanceFactor: 16, className: "lp-node-label", children: props.label })
+  ] });
+}
+function HighlightedLinks(props) {
+  const links = (0, import_react5.useMemo)(
+    () => props.bees.filter((bee) => props.ids.has(bee.id)).map((bee) => ({
+      id: bee.id,
+      color: BEE_STATUS_COLORS[bee.status],
+      points: beeArcPoints(bee, 24)
+    })),
+    [props.bees, props.ids]
+  );
+  if (links.length === 0) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_jsx_runtime3.Fragment, { children: links.map((link) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    Line4,
+    {
+      points: link.points,
+      color: link.color,
+      lineWidth: 2,
+      transparent: true,
+      opacity: 0.9
+    },
+    link.id
+  )) });
 }
 function BeeSwarm(props) {
   const meshRef = (0, import_react5.useRef)(null);
@@ -54303,7 +55580,10 @@ function BugMarkers(props) {
       if (hoverKeyRef.current === key) return;
       event.stopPropagation();
       hoverKeyRef.current = key;
-      props.onHover({ position: [...bug.position], text: bugTipText(bug) });
+      props.onHover({
+        position: [...bug.position],
+        text: bugTipText(bug)
+      });
     },
     [bugs, props]
   );
@@ -54322,7 +55602,14 @@ function BugMarkers(props) {
       onPointerOut,
       children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("octahedronGeometry", { args: [OVERLAY_3D.bugRadius, 0] }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshStandardMaterial", { color: BUG_BADGE_COLOR, emissive: BUG_BADGE_COLOR, emissiveIntensity: 0.5 })
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          "meshStandardMaterial",
+          {
+            color: BUG_BADGE_COLOR,
+            emissive: BUG_BADGE_COLOR,
+            emissiveIntensity: 0.5
+          }
+        )
       ]
     }
   );
@@ -54418,11 +55705,20 @@ function GrowthHalos(props) {
     }
   );
 }
-function mountScene3D(container, onError) {
-  const store = createSceneStore({ model: null, overlay: EMPTY_OVERLAY });
+function mountScene3D(container, options = {}) {
+  const store = createSceneStore({
+    model: null,
+    overlay: EMPTY_OVERLAY,
+    interaction: EMPTY_INTERACTION,
+    fitKey: ""
+  });
+  store.callbacks.onSelect = options.onSelect ?? (() => {
+  });
+  store.callbacks.onError = options.onError ?? (() => {
+  });
   const root = (0, import_client.createRoot)(container);
   root.render(
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SceneErrorBoundary, { onError, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SceneErrorBoundary, { onError: options.onError, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       Canvas,
       {
         camera: { position: [4, 3, 6], fov: 50 },
@@ -54434,9 +55730,20 @@ function mountScene3D(container, onError) {
   );
   let disposed = false;
   return {
-    setScene(model, overlay) {
+    setScene(model, overlay, fitKey) {
       if (disposed) return;
-      store.set({ model, overlay: overlay ?? EMPTY_OVERLAY });
+      const current = store.get();
+      store.set({
+        model,
+        overlay: overlay ?? EMPTY_OVERLAY,
+        interaction: current.interaction,
+        fitKey
+      });
+    },
+    setInteraction(interaction) {
+      if (disposed) return;
+      const current = store.get();
+      store.set({ ...current, interaction });
     },
     dispose() {
       if (disposed) return;

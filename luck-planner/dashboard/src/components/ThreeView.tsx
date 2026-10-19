@@ -1,5 +1,5 @@
 /**
- * The 3D viewport of the dashboard (PLAN.md stages I1, I2).
+ * The 3D viewport of the dashboard (PLAN.md stages I1, I2, I3, I4).
  *
  * A deliberately small component: it owns the container cell, pulls the lazy
  * `dashboard-3d.js` chunk on mount (the WebGL probe has already passed —
@@ -15,6 +15,12 @@
  * pair: the overlay (`dashboard/src/overlay-3d.ts`) is passed alongside the
  * layout, because a model and the links on it are one view of one payload.
  *
+ * Stage I4 adds the interaction: the selection, the pickable nodes and a
+ * camera request travel in one `SceneInteraction` object
+ * (`dashboard/src/pick-3d.ts`), and a click in the scene comes back as
+ * `onSelectNode` — the *same* setter the 2D canvas uses, so both views fill
+ * the same details panel.
+ *
  * Every outcome is reported through `onSceneState`, which keeps the app's
  * single status line honest: "Loading the 3D view…" while the chunk arrives,
  * a cleared line once the scene renders, and the failure text (which also
@@ -26,6 +32,7 @@ import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type { Scene3DHandle } from "../dashboard-3d";
 import type { Scene3DOverlay } from "../overlay-3d";
+import type { SceneInteraction } from "../pick-3d";
 import type { Scene3DModel } from "../tree-3d";
 import {
   THREE_LOADING_STATUS,
@@ -53,6 +60,23 @@ export interface ThreeViewProps {
    */
   readonly overlay: Scene3DOverlay | null;
   /**
+   * Identifies the data the model was built from. The scene re-frames the
+   * camera when it changes and keeps the camera where the user left it when
+   * it does not (a live refetch must not yank the view).
+   */
+  readonly fitKey: string;
+  /**
+   * The interaction state (stage I4): the selection, the pickable nodes and
+   * a possible camera flight. One object, one update.
+   */
+  readonly interaction: SceneInteraction;
+  /**
+   * Reports a node the user clicked in the scene (`null` for empty space).
+   * The app selects it — the same selection the 2D canvas sets, so the same
+   * details panel answers in both views.
+   */
+  readonly onSelectNode: (id: string | null) => void;
+  /**
    * Reports the state change. `loading` carries its status text, `ready`
    * clears the line, `failed` carries the reason — and the app falls back to
    * 2D on that state (the I1 fallback, second half).
@@ -68,10 +92,14 @@ export function ThreeView(props: ThreeViewProps): ReactElement {
   // model effect must not re-run the mount either.
   const stateRef = useRef(props.onSceneState);
   stateRef.current = props.onSceneState;
+  const selectRef = useRef(props.onSelectNode);
+  selectRef.current = props.onSelectNode;
   // The scene arrives as a pair (layout + overlay); both are read from refs so
   // the mount effect keeps running exactly once.
-  const sceneRef = useRef({ model: props.model, overlay: props.overlay });
-  sceneRef.current = { model: props.model, overlay: props.overlay };
+  const sceneRef = useRef({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
+  sceneRef.current = { model: props.model, overlay: props.overlay, fitKey: props.fitKey };
+  const interactionRef = useRef(props.interaction);
+  interactionRef.current = props.interaction;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -89,13 +117,23 @@ export function ThreeView(props: ThreeViewProps): ReactElement {
     import("../dashboard-3d")
       .then((module) => {
         if (cancelled) return;
-        const handle = module.mountScene3D(container, (detail) => {
-          // A renderer that dies after the probe passed (lost context, driver
-          // eviction): the scene reports it, the app leaves 3D.
-          if (!cancelled) stateRef.current("failed", threeFailedStatus(detail));
+        const handle = module.mountScene3D(container, {
+          onError: (detail) => {
+            // A renderer that dies after the probe passed (lost context, driver
+            // eviction): the scene reports it, the app leaves 3D.
+            if (!cancelled) stateRef.current("failed", threeFailedStatus(detail));
+          },
+          onSelect: (id) => {
+            if (!cancelled) selectRef.current(id);
+          },
         });
         handleRef.current = handle;
-        handle.setScene(sceneRef.current.model, sceneRef.current.overlay);
+        handle.setScene(
+          sceneRef.current.model,
+          sceneRef.current.overlay,
+          sceneRef.current.fitKey,
+        );
+        handle.setInteraction(interactionRef.current);
         stateRef.current("ready", "");
       })
       .catch((cause: unknown) => {
@@ -117,8 +155,13 @@ export function ThreeView(props: ThreeViewProps): ReactElement {
   // scene. Before the chunk arrived the handle is null — the mount effect
   // seeds the scene from the ref, so nothing is lost.
   useEffect(() => {
-    handleRef.current?.setScene(props.model, props.overlay);
-  }, [props.model, props.overlay]);
+    handleRef.current?.setScene(props.model, props.overlay, props.fitKey);
+  }, [props.model, props.overlay, props.fitKey]);
+
+  // Interaction path (I4): the selection and the camera request.
+  useEffect(() => {
+    handleRef.current?.setInteraction(props.interaction);
+  }, [props.interaction]);
 
   return (
     <div

@@ -32,6 +32,12 @@
  *   incidents, goal rings and (in the growth layer) growth halos. The overlay
  *   is rebuilt with the model and the layer, and travels with the model into
  *   the scene as one view.
+ * - **I4 3D interaction**: a click in the scene selects a node and fills the
+ *   *same* details panel the 2D canvas fills; the selection is drawn in the
+ *   scene (a ring, a label, the nodes sharing an incident, the links of the
+ *   node) and a search flies the camera to the node. The toolbar filters
+ *   narrow the 3D tree by the same rule the 2D diagram uses, and the 2D/3D
+ *   choice is remembered in the URL and in the tab's own storage.
  *
  * State rules kept deliberately small so later stages can extend them
  * without a rewrite: one `load()` effect keyed on the resolved client, one
@@ -49,6 +55,7 @@ import {
   type TreeResponse,
 } from "../../shared/api";
 import { DashboardApi, resolveApiOrigin } from "./api";
+import { KIND_LABELS, STATUS_LABELS } from "./colors";
 import {
   ancestorsOf,
   buildGraph,
@@ -61,8 +68,21 @@ import {
 } from "./graph";
 import { parseDashboardParams } from "./params";
 import { createChangeStream } from "./live";
-import { buildSceneOverlay } from "./overlay-3d";
+import { buildSceneOverlay, EMPTY_OVERLAY } from "./overlay-3d";
+import {
+  EMPTY_INTERACTION,
+  focusTarget,
+  pickCandidates,
+  selectionHighlight,
+  type SceneInteraction,
+} from "./pick-3d";
 import { buildScene3D } from "./tree-3d";
+import {
+  initialView,
+  viewSearch,
+  writeStoredView,
+  type ViewStorage,
+} from "./view-state";
 import {
   detectWebGL,
   planViewSwitch,
@@ -121,6 +141,36 @@ function filterExcludesNode(
 const GROWTH_EMPTY_HINT =
   "No growth records in this project yet — the heat layer stays neutral (agents write them with luck_tree_update_growth).";
 
+/** Shown when the 3D view is on but the filters left the tree empty. */
+const SCENE_EMPTY_HINT =
+  "No nodes match the filters — the 3D tree is empty. Loosen or clear the kind/status/version filters.";
+
+/**
+ * The tab's storage, or `null` when the browser forbids it (private mode,
+ * disabled cookies). A storage that throws is a storage that does not exist.
+ */
+function safeStorage(): ViewStorage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes the current view into the address bar (stage I4), keeping the token
+ * and the project parameter. A copied link then opens in the same diagram
+ * the sender was looking at.
+ */
+function syncViewToUrl(view: DashboardView): void {
+  const search = viewSearch(window.location.search, view);
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${search}${window.location.hash}`,
+  );
+}
+
 /** Connection state of the SSE stream (stage H1), incl. "not open yet". */
 type LiveState = "connecting" | "live" | "offline";
 
@@ -161,8 +211,16 @@ export function App(): ReactElement {
   // I1 3D spike: which diagram is on screen, and whether this tab can draw
   // WebGL at all. The probe runs once per tab (it allocates and releases a
   // context); every 3D request goes through `planViewSwitch`.
-  const [view, setView] = useState<DashboardView>("2d");
+  //
+  // I4: the view is a *preference* — the URL names it (`?view=3d`), the tab
+  // remembers it (localStorage), and the 2D diagram is the default. A tab
+  // that asks for 3D without WebGL stays on 2D and says why.
   const webgl = useMemo(() => detectWebGL(), []);
+  const storage = useMemo(() => safeStorage(), []);
+  const [view, setView] = useState<DashboardView>(() => {
+    const wanted = initialView(window.location.search, storage);
+    return planViewSwitch(webgl, wanted).view;
+  });
 
   // H1 live updates: the SSE connection state and a counter that forces the
   // details panel to refetch when a change touches the node it shows.
@@ -302,15 +360,30 @@ export function App(): ReactElement {
    * Resolves a toolbar view request (I1). The plan decides both halves of the
    * acceptance: with WebGL the tab switches to the lazy scene, without it the
    * tab *stays* on 2D and the status line carries the explanation.
+   *
+   * I4 adds the memory: the choice is written into the address bar (so a
+   * copied link opens in the same diagram) and into the tab's own storage
+   * (so a reload comes back to it).
    */
   const onViewChange = useCallback(
     (target: DashboardView): void => {
       const plan = planViewSwitch(webgl, target);
       setView(plan.view);
       if (plan.status !== null) setStatusLine(plan.status);
+      writeStoredView(storage, plan.view);
+      syncViewToUrl(plan.view);
     },
-    [webgl],
+    [storage, webgl],
   );
+
+  // The opening view: a refused 3D request explains itself, and the address
+  // bar always names the diagram this tab shows.
+  useEffect(() => {
+    const wanted = initialView(window.location.search, storage);
+    const plan = planViewSwitch(webgl, wanted);
+    if (plan.status !== null) setStatusLine(plan.status);
+    syncViewToUrl(plan.view);
+  }, [storage, webgl]);
 
   /**
    * Scene lifecycle (I1): progress and errors share the status line, and a
@@ -378,12 +451,12 @@ export function App(): ReactElement {
     [tree, collapsedIds, filters, layer],
   );
 
-  // I2 3D layout: the same payload, a radial projection. Rebuilt only when
-  // the tree itself changes — filters/collapse are 2D-canvas concerns until
-  // I4 — and consumed by the scene through `ThreeView`.
+  // I2 3D layout: the same payload, a radial projection. Rebuilt when the
+  // tree changes and when the toolbar filters narrow it (I4: both views show
+  // the same nodes) — the collapse state stays a 2D-canvas concern.
   const scene3dModel = useMemo(
-    () => (tree === null ? null : buildScene3D(tree.nodes)),
-    [tree],
+    () => (tree === null ? null : buildScene3D(tree.nodes, { filter: filters })),
+    [tree, filters],
   );
 
   // I3 3D overlays: bees, blocking incidents, goal rings and — in the growth
@@ -396,6 +469,80 @@ export function App(): ReactElement {
         : buildSceneOverlay(tree, scene3dModel, { layer }),
     [tree, scene3dModel, layer],
   );
+
+  // I4: the identity of the *data* the scene shows. The camera re-frames when
+  // it changes (a different tree) and stays put when it does not — a live
+  // refetch or a filter that narrows the tree must not yank the view.
+  const scene3dFitKey = useMemo(
+    () => (tree === null ? "" : `${tree.nodes.length}:${tree.nodes[0]?.id ?? ""}`),
+    [tree],
+  );
+
+  // I4: the pickable nodes — positions and radii for the click test. Rebuilt
+  // with the model, not with the selection.
+  const scene3dCandidates = useMemo(
+    () => (scene3dModel === null ? [] : pickCandidates(scene3dModel)),
+    [scene3dModel],
+  );
+
+  // I4: the interaction state the scene renders: the selection (with its
+  // label and its position), the highlight of the links around it and a
+  // possible camera flight. Computed here because the app is the only place
+  // that knows the tree, the selection and the search.
+  const scene3dInteraction = useMemo<SceneInteraction>(() => {
+    if (tree === null || scene3dModel === null) return EMPTY_INTERACTION;
+    const selected =
+      selectedId === null
+        ? null
+        : (tree.nodes.find((node) => node.id === selectedId) ?? null);
+    const position =
+      selectedId === null
+        ? null
+        : (scene3dModel.nodes.find((node) => node.id === selectedId)?.position ?? null);
+    const label =
+      selected === null
+        ? null
+        : `${selected.name} — ${KIND_LABELS[selected.kind]} · ${STATUS_LABELS[selected.status]}`;
+    const target = focus === null ? null : focusTarget(scene3dModel, focus.nodeId);
+    return {
+      selectedId,
+      selectedLabel: label,
+      selectedPosition: position,
+      candidates: scene3dCandidates,
+      highlight: selectionHighlight(
+        scene3dModel,
+        scene3dOverlay ?? EMPTY_OVERLAY,
+        selectedId,
+      ),
+      focus:
+        focus === null || target === null
+          ? null
+          : {
+              nodeId: focus.nodeId,
+              seq: focus.seq,
+              position: target.position,
+              distance: target.distance,
+            },
+    };
+  }, [
+    focus,
+    scene3dCandidates,
+    scene3dModel,
+    scene3dOverlay,
+    selectedId,
+    tree,
+  ]);
+
+  // I4: an empty 3D tree (the filters hid everything) says so instead of
+  // showing a blank viewport.
+  const scene3dEmpty = scene3dModel !== null && scene3dModel.nodes.length === 0;
+  useEffect(() => {
+    if (view !== "3d") return;
+    setStatusLine((previous) => {
+      if (scene3dEmpty) return SCENE_EMPTY_HINT;
+      return previous === SCENE_EMPTY_HINT ? "" : previous;
+    });
+  }, [scene3dEmpty, view]);
 
   const resolveName = useCallback(
     (id: string): string => {
@@ -429,6 +576,9 @@ export function App(): ReactElement {
             webgl={webgl}
             model={scene3dModel}
             overlay={scene3dOverlay}
+            fitKey={scene3dFitKey}
+            interaction={scene3dInteraction}
+            onSelectNode={setSelectedId}
             onSceneState={onSceneState}
           />
         ) : (

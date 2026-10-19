@@ -112,6 +112,15 @@ export interface SceneBee3D {
   /** The link's meaning ("depends on", "supersedes", …) — the tooltip text. */
   readonly impact: string;
   readonly revision: number;
+  /**
+   * The source leaf's node id. Added in stage I4: the selection highlight
+   * needs to know *which* node a link hangs off (the 2D canvas emphasises
+   * the edges touching the selection), and the arc itself only carries
+   * positions.
+   */
+  readonly sourceId: string;
+  /** The target leaf's node id (see `sourceId`). */
+  readonly targetId: string;
   /** The source leaf's scene position (the arc's start). */
   readonly from: Vec3;
   /** The target leaf's scene position (the arc's end). */
@@ -257,7 +266,19 @@ function buildBeeArcs(
         : `${bee.targetLeafId}|${bee.sourceLeafId}`;
     const lane = lanes.get(key) ?? 0;
     lanes.set(key, lane + 1);
-    arcs.push(beeArc(bee.id, bee.status, bee.impact, bee.revision, from, to, lane));
+    arcs.push(
+      beeArc(
+        bee.id,
+        bee.sourceLeafId,
+        bee.targetLeafId,
+        bee.status,
+        bee.impact,
+        bee.revision,
+        from,
+        to,
+        lane,
+      ),
+    );
   }
   return arcs;
 }
@@ -265,6 +286,8 @@ function buildBeeArcs(
 /** The arc of one bee, given its endpoints and its lane on that pair. */
 function beeArc(
   id: string,
+  sourceId: string,
+  targetId: string,
   status: BeeStatus,
   impact: string,
   revision: number,
@@ -296,6 +319,8 @@ function beeArc(
     status,
     impact,
     revision,
+    sourceId,
+    targetId,
     from,
     to,
     control,
@@ -334,6 +359,25 @@ export function beeArcPoint(bee: SceneBee3D, u: number, out: MutableVec3): Mutab
   out.y = a * bee.from[1] + b * bee.control[1] + c * bee.to[1];
   out.z = a * bee.from[2] + b * bee.control[2] + c * bee.to[2];
   return out;
+}
+
+/**
+ * Samples of a bee's arc, from its start to its end.
+ *
+ * Stage I4 draws the *link* of the selected node as a curve (the 3D twin of
+ * the 2D canvas' emphasised edge): a particle alone says "something flies
+ * here", a curve says "this fact depends on that one".
+ */
+export function beeArcPoints(bee: SceneBee3D, samples: number): Vec3[] {
+  const count = Math.max(2, Math.floor(samples));
+  const points: Vec3[] = [];
+  const scratch: MutableVec3 = { x: 0, y: 0, z: 0 };
+  for (let index = 0; index < count; index += 1) {
+    const u = index / (count - 1);
+    beeArcPoint(bee, u, scratch);
+    points.push([scratch.x, scratch.y, scratch.z]);
+  }
+  return points;
 }
 
 // ---------------------------------------------------------------------------

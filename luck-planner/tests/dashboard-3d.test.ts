@@ -268,6 +268,27 @@ describe("the lazy 3D chunk in dist/dashboard", () => {
     expect(html).not.toContain("dashboard-3d");
     expect(html).toContain('src="/assets/dashboard.js"');
   });
+
+  it("keeps the I4 picking app-side and its drawing behind the dynamic import", () => {
+    // The same split as I2/I3, one layer up: the *decisions* of the
+    // interaction (which node a ray hits, what the selection highlights,
+    // where the camera flies) are pure and live in the eager chunk; the
+    // drawing (the ray, the ring, the label, the highlighted arcs) is lazy.
+    const appGraph = [
+      fs.readFileSync(APP_JS, "utf8"),
+      ...fs
+        .readdirSync(ASSETS_DIR)
+        .filter((name) => name.startsWith("chunk-chunk-"))
+        .map((name) => fs.readFileSync(path.join(ASSETS_DIR, name), "utf8")),
+    ].join("\n");
+    const scene = fs.readFileSync(SCENE_JS, "utf8");
+    for (const marker of ["pickNode", "pickCandidates", "selectionHighlight"]) {
+      expect(appGraph, marker).toContain(marker);
+    }
+    // The lazy chunk consumes the decision, it does not make it.
+    expect(scene).toContain("pickNode");
+    expect(scene).not.toContain("function selectionHighlight");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -352,5 +373,105 @@ describe("source contracts", () => {
     // The button explains itself before it is pressed (the tooltip carries
     // the fallback text when the probe failed).
     expect(toolbar).toContain("WEBGL_UNAVAILABLE_HINT");
+  });
+
+  it("the scene draws the tree in instanced meshes, not one mesh per edge", () => {
+    // I4's instancing pass: a `<mesh>` per edge is one draw call *and* one
+    // React element per edge — thousands of them in a real project. The
+    // tubes are one instanced mesh now, and the leaf sprites already were.
+    const scene = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "dashboard-3d.tsx"),
+      "utf8",
+    );
+    expect(scene).toContain("function Tubes");
+    expect(scene).toContain("function LeafSprites");
+    // No per-edge element list any more.
+    expect(scene).not.toContain("model.edges.map");
+    expect(scene).not.toContain("function Tube(");
+    // The scale carries the thickness, so one unit cylinder serves all.
+    expect(scene).toContain("scale.set(edge.radius, length, edge.radius)");
+  });
+
+  it("the scene picks with the pure picker, not with a renderer raycast", () => {
+    // The 10 000-instance meshes stay out of three.js' raycast path: the
+    // click is turned into a ray and handed to the pure picker.
+    const scene = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "dashboard-3d.tsx"),
+      "utf8",
+    );
+    expect(scene).toContain("pickNode(");
+    expect(scene).toContain("raycast={() => null}");
+    // The big meshes are the ones that must not be raycast.
+    const raycastDisabled = scene.match(/raycast=\{\(\) => null\}/g) ?? [];
+    expect(raycastDisabled.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("the loader forwards the interaction and reports a picked node", () => {
+    const loader = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "ThreeView.tsx"),
+      "utf8",
+    );
+    expect(loader).toMatch(
+      /import type \{[^}]*SceneInteraction[^}]*\} from "\.\.\/pick-3d"/,
+    );
+    expect(loader).toContain("setInteraction(");
+    expect(loader).toContain("onSelect:");
+    const scene = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "dashboard-3d.tsx"),
+      "utf8",
+    );
+    expect(scene).toContain("setInteraction(interaction: SceneInteraction): void");
+  });
+
+  it("both views select through the same setter and the same details panel", () => {
+    // The I4 acceptance: "find a leaf → click → details → highlight the
+    // links" must read the same in 2D and in 3D. One selection id, one
+    // details panel — the app owns both.
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("onSelectNode={setSelectedId}");
+    expect(app).toContain("onSelectNode={setSelectedId}".replace("{", "{"));
+    // The 2D canvas gets the very same setter.
+    expect(app).toMatch(/<Canvas[\s\S]{0,600}onSelectNode=\{setSelectedId\}/);
+    // And the panel is rendered once, for both views.
+    expect(app.match(/<DetailsPanel/g) ?? []).toHaveLength(1);
+  });
+
+  it("the app remembers the view in the URL and in the tab's storage", () => {
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("initialView(");
+    expect(app).toContain("viewSearch(");
+    expect(app).toContain("writeStoredView(");
+  });
+
+  it("the toolbar filters reach the 3D layout", () => {
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("buildScene3D(tree.nodes, { filter: filters })");
+  });
+
+  it("the HTML overlays wait for the first frame", () => {
+    // A live check found this: drei's `<Html>` portals its content into the
+    // DOM in a layout effect guarded by the group's ref. Mounted in the very
+    // first render of the scene, that ref is not attached yet, the portal is
+    // skipped — and never happens again. The case is "the tab opens in 3D
+    // with a node already selected" (switching back from 2D keeps the
+    // selection), which is exactly the I4 acceptance scenario.
+    const scene = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "dashboard-3d.tsx"),
+      "utf8",
+    );
+    expect(scene).toContain("function SceneReady");
+    expect(scene).toContain("<SceneReady onReady={onSceneReady} />");
+    // Both HTML overlays are gated on it.
+    expect(scene).toContain("ready={sceneReady}");
+    expect(scene).toContain("hover === null || !sceneReady ? null");
   });
 });

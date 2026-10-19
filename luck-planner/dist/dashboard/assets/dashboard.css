@@ -753,6 +753,18 @@ body {
   white-space: normal;
   pointer-events: none;
 }
+.lp-node-label {
+  max-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid rgba(238, 242, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(16, 19, 26, 0.82);
+  color: #eef2ff;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .lp-canvas-empty {
   position: absolute;
   inset: 0;
