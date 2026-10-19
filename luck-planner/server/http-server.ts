@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { modulePath } from "./module-dir";
 import {
   DASHBOARD_EVENTS_PATH,
   DASHBOARD_EVENT_READY,
@@ -68,10 +68,7 @@ const SSE_HEARTBEAT_MS = 15_000;
  */
 export function resolvePluginVersion(): string {
   try {
-    const raw = fs.readFileSync(
-      new URL("../package.json", import.meta.url),
-      "utf8",
-    );
+    const raw = fs.readFileSync(modulePath("..", "package.json"), "utf8");
     const parsed = JSON.parse(raw) as { version?: unknown };
     return typeof parsed.version === "string" && parsed.version.length > 0
       ? parsed.version
@@ -85,9 +82,14 @@ export function resolvePluginVersion(): string {
  * `dist/dashboard` next to the plugin checkout — the SPA build produced by
  * stage G1. Kept as a function (not a constant) so tests can point the server
  * at a temporary directory.
+ *
+ * The location comes from {@link modulePath}, because the host's CommonJS
+ * build has no `import.meta.url` (see `server/module-dir.ts`): resolving it
+ * the ESM way alone left the dashboard down with "Invalid URL" on every live
+ * install.
  */
 export function resolveDashboardDir(): string {
-  return fileURLToPath(new URL("../dist/dashboard/", import.meta.url));
+  return modulePath("..", "dist", "dashboard");
 }
 
 // ---------------------------------------------------------------------------

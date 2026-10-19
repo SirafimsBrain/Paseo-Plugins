@@ -1875,3 +1875,38 @@ checklist covers exactly that walk, together with the FPS and bundle-size
 measurements on a live 5–10k-node project and the console being clean in the
 Paseo tab. Everything above is a statement about the *code*; the daemon
 install is a statement about the *host*, and it is still open.
+
+### 10.1 The CommonJS trap (0.29.1) — the live install found it
+
+The J2 acceptance installed the plugin from the git source on a running
+Paseo 0.12.0 daemon. The plugin reported `running`, the MCP entry was
+published and the skill was installed — and the **dashboard never started**:
+
+```text
+[luck-planner] dashboard port 8899 unavailable (Invalid URL); falling back to an ephemeral port
+[luck-planner] dashboard failed to start on an ephemeral port: Invalid URL
+```
+
+The cause: the host loads a plugin's *server* code by transpiling its
+TypeScript, and that build is **CommonJS**. There `import.meta` is an empty
+object, so `new URL("../dist/dashboard/", import.meta.url)` throws
+"Invalid URL" — and `resolvePluginVersion()` degraded to `0.0.0` in the same
+way, silently. The artifact tests could not see it: they exercise the ESM
+bundle (`dist/mcp-server.js`), where `import.meta.url` exists, while the
+daemon runs the CommonJS one. Two code paths, two module systems, one
+artifact.
+
+The fix is `server/module-dir.ts`: one helper that resolves the module's own
+directory through whichever door the build has — `import.meta.url` in ESM,
+`__dirname` in CommonJS (`typeof __dirname` on a free identifier is safe in
+an ESM bundle, so a single helper serves both). `resolveDashboardDir()` and
+`resolvePluginVersion()` now go through it.
+
+The regression test reproduces the host's build instead of describing it:
+`tests/module-dir.test.ts` bundles `server/http-server.ts` with esbuild in
+**CommonJS** format, lays the output out in the shape of a plugin checkout
+(`server/` next to `package.json` and `dist/dashboard/`) and asks the *built*
+module where its files are — the dashboard directory, the manifest version,
+and no "Invalid URL". The same suite checks the ESM path, and the failure was
+verified by hand: the pre-fix resolution, bundled the same way, throws
+`Invalid URL` in Node.
