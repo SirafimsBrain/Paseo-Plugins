@@ -147,6 +147,18 @@ export default function contribute(server: PluginServerContext) {
   /** Applies every settings-dependent side effect in one place. */
   const applySettings = (values: LuckPlannerSettings): void => {
     applyRetention(values);
+    // The MCP entry is refreshed here as well, and this is the *first* moment
+    // it can be: the daemon finalises an install (and rewrites its config
+    // with the new revision's path) right after the plugin is ready — so the
+    // publication at load time may still have copied the bundle of the
+    // revision the update replaced. The copy is cheap and the agents that
+    // already hold the entry path re-spawn from it on every turn, so it must
+    // carry the running code (stage J2, live daemon).
+    const entry = resolveMcpEntry();
+    console.log(
+      `[luck-planner] MCP entry refreshed: ${entry} ` +
+        `(${isExecutableFile(entry) ? "exists" : "MISSING"})`,
+    );
     dashboard.sync({
       enabled: values.httpEnabled,
       port: values.httpPort,

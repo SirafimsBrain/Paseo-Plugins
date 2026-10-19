@@ -1966,3 +1966,29 @@ whatever order the daemon installs in. The regression test in
 `tests/mcp-launch.test.ts` now asserts the *content* of the published entry
 (and that it still exists after the revision directory is removed) instead of
 the realpath of a link.
+
+### 10.4 When the entry is refreshed (0.29.4)
+
+The copy fixed the dangling link, but the first live run showed the copy
+carrying the *previous* revision's bundle: the plugin publishes at load, and
+at that moment the daemon's config still names the revision the update is
+replacing — the daemon rewrites it a few milliseconds later, right after the
+plugin is ready. The published entry was therefore the old code (the MCP
+handshake reported `0.29.2` while the plugin was `0.29.3`).
+
+The refresh now also happens in `applySettings` — the moment the settings
+arrive, which is *after* the daemon finalised the install and rewrote its
+config. That is the first instant at which "the revision the daemon just
+installed" and "the revision this process is running" are the same thing, and
+the log line `MCP entry refreshed: …` makes it visible in
+`paseo plugin logs luck-planner`.
+
+The ordering the daemon actually uses, measured on the live install:
+
+| when | what | consequence |
+| --- | --- | --- |
+| +0 ms | the new revision's directory is created | the bundle exists, but nothing points at it yet |
+| +8 s | the plugin loads (the config still names the old revision) | a load-time publication would copy the *old* bundle |
+| +8 s, +36 ms | the daemon rewrites `config.json` with the new path | from here on the config is the truth |
+| +8 s, +160 ms | the settings arrive → `applySettings` | the first moment the current bundle is knowable — the refresh happens here |
+| +8 s, +170 ms | the dashboard endpoint starts and resolves the dashboard directory | it reads the *current* revision's build ✓ |
