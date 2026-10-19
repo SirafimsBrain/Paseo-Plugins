@@ -397,6 +397,7 @@ describe("shared/ import boundaries", () => {
         "panel.ts",
         "rpc.ts",
         "settings.ts",
+        "timeline.ts",
         "tools.ts",
         "tree.ts",
       ].sort(),

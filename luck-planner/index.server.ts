@@ -1,4 +1,13 @@
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginRpcContract } from "@getpaseo/plugin";
+import type {
+  PluginHandlerContext,
+  PluginServerContext,
+} from "@getpaseo/plugin/server";
+import type {
+  ZodType,
+  input as ZodInput,
+  output as ZodOutput,
+} from "zod";
 import {
   defaultSettings,
   luckPlannerSettings,
@@ -28,7 +37,12 @@ import {
   sessionActorEnv,
 } from "./server/mcp-launch";
 import { ensureSkillInstalled } from "./server/skill";
-import { readChangesSince } from "./server/change-feed";
+import { ChangeFeed, readChangesSince } from "./server/change-feed";
+import {
+  notifyTimelineChange,
+  timelineSink,
+  type TimelinePaseo,
+} from "./server/timeline";
 import { LuckPlannerStore } from "./server/store";
 import { DashboardEndpoint } from "./server/http-lifecycle";
 import { growthProgress } from "./shared/growth";
@@ -54,6 +68,9 @@ import { growthProgress } from "./shared/growth";
  * - H1 (done): live data — the endpoint's change feed broadcasts
  *   `tree-changed` over SSE, and `tree-changes` is the polling twin the
  *   native panel uses
+ * - H2 (done): agent timeline rows — a second change feed turns two audit
+ *   facts (goal approved, leaf done) into `timeline.append` calls on the
+ *   responsible agent's timeline (`server/timeline.ts`)
  */
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(luckPlannerSettings);
@@ -142,32 +159,78 @@ export default function contribute(server: PluginServerContext) {
   });
 
   // -------------------------------------------------------------------------
+  // Agent timeline rows (stage H2). Two feeds over one audit table, on
+  // purpose: the dashboard's feed (stage H1) is armed only while a socket
+  // listens and deliberately skips rows written while it slept, because a
+  // tab refetches everything on connect — a timeline row has to appear with
+  // HTTP switched off and without that refetch. Independent watermarks are
+  // what make both true; the cost is one more indexed `SELECT` per second.
+  //
+  // The SDK handle is not available at contribute time: hooks and RPC
+  // handlers receive it in their context, so the first context to arrive
+  // hands it over and the feed appends through it (`server/timeline.ts`).
+  // -------------------------------------------------------------------------
+  let paseoHandle: TimelinePaseo | null = null;
+  const rememberPaseo = (
+    candidate: TimelinePaseo | null | undefined,
+  ): void => {
+    if (candidate && paseoHandle === null) paseoHandle = candidate;
+  };
+
+  const timelineFeed = new ChangeFeed({
+    store,
+    onChange: (change) => {
+      void notifyTimelineChange(change, {
+        store,
+        // Resolved per batch: the handle may only arrive mid-run.
+        sink: paseoHandle === null ? null : timelineSink(paseoHandle),
+        log: (message) => console.log(message),
+        logError: (message) => console.error(`[luck-planner] ${message}`),
+      }).catch((cause) => {
+        console.error(
+          `[luck-planner] timeline notify failed: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+      });
+    },
+    onError: (message) => console.error(`[luck-planner] ${message}`),
+  });
+  timelineFeed.start();
+
+  // -------------------------------------------------------------------------
   // MCP injection (ADR-3): every Paseo-created agent gets the bundled stdio
   // server. Async `before` hooks are awaited by the host before the request
   // proceeds, so the mutation below is applied to agent creation.
   // -------------------------------------------------------------------------
 
-  const removeCreateHook = server.before("agent.create", async ({ request }) => {
-    const values = await readValues();
-    if (!values.injectIntoAgents) {
-      console.log(`[luck-planner] agent.create injection disabled by settings`);
+  const removeCreateHook = server.before(
+    "agent.create",
+    async ({ request }, context) => {
+      rememberPaseo(context.paseo);
+      const values = await readValues();
+      if (!values.injectIntoAgents) {
+        console.log(
+          `[luck-planner] agent.create injection disabled by settings`,
+        );
+        return request;
+      }
+      const config = injectedMcpConfig({ serverName: values.mcpServerName });
+      request.config.mcpServers = {
+        ...(request.config.mcpServers ?? {}),
+        [MCP_SERVER_KEY]: config,
+      };
+      // Diagnostic: visible in `paseo plugin logs luck-planner` — helps to
+      // troubleshoot MCP spawn failures on the agent side.
+      const entryPath = config.args[0] ?? "";
+      console.log(
+        `[luck-planner] MCP injected: ${config.command} ${config.args.join(" ")} ` +
+          `(${isExecutableFile(entryPath) ? "entry exists" : "entry MISSING"}; ` +
+          `stable path ${publishedMcpEntry()})`,
+      );
       return request;
-    }
-    const config = injectedMcpConfig({ serverName: values.mcpServerName });
-    request.config.mcpServers = {
-      ...(request.config.mcpServers ?? {}),
-      [MCP_SERVER_KEY]: config,
-    };
-    // Diagnostic: visible in `paseo plugin logs luck-planner` — helps to
-    // troubleshoot MCP spawn failures on the agent side.
-    const entryPath = config.args[0] ?? "";
-    console.log(
-      `[luck-planner] MCP injected: ${config.command} ${config.args.join(" ")} ` +
-        `(${isExecutableFile(entryPath) ? "entry exists" : "entry MISSING"}; ` +
-        `stable path ${publishedMcpEntry()})`,
-    );
-    return request;
-  });
+    },
+  );
 
   // -------------------------------------------------------------------------
   // Audit actor: the MCP server stamps writes with LUCK_PLANNER_AGENT_ID.
@@ -179,7 +242,8 @@ export default function contribute(server: PluginServerContext) {
 
   const removeSessionHook = server.before(
     "agent.session_open",
-    async ({ request }) => {
+    async ({ request }, context) => {
+      rememberPaseo(context.paseo);
       const values = await readValues();
       if (!values.injectIntoAgents) return request;
       request.env = { ...request.env, ...sessionActorEnv(request.agentId) };
@@ -195,9 +259,26 @@ export default function contribute(server: PluginServerContext) {
   // attributable. Read handlers return store rows directly; write handlers
   // answer `{ ok, …, error }` instead of throwing, mirroring the MCP
   // dispatch discipline (one bad call never takes the server down).
+  //
+  // Registration goes through `handle` rather than `server.handle`: the
+  // handler context carries the same SDK handle the hooks carry, so a panel
+  // that never opened an agent session still gives the timeline feed its
+  // `paseo` (stage H2).
   // -------------------------------------------------------------------------
+  const handle = <InputSchema extends ZodType, OutputSchema extends ZodType>(
+    contract: PluginRpcContract<InputSchema, OutputSchema>,
+    handler: (
+      input: ZodOutput<InputSchema>,
+      context: PluginHandlerContext,
+    ) => ZodInput<OutputSchema> | Promise<ZodInput<OutputSchema>>,
+  ): void => {
+    server.handle(contract, (input, context) => {
+      rememberPaseo(context.paseo);
+      return handler(input, context);
+    });
+  };
 
-  server.handle(treeGet, (input) => {
+  handle(treeGet, (input) => {
     throwIfDisposed();
     const roots = store.listChildren(input.projectKey, null);
     return {
@@ -209,7 +290,7 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
-  server.handle(treeSearch, (input) => {
+  handle(treeSearch, (input) => {
     throwIfDisposed();
     const hits = store.search(input.query, {
       projectKey: input.projectKey,
@@ -228,7 +309,7 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
-  server.handle(nodeDetail, (input) => {
+  handle(nodeDetail, (input) => {
     throwIfDisposed();
     const node = store.getNode(input.projectKey, input.nodeId);
     if (!node) {
@@ -248,7 +329,7 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
-  server.handle(nodeSetStatus, (input) => {
+  handle(nodeSetStatus, (input) => {
     try {
       throwIfDisposed();
       const node = store.setStatus({
@@ -267,7 +348,7 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(goalApprove, (input) => {
+  handle(goalApprove, (input) => {
     try {
       throwIfDisposed();
       const goal = store.approveGoal({
@@ -286,7 +367,7 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(goalCreate, (input) => {
+  handle(goalCreate, (input) => {
     try {
       throwIfDisposed();
       const goal = store.createGoal({
@@ -305,7 +386,7 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(bugReport, (input) => {
+  handle(bugReport, (input) => {
     try {
       throwIfDisposed();
       const bug = store.createBug({
@@ -329,7 +410,7 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(growthGet, (input) => {
+  handle(growthGet, (input) => {
     throwIfDisposed();
     const growth = store.getGrowthForSubject(
       input.projectKey,
@@ -343,7 +424,7 @@ export default function contribute(server: PluginServerContext) {
     return { growth, ...aggregate };
   });
 
-  server.handle(stats, (input) => {
+  handle(stats, (input) => {
     throwIfDisposed();
     return store.stats(input.projectKey);
   });
@@ -352,7 +433,7 @@ export default function contribute(server: PluginServerContext) {
   // dashboard is. The answer comes from the live endpoint (bound port + active
   // token), not from the settings — a busy port may have fallen back and the
   // token is auto-generated when the setting is empty. Read-only.
-  server.handle(dashboardStatus, (input) => {
+  handle(dashboardStatus, (input) => {
     throwIfDisposed();
     const status = dashboard.status();
     return {
@@ -371,7 +452,7 @@ export default function contribute(server: PluginServerContext) {
   // rows are filtered to the caller's project (ADR-2) even though the cursor is
   // global. The watermark comes from the shared audit table, so writes made by
   // agent processes are visible here too.
-  server.handle(treeChanges, (input) => {
+  handle(treeChanges, (input) => {
     throwIfDisposed();
     if (input.sinceId === undefined) {
       return { watermark: store.latestHistoryId(), changes: [] };
@@ -392,6 +473,9 @@ export default function contribute(server: PluginServerContext) {
     removeCreateHook();
     removeSessionHook();
     unsubscribeSettings();
+    // The timeline feed reads the audit table: gone before the store it
+    // reads is closed, so a reload never polls a dead handle.
+    timelineFeed.stop();
     // Awaited (unlike the fire-and-forget syncs above) so the listening
     // socket is really gone before the store it serves is closed: a leaked
     // port would break the next plugin load on the same setting.

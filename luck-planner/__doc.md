@@ -1,15 +1,15 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.24.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.25.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection
 > highlights, search with camera focus, filters), **G5** (growth layer: per-node
-> growth roll-up, heat map, goal-frame progress) and **H1** (live data: the
-> `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls) are
-> done and all tests are green; the next stage is **H2** (agent timeline rows,
-> optional).
-> Stages A1–H1 are complete; H2 and blocks I–J are otherwise untouched. Nothing in
+> growth roll-up, heat map, goal-frame progress), **H1** (live data: the
+> `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls) and
+> **H2** (agent timeline rows for the two key audit facts) are done and all tests
+> are green; the next stage is **I1** (the WebGL spike that opens block I).
+> Stages A1–H2 are complete; blocks I–J are otherwise untouched. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -445,7 +445,7 @@ Verified by `tests/growth.test.ts` (13 tests):
 | Bundled stdio MCP server (`dist/mcp-server.js`) | `paseo-plugin.json` `mcp.entry` + `server/mcp-server.ts`, spawned by agents | D2 ✅ |
 | Dashboard HTTP server | daemon subprocess, started by the plugin lifecycle | F1 ✅ |
 | "Open dashboard" (panel button + ⌘K screen) | `navigation.openBrowser` → `openExternalUrl` fallback; `dashboard-status` RPC for the URL | F2 ✅ |
-| Agent timeline rows (goal approved, leaf done) | `paseo.agents.ref(id).timeline.append` (optional) | H2 |
+| Agent timeline rows (goal approved, leaf done) | `paseo.agents.ref(id).timeline.append` | H2 ✅ |
 
 Client rules enforced at every UI stage: colors only from `theme.colors`, padding from
 `layout.compact`, host typography via `use-host-typography`, React Native primitives only, and
@@ -1200,7 +1200,7 @@ livelocking on an id that will never arrive.
 retry: 3000
 
 event: ready
-data: {"version":"0.24.0","watermark":128}
+data: {"version":"0.25.0","watermark":128}
 
 event: tree-changed
 data: {"projectKey":"/abs/path","watermark":131,"changes":[ …history rows… ]}
@@ -1261,13 +1261,77 @@ priming and delta calls; `tests/dashboard-build.test.ts` proves the built bundle
 full suite are green: 26 files, 411 tests. The live-daemon walk-through with a real MCP tool
 call and a real browser tab belongs to J2.
 
+
+### Agent timeline rows (stage H2 — `shared/timeline.ts`, `server/timeline.ts`, `client/timeline-row.tsx`, `index.server.ts`, `index.client.tsx`)
+
+Two audit facts get a row in an agent's own timeline, appended with
+`paseo.agents.ref(id).timeline.append` and drawn by a plugin renderer: `goal-approved` and
+`leaf-done`.
+
+**Trigger: the same journal as H1, with its own feed.** Agents write through the bundled MCP
+server — a different process — so the only change log both processes share is the `history`
+table, exactly as in H1. `index.server.ts` therefore owns a *second* `ChangeFeed` with its own
+watermark, and the difference from the dashboard's feed is deliberate: that one is armed only
+while a socket listens and re-primes on start, skipping rows written while it slept, because a
+connecting tab refetches everything — a timeline row has no refetch and must appear with
+`httpEnabled: false`. Two readers over one table cost one extra indexed `SELECT` per second;
+independent cursors are what make both behaviours true.
+
+**Which agent: the acting agent, otherwise the last agent on the same entity.** The audit
+actor is free text (`LUCK_PLANNER_AGENT_ID` unless a tool call passes its own `actor`, and
+`user` for panel actions), so `agentCandidates` offers the row's actor first and then — newest
+first — every distinct non-`user` actor from that entity's earlier rows, capped at eight. That
+is how an approval reaches the agent that proposed the goal (the gate itself is crossed by a
+human, or by an orchestrating agent), and how a panel-driven `done` still reaches the agent
+that last worked on the leaf. Each candidate is verified against the daemon
+(`paseo.agents.ref(id).refresh()`, wrapped so both `null` and a rejection mean "not an agent"),
+and a fact with no live agent is skipped with one log line: an agent timeline is daemon-local
+memory that does not survive a restart, so there is nothing to queue for later.
+
+**SDK handle: captured from the first context that arrives.** `contribute(server)` receives no
+`paseo`; hooks and RPC handlers do. Both `before` hooks call `rememberPaseo`, and RPC
+registration goes through a local `handle` wrapper instead of `server.handle`, so a panel that
+approves a goal with no agent session ever opened still arms the feed — in the same call that
+writes the fact. Until a context arrives the feed keeps its cursor and logs the skip.
+
+**Payload.** `shared/timeline.ts` is the single source for `kind` (`luck-planner-event`),
+`version` (1) and `timelineDataSchema`; `buildTimelineItem` clamps every field in UTF-8 bytes.
+The arithmetic: JSON escaping expands one character to at most six bytes, so
+(2048 name + 1024 projectKey + 512 note + 256 actor + 128 entityId) × 6 ≈ 24 KiB — less than
+half the SDK's 64 KiB rejection limit — and `timelineDataBytes` measures the finished JSON in
+tests against NUL- and surrogate-heavy input. The row id is `lp-<event>-<entityId>-r<revision>`:
+re-appending the same transition replaces the row instead of duplicating it, while a later
+transition becomes a new row. The row's view-model (`timelineRowText`) lives in `shared/` as
+well, because vitest cannot load the Flow-typed `react-native` package — the same reason
+`shared/panel.ts` holds the panel's labels.
+
+**Renderer.** `client/timeline-row.tsx` draws `🎯 Goal approved: <name>` /
+`✅ Leaf done: <name>` plus `YYYY-MM-DD HH:MM · by <actor> · <note>` from `theme.colors`,
+`layout.compact` and `useHostFontScale`, React Native primitives only (the DOM grep over
+`client/` stays empty), with the event spelled out so colour is never the only signal.
+`index.client.tsx` registers it with the shared constants and schema — that pairing is what
+keeps the host from rendering "Plugin timeline item unavailable".
+
+**Tests.** `tests/timeline.test.ts` (36) covers the classifier and `rowFor`, the clamps and the
+64 KiB measurement, candidate ordering / deduplication / cap, and `notifyTimelineChange`
+against a file-backed store — including "a human approved a goal → the proposing agent gets
+the row", "no agent anywhere → quiet skip", a rejected append (logged, the batch continues) and
+a missing handle. The wiring tests run the *production* feed inside `contribute`: a write
+through a second connection to the same file (the agent-process model) arrives as a row, the
+handle is remembered from a plain RPC call, and cleanup stops the polling. Two pre-existing
+fake servers now pass a handler context (`{ paseo: undefined }`) — what the SDK always hands a
+handler. `typecheck` (both configs) and the full suite are green: 27 files, 447 tests. The
+live-daemon check — the row visible in an agent's timeline with no "unavailable" placeholder —
+belongs to J2.
+
+
 ## 7. Roadmap (stage map)
 
 One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each functional
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: block G is complete and block H is under way — H1 is done.** Stages A1–F2 are
+**Status: blocks G and H are complete.** Stages A1–F2 are
 complete and released as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**,
 **C (domain semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP
 transport)** are closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
@@ -1284,7 +1348,10 @@ on nodes and goal frames, and the honest "no growth records yet" hint, and
 H1 (0.24.0) made both views live: the audit-trail change feed behind the
 `tree-changed` SSE event, the per-project streams with their `ready` cursor,
 the dashboard's coalescing `EventSource` client, and the `tree-changes` RPC the
-native panel polls. Next: H2 (optional agent timeline rows). A candidate **D4**
+native panel polls, and H2 (0.25.0) put the two key audit facts — a goal crossing
+the approval gate, a leaf reaching `done` — into the responsible agent's own
+timeline, appended through the SDK and drawn by a plugin renderer. Next: **I1**
+(the WebGL spike that opens block I). A candidate **D4**
 (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
 precede the remaining UI work.
@@ -1298,7 +1365,7 @@ precede the remaining UI work.
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
-| H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0); optional timeline rows |
+| H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
 

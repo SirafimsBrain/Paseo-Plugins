@@ -16,6 +16,12 @@ import {
   resolveLeaf,
 } from "./client/slash";
 import { bugReport, goalCreate, nodeSetStatus, treeSearch } from "./shared/rpc";
+import {
+  LUCK_PLANNER_TIMELINE_KIND,
+  LUCK_PLANNER_TIMELINE_VERSION,
+  timelineDataSchema,
+} from "./shared/timeline";
+import { LuckPlannerTimelineRow } from "./client/timeline-row";
 
 /**
  * Client entry (Paseo app runtime).
@@ -29,6 +35,9 @@ import { bugReport, goalCreate, nodeSetStatus, treeSearch } from "./shared/rpc";
  *   runs in the daemon, see `server/http-server.ts`)
  * - F2 (done): "Open dashboard" — panel button + ⌘K item, in-app browser with
  *   an external fallback (`client/open-dashboard.ts`, `client/dashboard-screen.tsx`)
+ * - H2 (done): timeline renderer for the daemon-appended rows (goal approved,
+ *   leaf done) — registered under the kind/version/schema the server builds
+ *   (`shared/timeline.ts`)
  */
 
 const PANEL_ID = "luck-planner";
@@ -48,6 +57,18 @@ export default function contribute(client: PluginClientContext) {
     title: "Luck Planner",
     icon: "GitBranch",
     Component: LuckPlannerSettingsScreen,
+  });
+
+  // Stage H2: the daemon appends `{ kind, version, data }` rows to an agent's
+  // timeline; this registration is the other half of the contract. Kind,
+  // version and schema come from the one shared module, so a row can never be
+  // built under a `kind` the client does not draw (that mismatch is what
+  // renders as "Plugin timeline item unavailable").
+  client.addTimelineRenderer({
+    kind: LUCK_PLANNER_TIMELINE_KIND,
+    version: LUCK_PLANNER_TIMELINE_VERSION,
+    schema: timelineDataSchema,
+    Component: LuckPlannerTimelineRow,
   });
 
   // Stage F2: the ⌘K "Open dashboard" item opens this screen, which performs

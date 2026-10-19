@@ -82,7 +82,10 @@ function createFakeServer(): FakeServer {
     async call<T>(name: string, input: unknown): Promise<T> {
       const handler = handlers.get(name);
       if (!handler) throw new Error(`No handler registered for ${name}`);
-      return (await handler(input as never, undefined as never)) as T;
+      // The SDK always hands a handler its context; this suite does not
+      // exercise the daemon SDK, so the handle is absent — stage H2's
+      // capture ignores it and the timeline feed simply stays unarmed.
+      return (await handler(input as never, { paseo: undefined } as never)) as T;
     },
     handlers,
   };
