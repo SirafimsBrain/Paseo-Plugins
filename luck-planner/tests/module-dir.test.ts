@@ -24,6 +24,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { moduleDirectory, modulePath } from "../server/module-dir";
 import { resolveDashboardDir, resolvePluginVersion } from "../server/http-server";
+import { configuredPluginRoot } from "../server/plugin-paths";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PLUGIN_VERSION = "9.9.9-host-build";
@@ -94,6 +95,78 @@ describe("the module location in the CommonJS build (what the host runs)", () =>
   it("reads the plugin version from the manifest", () => {
     // The second symptom: the version silently degraded to "0.0.0".
     expect(commonJs.resolvePluginVersion()).toBe(PLUGIN_VERSION);
+  });
+});
+
+describe("the installed directory (the daemon's own truth)", () => {
+  let home = "";
+  let loaderDir = "";
+  let previousHome: string | undefined;
+  let hostBuild: { resolveDashboardDir(): string; resolvePluginVersion(): string };
+
+  beforeAll(async () => {
+    // A fake Paseo home whose config points at a fake checkout — the shape a
+    // live install has: the code is loaded from the host's own directory, the
+    // files stay in the checkout.
+    home = mkdtempSync(path.join(tmpdir(), "luck-planner-home-"));
+    const checkout = path.join(home, "checkout", "luck-planner");
+    mkdirSync(path.join(checkout, "dist", "dashboard"), { recursive: true });
+    writeFileSync(path.join(checkout, "dist", "dashboard", "index.html"), "<!doctype html>");
+    writeFileSync(path.join(checkout, "package.json"), JSON.stringify({ version: "1.2.3" }));
+    writeFileSync(
+      path.join(home, "config.json"),
+      JSON.stringify({ plugins: { "luck-planner": { path: checkout } } }),
+    );
+    // The host's loader directory: the module lives here, with *no* built app
+    // next to it — exactly the live case.
+    loaderDir = mkdtempSync(path.join(tmpdir(), "luck-planner-loader-"));
+    mkdirSync(path.join(loaderDir, "server"), { recursive: true });
+    const outfile = path.join(loaderDir, "server", "http-server.cjs");
+    await build({
+      entryPoints: [path.join(ROOT, "server", "http-server.ts")],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      outfile,
+      external: ["node:*"],
+      logLevel: "silent",
+    });
+    const require = createRequire(import.meta.url);
+    hostBuild = require(outfile) as typeof hostBuild;
+    previousHome = process.env.PASEO_HOME;
+    process.env.PASEO_HOME = home;
+  });
+
+  afterAll(() => {
+    if (previousHome === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = previousHome;
+    if (home !== "") rmSync(home, { recursive: true, force: true });
+    if (loaderDir !== "") rmSync(loaderDir, { recursive: true, force: true });
+  });
+
+  it("is read from the daemon's config", () => {
+    expect(configuredPluginRoot()).toBe(
+      path.join(home, "checkout", "luck-planner"),
+    );
+  });
+
+  it("is where the dashboard and the manifest come from on a live install", () => {
+    // The live case: the module's own directory holds no built app (the host
+    // loads the code from its own directory), so the installed directory
+    // answers — and the dashboard is served from the checkout that has it.
+    const checkout = path.join(home, "checkout", "luck-planner");
+    expect(hostBuild.resolveDashboardDir()).toBe(
+      path.join(checkout, "dist", "dashboard"),
+    );
+    expect(hostBuild.resolvePluginVersion()).toBe("1.2.3");
+  });
+
+  it("does not fall back to a directory without the built app", () => {
+    // The bug's second half: the placeholder page ("the dashboard web app is
+    // not built in this checkout") was served because the resolved directory
+    // had no `index.html`.
+    const resolved = hostBuild.resolveDashboardDir();
+    expect(fs.existsSync(path.join(resolved, "index.html"))).toBe(true);
   });
 });
 

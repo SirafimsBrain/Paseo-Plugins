@@ -2,7 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import { modulePath } from "./module-dir";
+import {
+  resolveDashboardDir as dashboardDir,
+  resolvePluginVersion as pluginVersion,
+} from "./plugin-paths";
 import {
   DASHBOARD_EVENTS_PATH,
   DASHBOARD_EVENT_READY,
@@ -62,20 +65,12 @@ const SSE_HEARTBEAT_MS = 15_000;
 
 /**
  * Resolves the plugin version for `GET /health` from `package.json`. The
- * daemon loads `server/http-server.ts` from the plugin checkout, so the file
- * sits one level up; a missing/unreadable manifest degrades to `0.0.0`
- * instead of failing the endpoint.
+ * daemon installs the plugin into a checkout of its own, so the manifest is
+ * found through the daemon's config (see `server/plugin-paths.ts`); a missing
+ * or unreadable manifest degrades to `0.0.0` instead of failing the endpoint.
  */
 export function resolvePluginVersion(): string {
-  try {
-    const raw = fs.readFileSync(modulePath("..", "package.json"), "utf8");
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === "string" && parsed.version.length > 0
-      ? parsed.version
-      : "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
+  return pluginVersion();
 }
 
 /**
@@ -83,13 +78,14 @@ export function resolvePluginVersion(): string {
  * stage G1. Kept as a function (not a constant) so tests can point the server
  * at a temporary directory.
  *
- * The location comes from {@link modulePath}, because the host's CommonJS
- * build has no `import.meta.url` (see `server/module-dir.ts`): resolving it
- * the ESM way alone left the dashboard down with "Invalid URL" on every live
- * install.
+ * The directory comes from {@link resolveDashboardDir} in
+ * `server/plugin-paths.ts`: the host loads the plugin's code from its own
+ * directory, so a path relative to the *module* pointed at the wrong place —
+ * the dashboard answered with its "not built in this checkout" placeholder on
+ * a live install.
  */
 export function resolveDashboardDir(): string {
-  return modulePath("..", "dist", "dashboard");
+  return dashboardDir();
 }
 
 // ---------------------------------------------------------------------------

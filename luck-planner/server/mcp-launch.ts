@@ -3,7 +3,6 @@ import * as process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
   statSync as fsStatSync,
-  readFileSync,
   mkdirSync,
   symlinkSync,
   renameSync,
@@ -12,6 +11,7 @@ import {
   copyFileSync,
 } from "node:fs";
 import { paseoHome } from "./store";
+import { configuredPluginRoot } from "./plugin-paths";
 
 /**
  * Launch configuration for the bundled stdio MCP server (PLAN.md stage D2).
@@ -231,16 +231,5 @@ function removeQuietly(target: string): void {
 
 /** Reads the plugin directory from the daemon config (`plugins.<id>.path`). */
 function configuredPluginPath(): string | null {
-  try {
-    const raw = JSON.parse(
-      readFileSync(path.join(paseoHome(), "config.json"), "utf8"),
-    ) as { plugins?: Record<string, { path?: unknown }> };
-    const entry = raw.plugins?.["luck-planner"];
-    if (entry && typeof entry.path === "string" && entry.path.length > 0) {
-      return entry.path;
-    }
-  } catch {
-    // Config unavailable — fall through to the other candidates.
-  }
-  return null;
+  return configuredPluginRoot();
 }

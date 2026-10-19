@@ -1910,3 +1910,31 @@ module where its files are — the dashboard directory, the manifest version,
 and no "Invalid URL". The same suite checks the ESM path, and the failure was
 verified by hand: the pre-fix resolution, bundled the same way, throws
 `Invalid URL` in Node.
+
+### 10.2 The second half of the same trap (0.29.2) — the files are not next to the code
+
+With 0.29.1 the dashboard *started* on the live install and answered on
+`http://127.0.0.1:8899` — but with the placeholder page ("the dashboard web
+app is not built in this checkout (run the plugin build)"), and `/health`
+still reported `0.0.0`.
+
+The reason is the other half of the same trap: the host loads the plugin's
+code from **its own** directory, so even a correct `__dirname` points
+nowhere near the checkout. The plugin's *files* — the built dashboard and the
+manifest — stay in the directory the daemon installed, and the daemon records
+it: `$PASEO_HOME/config.json` holds `plugins["luck-planner"].path`, the
+checkout with `package.json` and `dist/dashboard/` inside. `mcp-launch.ts`
+already used that entry to publish the MCP entry; the dashboard did not.
+
+`server/plugin-paths.ts` is now the single place that answers "where are the
+plugin's files": the configured directory first, the module's own root
+second (a development checkout has the built app next to the code), and a
+candidate counts as usable only when it holds the app's `index.html` — a
+directory without it would only reproduce the placeholder. `mcp-launch.ts`
+and `http-server.ts` share the lookup now.
+
+The acceptance that pins it is the *shape* of a live install: the test builds
+the module in CommonJS format into a directory that holds no built app, points
+`PASEO_HOME` at a fake home whose config names a fake checkout, and asserts
+that the built module finds the dashboard and the manifest *there* — with the
+`index.html` present, so the placeholder can never be served again.
