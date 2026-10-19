@@ -27,7 +27,7 @@
  * test suite via `pretest`, so the e2e spawn always sees a fresh bundle.
  */
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -57,6 +57,16 @@ console.log("dist/mcp-server.js written");
 
 const dashboardAssets = join(root, "dist", "dashboard", "assets");
 mkdirSync(dashboardAssets, { recursive: true });
+
+// Stage I2: code splitting names chunks by content hash, and esbuild never
+// removes the previous build's files — without this sweep every rebuild
+// would leave the old `chunk-*.js` on disk, dirtying installs and the
+// committed artifact. The two entries below are rewritten unconditionally.
+for (const file of readdirSync(dashboardAssets)) {
+  if (file.startsWith("chunk-")) {
+    rmSync(join(dashboardAssets, file), { force: true });
+  }
+}
 
 await build({
   entryPoints: {

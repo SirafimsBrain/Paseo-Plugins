@@ -23,6 +23,10 @@
  *   (`dashboard/src/webgl.ts`), the 3D scene arrives through the lazy
  *   `dashboard-3d.js` chunk only after the probe passed, and a tab without
  *   WebGL keeps the 2D diagram with an explanation in the status line.
+ * - **I2 3D tree**: the same tree feeds a pure radial layout
+ *   (`dashboard/src/tree-3d.ts` — depth becomes height, siblings fan around
+ *   the trunk axis) which the scene draws as sphere/tubes/sprites; the model
+ *   is rebuilt on every tree refetch and handed to the live scene.
  *
  * State rules kept deliberately small so later stages can extend them
  * without a rewrite: one `load()` effect keyed on the resolved client, one
@@ -52,6 +56,7 @@ import {
 } from "./graph";
 import { parseDashboardParams } from "./params";
 import { createChangeStream } from "./live";
+import { buildScene3D } from "./tree-3d";
 import {
   detectWebGL,
   planViewSwitch,
@@ -367,6 +372,14 @@ export function App(): ReactElement {
     [tree, collapsedIds, filters, layer],
   );
 
+  // I2 3D layout: the same payload, a radial projection. Rebuilt only when
+  // the tree itself changes — filters/collapse are 2D-canvas concerns until
+  // I4 — and consumed by the scene through `ThreeView`.
+  const scene3dModel = useMemo(
+    () => (tree === null ? null : buildScene3D(tree.nodes)),
+    [tree],
+  );
+
   const resolveName = useCallback(
     (id: string): string => {
       const node = tree?.nodes.find((candidate) => candidate.id === id);
@@ -395,7 +408,7 @@ export function App(): ReactElement {
       />
       <div className="lp-body">
         {view === "3d" ? (
-          <ThreeView webgl={webgl} onSceneState={onSceneState} />
+          <ThreeView webgl={webgl} model={scene3dModel} onSceneState={onSceneState} />
         ) : (
           <Canvas
             graph={graph}

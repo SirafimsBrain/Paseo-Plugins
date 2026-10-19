@@ -1,5 +1,6 @@
 /**
- * WebGL probe, the 2D/3D view policy and the lazy 3D chunk (PLAN.md stage I1).
+ * WebGL probe, the 2D/3D view policy and the lazy 3D chunk (PLAN.md stage I1,
+ * extended by I2 for the tree geometry split).
  *
  * Stage I1 is the spike that de-risks block I: prove the tab can get a WebGL
  * context, pin the fallback ("no WebGL → stay on 2D and say why") and keep
@@ -190,6 +191,41 @@ describe("the lazy 3D chunk in dist/dashboard", () => {
     expect(scene).toContain("mountScene3D");
     // And it is not the app: no toolbar, no diagram chrome leaked in.
     expect(scene).not.toContain("lp-app");
+  });
+
+  it("keeps the I2 layout in the app graph and the geometry behind the dynamic import", () => {
+    // The "app graph" is the main chunk *plus* the shared chunk-* files it
+    // imports: esbuild hoists modules both entries reference (tree-3d.ts is
+    // one — the scene value-imports LAYOUT_3D from it) into those, and the
+    // browser fetches them for the main chunk anyway, so the first-load cost
+    // is unchanged. The contract that matters: no *scene* code is reachable
+    // without the dynamic import, and the pure layout is app-side.
+    const appGraph = [
+      fs.readFileSync(APP_JS, "utf8"),
+      ...fs
+        .readdirSync(ASSETS_DIR)
+        .filter((name) => name.startsWith("chunk-chunk-"))
+        .map((name) => fs.readFileSync(path.join(ASSETS_DIR, name), "utf8")),
+    ].join("\n");
+    const scene = fs.readFileSync(SCENE_JS, "utf8");
+    // The radial layout and its constants travel with the app, which shares
+    // d3-hierarchy with the 2D adapter.
+    expect(appGraph).toContain("buildScene3D");
+    expect(appGraph).toContain("levelHeight"); // the LAYOUT_3D constants
+    // Geometry lives behind the dynamic import: one instanced draw call for
+    // the sprites, oriented tubes, root spheres.
+    for (const marker of [
+      "instancedMesh",
+      "setMatrixAt",
+      "setColorAt",
+      "sphereGeometry",
+      "cylinderGeometry",
+    ]) {
+      expect(scene, marker).toContain(marker);
+    }
+    // The lazy file itself carries no layout function — the scene renders
+    // the model, it never computes one.
+    expect(scene).not.toContain("buildScene3D");
   });
 
   it("index.html never links the 3D chunk eagerly", () => {

@@ -1,8 +1,11 @@
 import {
+  KIND_COLORS,
+  LAYOUT_3D,
+  STATUS_COLORS,
   require_jsx_runtime,
   require_react,
   require_with_selector
-} from "./chunk-chunk-VWXEI4HE.js";
+} from "./chunk-chunk-JXNWEBSR.js";
 import {
   __commonJS,
   __export,
@@ -53631,8 +53634,29 @@ var TOUCH_DOLLY_FACTOR = 1 / 8;
 var isMac = /Mac/.test(globalThis?.navigator?.platform);
 
 // dashboard/src/dashboard-3d.tsx
+var import_react5 = __toESM(require_react());
 var import_jsx_runtime3 = __toESM(require_jsx_runtime());
-function EmptyScene() {
+function createModelStore(initial) {
+  let current = initial;
+  const listeners = /* @__PURE__ */ new Set();
+  return {
+    get: () => current,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    set(model) {
+      if (current === model) return;
+      current = model;
+      for (const listener of [...listeners]) listener();
+    }
+  };
+}
+function SceneView(props) {
+  const model = (0, import_react5.useSyncExternalStore)(props.store.subscribe, props.store.get);
+  return model === null ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SpikeScene, {}) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(TreeScene, { model });
+}
+function SpikeScene() {
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("color", { attach: "background", args: ["#10131a"] }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ambientLight", { intensity: 0.7 }),
@@ -53642,13 +53666,135 @@ function EmptyScene() {
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OrbitControls2, { makeDefault: true, target: [0, 0, 0] })
   ] });
 }
+function TreeScene(props) {
+  const grid = (0, import_react5.useMemo)(() => {
+    const size = Math.max(20, Math.ceil(props.model.radius * 2.2 / 10) * 10);
+    return { size, divisions: size / 2 };
+  }, [props.model]);
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("color", { attach: "background", args: ["#10131a"] }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ambientLight", { intensity: 0.7 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("directionalLight", { position: [5, 8, 4], intensity: 1.2 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("gridHelper", { args: [grid.size, grid.divisions] }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CameraFit, { model: props.model }),
+    props.model.roots.map((root) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RootSphere, { node: root }, root.id)),
+    props.model.edges.map((edge) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Tube, { edge }, edge.id)),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(LeafSprites, { nodes: props.model.leaves }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OrbitControls2, { makeDefault: true, target: [0, props.model.height * 0.45, 0] })
+  ] });
+}
+function CameraFit(props) {
+  const camera = useThree((state2) => state2.camera);
+  const controls = useThree((state2) => state2.controls);
+  (0, import_react5.useEffect)(() => {
+    const model = props.model;
+    const span = Math.max(model.radius, model.height * 0.5, 4);
+    const target = new Vector3(0, model.height * 0.45, 0);
+    camera.position.set(span * 1.15, model.height * 0.8 + span * 0.55, span * 1.5);
+    camera.lookAt(target);
+    camera.updateProjectionMatrix();
+    if (controls) {
+      controls.target.copy(target);
+      controls.update();
+    }
+  }, [props.model, camera, controls]);
+  return null;
+}
+function RootSphere(props) {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("mesh", { position: props.node.position, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("sphereGeometry", { args: [LAYOUT_3D.rootRadius, 32, 24] }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshStandardMaterial", { color: KIND_COLORS[props.node.kind] })
+  ] });
+}
+function Tube(props) {
+  const placement = (0, import_react5.useMemo)(() => {
+    const from = new Vector3(...props.edge.from);
+    const to = new Vector3(...props.edge.to);
+    const direction = to.clone().sub(from);
+    const length = direction.length();
+    const midpoint = from.clone().add(direction.multiplyScalar(0.5));
+    const quaternion = new Quaternion().setFromUnitVectors(
+      new Vector3(0, 1, 0),
+      direction.clone().normalize()
+    );
+    return {
+      position: midpoint.toArray(),
+      quaternion: quaternion.toArray(),
+      length: Math.max(length, 1e-3)
+    };
+  }, [props.edge]);
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("mesh", { position: placement.position, quaternion: placement.quaternion, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      "cylinderGeometry",
+      {
+        args: [props.edge.radius, props.edge.radius, placement.length, 8]
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshStandardMaterial", { color: KIND_COLORS[props.edge.kind] })
+  ] });
+}
+function LeafSprites(props) {
+  const meshRef = (0, import_react5.useRef)(null);
+  const nodes = props.nodes;
+  (0, import_react5.useEffect)(() => {
+    const mesh = meshRef.current;
+    if (mesh === null) return;
+    const matrix = new Matrix4();
+    const color = new Color();
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      matrix.makeTranslation(node.position[0], node.position[1], node.position[2]);
+      mesh.setMatrixAt(index, matrix);
+      mesh.setColorAt(index, color.set(STATUS_COLORS[node.status]));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+  }, [nodes]);
+  const scratch = (0, import_react5.useMemo)(
+    () => ({
+      matrix: new Matrix4(),
+      position: new Vector3(),
+      scale: new Vector3(LAYOUT_3D.leafMarker, LAYOUT_3D.leafMarker, 1)
+    }),
+    []
+  );
+  useFrame(({ camera }) => {
+    const mesh = meshRef.current;
+    if (mesh === null) return;
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      scratch.position.set(node.position[0], node.position[1], node.position[2]);
+      scratch.matrix.compose(scratch.position, camera.quaternion, scratch.scale);
+      mesh.setMatrixAt(index, scratch.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+  if (nodes.length === 0) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+    "instancedMesh",
+    {
+      ref: meshRef,
+      args: [void 0, void 0, nodes.length],
+      frustumCulled: false,
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("planeGeometry", { args: [1, 1] }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("meshBasicMaterial", { side: DoubleSide, toneMapped: false })
+      ]
+    }
+  );
+}
 function mountScene3D(container) {
+  const store = createModelStore(null);
   const root = createRoot(container);
   root.render(
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CanvasShell, { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(EmptyScene, {}) })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CanvasShell, { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SceneView, { store }) })
   );
   let disposed = false;
   return {
+    setModel(model) {
+      if (disposed) return;
+      store.set(model);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

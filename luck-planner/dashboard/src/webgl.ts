@@ -57,7 +57,7 @@ export function threeFailedStatus(detail: string): string {
 
 /** Toolbar tooltip for the 3D button when WebGL is available. */
 export const THREE_BUTTON_HINT =
-  "3D view: an empty WebGL scene with orbit controls (the tree itself arrives in stage I2).";
+  "3D view: the project tree as a WebGL scene — drag to orbit, scroll to zoom (bees, bugs and goals arrive in stage I3).";
 
 /**
  * Default factory for a real tab; `null` outside a DOM (server-side tests).

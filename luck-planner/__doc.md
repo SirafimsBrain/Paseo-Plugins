@@ -1,17 +1,18 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.26.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.27.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection
 > highlights, search with camera focus, filters), **G5** (growth layer: per-node
 > growth roll-up, heat map, goal-frame progress), **H1** (live data: the
 > `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls),
-> **H2** (agent timeline rows for the two key audit facts) and **I1** (the WebGL
+> **H2** (agent timeline rows for the two key audit facts), **I1** (the WebGL
 > spike: probe + fallback, lazy `dashboard-3d.js` entry, empty scene with
-> OrbitControls) are done and all tests are green; the next stage is **I2**
-> (the 3D tree's layout and geometry).
-> Stages A1–I1 are complete; I2–J are otherwise untouched. Nothing in
+> OrbitControls) and **I2** (the 3D tree: radial layout + geometry) are done
+> and all tests are green; the next stage is **I3** (bees, bugs, goals and
+> growth in 3D).
+> Stages A1–I2 are complete; I3–J are otherwise untouched. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -1389,6 +1390,74 @@ suite are green. Rendering in a real tab — the Paseo workspace browser
 environment has no browser, and repo rule 4 keeps tab-level checks manual by
 design.
 
+### The 3D tree — layout and geometry (stage I2 — `dashboard/src/tree-3d.ts`, `dashboard/src/dashboard-3d.tsx`, `dashboard/src/components/ThreeView.tsx`, `dashboard/src/app.tsx`)
+
+The spike becomes a tree. The same payload the 2D diagram renders is
+projected into a radial cone, and the scene draws it as spheres, tubes and
+instanced sprites — the acceptance ("readable as a tree without a click",
+"5–10k nodes stay smooth") is a property of the layout, not of the camera.
+
+**The layout is a pure module.** `dashboard/src/tree-3d.ts` has no three.js
+and no DOM: it sits in the eagerly loaded chunk next to `graph.ts` and reuses
+that adapter's deterministic `indexTree` (roots + name-sorted children +
+dangling-parent defence), then runs d3-hierarchy's `tree().nodeSize([1,
+levelHeight])` over a synthetic forest root. Projection: **depth becomes
+height** (the deepest facts rest on the ground grid), the sibling axis
+becomes the **angle** around the trunk axis, normalised over the widest
+spread so a narrow tree fans out and a wide one wraps the full circle, and
+rings grow with depth — the silhouette is a measurable cone with the tech
+stack at its apex. `subtreeLeafCounts` is an iterative post-pass, and a
+branch's tube radius is `clamp(tubeMin, √leaves·0.055, tubeMax)` — square-
+root scaling means four times the leaves read as twice the thickness, and a
+single-leaf twig sits on the thinnest tube by construction. The synthetic
+forest root is dropped again on emit: the apex nodes (no real parent — an
+orphaned `parentId` included) carry `isRoot` and render as spheres, so even a
+stray trunk in a pruned payload draws instead of vanishing.
+
+**The scene renders, never decides.** `dashboard-3d.tsx` keeps the I1 spike
+scene as the base state (`setModel(null)` — the tree still loading — shows
+lights, grid and orbit controls, never a black viewport). With a model,
+`TreeScene` sizes the grid to the model's radius, `CameraFit` lands the
+camera once, when the model *arrives* (a refetch must not fight the hand on
+the mouse), apex nodes become `sphereGeometry` meshes tinted by
+`KIND_COLORS`, every edge becomes a cylinder oriented by a quaternion along
+its segment (exactly as long as the gap — no z-fighting), and **all leaves
+are one `InstancedMesh`**: per-instance translation + `STATUS_COLORS` tint
+set once per model, then a per-frame `compose` with the camera quaternion so
+the quads billboard — one draw call and a sub-millisecond loop at the 10k
+budget. The palette is imported from the same `colors.ts` the 2D legend
+renders, so the two views can never drift apart. Tube count equals internal-
+node count (hundreds in real projects; the leaves are the instanced bulk) —
+LOD for tubes is explicitly deferred to the I3–I4 measurement pass.
+
+**The data path.** `app.tsx` builds the model with `buildScene3D(tree.nodes)`
+in a memo keyed on the tree (collapse/filters are 2D-canvas concerns until
+I4) and hands it to `ThreeView`, which forwards it through `handle.setModel`
+— seeded once when the lazy chunk lands, then on every layout change,
+without ever remounting the renderer. `mountScene3D` gained a tiny external
+store (`useSyncExternalStore`) behind that setter; `dispose()` is unchanged:
+idempotent, unmounts the r3f root, empties the cell.
+
+**Tests.** `tests/dashboard-tree-3d.test.ts` (13) builds fixtures through a
+real `LuckPlannerStore` (root→trunk→branch→leaf, seven leaves across three
+branches): the apex/level/ring arithmetic, the sibling fan (shared ring,
+distinct angles, leaves resting on the ground), one tube per non-root node
+with exact endpoints, thickness strictly ordered by subtree leaf count
+(4 > 3 > 2 > 1 = floor), the sphere/sprite subsets with their statuses,
+purity (two builds are identical), degenerate payloads (empty project, lone
+root, an orphaned `parentId` the store itself refuses to create — built as
+the hand-crafted payload a pruned response can be), `tubeRadius` clamps and
+its √-scaling, `subtreeLeafCounts`, and the budget: 10 000 synthetic nodes
+lay out in ~90 ms (asserted under 500 ms) with 9 999 edges and 6 000+
+sprites in a single instance. The bundle markers in
+`tests/dashboard-3d.test.ts` pin the split: layout symbols live in the app
+graph (main + the shared chunk the browser fetches anyway — the scene
+value-imports `LAYOUT_3D`, so esbuild hoists the module), while
+`instancedMesh`/`setMatrixAt`/`setColorAt`/`sphereGeometry`/
+`cylinderGeometry` exist only behind the dynamic import, and the lazy file
+contains no layout function at all. `typecheck` (both configs) and the full
+suite are green. FPS and the 5–10k render measurements belong to J2.
+
 
 ## 7. Roadmap (stage map)
 
@@ -1419,8 +1488,12 @@ timeline, appended through the SDK and drawn by a plugin renderer, and I1
 (0.26.0) opened block I with the WebGL spike: an injectable canvas probe with
 a released context, the stay-on-2D-with-a-written-reason fallback, and a
 second esbuild entry (`dashboard-3d.js`) that keeps three/r3f/drei out of the
-eagerly loaded chunk while sharing a single React through code splitting.
-Next: **I2** (the 3D tree: radial layout + geometry). A candidate **D4**
+eagerly loaded chunk while sharing a single React through code splitting,
+and I2 (0.27.0) drew the tree itself: a pure radial layout module (depth →
+height, siblings → angles, tube radius ∝ √subtree leaves) feeding a scene of
+sphere apexes, quaternion-oriented tubes and a single instanced billboard
+mesh for every leaf, wired app → ThreeView → `handle.setModel` without
+remounts. Next: **I3** (bees, bugs, goals and growth in 3D). A candidate **D4**
 (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
 precede the remaining UI work.
@@ -1435,7 +1508,7 @@ precede the remaining UI work.
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
-| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), geometry, effects, interaction + toggle |
+| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
 
 Blocks B–D have file-disjoint boundaries and may be delegated to different agents.
