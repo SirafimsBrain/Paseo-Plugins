@@ -7,10 +7,13 @@ import {
   realpathSync,
   existsSync,
   readdirSync,
+  readFileSync,
+  lstatSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import {
+  isExecutableFile,
   mcpServerCommand,
   publishedMcpEntry,
   resolveMcpEntry,
@@ -22,6 +25,12 @@ import {
  * `agent.create` time, while the daemon deletes the per-revision install
  * directory on every update. The entry therefore has to live at a
  * revision-independent path and be re-published atomically.
+ *
+ * Stage J2 added the second half: the published entry is a **copy**, not a
+ * link into the revision directory. A link dangles the moment the daemon
+ * removes the revision — which is what the live install showed: the entry
+ * pointed at the revision the update had just deleted, and every agent
+ * spawning the server got "Cannot find module".
  */
 
 const BUNDLE = "// luck-planner bundle\n";
@@ -74,8 +83,11 @@ describe("mcp-launch entry resolution", () => {
       // on plugin load and on every agent.create.
       expect(resolveMcpEntry()).toBe(entry);
       expect(existsSync(entry)).toBe(true);
-      expect(realpathSync(entry)).toBe(
-        realpathSync(path.join(install, "dist", "mcp-server.js")),
+      // The published entry is a *copy* of the bundle, not a link into the
+      // revision: a link dies with the revision (stage J2, live daemon).
+      expect(lstatSync(entry).isFile()).toBe(true);
+      expect(readFileSync(entry, "utf8")).toBe(
+        readFileSync(path.join(install, "dist", "mcp-server.js"), "utf8"),
       );
       // No staging leftovers.
       const dataDir = path.join(home, "plugins", "luck-planner");
@@ -93,8 +105,8 @@ describe("mcp-launch entry resolution", () => {
       const entry = resolveMcpEntry();
       expect(entry).toBe(publishedMcpEntry());
       expect(entry).toBe(path.join(home, "plugins", "luck-planner", "mcp-server.js"));
-      expect(realpathSync(entry)).toBe(
-        realpathSync(path.join(install, "dist", "mcp-server.js")),
+      expect(readFileSync(entry, "utf8")).toBe(
+        readFileSync(path.join(install, "dist", "mcp-server.js"), "utf8"),
       );
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -117,19 +129,26 @@ describe("mcp-launch entry resolution", () => {
       });
       const install = installRevision(home, "rev-b", "// luck-planner bundle v2\n");
 
+      // The published entry survives the deletion of the revision it was
+      // copied from — a link into the revision would dangle here, and every
+      // agent spawning the server would get "Cannot find module".
+      expect(existsSync(entry)).toBe(true);
+      expect(isExecutableFile(entry)).toBe(true);
+
       const refreshed = mcpServerCommand().args[0];
       // Same path the old agent already holds — so its config stays valid.
       expect(refreshed).toBe(entry);
       expect(existsSync(refreshed)).toBe(true);
-      expect(realpathSync(refreshed)).toBe(
-        realpathSync(path.join(install, "dist", "mcp-server.js")),
+      // And the refresh carries the new revision's bundle.
+      expect(readFileSync(refreshed, "utf8")).toBe(
+        readFileSync(path.join(install, "dist", "mcp-server.js"), "utf8"),
       );
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it("republishes over a dangling entry left by a removed install", () => {
+  it("republishes over an entry left by a removed install", () => {
     const home = makeHome();
     process.env.PASEO_HOME = home;
     try {
@@ -139,12 +158,14 @@ describe("mcp-launch entry resolution", () => {
         recursive: true,
         force: true,
       });
-      // A dangling link must not be mistaken for a usable entry.
-      expect(existsSync(publishedMcpEntry())).toBe(false);
+      // The copy is still there — the removal of the revision cannot take it
+      // away, which is the whole point of publishing a copy.
+      expect(existsSync(publishedMcpEntry())).toBe(true);
 
-      installRevision(home, "rev-b");
+      installRevision(home, "rev-b", "// luck-planner bundle v2\n");
       expect(resolveMcpEntry()).toBe(publishedMcpEntry());
       expect(existsSync(publishedMcpEntry())).toBe(true);
+      expect(readFileSync(publishedMcpEntry(), "utf8")).toContain("bundle v2");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

@@ -1938,3 +1938,31 @@ the module in CommonJS format into a directory that holds no built app, points
 `PASEO_HOME` at a fake home whose config names a fake checkout, and asserts
 that the built module finds the dashboard and the manifest *there* — with the
 `index.html` present, so the placeholder can never be served again.
+
+### 10.3 The MCP entry died with the revision it pointed into (0.29.3)
+
+With the dashboard working, the acceptance spoke to the MCP server the way an
+agent does — the published entry, over stdio — and got:
+
+```text
+Error: Cannot find module '/home/sirafim/.paseo/plugins/luck-planner/mcp-server.js'
+```
+
+The published entry was a **symlink into the revision directory**, and the
+daemon deletes the previous revision right after the new one is loaded. The
+plugin published at load time — when the daemon's config still named the
+*previous* revision — so the link pointed at the revision that was about to
+be removed, and every agent that spawned the server afterwards got a missing
+module. The entry's path was right (revision-independent), its *target* was
+not: the plugin's own note called the publication "revision-independent",
+while the thing it pointed at was not.
+
+The fix is to publish a **copy**: `publishMcpEntry` writes the bundle to a
+temporary name and renames it over the published path, so the entry is a
+real file with the bundle's bytes and no dependency on the revision's
+lifetime. It is refreshed on every resolution — on plugin load and on every
+`agent.create` — so the entry is current by the time an agent needs it,
+whatever order the daemon installs in. The regression test in
+`tests/mcp-launch.test.ts` now asserts the *content* of the published entry
+(and that it still exists after the revision directory is removed) instead of
+the realpath of a link.

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   statSync as fsStatSync,
   mkdirSync,
-  symlinkSync,
+  chmodSync,
   renameSync,
   unlinkSync,
   realpathSync,
@@ -183,40 +183,52 @@ function resolveBundleSource(): string {
 }
 
 /**
- * Points the published path at `source`, atomically.
+ * Copies the bundle to its revision-independent path, atomically.
  *
- * The swap goes through a temporary name plus `rename`, so a server spawned
- * by an agent mid-update reads either the old or the new target and never a
- * missing file. Falls back to a copy where symlinks are unavailable;
- * returns `null` when the data directory cannot be written at all.
+ * A **copy**, not a symlink into the revision directory. The daemon deletes
+ * the previous revision's directory right after the new one is loaded — and a
+ * symlink into it dangles from that moment on, so every agent that then
+ * spawns the MCP server gets `Cannot find module`. The live-daemon
+ * acceptance (stage J2) found exactly that: the entry was a link to the
+ * revision that the update had just removed.
+ *
+ * The copy is written to a temporary name and renamed over the target, so a
+ * server spawned mid-write reads either the old file or the new one, never a
+ * half-written one. It is refreshed on every resolution, which happens on
+ * plugin load and on every `agent.create` — so the entry is current by the
+ * time an agent actually needs it, whatever order the daemon installs in.
  */
 function publishMcpEntry(source: string): string | null {
   const target = publishedMcpEntry();
+  // A development checkout that publishes onto itself: nothing to copy.
   if (sameFile(target, source)) return target;
   const staging = `${target}.${process.pid}.tmp`;
   try {
     mkdirSync(path.dirname(target), { recursive: true });
     removeQuietly(staging);
-    symlinkSync(source, staging);
+    copyFileSync(source, staging);
+    chmodSync(staging, 0o755);
     renameSync(staging, target);
     return target;
   } catch {
     removeQuietly(staging);
-  }
-  try {
-    copyFileSync(source, target);
-    return target;
-  } catch {
     return null;
   }
 }
 
-/** True when both paths resolve to the same existing file. */
+/**
+ * True when both paths are the same existing file.
+ *
+ * With a *copy* as the published entry this is never true for the published
+ * path (a copy is a different file with the same content) — the check stays
+ * for the one case where the target *is* the source, so the copy is not
+ * written onto itself.
+ */
 function sameFile(left: string, right: string): boolean {
   try {
     return realpathSync(left) === realpathSync(right);
   } catch {
-    // A dangling or missing link still needs to be replaced.
+    // A missing file still needs to be replaced.
     return false;
   }
 }
