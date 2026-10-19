@@ -14,11 +14,12 @@
 > **I4** (3D interaction: picking into the shared details panel, the selection
 > highlight, the camera flight from the search, the filters in 3D and the
 > remembered 2D/3D choice), **J1** (the plugin's English README and the link
-> from the repository README) and **J2** (the live-daemon acceptance — the
+> from the repository README), **J2** (the live-daemon acceptance — the
 > install, the MCP round trip, the goal approval, the dashboard in the host's
-> browser, the SSE, the themes and the measurements) are done and all tests
-> are green.
-> Stages A1–I4, J1 and J2 are complete. Nothing in
+> browser, the SSE, the themes and the measurements) and **D4** (the MCP
+> server registered in the agents' own config files — OpenCode, Kilo, Cline,
+> Cursor, Codex CLI) are done and all tests are green.
+> Stages A1–I4, J1, J2 and D4 are complete. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -1336,6 +1337,74 @@ handler. `typecheck` (both configs) and the full suite are green: 27 files, 447 
 live-daemon check — the row visible in an agent's timeline with no "unavailable" placeholder —
 belongs to J2.
 
+### Agent config registrations (stage D4 — `server/agent-mcp-config.ts`, `shared/rpc.ts`, `index.server.ts`, `client/settings-screen.tsx`)
+
+Paseo injects the plugin's MCP server into an agent through the `agent.create`
+hook, i.e. it lands in the **session** payload. Two provider behaviours make
+that fragile, and stage D4 answers both by registering the server in the
+agents' *own* config files:
+
+- **OpenCode and Kilo** keep their session registrations in memory, per
+  directory ("location services"), and evict an idle location — which takes
+  the server and all its tools with it. Paseo re-registers only while a
+  session is being created, so a long-lived agent loses every `luck-planner_*`
+  tool for the rest of its life while the MCP server itself is healthy. A
+  server that lives in the agent's *config file* is not affected: the config
+  is re-read every time a location boots, so the tools come back by
+  themselves.
+- **Cline, Cursor and Codex CLI** are terminal agents that do not connect
+  stdio MCP servers delivered through an orchestrator's session at all — for
+  them a config-file entry is the only way in.
+
+There is a second, subtler effect, measured on OpenCode (the memory-flash
+lesson): after an eviction the *dead* session entry still owns the server's
+name in the session, so it shadows the healthy config-file server and every
+call fails. So **when a config file already carries a current registration,
+the session-level injection is skipped** — the config entry wins on every
+dimension: it survives eviction, reconnects at every location boot, and
+reaches the sessions Paseo never touches. The injection stays the fallback
+for machines whose config file was never (or can no longer) be written, and
+the skip is logged (`agent.create injection skipped for <provider>`) so the
+behaviour is visible in `paseo plugin logs luck-planner`.
+
+**The formats.** One writer per family, because the shapes differ:
+
+| Agent | File | Entry |
+| ----- | ---- | ----- |
+| OpenCode | `~/.config/opencode/opencode.json` (or `.jsonc`) | `mcp: { luck-planner: { type: "local", command: [node, entry], enabled: true, timeout: 15000 } }` |
+| Kilo | `~/.config/kilo/kilo.jsonc` (or `.json`) | the same `mcp:` shape |
+| Cline | `~/.cline/data/settings/cline_mcp_settings.json` | `mcpServers: { luck-planner: { transport: { type: "stdio", command, args } } }` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers: { luck-planner: { command, args } }` |
+| Codex CLI | `~/.codex/config.toml` | the `[mcp_servers.luck-planner]` table with `command` and `args` |
+
+**The rules the writers follow**, in every format:
+
+- **Explicit, per agent.** The plugin never writes these files by itself:
+  they change the behaviour of *every* session of that agent on the machine,
+  so it is a button in the settings screen — one per target and one pair for
+  all of them. A config that does not parse as plain JSON (a `//` comment, a
+  syntax error) is **reported, not overwritten**: losing a hand-written
+  comment is worse than not registering.
+- **Foreign content is preserved.** Only the plugin's own entry is added,
+  replaced or removed; every other key, server, table and comment stays — in
+  the TOML file byte for byte, because only our table is spliced.
+- **Atomic writes.** Temp file plus rename, so a reader never sees a
+  half-written config, and the file's mode is kept.
+- **The paths are computed per call**, never at import time, so they follow
+  the environment (and a test can point them at a temporary home).
+
+**Tests.** `tests/agent-mcp-config.test.ts` (22) points `HOME` and
+`XDG_CONFIG_HOME` at a temporary directory — the machine's real agent configs
+are never touched — and pins the five formats, the preservation of foreign
+keys, servers, tables and comments through a registration *and* a removal,
+the refusal to overwrite a file that does not parse, the idempotence of a
+second registration (and exactly one table of ours in the TOML file), the
+truthful status (registered / registered with an older command / not
+registered / agent not installed here), the atomic write (no staging file
+left, the mode kept) and the paths themselves (XDG for OpenCode and Kilo, the
+home directory for Cline, Cursor and Codex). `tests/rpc.test.ts` pins the
+three new contracts on the RPC surface.
+
 ### WebGL spike and the lazy 3D entry (stage I1 — `dashboard/src/webgl.ts`, `dashboard/src/dashboard-3d.tsx`, `dashboard/src/components/ThreeView.tsx`, `scripts/bundle.mjs`)
 
 Block I opens with the spike that de-risks the 3D tree: prove a tab can obtain a
@@ -1813,7 +1882,7 @@ memory-flash itself is not touched — it already ships that solution.
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
-| D | D1–D3 | 0.10.0–0.12.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0) |
+| D | D1–D4 | 0.10.0–0.12.0, 0.30.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0), agent config-file registrations ✅ (0.30.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |

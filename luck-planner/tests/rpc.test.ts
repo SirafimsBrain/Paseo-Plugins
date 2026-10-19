@@ -7,6 +7,9 @@ import contribute from "../index.server";
 import { LuckPlannerStore } from "../server/store";
 import {
   UI_ACTOR,
+  agentMcpRegister,
+  agentMcpStatus,
+  agentMcpUnregister,
   bugReport,
   dashboardStatus,
   goalApprove,
@@ -195,6 +198,9 @@ describe("RPC surface", () => {
     try {
       expect([...server.handlers.keys()].sort()).toEqual(
         [
+          agentMcpRegister.name,
+          agentMcpStatus.name,
+          agentMcpUnregister.name,
           bugReport.name,
           dashboardStatus.name,
           goalApprove.name,

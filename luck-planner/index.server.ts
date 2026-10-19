@@ -16,6 +16,9 @@ import {
 } from "./shared/settings";
 import {
   UI_ACTOR,
+  agentMcpRegister,
+  agentMcpStatus,
+  agentMcpUnregister,
   bugReport,
   dashboardStatus,
   goalApprove,
@@ -27,6 +30,7 @@ import {
   treeChanges,
   treeGet,
   treeSearch,
+  type AgentMcpTargetId,
 } from "./shared/rpc";
 import {
   MCP_SERVER_KEY,
@@ -36,6 +40,13 @@ import {
   resolveMcpEntry,
   sessionActorEnv,
 } from "./server/mcp-launch";
+import {
+  AGENT_MCP_TARGETS,
+  agentConfigCoversProvider,
+  agentMcpStatuses,
+  registerAgentMcp,
+  unregisterAgentMcp,
+} from "./server/agent-mcp-config";
 import { ensureSkillInstalled } from "./server/skill";
 import { ChangeFeed, readChangesSince } from "./server/change-feed";
 import {
@@ -227,6 +238,22 @@ export default function contribute(server: PluginServerContext) {
         );
         return request;
       }
+      // Stage D4: when the agent's own config file already carries a current
+      // registration, the session-level entry is *not* injected. The config
+      // entry survives OpenCode's per-directory eviction, reconnects at every
+      // location boot and is the only thing the terminal agents (Cline,
+      // Cursor, Codex CLI) read at all — while a session entry that died with
+      // an eviction would still own the server's name and shadow the healthy
+      // config one, breaking every call. The injection stays the fallback for
+      // machines whose config file was never (or can no longer) be written.
+      const cover = agentConfigCoversProvider(request.config.provider);
+      if (cover.covered) {
+        console.log(
+          `[luck-planner] agent.create injection skipped for ${request.config.provider}: ` +
+            `config-file registration active at ${cover.path ?? "(unknown)"}`,
+        );
+        return request;
+      }
       const config = injectedMcpConfig({ serverName: values.mcpServerName });
       request.config.mcpServers = {
         ...(request.config.mcpServers ?? {}),
@@ -338,6 +365,63 @@ export default function contribute(server: PluginServerContext) {
       blockingBugs: store.listBlockingBugs(input.projectKey, node.id),
       history: store.listHistory(input.projectKey, node.id),
       growth: store.getGrowthForSubject(input.projectKey, "node", node.id),
+    };
+  });
+
+  // -------------------------------------------------------------------------
+  // Agent config registrations (stage D4): the plugin can register its MCP
+  // server in the agents' *own* config files — the only registration that
+  // survives OpenCode's per-directory eviction and the only one the terminal
+  // agents (Cline, Cursor, Codex CLI) read at all. The files belong to the
+  // user, so nothing is written without an explicit request from the settings
+  // screen; every other key, server, table and comment is preserved, and a
+  // file that does not parse is reported instead of overwritten.
+  // -------------------------------------------------------------------------
+  handle(agentMcpStatus, () => ({ targets: agentMcpStatuses() }));
+
+  handle(agentMcpRegister, (input) => {
+    const targets: AgentMcpTargetId[] =
+      input.target === "all" ? [...AGENT_MCP_TARGETS] : [input.target];
+    const results = targets.map((id) => {
+      const outcome = registerAgentMcp(id);
+      const status = agentMcpStatuses().find((candidate) => candidate.id === id);
+      console.log(
+        `[luck-planner] agent MCP registered: ${status?.label ?? id} ` +
+          `(${outcome.ok ? "ok" : outcome.error})`,
+      );
+      return { id, label: status?.label ?? id, ok: outcome.ok, error: outcome.error };
+    });
+    const failed = results.filter((result) => !result.ok);
+    return {
+      ok: failed.length === 0,
+      error:
+        failed.length === 0
+          ? null
+          : failed.map((result) => `${result.label}: ${result.error}`).join("; "),
+      results,
+    };
+  });
+
+  handle(agentMcpUnregister, (input) => {
+    const targets: AgentMcpTargetId[] =
+      input.target === "all" ? [...AGENT_MCP_TARGETS] : [input.target];
+    const results = targets.map((id) => {
+      const outcome = unregisterAgentMcp(id);
+      const status = agentMcpStatuses().find((candidate) => candidate.id === id);
+      console.log(
+        `[luck-planner] agent MCP unregistered: ${status?.label ?? id} ` +
+          `(${outcome.ok ? "ok" : outcome.error})`,
+      );
+      return { id, label: status?.label ?? id, ok: outcome.ok, error: outcome.error };
+    });
+    const failed = results.filter((result) => !result.ok);
+    return {
+      ok: failed.length === 0,
+      error:
+        failed.length === 0
+          ? null
+          : failed.map((result) => `${result.label}: ${result.error}`).join("; "),
+      results,
     };
   });
 

@@ -30,6 +30,15 @@ import {
 
 export const UI_ACTOR = "user";
 
+/** One of the agent config files the plugin can register itself with. */
+export const agentMcpTargetIdSchema = z.enum([
+  "opencode",
+  "kilo",
+  "cline",
+  "cursor",
+  "codex",
+]);
+
 /** `luck-planner.tree-get`: project overview — roots with their children. */
 export const treeGet = defineRpc({
   name: "luck-planner.tree-get",
@@ -289,6 +298,103 @@ export const treeChanges = defineRpc({
  */
 export const PANEL_CHANGE_POLL_MS = 2_000;
 
+/**
+ * The agents the plugin can register itself with directly (stage D4).
+ *
+ * The list is duplicated in `server/agent-mcp-config.ts` (the server owns the
+ * file formats) — this is the contract the UI speaks.
+ */
+export const AGENT_MCP_TARGET_IDS = [
+  "opencode",
+  "kilo",
+  "cline",
+  "cursor",
+  "codex",
+] as const;
+export type AgentMcpTargetId = (typeof AGENT_MCP_TARGET_IDS)[number];
+
+/** The registration state of one target, as the settings screen shows it. */
+export const agentMcpTargetStatusSchema = z.object({
+  id: agentMcpTargetIdSchema,
+  label: z.string(),
+  path: z.string(),
+  detected: z.boolean(),
+  installed: z.boolean(),
+  upToDate: z.boolean().nullable(),
+  command: z.string().nullable(),
+  args: z.array(z.string()).nullable(),
+});
+
+/**
+ * `luck-planner.agent-mcp-status`: the registration state of every agent
+ * config file (stage D4).
+ *
+ * The plugin can register its MCP server in the agents' *own* config files,
+ * which is the only registration that survives OpenCode's per-directory
+ * eviction and the only one the terminal agents (Cline, Cursor, Codex CLI)
+ * read at all. The files belong to the user, so the plugin never writes them
+ * by itself: the settings screen offers one button per target (and one for
+ * all of them), and this contract reports what is registered where.
+ */
+export const agentMcpStatus = defineRpc({
+  name: "luck-planner.agent-mcp-status",
+  input: z.object({}).optional(),
+  output: z.object({
+    targets: z.array(agentMcpTargetStatusSchema),
+  }),
+});
+
+/**
+ * `luck-planner.agent-mcp-register`: adds (or refreshes) the plugin's entry
+ * in one agent's config file — or in all of them.
+ *
+ * Every other key, server, table and comment in the file is preserved, the
+ * write is atomic, and a file that does not parse is reported instead of
+ * overwritten. `target: "all"` walks the five targets and reports each
+ * result separately: one of them failing must not hide the others.
+ */
+export const agentMcpRegister = defineRpc({
+  name: "luck-planner.agent-mcp-register",
+  input: z.object({
+    target: z.union([agentMcpTargetIdSchema, z.literal("all")]),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable(),
+    results: z.array(
+      z.object({
+        id: agentMcpTargetIdSchema,
+        label: z.string(),
+        ok: z.boolean(),
+        error: z.string().nullable(),
+      }),
+    ),
+  }),
+});
+
+/**
+ * `luck-planner.agent-mcp-unregister`: removes the plugin's entry again,
+ * leaving the rest of the file untouched.
+ */
+export const agentMcpUnregister = defineRpc({
+  name: "luck-planner.agent-mcp-unregister",
+  input: z.object({
+    target: z.union([agentMcpTargetIdSchema, z.literal("all")]),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable(),
+    results: z.array(
+      z.object({
+        id: agentMcpTargetIdSchema,
+        label: z.string(),
+        ok: z.boolean(),
+        error: z.string().nullable(),
+      }),
+    ),
+  }),
+});
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -301,4 +407,7 @@ export const RPC_CONTRACT_NAMES = [
   stats.name,
   dashboardStatus.name,
   treeChanges.name,
+  agentMcpStatus.name,
+  agentMcpRegister.name,
+  agentMcpUnregister.name,
 ] as const;

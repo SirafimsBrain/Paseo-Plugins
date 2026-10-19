@@ -107,6 +107,13 @@ var PluginAttachmentSearchPayloadSchema = external_exports.object({
 });
 
 // shared/rpc.ts
+var agentMcpTargetIdSchema = external_exports.enum([
+  "opencode",
+  "kilo",
+  "cline",
+  "cursor",
+  "codex"
+]);
 var treeGet = defineRpc({
   name: "luck-planner.tree-get",
   input: external_exports.object({
@@ -299,6 +306,59 @@ var treeChanges = defineRpc({
     changes: external_exports.array(historyEntrySchema)
   })
 });
+var agentMcpTargetStatusSchema = external_exports.object({
+  id: agentMcpTargetIdSchema,
+  label: external_exports.string(),
+  path: external_exports.string(),
+  detected: external_exports.boolean(),
+  installed: external_exports.boolean(),
+  upToDate: external_exports.boolean().nullable(),
+  command: external_exports.string().nullable(),
+  args: external_exports.array(external_exports.string()).nullable()
+});
+var agentMcpStatus = defineRpc({
+  name: "luck-planner.agent-mcp-status",
+  input: external_exports.object({}).optional(),
+  output: external_exports.object({
+    targets: external_exports.array(agentMcpTargetStatusSchema)
+  })
+});
+var agentMcpRegister = defineRpc({
+  name: "luck-planner.agent-mcp-register",
+  input: external_exports.object({
+    target: external_exports.union([agentMcpTargetIdSchema, external_exports.literal("all")])
+  }),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    error: external_exports.string().nullable(),
+    results: external_exports.array(
+      external_exports.object({
+        id: agentMcpTargetIdSchema,
+        label: external_exports.string(),
+        ok: external_exports.boolean(),
+        error: external_exports.string().nullable()
+      })
+    )
+  })
+});
+var agentMcpUnregister = defineRpc({
+  name: "luck-planner.agent-mcp-unregister",
+  input: external_exports.object({
+    target: external_exports.union([agentMcpTargetIdSchema, external_exports.literal("all")])
+  }),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    error: external_exports.string().nullable(),
+    results: external_exports.array(
+      external_exports.object({
+        id: agentMcpTargetIdSchema,
+        label: external_exports.string(),
+        ok: external_exports.boolean(),
+        error: external_exports.string().nullable()
+      })
+    )
+  })
+});
 var RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -310,7 +370,10 @@ var RPC_CONTRACT_NAMES = [
   growthGet.name,
   stats.name,
   dashboardStatus.name,
-  treeChanges.name
+  treeChanges.name,
+  agentMcpStatus.name,
+  agentMcpRegister.name,
+  agentMcpUnregister.name
 ];
 
 // shared/api.ts
