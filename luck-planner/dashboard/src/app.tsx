@@ -19,6 +19,10 @@
  *   adapter, which fills each node's `heat` with its rolled-up growth ratio;
  *   switching it is a pure re-render (same positions), and an empty heat
  *   layer says so in words instead of looking like "nothing done".
+ * - **I1 3D spike**: the toolbar's 2D/3D switch is real. WebGL is probed once
+ *   (`dashboard/src/webgl.ts`), the 3D scene arrives through the lazy
+ *   `dashboard-3d.js` chunk only after the probe passed, and a tab without
+ *   WebGL keeps the 2D diagram with an explanation in the status line.
  *
  * State rules kept deliberately small so later stages can extend them
  * without a rewrite: one `load()` effect keyed on the resolved client, one
@@ -48,10 +52,16 @@ import {
 } from "./graph";
 import { parseDashboardParams } from "./params";
 import { createChangeStream } from "./live";
+import {
+  detectWebGL,
+  planViewSwitch,
+  type DashboardView,
+} from "./webgl";
 import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./theme";
 import { Canvas } from "./components/Canvas";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { Legend } from "./components/Legend";
+import { ThreeView, type ThreeViewState } from "./components/ThreeView";
 import { Toolbar, type ToolbarFilters } from "./components/Toolbar";
 
 /** Applies a theme's tokens to `:root` as the CSS custom properties. */
@@ -136,6 +146,12 @@ export function App(): ReactElement {
 
   // G5 growth layer: `status` is the G3/G4 view, `growth` tints the tree.
   const [layer, setLayer] = useState<GraphLayer>("status");
+
+  // I1 3D spike: which diagram is on screen, and whether this tab can draw
+  // WebGL at all. The probe runs once per tab (it allocates and releases a
+  // context); every 3D request goes through `planViewSwitch`.
+  const [view, setView] = useState<DashboardView>("2d");
+  const webgl = useMemo(() => detectWebGL(), []);
 
   // H1 live updates: the SSE connection state and a counter that forces the
   // details panel to refetch when a change touches the node it shows.
@@ -272,6 +288,33 @@ export function App(): ReactElement {
   );
 
   /**
+   * Resolves a toolbar view request (I1). The plan decides both halves of the
+   * acceptance: with WebGL the tab switches to the lazy scene, without it the
+   * tab *stays* on 2D and the status line carries the explanation.
+   */
+  const onViewChange = useCallback(
+    (target: DashboardView): void => {
+      const plan = planViewSwitch(webgl, target);
+      setView(plan.view);
+      if (plan.status !== null) setStatusLine(plan.status);
+    },
+    [webgl],
+  );
+
+  /**
+   * Scene lifecycle (I1): progress and errors share the status line, and a
+   * failed scene drops straight back to 2D — a blank viewport would be a
+   * worse answer than the diagram that works.
+   */
+  const onSceneState = useCallback(
+    (state: ThreeViewState, status: string): void => {
+      setStatusLine(status);
+      if (state === "failed") setView("2d");
+    },
+    [],
+  );
+
+  /**
    * Makes sure a node is actually on screen: expands its collapsed
    * ancestors and clears whichever filter excludes it (search should never
    * "find" something the user cannot see — the G4 acceptance scenario).
@@ -346,22 +389,29 @@ export function App(): ReactElement {
         onSearch={(query) => void onSearch(query)}
         layer={layer}
         onLayerChange={onLayerChange}
+        view={view}
+        onViewChange={onViewChange}
+        webglOk={webgl.ok}
       />
       <div className="lp-body">
-        <Canvas
-          graph={graph}
-          loaded={tree !== null}
-          onToggleNode={onToggleNode}
-          selectedId={selectedId}
-          onSelectNode={setSelectedId}
-          focus={focus}
-          emptyTitle={filtersActive ? "No nodes match the filters" : undefined}
-          emptyText={
-            filtersActive
-              ? "Loosen or clear the kind/status/version filters to see the tree again."
-              : undefined
-          }
-        />
+        {view === "3d" ? (
+          <ThreeView webgl={webgl} onSceneState={onSceneState} />
+        ) : (
+          <Canvas
+            graph={graph}
+            loaded={tree !== null}
+            onToggleNode={onToggleNode}
+            selectedId={selectedId}
+            onSelectNode={setSelectedId}
+            focus={focus}
+            emptyTitle={filtersActive ? "No nodes match the filters" : undefined}
+            emptyText={
+              filtersActive
+                ? "Loosen or clear the kind/status/version filters to see the tree again."
+                : undefined
+            }
+          />
+        )}
         <DetailsPanel
           detail={detail}
           loading={detailLoading}

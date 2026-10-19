@@ -1,490 +1,13 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-};
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-
-// node_modules/react/cjs/react.production.js
-var require_react_production = __commonJS({
-  "node_modules/react/cjs/react.production.js"(exports) {
-    "use strict";
-    var REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element");
-    var REACT_PORTAL_TYPE = Symbol.for("react.portal");
-    var REACT_FRAGMENT_TYPE = Symbol.for("react.fragment");
-    var REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode");
-    var REACT_PROFILER_TYPE = Symbol.for("react.profiler");
-    var REACT_CONSUMER_TYPE = Symbol.for("react.consumer");
-    var REACT_CONTEXT_TYPE = Symbol.for("react.context");
-    var REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref");
-    var REACT_SUSPENSE_TYPE = Symbol.for("react.suspense");
-    var REACT_MEMO_TYPE = Symbol.for("react.memo");
-    var REACT_LAZY_TYPE = Symbol.for("react.lazy");
-    var MAYBE_ITERATOR_SYMBOL = Symbol.iterator;
-    function getIteratorFn(maybeIterable) {
-      if (null === maybeIterable || "object" !== typeof maybeIterable) return null;
-      maybeIterable = MAYBE_ITERATOR_SYMBOL && maybeIterable[MAYBE_ITERATOR_SYMBOL] || maybeIterable["@@iterator"];
-      return "function" === typeof maybeIterable ? maybeIterable : null;
-    }
-    var ReactNoopUpdateQueue = {
-      isMounted: function() {
-        return false;
-      },
-      enqueueForceUpdate: function() {
-      },
-      enqueueReplaceState: function() {
-      },
-      enqueueSetState: function() {
-      }
-    };
-    var assign = Object.assign;
-    var emptyObject = {};
-    function Component(props, context, updater) {
-      this.props = props;
-      this.context = context;
-      this.refs = emptyObject;
-      this.updater = updater || ReactNoopUpdateQueue;
-    }
-    Component.prototype.isReactComponent = {};
-    Component.prototype.setState = function(partialState, callback) {
-      if ("object" !== typeof partialState && "function" !== typeof partialState && null != partialState)
-        throw Error(
-          "takes an object of state variables to update or a function which returns an object of state variables."
-        );
-      this.updater.enqueueSetState(this, partialState, callback, "setState");
-    };
-    Component.prototype.forceUpdate = function(callback) {
-      this.updater.enqueueForceUpdate(this, callback, "forceUpdate");
-    };
-    function ComponentDummy() {
-    }
-    ComponentDummy.prototype = Component.prototype;
-    function PureComponent(props, context, updater) {
-      this.props = props;
-      this.context = context;
-      this.refs = emptyObject;
-      this.updater = updater || ReactNoopUpdateQueue;
-    }
-    var pureComponentPrototype = PureComponent.prototype = new ComponentDummy();
-    pureComponentPrototype.constructor = PureComponent;
-    assign(pureComponentPrototype, Component.prototype);
-    pureComponentPrototype.isPureReactComponent = true;
-    var isArrayImpl = Array.isArray;
-    var ReactSharedInternals = { H: null, A: null, T: null, S: null, V: null };
-    var hasOwnProperty = Object.prototype.hasOwnProperty;
-    function ReactElement(type, key, self, source, owner, props) {
-      self = props.ref;
-      return {
-        $$typeof: REACT_ELEMENT_TYPE,
-        type,
-        key,
-        ref: void 0 !== self ? self : null,
-        props
-      };
-    }
-    function cloneAndReplaceKey(oldElement, newKey) {
-      return ReactElement(
-        oldElement.type,
-        newKey,
-        void 0,
-        void 0,
-        void 0,
-        oldElement.props
-      );
-    }
-    function isValidElement(object2) {
-      return "object" === typeof object2 && null !== object2 && object2.$$typeof === REACT_ELEMENT_TYPE;
-    }
-    function escape(key) {
-      var escaperLookup = { "=": "=0", ":": "=2" };
-      return "$" + key.replace(/[=:]/g, function(match) {
-        return escaperLookup[match];
-      });
-    }
-    var userProvidedKeyEscapeRegex = /\/+/g;
-    function getElementKey(element, index2) {
-      return "object" === typeof element && null !== element && null != element.key ? escape("" + element.key) : index2.toString(36);
-    }
-    function noop$1() {
-    }
-    function resolveThenable(thenable) {
-      switch (thenable.status) {
-        case "fulfilled":
-          return thenable.value;
-        case "rejected":
-          throw thenable.reason;
-        default:
-          switch ("string" === typeof thenable.status ? thenable.then(noop$1, noop$1) : (thenable.status = "pending", thenable.then(
-            function(fulfilledValue) {
-              "pending" === thenable.status && (thenable.status = "fulfilled", thenable.value = fulfilledValue);
-            },
-            function(error62) {
-              "pending" === thenable.status && (thenable.status = "rejected", thenable.reason = error62);
-            }
-          )), thenable.status) {
-            case "fulfilled":
-              return thenable.value;
-            case "rejected":
-              throw thenable.reason;
-          }
-      }
-      throw thenable;
-    }
-    function mapIntoArray(children2, array3, escapedPrefix, nameSoFar, callback) {
-      var type = typeof children2;
-      if ("undefined" === type || "boolean" === type) children2 = null;
-      var invokeCallback = false;
-      if (null === children2) invokeCallback = true;
-      else
-        switch (type) {
-          case "bigint":
-          case "string":
-          case "number":
-            invokeCallback = true;
-            break;
-          case "object":
-            switch (children2.$$typeof) {
-              case REACT_ELEMENT_TYPE:
-              case REACT_PORTAL_TYPE:
-                invokeCallback = true;
-                break;
-              case REACT_LAZY_TYPE:
-                return invokeCallback = children2._init, mapIntoArray(
-                  invokeCallback(children2._payload),
-                  array3,
-                  escapedPrefix,
-                  nameSoFar,
-                  callback
-                );
-            }
-        }
-      if (invokeCallback)
-        return callback = callback(children2), invokeCallback = "" === nameSoFar ? "." + getElementKey(children2, 0) : nameSoFar, isArrayImpl(callback) ? (escapedPrefix = "", null != invokeCallback && (escapedPrefix = invokeCallback.replace(userProvidedKeyEscapeRegex, "$&/") + "/"), mapIntoArray(callback, array3, escapedPrefix, "", function(c) {
-          return c;
-        })) : null != callback && (isValidElement(callback) && (callback = cloneAndReplaceKey(
-          callback,
-          escapedPrefix + (null == callback.key || children2 && children2.key === callback.key ? "" : ("" + callback.key).replace(
-            userProvidedKeyEscapeRegex,
-            "$&/"
-          ) + "/") + invokeCallback
-        )), array3.push(callback)), 1;
-      invokeCallback = 0;
-      var nextNamePrefix = "" === nameSoFar ? "." : nameSoFar + ":";
-      if (isArrayImpl(children2))
-        for (var i = 0; i < children2.length; i++)
-          nameSoFar = children2[i], type = nextNamePrefix + getElementKey(nameSoFar, i), invokeCallback += mapIntoArray(
-            nameSoFar,
-            array3,
-            escapedPrefix,
-            type,
-            callback
-          );
-      else if (i = getIteratorFn(children2), "function" === typeof i)
-        for (children2 = i.call(children2), i = 0; !(nameSoFar = children2.next()).done; )
-          nameSoFar = nameSoFar.value, type = nextNamePrefix + getElementKey(nameSoFar, i++), invokeCallback += mapIntoArray(
-            nameSoFar,
-            array3,
-            escapedPrefix,
-            type,
-            callback
-          );
-      else if ("object" === type) {
-        if ("function" === typeof children2.then)
-          return mapIntoArray(
-            resolveThenable(children2),
-            array3,
-            escapedPrefix,
-            nameSoFar,
-            callback
-          );
-        array3 = String(children2);
-        throw Error(
-          "Objects are not valid as a React child (found: " + ("[object Object]" === array3 ? "object with keys {" + Object.keys(children2).join(", ") + "}" : array3) + "). If you meant to render a collection of children, use an array instead."
-        );
-      }
-      return invokeCallback;
-    }
-    function mapChildren2(children2, func, context) {
-      if (null == children2) return children2;
-      var result = [], count2 = 0;
-      mapIntoArray(children2, result, "", "", function(child) {
-        return func.call(context, child, count2++);
-      });
-      return result;
-    }
-    function lazyInitializer(payload) {
-      if (-1 === payload._status) {
-        var ctor = payload._result;
-        ctor = ctor();
-        ctor.then(
-          function(moduleObject) {
-            if (0 === payload._status || -1 === payload._status)
-              payload._status = 1, payload._result = moduleObject;
-          },
-          function(error62) {
-            if (0 === payload._status || -1 === payload._status)
-              payload._status = 2, payload._result = error62;
-          }
-        );
-        -1 === payload._status && (payload._status = 0, payload._result = ctor);
-      }
-      if (1 === payload._status) return payload._result.default;
-      throw payload._result;
-    }
-    var reportGlobalError = "function" === typeof reportError ? reportError : function(error62) {
-      if ("object" === typeof window && "function" === typeof window.ErrorEvent) {
-        var event = new window.ErrorEvent("error", {
-          bubbles: true,
-          cancelable: true,
-          message: "object" === typeof error62 && null !== error62 && "string" === typeof error62.message ? String(error62.message) : String(error62),
-          error: error62
-        });
-        if (!window.dispatchEvent(event)) return;
-      } else if ("object" === typeof process && "function" === typeof process.emit) {
-        process.emit("uncaughtException", error62);
-        return;
-      }
-      console.error(error62);
-    };
-    function noop2() {
-    }
-    exports.Children = {
-      map: mapChildren2,
-      forEach: function(children2, forEachFunc, forEachContext) {
-        mapChildren2(
-          children2,
-          function() {
-            forEachFunc.apply(this, arguments);
-          },
-          forEachContext
-        );
-      },
-      count: function(children2) {
-        var n = 0;
-        mapChildren2(children2, function() {
-          n++;
-        });
-        return n;
-      },
-      toArray: function(children2) {
-        return mapChildren2(children2, function(child) {
-          return child;
-        }) || [];
-      },
-      only: function(children2) {
-        if (!isValidElement(children2))
-          throw Error(
-            "React.Children.only expected to receive a single React element child."
-          );
-        return children2;
-      }
-    };
-    exports.Component = Component;
-    exports.Fragment = REACT_FRAGMENT_TYPE;
-    exports.Profiler = REACT_PROFILER_TYPE;
-    exports.PureComponent = PureComponent;
-    exports.StrictMode = REACT_STRICT_MODE_TYPE;
-    exports.Suspense = REACT_SUSPENSE_TYPE;
-    exports.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = ReactSharedInternals;
-    exports.__COMPILER_RUNTIME = {
-      __proto__: null,
-      c: function(size) {
-        return ReactSharedInternals.H.useMemoCache(size);
-      }
-    };
-    exports.cache = function(fn) {
-      return function() {
-        return fn.apply(null, arguments);
-      };
-    };
-    exports.cloneElement = function(element, config2, children2) {
-      if (null === element || void 0 === element)
-        throw Error(
-          "The argument must be a React element, but you passed " + element + "."
-        );
-      var props = assign({}, element.props), key = element.key, owner = void 0;
-      if (null != config2)
-        for (propName in void 0 !== config2.ref && (owner = void 0), void 0 !== config2.key && (key = "" + config2.key), config2)
-          !hasOwnProperty.call(config2, propName) || "key" === propName || "__self" === propName || "__source" === propName || "ref" === propName && void 0 === config2.ref || (props[propName] = config2[propName]);
-      var propName = arguments.length - 2;
-      if (1 === propName) props.children = children2;
-      else if (1 < propName) {
-        for (var childArray = Array(propName), i = 0; i < propName; i++)
-          childArray[i] = arguments[i + 2];
-        props.children = childArray;
-      }
-      return ReactElement(element.type, key, void 0, void 0, owner, props);
-    };
-    exports.createContext = function(defaultValue) {
-      defaultValue = {
-        $$typeof: REACT_CONTEXT_TYPE,
-        _currentValue: defaultValue,
-        _currentValue2: defaultValue,
-        _threadCount: 0,
-        Provider: null,
-        Consumer: null
-      };
-      defaultValue.Provider = defaultValue;
-      defaultValue.Consumer = {
-        $$typeof: REACT_CONSUMER_TYPE,
-        _context: defaultValue
-      };
-      return defaultValue;
-    };
-    exports.createElement = function(type, config2, children2) {
-      var propName, props = {}, key = null;
-      if (null != config2)
-        for (propName in void 0 !== config2.key && (key = "" + config2.key), config2)
-          hasOwnProperty.call(config2, propName) && "key" !== propName && "__self" !== propName && "__source" !== propName && (props[propName] = config2[propName]);
-      var childrenLength = arguments.length - 2;
-      if (1 === childrenLength) props.children = children2;
-      else if (1 < childrenLength) {
-        for (var childArray = Array(childrenLength), i = 0; i < childrenLength; i++)
-          childArray[i] = arguments[i + 2];
-        props.children = childArray;
-      }
-      if (type && type.defaultProps)
-        for (propName in childrenLength = type.defaultProps, childrenLength)
-          void 0 === props[propName] && (props[propName] = childrenLength[propName]);
-      return ReactElement(type, key, void 0, void 0, null, props);
-    };
-    exports.createRef = function() {
-      return { current: null };
-    };
-    exports.forwardRef = function(render) {
-      return { $$typeof: REACT_FORWARD_REF_TYPE, render };
-    };
-    exports.isValidElement = isValidElement;
-    exports.lazy = function(ctor) {
-      return {
-        $$typeof: REACT_LAZY_TYPE,
-        _payload: { _status: -1, _result: ctor },
-        _init: lazyInitializer
-      };
-    };
-    exports.memo = function(type, compare) {
-      return {
-        $$typeof: REACT_MEMO_TYPE,
-        type,
-        compare: void 0 === compare ? null : compare
-      };
-    };
-    exports.startTransition = function(scope) {
-      var prevTransition = ReactSharedInternals.T, currentTransition = {};
-      ReactSharedInternals.T = currentTransition;
-      try {
-        var returnValue = scope(), onStartTransitionFinish = ReactSharedInternals.S;
-        null !== onStartTransitionFinish && onStartTransitionFinish(currentTransition, returnValue);
-        "object" === typeof returnValue && null !== returnValue && "function" === typeof returnValue.then && returnValue.then(noop2, reportGlobalError);
-      } catch (error62) {
-        reportGlobalError(error62);
-      } finally {
-        ReactSharedInternals.T = prevTransition;
-      }
-    };
-    exports.unstable_useCacheRefresh = function() {
-      return ReactSharedInternals.H.useCacheRefresh();
-    };
-    exports.use = function(usable) {
-      return ReactSharedInternals.H.use(usable);
-    };
-    exports.useActionState = function(action, initialState, permalink) {
-      return ReactSharedInternals.H.useActionState(action, initialState, permalink);
-    };
-    exports.useCallback = function(callback, deps) {
-      return ReactSharedInternals.H.useCallback(callback, deps);
-    };
-    exports.useContext = function(Context) {
-      return ReactSharedInternals.H.useContext(Context);
-    };
-    exports.useDebugValue = function() {
-    };
-    exports.useDeferredValue = function(value, initialValue) {
-      return ReactSharedInternals.H.useDeferredValue(value, initialValue);
-    };
-    exports.useEffect = function(create2, createDeps, update) {
-      var dispatcher = ReactSharedInternals.H;
-      if ("function" === typeof update)
-        throw Error(
-          "useEffect CRUD overload is not enabled in this build of React."
-        );
-      return dispatcher.useEffect(create2, createDeps);
-    };
-    exports.useId = function() {
-      return ReactSharedInternals.H.useId();
-    };
-    exports.useImperativeHandle = function(ref, create2, deps) {
-      return ReactSharedInternals.H.useImperativeHandle(ref, create2, deps);
-    };
-    exports.useInsertionEffect = function(create2, deps) {
-      return ReactSharedInternals.H.useInsertionEffect(create2, deps);
-    };
-    exports.useLayoutEffect = function(create2, deps) {
-      return ReactSharedInternals.H.useLayoutEffect(create2, deps);
-    };
-    exports.useMemo = function(create2, deps) {
-      return ReactSharedInternals.H.useMemo(create2, deps);
-    };
-    exports.useOptimistic = function(passthrough, reducer) {
-      return ReactSharedInternals.H.useOptimistic(passthrough, reducer);
-    };
-    exports.useReducer = function(reducer, initialArg, init2) {
-      return ReactSharedInternals.H.useReducer(reducer, initialArg, init2);
-    };
-    exports.useRef = function(initialValue) {
-      return ReactSharedInternals.H.useRef(initialValue);
-    };
-    exports.useState = function(initialState) {
-      return ReactSharedInternals.H.useState(initialState);
-    };
-    exports.useSyncExternalStore = function(subscribe, getSnapshot, getServerSnapshot) {
-      return ReactSharedInternals.H.useSyncExternalStore(
-        subscribe,
-        getSnapshot,
-        getServerSnapshot
-      );
-    };
-    exports.useTransition = function() {
-      return ReactSharedInternals.H.useTransition();
-    };
-    exports.version = "19.1.0";
-  }
-});
-
-// node_modules/react/index.js
-var require_react = __commonJS({
-  "node_modules/react/index.js"(exports, module) {
-    "use strict";
-    if (true) {
-      module.exports = require_react_production();
-    } else {
-      module.exports = null;
-    }
-  }
-});
+import {
+  require_jsx_runtime,
+  require_react,
+  require_with_selector
+} from "./chunk-chunk-VWXEI4HE.js";
+import {
+  __commonJS,
+  __export,
+  __toESM
+} from "./chunk-chunk-IYTTBCGI.js";
 
 // node_modules/scheduler/cjs/scheduler.production.js
 var require_scheduler_production = __commonJS({
@@ -12256,200 +11779,12 @@ var require_client = __commonJS({
   }
 });
 
-// node_modules/react/cjs/react-jsx-runtime.production.js
-var require_react_jsx_runtime_production = __commonJS({
-  "node_modules/react/cjs/react-jsx-runtime.production.js"(exports) {
-    "use strict";
-    var REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element");
-    var REACT_FRAGMENT_TYPE = Symbol.for("react.fragment");
-    function jsxProd(type, config2, maybeKey) {
-      var key = null;
-      void 0 !== maybeKey && (key = "" + maybeKey);
-      void 0 !== config2.key && (key = "" + config2.key);
-      if ("key" in config2) {
-        maybeKey = {};
-        for (var propName in config2)
-          "key" !== propName && (maybeKey[propName] = config2[propName]);
-      } else maybeKey = config2;
-      config2 = maybeKey.ref;
-      return {
-        $$typeof: REACT_ELEMENT_TYPE,
-        type,
-        key,
-        ref: void 0 !== config2 ? config2 : null,
-        props: maybeKey
-      };
-    }
-    exports.Fragment = REACT_FRAGMENT_TYPE;
-    exports.jsx = jsxProd;
-    exports.jsxs = jsxProd;
-  }
-});
-
-// node_modules/react/jsx-runtime.js
-var require_jsx_runtime = __commonJS({
-  "node_modules/react/jsx-runtime.js"(exports, module) {
-    "use strict";
-    if (true) {
-      module.exports = require_react_jsx_runtime_production();
-    } else {
-      module.exports = null;
-    }
-  }
-});
-
-// node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js
-var require_use_sync_external_store_shim_production = __commonJS({
-  "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js"(exports) {
-    "use strict";
-    var React = require_react();
-    function is(x, y) {
-      return x === y && (0 !== x || 1 / x === 1 / y) || x !== x && y !== y;
-    }
-    var objectIs = "function" === typeof Object.is ? Object.is : is;
-    var useState4 = React.useState;
-    var useEffect4 = React.useEffect;
-    var useLayoutEffect2 = React.useLayoutEffect;
-    var useDebugValue2 = React.useDebugValue;
-    function useSyncExternalStore$2(subscribe, getSnapshot) {
-      var value = getSnapshot(), _useState = useState4({ inst: { value, getSnapshot } }), inst = _useState[0].inst, forceUpdate = _useState[1];
-      useLayoutEffect2(
-        function() {
-          inst.value = value;
-          inst.getSnapshot = getSnapshot;
-          checkIfSnapshotChanged(inst) && forceUpdate({ inst });
-        },
-        [subscribe, value, getSnapshot]
-      );
-      useEffect4(
-        function() {
-          checkIfSnapshotChanged(inst) && forceUpdate({ inst });
-          return subscribe(function() {
-            checkIfSnapshotChanged(inst) && forceUpdate({ inst });
-          });
-        },
-        [subscribe]
-      );
-      useDebugValue2(value);
-      return value;
-    }
-    function checkIfSnapshotChanged(inst) {
-      var latestGetSnapshot = inst.getSnapshot;
-      inst = inst.value;
-      try {
-        var nextValue = latestGetSnapshot();
-        return !objectIs(inst, nextValue);
-      } catch (error62) {
-        return true;
-      }
-    }
-    function useSyncExternalStore$1(subscribe, getSnapshot) {
-      return getSnapshot();
-    }
-    var shim = "undefined" === typeof window || "undefined" === typeof window.document || "undefined" === typeof window.document.createElement ? useSyncExternalStore$1 : useSyncExternalStore$2;
-    exports.useSyncExternalStore = void 0 !== React.useSyncExternalStore ? React.useSyncExternalStore : shim;
-  }
-});
-
-// node_modules/use-sync-external-store/shim/index.js
-var require_shim = __commonJS({
-  "node_modules/use-sync-external-store/shim/index.js"(exports, module) {
-    "use strict";
-    if (true) {
-      module.exports = require_use_sync_external_store_shim_production();
-    } else {
-      module.exports = null;
-    }
-  }
-});
-
-// node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js
-var require_with_selector_production = __commonJS({
-  "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js"(exports) {
-    "use strict";
-    var React = require_react();
-    var shim = require_shim();
-    function is(x, y) {
-      return x === y && (0 !== x || 1 / x === 1 / y) || x !== x && y !== y;
-    }
-    var objectIs = "function" === typeof Object.is ? Object.is : is;
-    var useSyncExternalStore = shim.useSyncExternalStore;
-    var useRef3 = React.useRef;
-    var useEffect4 = React.useEffect;
-    var useMemo3 = React.useMemo;
-    var useDebugValue2 = React.useDebugValue;
-    exports.useSyncExternalStoreWithSelector = function(subscribe, getSnapshot, getServerSnapshot, selector, isEqual) {
-      var instRef = useRef3(null);
-      if (null === instRef.current) {
-        var inst = { hasValue: false, value: null };
-        instRef.current = inst;
-      } else inst = instRef.current;
-      instRef = useMemo3(
-        function() {
-          function memoizedSelector(nextSnapshot) {
-            if (!hasMemo) {
-              hasMemo = true;
-              memoizedSnapshot = nextSnapshot;
-              nextSnapshot = selector(nextSnapshot);
-              if (void 0 !== isEqual && inst.hasValue) {
-                var currentSelection = inst.value;
-                if (isEqual(currentSelection, nextSnapshot))
-                  return memoizedSelection = currentSelection;
-              }
-              return memoizedSelection = nextSnapshot;
-            }
-            currentSelection = memoizedSelection;
-            if (objectIs(memoizedSnapshot, nextSnapshot)) return currentSelection;
-            var nextSelection = selector(nextSnapshot);
-            if (void 0 !== isEqual && isEqual(currentSelection, nextSelection))
-              return memoizedSnapshot = nextSnapshot, currentSelection;
-            memoizedSnapshot = nextSnapshot;
-            return memoizedSelection = nextSelection;
-          }
-          var hasMemo = false, memoizedSnapshot, memoizedSelection, maybeGetServerSnapshot = void 0 === getServerSnapshot ? null : getServerSnapshot;
-          return [
-            function() {
-              return memoizedSelector(getSnapshot());
-            },
-            null === maybeGetServerSnapshot ? void 0 : function() {
-              return memoizedSelector(maybeGetServerSnapshot());
-            }
-          ];
-        },
-        [getSnapshot, getServerSnapshot, selector, isEqual]
-      );
-      var value = useSyncExternalStore(subscribe, instRef[0], instRef[1]);
-      useEffect4(
-        function() {
-          inst.hasValue = true;
-          inst.value = value;
-        },
-        [value]
-      );
-      useDebugValue2(value);
-      return value;
-    };
-  }
-});
-
-// node_modules/use-sync-external-store/shim/with-selector.js
-var require_with_selector = __commonJS({
-  "node_modules/use-sync-external-store/shim/with-selector.js"(exports, module) {
-    "use strict";
-    if (true) {
-      module.exports = require_with_selector_production();
-    } else {
-      module.exports = null;
-    }
-  }
-});
-
 // dashboard/src/main.tsx
-var import_react9 = __toESM(require_react());
+var import_react10 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // dashboard/src/app.tsx
-var import_react8 = __toESM(require_react());
+var import_react9 = __toESM(require_react());
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -33810,6 +33145,59 @@ function createChangeStream(options) {
   };
 }
 
+// dashboard/src/webgl.ts
+var CONTEXT_TYPES = ["webgl2", "webgl", "experimental-webgl"];
+var WEBGL_UNAVAILABLE_HINT = "The 3D view needs WebGL, which this browser or launch flag has disabled \u2014 showing the 2D diagram.";
+var THREE_LOADING_STATUS = "Loading the 3D view\u2026";
+function threeFailedStatus(detail) {
+  return `The 3D view could not start: ${detail}`;
+}
+var THREE_BUTTON_HINT = "3D view: an empty WebGL scene with orbit controls (the tree itself arrives in stage I2).";
+function browserCanvas() {
+  const scope = globalThis;
+  const document2 = scope.document;
+  if (!document2) return null;
+  try {
+    return document2.createElement("canvas");
+  } catch {
+    return null;
+  }
+}
+function releaseProbe(context) {
+  const probe = context;
+  try {
+    probe.getExtension?.("WEBGL_lose_context")?.loseContext?.();
+  } catch {
+  }
+}
+function detectWebGL(createCanvas = browserCanvas) {
+  try {
+    const canvas = createCanvas();
+    if (canvas === null) {
+      return { ok: false, reason: "no canvas is available" };
+    }
+    for (const type of CONTEXT_TYPES) {
+      const context = canvas.getContext(type);
+      if (context !== null && context !== void 0) {
+        releaseProbe(context);
+        return { ok: true, reason: null };
+      }
+    }
+    return { ok: false, reason: "the browser offered no WebGL context" };
+  } catch (cause) {
+    return {
+      ok: false,
+      reason: cause instanceof Error ? cause.message : String(cause)
+    };
+  }
+}
+function planViewSwitch(webgl, target) {
+  if (target === "3d") {
+    return webgl.ok ? { view: "3d", status: null } : { view: "2d", status: WEBGL_UNAVAILABLE_HINT };
+  }
+  return { view: "2d", status: null };
+}
+
 // dashboard/src/theme.ts
 var DARK_THEME = {
   bg: "#0f1115",
@@ -43568,9 +42956,54 @@ function Legend() {
   ] });
 }
 
-// dashboard/src/components/Toolbar.tsx
+// dashboard/src/components/ThreeView.tsx
 var import_react7 = __toESM(require_react());
 var import_jsx_runtime7 = __toESM(require_jsx_runtime());
+function ThreeView(props) {
+  const containerRef = (0, import_react7.useRef)(null);
+  const stateRef = (0, import_react7.useRef)(props.onSceneState);
+  stateRef.current = props.onSceneState;
+  (0, import_react7.useEffect)(() => {
+    const container2 = containerRef.current;
+    if (container2 === null) return;
+    if (!props.webgl.ok) {
+      stateRef.current("failed", WEBGL_UNAVAILABLE_HINT);
+      return;
+    }
+    let cancelled = false;
+    let handle = null;
+    stateRef.current("loading", THREE_LOADING_STATUS);
+    import("./dashboard-3d.js").then((module) => {
+      if (cancelled) return;
+      handle = module.mountScene3D(container2);
+      stateRef.current("ready", "");
+    }).catch((cause) => {
+      if (cancelled) return;
+      stateRef.current(
+        "failed",
+        threeFailedStatus(cause instanceof Error ? cause.message : String(cause))
+      );
+    });
+    return () => {
+      cancelled = true;
+      handle?.dispose();
+      handle = null;
+    };
+  }, [props.webgl.ok]);
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    "div",
+    {
+      className: "lp-scene3d",
+      ref: containerRef,
+      role: "img",
+      "aria-label": "3D scene"
+    }
+  );
+}
+
+// dashboard/src/components/Toolbar.tsx
+var import_react8 = __toESM(require_react());
+var import_jsx_runtime8 = __toESM(require_jsx_runtime());
 var LIVE_LABELS = {
   connecting: "connecting",
   live: "live",
@@ -43582,34 +43015,34 @@ var LIVE_HINTS = {
   offline: "The change stream is down and reconnecting; the data on screen may be stale. Reload the tab if the plugin was restarted."
 };
 function Counter(props) {
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-counter", title: props.label, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-counter-value", children: props.value }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-counter-label", children: props.label })
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-counter", title: props.label, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-counter-value", children: props.value }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-counter-label", children: props.label })
   ] });
 }
 function Toolbar(props) {
   const stats2 = props.stats;
-  const [draft, setDraft] = (0, import_react7.useState)("");
+  const [draft, setDraft] = (0, import_react8.useState)("");
   const submit = (event) => {
     event.preventDefault();
     const query = draft.trim();
     if (query.length > 0) props.onSearch(query);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("header", { className: "lp-toolbar", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-identity", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("header", { className: "lp-toolbar", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-toolbar-identity", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "bees", value: stats2.bees }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "bees", value: stats2.bees }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
     ] }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-controls", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-toolbar-controls", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         "input",
         {
           className: "lp-toolbar-search",
@@ -43620,7 +43053,7 @@ function Toolbar(props) {
           onChange: (event) => setDraft(event.target.value)
         }
       ) }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -43631,12 +43064,12 @@ function Toolbar(props) {
             kind: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "", children: "All kinds" }),
-            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "", children: "All kinds" }),
+            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -43647,12 +43080,12 @@ function Toolbar(props) {
             status: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "", children: "All statuses" }),
-            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "", children: "All statuses" }),
+            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         "input",
         {
           className: "lp-toolbar-filter",
@@ -43668,7 +43101,7 @@ function Toolbar(props) {
           })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         "button",
         {
           type: "button",
@@ -43679,48 +43112,49 @@ function Toolbar(props) {
         },
         candidate
       )) }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
           "button",
           {
             type: "button",
-            className: "lp-view-button lp-view-button-active",
-            "aria-pressed": "true",
+            className: props.view === "2d" ? "lp-view-button lp-view-button-active" : "lp-view-button",
+            "aria-pressed": props.view === "2d",
+            onClick: () => props.onViewChange("2d"),
             children: "2D"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
           "button",
           {
             type: "button",
-            className: "lp-view-button",
-            "aria-pressed": "false",
-            disabled: true,
-            title: "The 3D view arrives in stage I4",
+            className: props.view === "3d" ? "lp-view-button lp-view-button-active" : "lp-view-button",
+            "aria-pressed": props.view === "3d",
+            title: props.webglOk ? THREE_BUTTON_HINT : WEBGL_UNAVAILABLE_HINT,
+            onClick: () => props.onViewChange("3d"),
             children: "3D"
           }
         )
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
         "span",
         {
           className: `lp-live lp-live-${props.live}`,
           title: LIVE_HINTS[props.live],
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
             LIVE_LABELS[props.live]
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
     ] })
   ] });
 }
 
 // dashboard/src/app.tsx
-var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+var import_jsx_runtime9 = __toESM(require_jsx_runtime());
 function applyTheme(theme) {
   const tokens = tokensFor(theme);
   const root2 = document.documentElement;
@@ -43751,38 +43185,40 @@ function filterExcludesNode(filters, node2) {
 }
 var GROWTH_EMPTY_HINT = "No growth records in this project yet \u2014 the heat layer stays neutral (agents write them with luck_tree_update_growth).";
 function App() {
-  const params = (0, import_react8.useMemo)(() => parseDashboardParams(window.location.search), []);
-  const client = (0, import_react8.useMemo)(
+  const params = (0, import_react9.useMemo)(() => parseDashboardParams(window.location.search), []);
+  const client = (0, import_react9.useMemo)(
     () => params.token.length > 0 ? new DashboardApi(resolveApiOrigin(window.location.href), params.token, params.projectKey) : null,
     [params.projectKey, params.token]
   );
-  const [stats2, setStats] = (0, import_react8.useState)(null);
-  const [tree, setTree] = (0, import_react8.useState)(null);
-  const [collapsedIds, setCollapsedIds] = (0, import_react8.useState)(
+  const [stats2, setStats] = (0, import_react9.useState)(null);
+  const [tree, setTree] = (0, import_react9.useState)(null);
+  const [collapsedIds, setCollapsedIds] = (0, import_react9.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [statusLine, setStatusLine] = (0, import_react8.useState)("");
-  const [theme] = (0, import_react8.useState)(initialTheme);
-  const [selectedId, setSelectedId] = (0, import_react8.useState)(null);
-  const [detail, setDetail] = (0, import_react8.useState)(null);
-  const [detailLoading, setDetailLoading] = (0, import_react8.useState)(false);
-  const [detailError, setDetailError] = (0, import_react8.useState)("");
-  const [filters, setFilters] = (0, import_react8.useState)({
+  const [statusLine, setStatusLine] = (0, import_react9.useState)("");
+  const [theme] = (0, import_react9.useState)(initialTheme);
+  const [selectedId, setSelectedId] = (0, import_react9.useState)(null);
+  const [detail, setDetail] = (0, import_react9.useState)(null);
+  const [detailLoading, setDetailLoading] = (0, import_react9.useState)(false);
+  const [detailError, setDetailError] = (0, import_react9.useState)("");
+  const [filters, setFilters] = (0, import_react9.useState)({
     kind: "",
     status: "",
     version: ""
   });
-  const [focus, setFocus] = (0, import_react8.useState)(null);
-  const focusSeq = (0, import_react8.useRef)(0);
-  const [layer, setLayer] = (0, import_react8.useState)("status");
-  const [live, setLive] = (0, import_react8.useState)("connecting");
-  const [detailRefresh, setDetailRefresh] = (0, import_react8.useState)(0);
-  const selectedIdRef = (0, import_react8.useRef)(null);
+  const [focus, setFocus] = (0, import_react9.useState)(null);
+  const focusSeq = (0, import_react9.useRef)(0);
+  const [layer, setLayer] = (0, import_react9.useState)("status");
+  const [view, setView] = (0, import_react9.useState)("2d");
+  const webgl = (0, import_react9.useMemo)(() => detectWebGL(), []);
+  const [live, setLive] = (0, import_react9.useState)("connecting");
+  const [detailRefresh, setDetailRefresh] = (0, import_react9.useState)(0);
+  const selectedIdRef = (0, import_react9.useRef)(null);
   selectedIdRef.current = selectedId;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
-  const load = (0, import_react8.useCallback)(async () => {
+  const load = (0, import_react9.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
       return;
@@ -43806,10 +43242,10 @@ function App() {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
     }
   }, [client, params.projectKey]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     void load();
   }, [load]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     if (client === null) return;
     let opens = 0;
     const stream = createChangeStream({
@@ -43830,7 +43266,7 @@ function App() {
     });
     return () => stream.close();
   }, [client, load]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
@@ -43853,14 +43289,14 @@ function App() {
       stale = true;
     };
   }, [client, selectedId, detailRefresh]);
-  const onToggleNode = (0, import_react8.useCallback)((id2) => {
+  const onToggleNode = (0, import_react9.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
-  const requestFocus = (0, import_react8.useCallback)((nodeId) => {
+  const requestFocus = (0, import_react9.useCallback)((nodeId) => {
     focusSeq.current += 1;
     setFocus({ nodeId, seq: focusSeq.current });
   }, []);
-  const onLayerChange = (0, import_react8.useCallback)(
+  const onLayerChange = (0, import_react9.useCallback)(
     (next) => {
       setLayer(next);
       setStatusLine((previous) => {
@@ -43875,7 +43311,22 @@ function App() {
     },
     [tree]
   );
-  const revealNode = (0, import_react8.useCallback)((nodeId) => {
+  const onViewChange = (0, import_react9.useCallback)(
+    (target) => {
+      const plan = planViewSwitch(webgl, target);
+      setView(plan.view);
+      if (plan.status !== null) setStatusLine(plan.status);
+    },
+    [webgl]
+  );
+  const onSceneState = (0, import_react9.useCallback)(
+    (state, status) => {
+      setStatusLine(status);
+      if (state === "failed") setView("2d");
+    },
+    []
+  );
+  const revealNode = (0, import_react9.useCallback)((nodeId) => {
     setCollapsedIds((previous) => {
       const next = new Set(previous);
       for (const ancestor of ancestorsOf(tree?.nodes ?? [], nodeId)) {
@@ -43889,7 +43340,7 @@ function App() {
       return filterExcludesNode(previous, node2);
     });
   }, [tree]);
-  const onSearch = (0, import_react8.useCallback)(
+  const onSearch = (0, import_react9.useCallback)(
     async (query) => {
       if (client === null) return;
       try {
@@ -43911,11 +43362,11 @@ function App() {
     },
     [client, revealNode, requestFocus]
   );
-  const graph = (0, import_react8.useMemo)(
+  const graph = (0, import_react9.useMemo)(
     () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters, layer }),
     [tree, collapsedIds, filters, layer]
   );
-  const resolveName = (0, import_react8.useCallback)(
+  const resolveName = (0, import_react9.useCallback)(
     (id2) => {
       const node2 = tree?.nodes.find((candidate) => candidate.id === id2);
       return node2 !== void 0 ? node2.name : `\u2026${id2.slice(0, 8)}`;
@@ -43923,8 +43374,8 @@ function App() {
     [tree]
   );
   const filtersActive = isFilterActive(filters);
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-app", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-app", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       Toolbar,
       {
         projectKey: params.projectKey,
@@ -43935,11 +43386,14 @@ function App() {
         onFiltersChange: setFilters,
         onSearch: (query) => void onSearch(query),
         layer,
-        onLayerChange
+        onLayerChange,
+        view,
+        onViewChange,
+        webglOk: webgl.ok
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-body", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-body", children: [
+      view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(ThreeView, { webgl, onSceneState }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         Canvas,
         {
           graph,
@@ -43952,7 +43406,7 @@ function App() {
           emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         DetailsPanel,
         {
           detail,
@@ -43962,31 +43416,20 @@ function App() {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Legend, {})
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Legend, {})
   ] });
 }
 
 // dashboard/src/main.tsx
-var import_jsx_runtime9 = __toESM(require_jsx_runtime());
+var import_jsx_runtime10 = __toESM(require_jsx_runtime());
 var container = document.getElementById("root");
 if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_react9.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_react10.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(App, {}) })
 );
 /*! Bundled license information:
-
-react/cjs/react.production.js:
-  (**
-   * @license React
-   * react.production.js
-   *
-   * Copyright (c) Meta Platforms, Inc. and affiliates.
-   *
-   * This source code is licensed under the MIT license found in the
-   * LICENSE file in the root directory of this source tree.
-   *)
 
 scheduler/cjs/scheduler.production.js:
   (**
@@ -44014,39 +43457,6 @@ react-dom/cjs/react-dom-client.production.js:
   (**
    * @license React
    * react-dom-client.production.js
-   *
-   * Copyright (c) Meta Platforms, Inc. and affiliates.
-   *
-   * This source code is licensed under the MIT license found in the
-   * LICENSE file in the root directory of this source tree.
-   *)
-
-react/cjs/react-jsx-runtime.production.js:
-  (**
-   * @license React
-   * react-jsx-runtime.production.js
-   *
-   * Copyright (c) Meta Platforms, Inc. and affiliates.
-   *
-   * This source code is licensed under the MIT license found in the
-   * LICENSE file in the root directory of this source tree.
-   *)
-
-use-sync-external-store/cjs/use-sync-external-store-shim.production.js:
-  (**
-   * @license React
-   * use-sync-external-store-shim.production.js
-   *
-   * Copyright (c) Meta Platforms, Inc. and affiliates.
-   *
-   * This source code is licensed under the MIT license found in the
-   * LICENSE file in the root directory of this source tree.
-   *)
-
-use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js:
-  (**
-   * @license React
-   * use-sync-external-store-shim/with-selector.production.js
    *
    * Copyright (c) Meta Platforms, Inc. and affiliates.
    *

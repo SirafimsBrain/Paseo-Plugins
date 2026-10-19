@@ -11,6 +11,11 @@
  * The search input keeps its own draft state (the query is *not* diagram
  * state — only the picked result is) and submits on Enter, which is the
  * keyboard flow the acceptance scenario assumes.
+ *
+ * **I1** turns the view switch (previously a disabled stub) into the real
+ * 2D/3D control: it always reports the request, the app decides it through
+ * `planViewSwitch`, and the button's tooltip tells a tab without WebGL why
+ * 3D will not open before the user even presses it.
  */
 import { useState } from "react";
 import type { ChangeEvent, FormEvent, ReactElement } from "react";
@@ -19,6 +24,11 @@ import { LEAF_STATUSES, NODE_KINDS } from "../../../shared/tree";
 import type { LeafStatus, NodeKind } from "../../../shared/tree";
 import { GRAPH_LAYER_LABELS, GRAPH_LAYERS, type GraphLayer } from "../graph";
 import { KIND_LABELS, STATUS_LABELS } from "../colors";
+import {
+  THREE_BUTTON_HINT,
+  WEBGL_UNAVAILABLE_HINT,
+  type DashboardView,
+} from "../webgl";
 
 /** The three toolbar filters, owned by the app and applied by the adapter. */
 export interface ToolbarFilters {
@@ -64,6 +74,12 @@ export interface ToolbarProps {
   readonly onLayerChange: (layer: GraphLayer) => void;
   /** Live-update stream state (H1). */
   readonly live: ToolbarLiveState;
+  /** Active diagram view (I1). */
+  readonly view: DashboardView;
+  /** Requests the other view; the app resolves it through `planViewSwitch`. */
+  readonly onViewChange: (view: DashboardView) => void;
+  /** Whether this tab can render WebGL — drives the 3D button's tooltip. */
+  readonly webglOk: boolean;
 }
 
 /** One `label · value` counter cell. */
@@ -194,17 +210,28 @@ export function Toolbar(props: ToolbarProps): ReactElement {
         <div className="lp-view-switch" role="group" aria-label="View">
           <button
             type="button"
-            className="lp-view-button lp-view-button-active"
-            aria-pressed="true"
+            className={
+              props.view === "2d"
+                ? "lp-view-button lp-view-button-active"
+                : "lp-view-button"
+            }
+            aria-pressed={props.view === "2d"}
+            onClick={() => props.onViewChange("2d")}
           >
             2D
           </button>
           <button
             type="button"
-            className="lp-view-button"
-            aria-pressed="false"
-            disabled
-            title="The 3D view arrives in stage I4"
+            className={
+              props.view === "3d"
+                ? "lp-view-button lp-view-button-active"
+                : "lp-view-button"
+            }
+            aria-pressed={props.view === "3d"}
+            // Kept enabled on purpose: pressing it with WebGL disabled is
+            // what surfaces the explanation in the status line (I1).
+            title={props.webglOk ? THREE_BUTTON_HINT : WEBGL_UNAVAILABLE_HINT}
+            onClick={() => props.onViewChange("3d")}
           >
             3D
           </button>

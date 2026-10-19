@@ -734,6 +734,13 @@ body {
   min-height: 0;
   background: var(--lp-bg, #0f1115);
 }
+.lp-scene3d {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--lp-bg, #0f1115);
+}
 .lp-canvas-empty {
   position: absolute;
   inset: 0;

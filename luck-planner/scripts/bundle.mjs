@@ -1,7 +1,7 @@
 /**
  * Bundles the plugin's standalone build outputs into `dist/`.
  *
- * Two entries:
+ * Entries:
  * - `server/mcp-server.ts` → `dist/mcp-server.js` — the stdio MCP server that
  *   coding agents spawn with their own Node runtime. A single-file bundle
  *   avoids shipping `node_modules` next to it and resolves the ESM
@@ -15,6 +15,13 @@
  *   reviewable), with `dashboard/index.html` copied next to the assets. The
  *   HTTP server already falls back to a placeholder shell when this directory
  *   is missing, so a checkout that only needs the MCP server still works.
+ * - `dashboard/src/dashboard-3d.tsx` → `dist/dashboard/assets/dashboard-3d.js`
+ *   — the lazy 3D scene (stage I1), loaded only when the toolbar's 3D button
+ *   is pressed. Code splitting (`splitting: true`) is what keeps `three`,
+ *   `@react-three/fiber` and `@react-three/drei` out of the first chunk while
+ *   both entries share **one** React — two copies of React in a page break
+ *   every hook — so shared modules land in `chunk-*.js` files that both
+ *   entries import.
  *
  * Runs on every plugin install/update via the `build` step, and before the
  * test suite via `pretest`, so the e2e spawn always sees a fresh bundle.
@@ -52,11 +59,17 @@ const dashboardAssets = join(root, "dist", "dashboard", "assets");
 mkdirSync(dashboardAssets, { recursive: true });
 
 await build({
-  entryPoints: [join(root, "dashboard", "src", "main.tsx")],
+  entryPoints: {
+    dashboard: join(root, "dashboard", "src", "main.tsx"),
+    "dashboard-3d": join(root, "dashboard", "src", "dashboard-3d.tsx"),
+  },
   bundle: true,
   platform: "browser",
   target: "es2020",
   format: "esm",
+  // Stage I1: split the graph so `dashboard-3d.js` (and the React it shares
+  // with the app) stays out of the file index.html loads eagerly.
+  splitting: true,
   jsx: "automatic",
   // React reads process.env.NODE_ENV; without this define a browser tab dies
   // with `ReferenceError: process is not defined` before the first render
@@ -65,7 +78,12 @@ await build({
   define: {
     "process.env.NODE_ENV": '"production"',
   },
-  outfile: join(dashboardAssets, "dashboard.js"),
+  outdir: dashboardAssets,
+  // Stable names: the shell links /assets/dashboard.js, the app imports
+  // ./dashboard-3d, and the committed artifacts stay reviewable (the chunk
+  // hash in chunk-*.js is content-derived, so rebuilds stay byte-identical).
+  entryNames: "[name]",
+  chunkNames: "chunk-[name]-[hash]",
   // The CSS import in main.tsx makes esbuild emit dashboard.css beside the
   // script; index.html links that exact pair.
   sourcemap: false,

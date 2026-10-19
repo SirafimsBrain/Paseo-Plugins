@@ -1,15 +1,17 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.25.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.26.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection
 > highlights, search with camera focus, filters), **G5** (growth layer: per-node
 > growth roll-up, heat map, goal-frame progress), **H1** (live data: the
-> `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls) and
-> **H2** (agent timeline rows for the two key audit facts) are done and all tests
-> are green; the next stage is **I1** (the WebGL spike that opens block I).
-> Stages A1–H2 are complete; blocks I–J are otherwise untouched. Nothing in
+> `tree-changed` SSE event plus the `tree-changes` RPC the native panel polls),
+> **H2** (agent timeline rows for the two key audit facts) and **I1** (the WebGL
+> spike: probe + fallback, lazy `dashboard-3d.js` entry, empty scene with
+> OrbitControls) are done and all tests are green; the next stage is **I2**
+> (the 3D tree's layout and geometry).
+> Stages A1–I1 are complete; I2–J are otherwise untouched. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -1324,6 +1326,69 @@ handler. `typecheck` (both configs) and the full suite are green: 27 files, 447 
 live-daemon check — the row visible in an agent's timeline with no "unavailable" placeholder —
 belongs to J2.
 
+### WebGL spike and the lazy 3D entry (stage I1 — `dashboard/src/webgl.ts`, `dashboard/src/dashboard-3d.tsx`, `dashboard/src/components/ThreeView.tsx`, `scripts/bundle.mjs`)
+
+Block I opens with the spike that de-risks the 3D tree: prove a tab can obtain a
+WebGL context, pin the fallback answer, fix the library stack — and do all of it
+without touching the first-chunk budget.
+
+**Stack (fixed here, per PLAN.md I1).** `three` + `@react-three/fiber` (the React
+reconciler for three) + `@react-three/drei` (OrbitControls and helpers), pinned
+to exact versions in `package.json`; the radial tree layout in I2 keeps using
+`d3-hierarchy`, the same adapter the 2D diagram already uses, so both views
+share one layout model. Rebuilding I2/I3 on a different stack would require
+re-opening this decision.
+
+**One React, two entries.** The dashboard build switched to esbuild
+`splitting: true` with two entries: `dashboard` (what `index.html` loads
+eagerly) and `dashboard-3d` (the scene). esbuild hoists the modules both
+graphs share into `chunk-*.js` files, so `react` and the jsx-runtime exist
+exactly once per page — two copies of React break every hook (the "Invalid
+hook call" failure). The tests pin the outcome: `dashboard.js` contains
+exactly one `import("./dashboard-3d.js")` and no
+`OrbitControls`/`gridHelper`/`WebGLRenderer` marker, while
+`dashboard-3d.js` (≈2.1 MB unminified — the repo does not minify committed
+bundles, reviewability over bytes) carries three/r3f/drei and is fetched only
+when the toolbar's 3D button is pressed. `index.html` never links it. The
+shared react chunk (~26 KB) is the entire first-chunk cost of splitting.
+
+**Probe and fallback.** `detectWebGL()` asks for `webgl2`, then `webgl`, then
+`experimental-webgl`, releases the probe context through `WEBGL_lose_context`
+(browsers cap live contexts — Chrome caps at 16) and never throws: no canvas,
+all-null contexts and a throwing `getContext` (blocked driver, tainted origin)
+all answer `{ ok: false, reason }`. The canvas factory is injectable — the
+same injected-boundary discipline as `dashboard/src/live.ts` — so vitest
+exercises every browser outcome in a DOM-less environment.
+`planViewSwitch()` is the one policy point: asking for 3D without WebGL keeps
+the 2D diagram and installs `WEBGL_UNAVAILABLE_HINT` in the status line (the
+`--disable-webgl` acceptance), and returning to 2D is always silent.
+
+**Mounting.** `dashboard-3d.tsx` exports an imperative
+`mountScene3D(container) → { dispose() }` instead of a global: the caller
+owns the container, `dispose()` is idempotent, unmounts the r3f root and
+empties the cell, so switching back to 2D leaves no renderer, animation loop
+or canvas behind. The spike scene is ambient + directional light, a 20-unit
+grid, axes and `OrbitControls` — enough to answer "does WebGL render in this
+tab". `ThreeView.tsx` is the only thing the first chunk knows about the
+scene: it imports the *type* only (a value import would drag the whole scene
+graph into the eager bundle), dynamically imports the chunk on mount, and
+reports `loading → ready` / `failed` through the app's status line; `failed`
+sends the tab back to 2D.
+
+**Tests.** `tests/dashboard-3d.test.ts` (18): the probe against fakes (WebGL2,
+WebGL1 floor, experimental floor, no context, no canvas, throwing factory,
+context release), the view policy (the `--disable-webgl` case refuses 3D with
+a written reason), the built artifacts (the 3D chunk exists, exactly one
+dynamic import reaches it, no three markers leak into the eager chunk,
+`index.html` never links it) and the source contracts (type-only import, the
+`mountScene3D`/dispose pair, every 3D request routed through
+`planViewSwitch`). The determinism test in `tests/dashboard-build.test.ts`
+now hashes the 3D chunk as well. `typecheck` (both configs) and the full
+suite are green. Rendering in a real tab — the Paseo workspace browser
+(Electron) and an external browser — is a J2 manual check: this build
+environment has no browser, and repo rule 4 keeps tab-level checks manual by
+design.
+
 
 ## 7. Roadmap (stage map)
 
@@ -1350,8 +1415,12 @@ H1 (0.24.0) made both views live: the audit-trail change feed behind the
 the dashboard's coalescing `EventSource` client, and the `tree-changes` RPC the
 native panel polls, and H2 (0.25.0) put the two key audit facts — a goal crossing
 the approval gate, a leaf reaching `done` — into the responsible agent's own
-timeline, appended through the SDK and drawn by a plugin renderer. Next: **I1**
-(the WebGL spike that opens block I). A candidate **D4**
+timeline, appended through the SDK and drawn by a plugin renderer, and I1
+(0.26.0) opened block I with the WebGL spike: an injectable canvas probe with
+a released context, the stay-on-2D-with-a-written-reason fallback, and a
+second esbuild entry (`dashboard-3d.js`) that keeps three/r3f/drei out of the
+eagerly loaded chunk while sharing a single React through code splitting.
+Next: **I2** (the 3D tree: radial layout + geometry). A candidate **D4**
 (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
 precede the remaining UI work.
@@ -1366,7 +1435,7 @@ precede the remaining UI work.
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
-| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike, geometry, effects, interaction + toggle |
+| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), geometry, effects, interaction + toggle |
 | J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
 
 Blocks B–D have file-disjoint boundaries and may be delegated to different agents.

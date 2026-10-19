@@ -209,6 +209,17 @@ body {
   background: var(--lp-bg, #0f1115);
 }
 
+/* 3D viewport (stage I1): same grid cell as the 2D canvas, so the r3f
+   Canvas gets a definite size to fill — without min-height: 0 the row would
+   stretch past the viewport. */
+.lp-scene3d {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--lp-bg, #0f1115);
+}
+
 .lp-canvas-empty {
   position: absolute;
   inset: 0;

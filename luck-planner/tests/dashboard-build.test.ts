@@ -39,6 +39,10 @@ const INDEX_FILE = path.join(DASHBOARD_DIR, "index.html");
 const ASSETS_DIR = path.join(DASHBOARD_DIR, "assets");
 const APP_JS = path.join(ASSETS_DIR, "dashboard.js");
 const APP_CSS = path.join(ASSETS_DIR, "dashboard.css");
+// Stage I1: the lazy 3D entry, hashed with the pair so a rebuild stays
+// byte-identical across the whole split graph (chunk hashes are content-
+// derived, so this also covers the shared chunk-* files).
+const SCENE_JS = path.join(ASSETS_DIR, "dashboard-3d.js");
 
 const P = "/tmp/luck-planner-g1";
 const ACTOR = "user";
@@ -103,6 +107,7 @@ describe("dist/dashboard (the built SPA)", () => {
         .update(fs.readFileSync(APP_JS))
         .update(fs.readFileSync(APP_CSS))
         .update(fs.readFileSync(INDEX_FILE))
+        .update(fs.readFileSync(SCENE_JS))
         .digest("hex");
     };
     expect(hashDashboard()).toBe(hashDashboard());

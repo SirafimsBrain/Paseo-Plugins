@@ -1,7 +1,7 @@
 {
   "name": "luck-planner",
   "private": true,
-  "version": "0.25.0",
+  "version": "0.26.0",
   "scripts": {
     "bundle": "node scripts/bundle.mjs",
     "pretest": "node scripts/bundle.mjs",
@@ -11,16 +11,20 @@
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.11.2",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
     "@types/d3-hierarchy": "^3.1.7",
     "@types/node": "^22.0.0",
     "@types/react": "~19.2.0",
     "@types/react-dom": "^19.2.7",
+    "@types/three": "^0.186.0",
     "@xyflow/react": "^12.12.0",
     "d3-hierarchy": "^3.1.2",
     "esbuild": "^0.25.12",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "three": "^0.186.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11",
     "zod": "^4.4.3"
