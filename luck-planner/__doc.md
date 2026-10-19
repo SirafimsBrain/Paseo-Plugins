@@ -13,14 +13,15 @@
 > (bees, bugs, goals and growth in 3D, with the animation frame budget) and
 > **I4** (3D interaction: picking into the shared details panel, the selection
 > highlight, the camera flight from the search, the filters in 3D and the
-> remembered 2D/3D choice) are done and all tests are green; the next stage is
-> **J1** (the plugin's English README and the link from the root README).
-> Stages A1–I4 are complete; J1–J2 are otherwise untouched. Nothing in
+> remembered 2D/3D choice) and **J1** (the plugin's English README and the
+> link from the repository README) are done and all tests are green; the next
+> stage is **J2** (the live-daemon end-to-end acceptance).
+> Stages A1–I4 and J1 are complete; J2 is untouched. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
-User-facing description: [README.md](./README.md) (added in stage J1).
+User-facing description: [README.md](./README.md).
 
 `luck-planner` is the project-planning tree for coding agents on [Paseo](https://paseo.sh/):
 a SQLite-backed hierarchical model of a project — tech-stack root, trunk, module branches,
@@ -1779,8 +1780,13 @@ siblings, the links (drawn as curves) and the tubes that touch it, a search
 flies the camera to the node, the toolbar filters narrow the 3D tree by the
 2D adapter's own rule, the 2D/3D choice is remembered in the URL and in the
 tab's storage, and the tubes became one instanced mesh (7 draw calls for a
-92-node fixture). Next: **J1** (the plugin's English README + the link from
-the root README) and **J2** (the live-daemon e2e checklist).
+92-node fixture). J1 wrote the plugin's **English README** — what the plugin
+does, the install, the eight MCP tools, the 2D and 3D dashboards, the panel,
+the skill, the settings, where the data lives and the known limitations — and
+linked it from the repository README (Plugins, Installation, the build table
+and the compatibility table), with a `__doc.md §10 Compatibility` section that
+states plainly what is verified and what is not (the live-daemon install is
+still open — that is J2). Next: **J2** (the live-daemon e2e checklist).
 A candidate **D4**
 (config-file MCP registrations for
 OpenCode/Kilo/Cline/Cursor/Codex, the memory-flash 0.8.1 fix) may still
@@ -1797,7 +1803,7 @@ precede the remaining UI work.
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle ✅ (0.29.0) |
-| J | J1–J2 | — | README.md + root README link; final e2e acceptance on a live daemon |
+| J | J1–J2 | — | README.md + root README link ✅ (J1, 0.29.0), final e2e acceptance on a live daemon (J2) |
 
 Blocks B–D have file-disjoint boundaries and may be delegated to different agents.
 
@@ -1839,3 +1845,33 @@ Standing constraints: zero runtime npm dependencies in daemon code where possibl
 built-ins first, as in memory-flash); `dashboard/` dependencies (React Flow, three.js) live in
 `devDependencies` and are bundled by esbuild; README.md and `__doc.md` are maintained in
 English only (project rule).
+
+## 10. Compatibility
+
+Verified on 2026-10-19 in the plugin's development environment with
+`@getpaseo/plugin@0.11.2` (the manifest requires Paseo `>= 0.11.0`):
+
+- `npm run typecheck` — clean, in both configurations (the root one and
+  `dashboard/tsconfig.json`, which the root excludes).
+- `npm test` — 31 suites, 536 tests, all green. The suite includes a
+  real-process stdio e2e (it spawns the built `dist/mcp-server.js` and speaks
+  JSON-RPC over the pipe: handshake → `tools/list` → `tools/call`), the HTTP
+  server suites (a real socket on loopback, an SSE stream that a second
+  connection to the same file wakes up), the dashboard suites (the built
+  artifact, the 2D/3D bundle split, the rebuild determinism against a fresh
+  build in a temp root) and the 3D budget tests (10 000 nodes, a build and a
+  60-frame animation budget).
+- Node ≥ 24.20 on the daemon host: the store uses the built-in `node:sqlite`
+  with FTS5 (`porter`, `unicode61`).
+- The MCP bundle depends on nothing beyond Node built-ins, so an agent's own
+  Node runtime can spawn it without an `npm install`.
+- The dashboard bundle is a static ESM app served by the plugin's own
+  loopback HTTP server; it needs no CDN, no network and no external asset.
+
+**Not verified yet, and stated plainly:** the plugin has never been installed
+into a *running* Paseo daemon (`paseo plugin add` → `running` → a real agent
+calling a real tool → the dashboard openable in the host's browser). The J2
+checklist covers exactly that walk, together with the FPS and bundle-size
+measurements on a live 5–10k-node project and the console being clean in the
+Paseo tab. Everything above is a statement about the *code*; the daemon
+install is a statement about the *host*, and it is still open.
