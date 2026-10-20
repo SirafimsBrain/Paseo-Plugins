@@ -725,7 +725,7 @@ body {
 }
 .lp-body {
   display: grid;
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: 1fr var(--lp-details-width, 450px);
   min-height: 0;
 }
 .lp-canvas {
@@ -793,10 +793,29 @@ body {
   padding: 0 4px;
 }
 .lp-details {
+  position: relative;
   background: var(--lp-surface, #171a21);
   border-left: 1px solid var(--lp-border, #262b36);
   padding: 12px;
   overflow-y: auto;
+}
+.lp-resize-handle {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.lp-resize-handle:hover,
+.lp-resize-handle:focus-visible {
+  background: var(--lp-accent, #5b9dff);
+  opacity: 0.35;
+  outline: none;
 }
 .lp-details-title {
   margin: 0 0 8px;
@@ -1113,6 +1132,11 @@ body {
 .lp-details-child-name {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.lp-details-child .lp-details-hint {
+  flex: none;
   white-space: nowrap;
 }
 .lp-details-history-action {

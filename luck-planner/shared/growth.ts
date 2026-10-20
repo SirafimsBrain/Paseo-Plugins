@@ -29,6 +29,33 @@ export type GrowthStepState = z.infer<typeof growthStepStateSchema>;
 export const GROWTH_STEP_STATES = growthStepStateSchema.options;
 
 /**
+ * An array of strings that also accepts the shapes a **rewriting MCP client**
+ * produces.
+ *
+ * Found by the live test pass (stage D5): the Kilo MCP client rewrites an
+ * array that lives inside a schema-free object — `steps[].facts` arrived as
+ * `{"item": [...]}` (and an empty array as `""`), and zod refused the whole
+ * call with "expected array, received object". Top-level arrays (a bug's
+ * `nodeIds`) survive; the nested ones do not.
+ *
+ * The array is therefore normalized before it is validated: an object with an
+ * `item` array yields that array, a string yields the array of its
+ * non-empty lines, and anything else is left to zod to reject. The data
+ * itself is not damaged — only the shape it arrives in.
+ */
+export const lenientStringArraySchema = z.preprocess((value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    return value.length === 0 ? [] : value.split("\n");
+  }
+  if (value !== null && typeof value === "object") {
+    const item = (value as { item?: unknown }).item;
+    if (Array.isArray(item)) return item;
+  }
+  return value;
+}, z.array(z.string()));
+
+/**
  * One step of a growth record. `reason` carries why the step was not
  * completed or why work stopped (pause, waiting for approval, blocked —
  * required by the "growth rates" spec); `facts` records what was actually
@@ -38,7 +65,7 @@ export const growthStepSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   state: growthStepStateSchema,
-  facts: z.array(z.string()),
+  facts: lenientStringArraySchema,
   reason: z.string(),
 });
 export type GrowthStep = z.infer<typeof growthStepSchema>;

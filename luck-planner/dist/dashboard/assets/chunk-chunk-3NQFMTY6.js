@@ -32301,11 +32301,22 @@ var growthStepStateSchema = external_exports.enum([
   "failed"
 ]);
 var GROWTH_STEP_STATES = growthStepStateSchema.options;
+var lenientStringArraySchema = external_exports.preprocess((value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    return value.length === 0 ? [] : value.split("\n");
+  }
+  if (value !== null && typeof value === "object") {
+    const item = value.item;
+    if (Array.isArray(item)) return item;
+  }
+  return value;
+}, external_exports.array(external_exports.string()));
 var growthStepSchema = external_exports.object({
   id: external_exports.string().min(1),
   title: external_exports.string().min(1),
   state: growthStepStateSchema,
-  facts: external_exports.array(external_exports.string()),
+  facts: lenientStringArraySchema,
   reason: external_exports.string()
 });
 var growthStatusSchema = external_exports.enum([

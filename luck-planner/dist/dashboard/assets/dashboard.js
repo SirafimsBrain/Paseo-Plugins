@@ -60,17 +60,17 @@ import {
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-W2N7U5RE.js";
+} from "./chunk-chunk-3NQFMTY6.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
 
 // dashboard/src/main.tsx
-var import_react10 = __toESM(require_react());
+var import_react11 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // dashboard/src/app.tsx
-var import_react9 = __toESM(require_react());
+var import_react10 = __toESM(require_react());
 
 // node_modules/@getpaseo/plugin/dist/rpc.js
 var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
@@ -521,6 +521,41 @@ function parseDashboardParams(search) {
     token: params.get(DASHBOARD_TOKEN_PARAM) ?? "",
     projectKey: params.get(DASHBOARD_PROJECT_PARAM) ?? ""
   };
+}
+
+// dashboard/src/details-width.ts
+var DEFAULT_DETAILS_WIDTH = 450;
+var MIN_DETAILS_WIDTH = 280;
+var MAX_DETAILS_WIDTH = 720;
+var DETAILS_WIDTH_KEY = "luck-planner:details-width";
+function clampDetailsWidth(width) {
+  if (!Number.isFinite(width)) return DEFAULT_DETAILS_WIDTH;
+  return Math.min(MAX_DETAILS_WIDTH, Math.max(MIN_DETAILS_WIDTH, Math.round(width)));
+}
+function readStoredDetailsWidth(storage) {
+  if (storage === null) return DEFAULT_DETAILS_WIDTH;
+  try {
+    const stored = Number.parseInt(storage.getItem(DETAILS_WIDTH_KEY) ?? "", 10);
+    if (Number.isInteger(stored) && stored >= MIN_DETAILS_WIDTH && stored <= MAX_DETAILS_WIDTH) {
+      return stored;
+    }
+  } catch {
+  }
+  return DEFAULT_DETAILS_WIDTH;
+}
+function storeDetailsWidth(storage, width) {
+  if (storage === null) return;
+  try {
+    storage.setItem(DETAILS_WIDTH_KEY, String(clampDetailsWidth(width)));
+  } catch {
+  }
+}
+function forgetDetailsWidth(storage) {
+  if (storage === null) return;
+  try {
+    storage.removeItem(DETAILS_WIDTH_KEY);
+  } catch {
+  }
 }
 
 // dashboard/src/live.ts
@@ -10177,6 +10212,7 @@ function Canvas(props) {
 }
 
 // dashboard/src/components/DetailsPanel.tsx
+var import_react7 = __toESM(require_react());
 var import_jsx_runtime5 = __toESM(require_jsx_runtime());
 function formatTime(ts) {
   return new Date(ts).toLocaleString(void 0, {
@@ -10193,9 +10229,64 @@ function Row(props) {
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-row-value", children: props.children })
   ] });
 }
+function ResizeHandle(props) {
+  const start2 = (0, import_react7.useRef)(null);
+  const last = (0, import_react7.useRef)(props.width);
+  const onPointerMove = (0, import_react7.useCallback)(
+    (event) => {
+      const origin = start2.current;
+      if (origin === null) return;
+      const next = origin.width + (origin.x - event.clientX);
+      last.current = next;
+      props.onWidthChange(next);
+    },
+    [props]
+  );
+  const stop = (0, import_react7.useCallback)(() => {
+    if (start2.current === null) return;
+    start2.current = null;
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    props.onWidthCommit(last.current);
+  }, [onPointerMove, props]);
+  const onPointerDown2 = (0, import_react7.useCallback)(
+    (event) => {
+      event.preventDefault();
+      start2.current = { x: event.clientX, width: props.width };
+      last.current = props.width;
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    },
+    [onPointerMove, props.width, stop]
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+    "div",
+    {
+      className: "lp-resize-handle",
+      role: "separator",
+      "aria-orientation": "vertical",
+      "aria-label": "Resize the details panel",
+      "aria-valuenow": Math.round(props.width),
+      title: "Drag to resize \xB7 double-click to reset",
+      onPointerDown: onPointerDown2,
+      onDoubleClick: props.onWidthReset
+    }
+  );
+}
 function DetailsPanel(props) {
   const { detail, loading, error, resolveName } = props;
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("aside", { className: "lp-details", "aria-label": "Node details", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+      ResizeHandle,
+      {
+        width: props.width,
+        onWidthChange: props.onWidthChange,
+        onWidthCommit: props.onWidthCommit,
+        onWidthReset: props.onWidthReset
+      }
+    ),
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { className: "lp-details-title", children: "Details" }),
     error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(NodeDetails, { detail, resolveName })
   ] });
@@ -10454,20 +10545,20 @@ function Legend() {
 }
 
 // dashboard/src/components/ThreeView.tsx
-var import_react7 = __toESM(require_react());
+var import_react8 = __toESM(require_react());
 var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 function ThreeView(props) {
-  const containerRef = (0, import_react7.useRef)(null);
-  const handleRef = (0, import_react7.useRef)(null);
-  const stateRef = (0, import_react7.useRef)(props.onSceneState);
+  const containerRef = (0, import_react8.useRef)(null);
+  const handleRef = (0, import_react8.useRef)(null);
+  const stateRef = (0, import_react8.useRef)(props.onSceneState);
   stateRef.current = props.onSceneState;
-  const selectRef = (0, import_react7.useRef)(props.onSelectNode);
+  const selectRef = (0, import_react8.useRef)(props.onSelectNode);
   selectRef.current = props.onSelectNode;
-  const sceneRef = (0, import_react7.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
+  const sceneRef = (0, import_react8.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
   sceneRef.current = { model: props.model, overlay: props.overlay, fitKey: props.fitKey };
-  const interactionRef = (0, import_react7.useRef)(props.interaction);
+  const interactionRef = (0, import_react8.useRef)(props.interaction);
   interactionRef.current = props.interaction;
-  (0, import_react7.useEffect)(() => {
+  (0, import_react8.useEffect)(() => {
     const container2 = containerRef.current;
     if (container2 === null) return;
     if (!props.webgl.ok) {
@@ -10507,10 +10598,10 @@ function ThreeView(props) {
       handleRef.current = null;
     };
   }, [props.webgl.ok]);
-  (0, import_react7.useEffect)(() => {
+  (0, import_react8.useEffect)(() => {
     handleRef.current?.setScene(props.model, props.overlay, props.fitKey);
   }, [props.model, props.overlay, props.fitKey]);
-  (0, import_react7.useEffect)(() => {
+  (0, import_react8.useEffect)(() => {
     handleRef.current?.setInteraction(props.interaction);
   }, [props.interaction]);
   return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
@@ -10525,7 +10616,7 @@ function ThreeView(props) {
 }
 
 // dashboard/src/components/Toolbar.tsx
-var import_react8 = __toESM(require_react());
+var import_react9 = __toESM(require_react());
 var import_jsx_runtime8 = __toESM(require_jsx_runtime());
 var LIVE_LABELS = {
   connecting: "connecting",
@@ -10545,7 +10636,7 @@ function Counter(props) {
 }
 function Toolbar(props) {
   const stats2 = props.stats;
-  const [draft, setDraft] = (0, import_react8.useState)("");
+  const [draft, setDraft] = (0, import_react9.useState)("");
   const submit = (event) => {
     event.preventDefault();
     const query = draft.trim();
@@ -10706,6 +10797,13 @@ function filterExcludesNode(filters, node) {
     version: filters.version
   };
 }
+function detailsStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 var GROWTH_EMPTY_HINT = "No growth records in this project yet \u2014 the heat layer stays neutral (agents write them with luck_tree_update_growth).";
 var SCENE_EMPTY_HINT = "No nodes match the filters \u2014 the 3D tree is empty. Loosen or clear the kind/status/version filters.";
 function safeStorage() {
@@ -10724,44 +10822,47 @@ function syncViewToUrl(view) {
   );
 }
 function App() {
-  const params = (0, import_react9.useMemo)(() => parseDashboardParams(window.location.search), []);
-  const client = (0, import_react9.useMemo)(
+  const params = (0, import_react10.useMemo)(() => parseDashboardParams(window.location.search), []);
+  const client = (0, import_react10.useMemo)(
     () => params.token.length > 0 ? new DashboardApi(resolveApiOrigin(window.location.href), params.token, params.projectKey) : null,
     [params.projectKey, params.token]
   );
-  const [stats2, setStats] = (0, import_react9.useState)(null);
-  const [tree, setTree] = (0, import_react9.useState)(null);
-  const [collapsedIds, setCollapsedIds] = (0, import_react9.useState)(
+  const [stats2, setStats] = (0, import_react10.useState)(null);
+  const [tree, setTree] = (0, import_react10.useState)(null);
+  const [collapsedIds, setCollapsedIds] = (0, import_react10.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [statusLine, setStatusLine] = (0, import_react9.useState)("");
-  const [theme] = (0, import_react9.useState)(initialTheme);
-  const [selectedId, setSelectedId] = (0, import_react9.useState)(null);
-  const [detail, setDetail] = (0, import_react9.useState)(null);
-  const [detailLoading, setDetailLoading] = (0, import_react9.useState)(false);
-  const [detailError, setDetailError] = (0, import_react9.useState)("");
-  const [filters, setFilters] = (0, import_react9.useState)({
+  const [statusLine, setStatusLine] = (0, import_react10.useState)("");
+  const [theme] = (0, import_react10.useState)(initialTheme);
+  const [detailsWidth, setDetailsWidth] = (0, import_react10.useState)(
+    () => readStoredDetailsWidth(detailsStorage())
+  );
+  const [selectedId, setSelectedId] = (0, import_react10.useState)(null);
+  const [detail, setDetail] = (0, import_react10.useState)(null);
+  const [detailLoading, setDetailLoading] = (0, import_react10.useState)(false);
+  const [detailError, setDetailError] = (0, import_react10.useState)("");
+  const [filters, setFilters] = (0, import_react10.useState)({
     kind: "",
     status: "",
     version: ""
   });
-  const [focus, setFocus] = (0, import_react9.useState)(null);
-  const focusSeq = (0, import_react9.useRef)(0);
-  const [layer, setLayer] = (0, import_react9.useState)("status");
-  const webgl = (0, import_react9.useMemo)(() => detectWebGL(), []);
-  const storage = (0, import_react9.useMemo)(() => safeStorage(), []);
-  const [view, setView] = (0, import_react9.useState)(() => {
+  const [focus, setFocus] = (0, import_react10.useState)(null);
+  const focusSeq = (0, import_react10.useRef)(0);
+  const [layer, setLayer] = (0, import_react10.useState)("status");
+  const webgl = (0, import_react10.useMemo)(() => detectWebGL(), []);
+  const storage = (0, import_react10.useMemo)(() => safeStorage(), []);
+  const [view, setView] = (0, import_react10.useState)(() => {
     const wanted = initialView(window.location.search, storage);
     return planViewSwitch(webgl, wanted).view;
   });
-  const [live, setLive] = (0, import_react9.useState)("connecting");
-  const [detailRefresh, setDetailRefresh] = (0, import_react9.useState)(0);
-  const selectedIdRef = (0, import_react9.useRef)(null);
+  const [live, setLive] = (0, import_react10.useState)("connecting");
+  const [detailRefresh, setDetailRefresh] = (0, import_react10.useState)(0);
+  const selectedIdRef = (0, import_react10.useRef)(null);
   selectedIdRef.current = selectedId;
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
-  const load = (0, import_react9.useCallback)(async () => {
+  const load = (0, import_react10.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
       return;
@@ -10785,10 +10886,10 @@ function App() {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
     }
   }, [client, params.projectKey]);
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     void load();
   }, [load]);
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (client === null) return;
     let opens = 0;
     const stream = createChangeStream({
@@ -10809,7 +10910,7 @@ function App() {
     });
     return () => stream.close();
   }, [client, load]);
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
@@ -10832,14 +10933,14 @@ function App() {
       stale = true;
     };
   }, [client, selectedId, detailRefresh]);
-  const onToggleNode = (0, import_react9.useCallback)((id2) => {
+  const onToggleNode = (0, import_react10.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
-  const requestFocus = (0, import_react9.useCallback)((nodeId) => {
+  const requestFocus = (0, import_react10.useCallback)((nodeId) => {
     focusSeq.current += 1;
     setFocus({ nodeId, seq: focusSeq.current });
   }, []);
-  const onLayerChange = (0, import_react9.useCallback)(
+  const onLayerChange = (0, import_react10.useCallback)(
     (next) => {
       setLayer(next);
       setStatusLine((previous) => {
@@ -10854,7 +10955,7 @@ function App() {
     },
     [tree]
   );
-  const onViewChange = (0, import_react9.useCallback)(
+  const onViewChange = (0, import_react10.useCallback)(
     (target) => {
       const plan = planViewSwitch(webgl, target);
       setView(plan.view);
@@ -10864,20 +10965,20 @@ function App() {
     },
     [storage, webgl]
   );
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     const wanted = initialView(window.location.search, storage);
     const plan = planViewSwitch(webgl, wanted);
     if (plan.status !== null) setStatusLine(plan.status);
     syncViewToUrl(plan.view);
   }, [storage, webgl]);
-  const onSceneState = (0, import_react9.useCallback)(
+  const onSceneState = (0, import_react10.useCallback)(
     (state, status) => {
       setStatusLine(status);
       if (state === "failed") setView("2d");
     },
     []
   );
-  const revealNode = (0, import_react9.useCallback)((nodeId) => {
+  const revealNode = (0, import_react10.useCallback)((nodeId) => {
     setCollapsedIds((previous) => {
       const next = new Set(previous);
       for (const ancestor of ancestorsOf(tree?.nodes ?? [], nodeId)) {
@@ -10891,7 +10992,7 @@ function App() {
       return filterExcludesNode(previous, node);
     });
   }, [tree]);
-  const onSearch = (0, import_react9.useCallback)(
+  const onSearch = (0, import_react10.useCallback)(
     async (query) => {
       if (client === null) return;
       try {
@@ -10913,27 +11014,27 @@ function App() {
     },
     [client, revealNode, requestFocus]
   );
-  const graph = (0, import_react9.useMemo)(
+  const graph = (0, import_react10.useMemo)(
     () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters, layer }),
     [tree, collapsedIds, filters, layer]
   );
-  const scene3dModel = (0, import_react9.useMemo)(
+  const scene3dModel = (0, import_react10.useMemo)(
     () => tree === null ? null : buildScene3D(tree.nodes, { filter: filters }),
     [tree, filters]
   );
-  const scene3dOverlay = (0, import_react9.useMemo)(
+  const scene3dOverlay = (0, import_react10.useMemo)(
     () => tree === null || scene3dModel === null ? null : buildSceneOverlay(tree, scene3dModel, { layer }),
     [tree, scene3dModel, layer]
   );
-  const scene3dFitKey = (0, import_react9.useMemo)(
+  const scene3dFitKey = (0, import_react10.useMemo)(
     () => tree === null ? "" : `${tree.nodes.length}:${tree.nodes[0]?.id ?? ""}`,
     [tree]
   );
-  const scene3dCandidates = (0, import_react9.useMemo)(
+  const scene3dCandidates = (0, import_react10.useMemo)(
     () => scene3dModel === null ? [] : pickCandidates(scene3dModel),
     [scene3dModel]
   );
-  const scene3dInteraction = (0, import_react9.useMemo)(() => {
+  const scene3dInteraction = (0, import_react10.useMemo)(() => {
     if (tree === null || scene3dModel === null) return EMPTY_INTERACTION;
     const selected2 = selectedId === null ? null : tree.nodes.find((node) => node.id === selectedId) ?? null;
     const position = selectedId === null ? null : scene3dModel.nodes.find((node) => node.id === selectedId)?.position ?? null;
@@ -10965,14 +11066,14 @@ function App() {
     tree
   ]);
   const scene3dEmpty = scene3dModel !== null && scene3dModel.nodes.length === 0;
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (view !== "3d") return;
     setStatusLine((previous) => {
       if (scene3dEmpty) return SCENE_EMPTY_HINT;
       return previous === SCENE_EMPTY_HINT ? "" : previous;
     });
   }, [scene3dEmpty, view]);
-  const resolveName = (0, import_react9.useCallback)(
+  const resolveName = (0, import_react10.useCallback)(
     (id2) => {
       const node = tree?.nodes.find((candidate) => candidate.id === id2);
       return node !== void 0 ? node.name : `\u2026${id2.slice(0, 8)}`;
@@ -10980,6 +11081,18 @@ function App() {
     [tree]
   );
   const filtersActive = isFilterActive(filters);
+  const onDetailsWidthChange = (0, import_react10.useCallback)((width) => {
+    setDetailsWidth(clampDetailsWidth(width));
+  }, []);
+  const onDetailsWidthCommit = (0, import_react10.useCallback)((width) => {
+    const clamped = clampDetailsWidth(width);
+    setDetailsWidth(clamped);
+    storeDetailsWidth(detailsStorage(), clamped);
+  }, []);
+  const onDetailsWidthReset = (0, import_react10.useCallback)(() => {
+    setDetailsWidth(DEFAULT_DETAILS_WIDTH);
+    forgetDetailsWidth(detailsStorage());
+  }, []);
   return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-app", children: [
     /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
       Toolbar,
@@ -10998,41 +11111,54 @@ function App() {
         webglOk: webgl.ok
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-body", children: [
-      view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-        ThreeView,
-        {
-          webgl,
-          model: scene3dModel,
-          overlay: scene3dOverlay,
-          fitKey: scene3dFitKey,
-          interaction: scene3dInteraction,
-          onSelectNode: setSelectedId,
-          onSceneState
-        }
-      ) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-        Canvas,
-        {
-          graph,
-          loaded: tree !== null,
-          onToggleNode,
-          selectedId,
-          onSelectNode: setSelectedId,
-          focus,
-          emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
-          emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
-        DetailsPanel,
-        {
-          detail,
-          loading: detailLoading,
-          error: detailError,
-          resolveName
-        }
-      )
-    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
+      "div",
+      {
+        className: "lp-body",
+        style: {
+          "--lp-details-width": `${detailsWidth}px`
+        },
+        children: [
+          view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+            ThreeView,
+            {
+              webgl,
+              model: scene3dModel,
+              overlay: scene3dOverlay,
+              fitKey: scene3dFitKey,
+              interaction: scene3dInteraction,
+              onSelectNode: setSelectedId,
+              onSceneState
+            }
+          ) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+            Canvas,
+            {
+              graph,
+              loaded: tree !== null,
+              onToggleNode,
+              selectedId,
+              onSelectNode: setSelectedId,
+              focus,
+              emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
+              emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+            DetailsPanel,
+            {
+              detail,
+              loading: detailLoading,
+              error: detailError,
+              resolveName,
+              width: detailsWidth,
+              onWidthChange: onDetailsWidthChange,
+              onWidthCommit: onDetailsWidthCommit,
+              onWidthReset: onDetailsWidthReset
+            }
+          )
+        ]
+      }
+    ),
     /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Legend, {})
   ] });
 }
@@ -11044,5 +11170,5 @@ if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_react10.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_react11.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(App, {}) })
 );

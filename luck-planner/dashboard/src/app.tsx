@@ -47,7 +47,7 @@
  * a stale response can never overwrite a newer selection.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import {
   changesTouchNode,
   type NodeResponse,
@@ -67,6 +67,14 @@ import {
   type GraphLayer,
 } from "./graph";
 import { parseDashboardParams } from "./params";
+import {
+  clampDetailsWidth,
+  DEFAULT_DETAILS_WIDTH,
+  forgetDetailsWidth,
+  readStoredDetailsWidth,
+  storeDetailsWidth,
+  type DetailsWidthStorage,
+} from "./details-width";
 import { createChangeStream } from "./live";
 import { buildSceneOverlay, EMPTY_OVERLAY } from "./overlay-3d";
 import {
@@ -137,6 +145,18 @@ function filterExcludesNode(
   };
 }
 
+/**
+ * The details panel's width (stage I4 follow-up) — the rules live in
+ * `dashboard/src/details-width.ts` (pure, testable without a DOM).
+ */
+function detailsStorage(): DetailsWidthStorage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /** Shown when the growth layer is switched on in a project without records. */
 const GROWTH_EMPTY_HINT =
   "No growth records in this project yet — the heat layer stays neutral (agents write them with luck_tree_update_growth).";
@@ -191,6 +211,10 @@ export function App(): ReactElement {
   );
   const [statusLine, setStatusLine] = useState("");
   const [theme] = useState<ThemeName>(initialTheme);
+  // The details panel is resizable; the width survives a reload.
+  const [detailsWidth, setDetailsWidth] = useState(() =>
+    readStoredDetailsWidth(detailsStorage()),
+  );
 
   // G4 interaction state.
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -554,6 +578,24 @@ export function App(): ReactElement {
 
   const filtersActive = isFilterActive(filters);
 
+  /** A new width while the user drags the panel's edge. */
+  const onDetailsWidthChange = useCallback((width: number): void => {
+    setDetailsWidth(clampDetailsWidth(width));
+  }, []);
+
+  /** The width once the drag ends — the moment to remember it. */
+  const onDetailsWidthCommit = useCallback((width: number): void => {
+    const clamped = clampDetailsWidth(width);
+    setDetailsWidth(clamped);
+    storeDetailsWidth(detailsStorage(), clamped);
+  }, []);
+
+  /** Back to the default width (double-click on the edge). */
+  const onDetailsWidthReset = useCallback((): void => {
+    setDetailsWidth(DEFAULT_DETAILS_WIDTH);
+    forgetDetailsWidth(detailsStorage());
+  }, []);
+
   return (
     <div className="lp-app">
       <Toolbar
@@ -570,7 +612,14 @@ export function App(): ReactElement {
         onViewChange={onViewChange}
         webglOk={webgl.ok}
       />
-      <div className="lp-body">
+      <div
+        className="lp-body"
+        style={
+          {
+            "--lp-details-width": `${detailsWidth}px`,
+          } as React.CSSProperties
+        }
+      >
         {view === "3d" ? (
           <ThreeView
             webgl={webgl}
@@ -602,6 +651,10 @@ export function App(): ReactElement {
           loading={detailLoading}
           error={detailError}
           resolveName={resolveName}
+          width={detailsWidth}
+          onWidthChange={onDetailsWidthChange}
+          onWidthCommit={onDetailsWidthCommit}
+          onWidthReset={onDetailsWidthReset}
         />
       </div>
       <Legend />

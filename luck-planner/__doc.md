@@ -1358,6 +1358,38 @@ lowest node of the diagram, the deepest leaves the highest) and the live
 dashboard confirmed it: the root at `y = 487`, the trunk at `424`, the branch
 at `362`, the leaves at `237…300` — the tree grows up.
 
+### The details panel is resizable (0.32.0)
+
+The panel was a fixed 300 px column, and it showed: the node names and the
+history rows were cut mid-word ("Draf t"), and a branch with a long name
+("Client panel, settings and host typography") was truncated to nothing
+useful. It is **1.5× that (450 px) by default and draggable** — the user
+pulls its left edge, the canvas takes the rest, and the width survives a
+reload (the same localStorage pattern the theme uses). A double-click on the
+edge restores the default; the bounds are 280…720 px.
+
+Two details make the drag behave: the pointer events are **pointer** events
+(a touch or a pen drags the same way), and the move/release listeners live
+on the **window** — the pointer leaves the seven-pixel edge long before the
+user stops moving, and the drag must survive that. The rules (the clamp, the
+stored value, the default) live in `dashboard/src/details-width.ts`, pure
+over an injected storage, so they are tested without a DOM.
+
+The status of a child row also stopped being squeezed into a broken word
+(`flex: none` on the status, `min-width: 0` on the name).
+
+### The growth schema tolerates a rewriting MCP client (0.32.0)
+
+The live test pass found that the Kilo MCP client **rewrites an array that
+lives inside a schema-free object**: `steps[].facts` arrived as
+`{"item": [...]}` — and an empty array as `""` — so zod rejected the whole
+call with "expected array, received object". The data was not damaged, only
+the shape it arrived in. The shared schema now normalizes the shape *before*
+the validation (`lenientStringArraySchema`): an object with an `item` array
+yields that array, a string yields the array of its lines, and anything else
+is still rejected. It lives in the shared contract, so the MCP path, the
+HTTP API and the store all benefit at once.
+
 ### Agent config registrations (stage D4 — `server/agent-mcp-config.ts`, `shared/rpc.ts`, `index.server.ts`, `client/settings-screen.tsx`)
 
 Paseo injects the plugin's MCP server into an agent through the `agent.create`
