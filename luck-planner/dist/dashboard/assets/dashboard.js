@@ -112,6 +112,7 @@ var agentMcpTargetIdSchema = external_exports.enum([
   "kilo",
   "cline",
   "cursor",
+  "qwen-code",
   "codex"
 ]);
 var treeGet = defineRpc({

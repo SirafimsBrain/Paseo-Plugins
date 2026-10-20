@@ -18,7 +18,7 @@
 > install, the MCP round trip, the goal approval, the dashboard in the host's
 > browser, the SSE, the themes and the measurements), **D4** (the MCP
 > server registered in the agents' own config files — OpenCode, Kilo, Cline,
-> Cursor, Codex CLI) and **D5** (the structural tools an agent needs to shape
+> Cursor, Qwen Code, Codex CLI) and **D5** (the structural tools an agent needs to shape
 > a project: create/rename, move and archive any node) are done and all
 > tests are green.
 > Stages A1–I4, J1, J2, D4 and D5 are complete. Nothing in
@@ -685,7 +685,7 @@ gets a real actor, and agents get a written protocol for keeping the tree. Verif
   catalog mid-session (the memory-flash lesson, 0.8.0 + 0.8.2: for OpenCode/Kilo
   a registration in the provider's own MCP config file is strictly more reliable
   than the session-level entry);
-  Cline/Cursor/Codex CLI ignore session-delivered MCP servers altogether. Porting
+  Cline/Cursor/Qwen Code/Codex CLI ignore session-delivered MCP servers altogether. Porting
   memory-flash's config-file registrations (`opencode`/`kilo`/`cline`/`cursor`/`codex`) is
   the candidate follow-up stage **D4** — this plugin would reuse the *approach*
   (memory-flash itself is not touched; it already ships that solution), and
@@ -1405,7 +1405,7 @@ agents' *own* config files:
   server that lives in the agent's *config file* is not affected: the config
   is re-read every time a location boots, so the tools come back by
   themselves.
-- **Cline, Cursor and Codex CLI** are terminal agents that do not connect
+- **Cline, Cursor, Qwen Code and Codex CLI** are terminal agents that do not connect
   stdio MCP servers delivered through an orchestrator's session at all — for
   them a config-file entry is the only way in.
 
@@ -1428,6 +1428,7 @@ behaviour is visible in `paseo plugin logs luck-planner`.
 | Kilo | `~/.config/kilo/kilo.jsonc` (or `.json`) | the same `mcp:` shape |
 | Cline | `~/.cline/data/settings/cline_mcp_settings.json` | `mcpServers: { luck-planner: { transport: { type: "stdio", command, args } } }` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers: { luck-planner: { command, args } }` |
+| Qwen Code | `~/.qwen/settings.json` | `mcpServers: { luck-planner: { command, args, timeout: 15000, trust: true } }` |
 | Codex CLI | `~/.codex/config.toml` | the `[mcp_servers.luck-planner]` table with `command` and `args` |
 
 **The rules the writers follow**, in every format:
@@ -1446,16 +1447,16 @@ behaviour is visible in `paseo plugin logs luck-planner`.
 - **The paths are computed per call**, never at import time, so they follow
   the environment (and a test can point them at a temporary home).
 
-**Tests.** `tests/agent-mcp-config.test.ts` (22) points `HOME` and
+**Tests.** `tests/agent-mcp-config.test.ts` (26) points `HOME` and
 `XDG_CONFIG_HOME` at a temporary directory — the machine's real agent configs
-are never touched — and pins the five formats, the preservation of foreign
+are never touched — and pins the six formats, the preservation of foreign
 keys, servers, tables and comments through a registration *and* a removal,
 the refusal to overwrite a file that does not parse, the idempotence of a
 second registration (and exactly one table of ours in the TOML file), the
 truthful status (registered / registered with an older command / not
 registered / agent not installed here), the atomic write (no staging file
 left, the mode kept) and the paths themselves (XDG for OpenCode and Kilo, the
-home directory for Cline, Cursor and Codex). `tests/rpc.test.ts` pins the
+home directory for Cline, Cursor, Qwen Code and Codex). `tests/rpc.test.ts` pins the
 three new contracts on the RPC surface.
 
 ### WebGL spike and the lazy 3D entry (stage I1 — `dashboard/src/webgl.ts`, `dashboard/src/dashboard-3d.tsx`, `dashboard/src/components/ThreeView.tsx`, `scripts/bundle.mjs`)
@@ -1924,9 +1925,9 @@ artifact test could see: the host's CommonJS build has no `import.meta.url`
 published MCP entry died with the revision it pointed into (§10.3, §10.4).
 A candidate **D4**
 remains: registering the plugin in the agents' own MCP config files
-(OpenCode, Kilo, Cline, Cursor, Codex CLI) — the approach memory-flash took in
+(OpenCode, Kilo, Cline, Cursor, Qwen Code, Codex CLI) — the approach memory-flash took in
 0.8.0 and hardened in 0.8.2, for the same two reasons: OpenCode evicts an idle
-directory and takes the session-injected entry with it, and Cline/Cursor/Codex
+directory and takes the session-injected entry with it, and Cline/Cursor/Qwen Code/Codex
 CLI ignore session-delivered MCP servers altogether. It changes **this** plugin
 only: the writers reuse `mcpServerCommand()`/`injectedMcpConfig()`, and
 memory-flash itself is not touched — it already ships that solution.

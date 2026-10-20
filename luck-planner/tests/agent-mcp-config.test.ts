@@ -169,6 +169,75 @@ describe("D4: the Cline and Cursor config files", () => {
   });
 });
 
+describe("D4: the Qwen Code config file", () => {
+  it("writes the flat shape Qwen's own `qwen mcp add` writes", () => {
+    expect(registerAgentMcp("qwen-code").ok).toBe(true);
+    const document = JSON.parse(readFileSync(targetPath("qwen-code"), "utf8")) as {
+      mcpServers: Record<string, { command: string; args: string[]; timeout?: number; trust?: boolean }>;
+    };
+    const entry = document.mcpServers[AGENT_MCP_SERVER_NAME];
+    expect(typeof entry?.command).toBe("string");
+    expect(Array.isArray(entry?.args)).toBe(true);
+    expect(entry?.command).toMatch(/node/);
+    // The slow-start guard the OpenCode/Kilo entry carries.
+    expect(entry?.timeout).toBeGreaterThanOrEqual(10000);
+    // The user asked for the registration with a button — the agent must not
+    // stop at an approval prompt in another window.
+    expect(entry?.trust).toBe(true);
+  });
+
+  it("keeps every other setting of the file", () => {
+    const file = targetPath("qwen-code");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify(
+        {
+          ui: { autoModeAcknowledged: true },
+          modelProviders: { openai: [{ id: "some/model" }] },
+          mcpServers: { other: { command: "node", args: ["x.js"] } },
+        },
+        null,
+        2,
+      ),
+    );
+    expect(registerAgentMcp("qwen-code").ok).toBe(true);
+    const document = JSON.parse(readFileSync(file, "utf8")) as {
+      ui: { autoModeAcknowledged: boolean };
+      modelProviders: unknown;
+      mcpServers: Record<string, unknown>;
+    };
+    expect(document.ui.autoModeAcknowledged).toBe(true);
+    expect(document.modelProviders).toBeDefined();
+    expect(document.mcpServers.other).toBeDefined();
+    expect(document.mcpServers[AGENT_MCP_SERVER_NAME]).toBeDefined();
+  });
+
+  it("removes only its own entry", () => {
+    const file = targetPath("qwen-code");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({ mcpServers: { other: { command: "node", args: ["x.js"] } } }),
+    );
+    registerAgentMcp("qwen-code");
+    expect(unregisterAgentMcp("qwen-code").ok).toBe(true);
+    const document = JSON.parse(readFileSync(file, "utf8")) as {
+      mcpServers: Record<string, unknown>;
+    };
+    expect(document.mcpServers[AGENT_MCP_SERVER_NAME]).toBeUndefined();
+    expect(document.mcpServers.other).toBeDefined();
+  });
+
+  it("covers the `qwen-code` provider, so the session injection yields to it", () => {
+    expect(agentConfigCoversProvider("qwen-code").covered).toBe(false);
+    expect(registerAgentMcp("qwen-code").ok).toBe(true);
+    const cover = agentConfigCoversProvider("qwen-code");
+    expect(cover.covered).toBe(true);
+    expect(cover.path).toContain(path.join(".qwen", "settings.json"));
+  });
+});
+
 describe("D4: the Codex CLI config file (TOML)", () => {
   it("adds its own table and keeps the rest of the file", () => {
     const file = targetPath("codex");
@@ -282,12 +351,13 @@ describe("D4: the writes are atomic", () => {
 });
 
 describe("D4: every target is offered", () => {
-  it("knows the five agents", () => {
+  it("knows the six agents", () => {
     expect(agentMcpStatuses().map((row) => row.id)).toEqual([
       "opencode",
       "kilo",
       "cline",
       "cursor",
+      "qwen-code",
       "codex",
     ]);
   });
@@ -306,12 +376,14 @@ describe("D4: the registration is written where the agent reads it", () => {
     expect(existsSync(path.join(home, ".config", "opencode", "opencode.json"))).toBe(true);
   });
 
-  it("uses the home directory for Cline, Cursor and Codex", () => {
+  it("uses the home directory for Cline, Cursor, Qwen Code and Codex", () => {
     registerAgentMcp("cline");
     registerAgentMcp("cursor");
+    registerAgentMcp("qwen-code");
     registerAgentMcp("codex");
     expect(existsSync(path.join(home, ".cline", "data", "settings", "cline_mcp_settings.json"))).toBe(true);
     expect(existsSync(path.join(home, ".cursor", "mcp.json"))).toBe(true);
+    expect(existsSync(path.join(home, ".qwen", "settings.json"))).toBe(true);
     expect(existsSync(path.join(home, ".codex", "config.toml"))).toBe(true);
   });
 });

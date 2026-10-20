@@ -242,7 +242,7 @@ export default function contribute(server: PluginServerContext) {
       // registration, the session-level entry is *not* injected. The config
       // entry survives OpenCode's per-directory eviction, reconnects at every
       // location boot and is the only thing the terminal agents (Cline,
-      // Cursor, Codex CLI) read at all — while a session entry that died with
+      // Cursor, Qwen Code, Codex CLI) read at all — while a session entry that died with
       // an eviction would still own the server's name and shadow the healthy
       // config one, breaking every call. The injection stays the fallback for
       // machines whose config file was never (or can no longer) be written.
@@ -372,7 +372,7 @@ export default function contribute(server: PluginServerContext) {
   // Agent config registrations (stage D4): the plugin can register its MCP
   // server in the agents' *own* config files — the only registration that
   // survives OpenCode's per-directory eviction and the only one the terminal
-  // agents (Cline, Cursor, Codex CLI) read at all. The files belong to the
+  // agents (Cline, Cursor, Qwen Code, Codex CLI) read at all. The files belong to the
   // user, so nothing is written without an explicit request from the settings
   // screen; every other key, server, table and comment is preserved, and a
   // file that does not parse is reported instead of overwritten.

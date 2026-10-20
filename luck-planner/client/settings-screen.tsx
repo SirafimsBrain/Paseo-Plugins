@@ -201,7 +201,7 @@ export function LuckPlannerSettingsScreen({ theme }: PluginSurfaceProps) {
         <SettingsSection title="Agent config files (stage D4)">
           <SettingsRow
             label="Register the MCP server in the agents' own config files"
-            hint="OpenCode and Kilo keep the session entry in memory and drop it when an idle directory is evicted; Cline, Cursor and Codex CLI ignore session-delivered MCP servers altogether. A config-file entry survives both. Your files are only touched when you press a button — every other key, server and comment is preserved."
+            hint="OpenCode and Kilo keep the session entry in memory and drop it when an idle directory is evicted; Cline, Cursor, Qwen Code and Codex CLI ignore session-delivered MCP servers altogether. A config-file entry survives both. Your files are only touched when you press a button — every other key, server and comment is preserved."
           >
             <Text style={{ color: fg, fontSize: font(11) }}>
               {agentMessage !== "" ? agentMessage : " "}

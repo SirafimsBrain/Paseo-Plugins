@@ -13,7 +13,7 @@
  *    itself is perfectly healthy. A server that lives in the agent's *config
  *    file* is not affected: the config is re-read every time a location
  *    boots, so the tools come back by themselves.
- * 2. **Cline, Cursor and Codex CLI** are terminal agents that do not
+ * 2. **Cline, Cursor, Qwen Code and Codex CLI** are terminal agents that do not
  *    connect stdio MCP servers delivered through an orchestrator's session
  *    at all — for them a config-file entry is the only way in.
  *
@@ -63,6 +63,7 @@ export const AGENT_MCP_TARGETS = [
   "kilo",
   "cline",
   "cursor",
+  "qwen-code",
   "codex",
 ] as const;
 export type AgentMcpTargetId = (typeof AGENT_MCP_TARGETS)[number];
@@ -160,6 +161,16 @@ function cursorPath(): string {
   return path.join(os.homedir(), ".cursor", "mcp.json");
 }
 
+/**
+ * Qwen Code keeps its user settings in `~/.qwen/settings.json` — the same
+ * file `qwen mcp add` writes, and the file its MCP reader reads. The
+ * `mcpServers` object there has the flat `{command, args}` shape (the
+ * `qwen mcp` CLI writes exactly that).
+ */
+function qwenPath(): string {
+  return path.join(os.homedir(), ".qwen", "settings.json");
+}
+
 function codexPath(): string {
   return path.join(os.homedir(), ".codex", "config.toml");
 }
@@ -246,7 +257,7 @@ function writeJsonDocument(target: string, document: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
-// The `mcpServers:` format — Cline and Cursor
+// The `mcpServers:` format — Cline, Cursor and Qwen Code
 // ---------------------------------------------------------------------------
 
 interface ServersDocument {
@@ -404,6 +415,8 @@ function targetLabel(id: AgentMcpTargetId): string {
       return "Cline";
     case "cursor":
       return "Cursor";
+    case "qwen-code":
+      return "Qwen Code";
     case "codex":
       return "Codex CLI";
   }
@@ -420,6 +433,8 @@ function targetPath(id: AgentMcpTargetId): string {
       return clinePath();
     case "cursor":
       return cursorPath();
+    case "qwen-code":
+      return qwenPath();
     case "codex":
       return codexPath();
   }
@@ -442,6 +457,8 @@ function targetDetected(id: AgentMcpTargetId): boolean {
       return fs.existsSync(clinePath()) || fs.existsSync(path.dirname(clinePath()));
     case "cursor":
       return fs.existsSync(cursorPath()) || fs.existsSync(path.dirname(cursorPath()));
+    case "qwen-code":
+      return fs.existsSync(qwenPath()) || fs.existsSync(path.dirname(qwenPath()));
     case "codex":
       return fs.existsSync(codexPath()) || fs.existsSync(path.dirname(codexPath()));
   }
@@ -475,7 +492,7 @@ function statusOf(id: AgentMcpTargetId): AgentMcpStatus {
     };
   }
 
-  if (id === "cline" || id === "cursor") {
+  if (id === "cline" || id === "cursor" || id === "qwen-code") {
     const loaded = readServersDocument(path);
     if (!loaded.ok) {
       return { id, label: targetLabel(id), path, detected, installed: false, upToDate: null, command: null, args: null };
@@ -528,7 +545,7 @@ function statusOf(id: AgentMcpTargetId): AgentMcpStatus {
   };
 }
 
-/** Reads the launch back from a Cline/Cursor entry. */
+/** Reads the launch back from a Cline/Cursor/Qwen entry. */
 function serversEntryLaunch(entry: unknown, id: AgentMcpTargetId): AgentMcpLaunch | null {
   const candidate = entry as { command?: unknown; args?: unknown; transport?: unknown } | undefined;
   const command = id === "cline" ? (candidate?.transport as { command?: unknown } | undefined)?.command : candidate?.command;
@@ -537,10 +554,24 @@ function serversEntryLaunch(entry: unknown, id: AgentMcpTargetId): AgentMcpLaunc
   return { command, args: args.map(String) };
 }
 
-/** Writes the entry a Cline/Cursor expects. */
+/** Writes the entry a Cline/Cursor/Qwen Code expects. */
 function serversEntryFor(id: AgentMcpTargetId, launch: AgentMcpLaunch): unknown {
   if (id === "cline") {
     return { transport: { type: "stdio", command: launch.command, args: launch.args } };
+  }
+  if (id === "qwen-code") {
+    // Qwen Code reads the flat shape (`qwen mcp add` writes exactly that) and
+    // understands two extra keys: `timeout` — the same slow-start guard the
+    // OpenCode/Kilo entry carries — and `trust`, which lets the agent use the
+    // server without an approval prompt the user would have to answer in
+    // another window. The user asked for this registration with a button, so
+    // the server is trusted by that very act.
+    return {
+      command: launch.command,
+      args: launch.args,
+      timeout: TOOL_TIMEOUT_MS,
+      trust: true,
+    };
   }
   return { command: launch.command, args: launch.args };
 }
@@ -569,7 +600,7 @@ export function registerAgentMcp(id: AgentMcpTargetId): { ok: boolean; error: st
       return { ok: true, error: null };
     }
 
-    if (id === "cline" || id === "cursor") {
+    if (id === "cline" || id === "cursor" || id === "qwen-code") {
       const target = targetPath(id);
       const loaded = readServersDocument(target);
       if (!loaded.ok) return { ok: false, error: loaded.error };
@@ -618,7 +649,7 @@ export function unregisterAgentMcp(id: AgentMcpTargetId): { ok: boolean; error: 
       return { ok: true, error: null };
     }
 
-    if (id === "cline" || id === "cursor") {
+    if (id === "cline" || id === "cursor" || id === "qwen-code") {
       const target = targetPath(id);
       const loaded = readServersDocument(target);
       if (!loaded.ok) return { ok: false, error: loaded.error };

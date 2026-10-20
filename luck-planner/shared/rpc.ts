@@ -36,6 +36,7 @@ export const agentMcpTargetIdSchema = z.enum([
   "kilo",
   "cline",
   "cursor",
+  "qwen-code",
   "codex",
 ]);
 
@@ -309,6 +310,7 @@ export const AGENT_MCP_TARGET_IDS = [
   "kilo",
   "cline",
   "cursor",
+  "qwen-code",
   "codex",
 ] as const;
 export type AgentMcpTargetId = (typeof AGENT_MCP_TARGET_IDS)[number];
@@ -331,7 +333,8 @@ export const agentMcpTargetStatusSchema = z.object({
  *
  * The plugin can register its MCP server in the agents' *own* config files,
  * which is the only registration that survives OpenCode's per-directory
- * eviction and the only one the terminal agents (Cline, Cursor, Codex CLI)
+ * eviction and the only one the terminal agents (Cline, Cursor, Qwen Code,
+ * Codex CLI)
  * read at all. The files belong to the user, so the plugin never writes them
  * by itself: the settings screen offers one button per target (and one for
  * all of them), and this contract reports what is registered where.
