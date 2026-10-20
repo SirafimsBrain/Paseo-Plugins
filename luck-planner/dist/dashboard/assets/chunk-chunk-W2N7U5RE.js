@@ -33013,10 +33013,14 @@ function buildGraph(input2, options = {}) {
     LAYOUT.nodeHeight + LAYOUT.verticalGap
   ]);
   const laidOut = layout(hierarchy(layoutInput, (d) => d.children));
+  let maxY = 0;
+  laidOut.each((d) => {
+    if (d.y > maxY) maxY = d.y;
+  });
   const positions = /* @__PURE__ */ new Map();
   laidOut.each((d) => {
     if (d.data.id !== VIRTUAL_ROOT) {
-      positions.set(d.data.id, { x: d.x, y: d.y });
+      positions.set(d.data.id, { x: d.x, y: maxY - d.y });
     }
   });
   const nodes = [];

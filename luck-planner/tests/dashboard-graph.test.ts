@@ -204,12 +204,18 @@ describe("buildGraph positions", () => {
       collapsed: false,
     });
 
+    // The tree grows **upwards**: the deepest level sits at the top (y = 0)
+    // and the root at the bottom, one step per level.
     const level = LAYOUT.nodeHeight + LAYOUT.verticalGap;
-    expect(byId.get("root-1")!.position.y).toBe(level);
+    expect(byId.get("root-1")!.position.y).toBe(3 * level);
     expect(byId.get("trunk-1")!.position.y).toBe(2 * level);
-    expect(byId.get("branch-1")!.position.y).toBe(3 * level);
-    expect(byId.get("leaf-a")!.position.y).toBe(4 * level);
-    expect(byId.get("leaf-b")!.position.y).toBe(4 * level);
+    expect(byId.get("branch-1")!.position.y).toBe(level);
+    expect(byId.get("leaf-a")!.position.y).toBe(0);
+    expect(byId.get("leaf-b")!.position.y).toBe(0);
+    // The root is the lowest node of the diagram.
+    expect(byId.get("root-1")!.position.y).toBeGreaterThan(
+      byId.get("leaf-a")!.position.y,
+    );
 
     const a = byId.get("leaf-a")!.position.x;
     const b = byId.get("leaf-b")!.position.x;
@@ -259,9 +265,11 @@ describe("buildGraph collapse and payloads", () => {
     const graph = buildGraph(fixture(), { collapsedIds: new Set(["branch-1"]) });
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
     const level = LAYOUT.nodeHeight + LAYOUT.verticalGap;
-    expect(byId.get("root-1")!.position.y).toBe(level);
-    expect(byId.get("trunk-1")!.position.y).toBe(2 * level);
-    expect(byId.get("branch-1")!.position.y).toBe(3 * level);
+    // The collapsed branch is the deepest visible node: it sits at the top,
+    // the root at the bottom — and the gap it leaves is closed.
+    expect(byId.get("root-1")!.position.y).toBe(2 * level);
+    expect(byId.get("trunk-1")!.position.y).toBe(level);
+    expect(byId.get("branch-1")!.position.y).toBe(0);
   });
 
   it("renders a bee edge only when both endpoints are visible", () => {

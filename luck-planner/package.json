@@ -1,7 +1,7 @@
 {
   "name": "luck-planner",
   "private": true,
-  "version": "0.30.0",
+  "version": "0.30.1",
   "scripts": {
     "bundle": "node scripts/bundle.mjs",
     "pretest": "node scripts/bundle.mjs",

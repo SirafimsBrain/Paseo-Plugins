@@ -431,10 +431,25 @@ export function buildGraph(
   ]);
   const laidOut = layout(hierarchy(layoutInput, (d) => d.children));
 
+  // **The tree grows upwards.** d3 lays the hierarchy out with the sibling
+  // order on x and the depth on y; a diagram read left-to-right would put the
+  // root at the far left and the leaves at the far right, which no tree in
+  // the world does. A human reads a tree from its root at the bottom, the
+  // trunk rising and the branches fanning out above — so the depth axis
+  // becomes the vertical one and is inverted: the deepest leaves sit at the
+  // top (y = 0) and the root at the bottom (y = the deepest level).
+  //
+  // The node components already draw their handles top/bottom for exactly
+  // this direction; before the flip they pointed into empty space.
+  let maxY = 0;
+  laidOut.each((d) => {
+    if (d.y > maxY) maxY = d.y;
+  });
+
   const positions = new Map<string, { x: number; y: number }>();
   laidOut.each((d) => {
     if (d.data.id !== VIRTUAL_ROOT) {
-      positions.set(d.data.id, { x: d.x, y: d.y });
+      positions.set(d.data.id, { x: d.x, y: maxY - d.y });
     }
   });
 

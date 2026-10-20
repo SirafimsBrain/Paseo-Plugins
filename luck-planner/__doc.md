@@ -867,6 +867,22 @@ construction). `npm run typecheck` runs both. The pure modules the vitest suite 
 (`params.ts`, `theme.ts`, `colors.ts`) touch no DOM APIs, so they typecheck under either
 configuration.
 
+### The tree grows upwards (the 2D flip, 0.30.1)
+
+A tree read left-to-right — the root at the far left, the leaves at the far
+right — is not how a human reads a tree. The depth axis became the vertical
+one and was inverted: the deepest level sits at the top (`y = 0`) and the root
+at the bottom, the trunk rising and the branches fanning out above it. One
+line in the adapter (`{ x: d.x, y: maxY - d.y }`), and the node components —
+which had *always* drawn their handles `Position.Top` / `Position.Bottom` for
+exactly this direction — finally point at each other instead of into empty
+space.
+
+The layout tests were rewritten for the new convention (the root is the
+lowest node of the diagram, the deepest leaves the highest) and the live
+dashboard confirmed it: the root at `y = 487`, the trunk at `424`, the branch
+at `362`, the leaves at `237…300` — the tree grows up.
+
 ### Data adapter and layout (stage G2 — `dashboard/src/graph.ts`, G2 nodes)
 
 The `/api/tree` payload becomes a React Flow `{ nodes, edges }` graph in a
