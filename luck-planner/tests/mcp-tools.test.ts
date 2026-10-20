@@ -117,6 +117,9 @@ describe("MCP tool surface", () => {
       "luck_tree_get_context",
       "luck_tree_search",
       "luck_tree_upsert_leaf",
+      "luck_tree_upsert_node",
+      "luck_tree_move_node",
+      "luck_tree_archive_node",
       "luck_tree_add_bee",
       "luck_tree_report_bug",
       "luck_tree_set_goal",
@@ -447,6 +450,168 @@ describe("luck_tree_upsert_leaf", () => {
     });
     expectError(result, /not found in project/);
     expect(store.getNode(P, leafA.id)?.name).toBe("retry failed charges");
+  });
+});
+
+describe("luck_tree_upsert_node, luck_tree_move_node, luck_tree_archive_node", () => {
+  it("creates a trunk, a branch and a subbranch — the structure a project needs", () => {
+    // The gap the stage-D4 test pass found: with the leaf-level tool alone
+    // an agent could add facts but not shape the tree, so a project with
+    // several functional areas could only be a flat list of leaves.
+    const store = openStore();
+    const { root } = seedTree(store);
+    const trunk = payload<{ created: boolean; node: { id: string; kind: string; name: string } }>(
+      call(store, "luck_tree_upsert_node", {
+        projectKey: P,
+        kind: "trunk",
+        parentId: root.id,
+        name: "Provider adapters",
+      }),
+    );
+    expect(trunk.created).toBe(true);
+    expect(trunk.node.kind).toBe("trunk");
+    const branch = payload<{ created: boolean; node: { id: string; kind: string } }>(
+      call(store, "luck_tree_upsert_node", {
+        projectKey: P,
+        kind: "branch",
+        parentId: trunk.node.id,
+        name: "Cline",
+      }),
+    );
+    expect(branch.node.kind).toBe("branch");
+    const subbranch = payload<{ created: boolean; node: { id: string; kind: string } }>(
+      call(store, "luck_tree_upsert_node", {
+        projectKey: P,
+        kind: "subbranch",
+        parentId: branch.node.id,
+        name: "Store layout",
+      }),
+    );
+    expect(subbranch.node.kind).toBe("subbranch");
+  });
+
+  it("renames the auto-created skeleton", () => {
+    const store = openStore();
+    const { trunk } = seedTree(store);
+    const renamed = payload<{ created: boolean; node: { name: string } }>(
+      call(store, "luck_tree_upsert_node", {
+        projectKey: P,
+        nodeId: trunk.id,
+        name: "Session manager plugin",
+      }),
+    );
+    expect(renamed.created).toBe(false);
+    expect(renamed.node.name).toBe("Session manager plugin");
+  });
+
+  it("places a node under the first suitable parent when none is named", () => {
+    const store = openStore();
+    const { root } = seedTree(store);
+    const branch = payload<{ node: { id: string; parentId: string } }>(
+      call(store, "luck_tree_upsert_node", {
+        projectKey: P,
+        kind: "branch",
+        name: "Guessed parent",
+      }),
+    );
+    // The first trunk of the root.
+    const trunks = store.listChildren(P, root.id);
+    expect(branch.node.parentId).toBe(trunks[0]?.id);
+  });
+
+  it("refuses an impossible shape with a readable reason", () => {
+    const store = openStore();
+    const { root } = seedTree(store);
+    const result = call(store, "luck_tree_upsert_node", {
+      projectKey: P,
+      kind: "leaf",
+      parentId: root.id,
+      name: "Not allowed here",
+    });
+    expectError(result, /cannot be a child of a root/);
+  });
+
+  it("asks for the kind and the name when a node is created", () => {
+    const store = openStore();
+    seedTree(store);
+    expectError(
+      call(store, "luck_tree_upsert_node", { projectKey: P, name: "No kind" }),
+      /kind is required/,
+    );
+    expectError(
+      call(store, "luck_tree_upsert_node", { projectKey: P, kind: "branch" }),
+      /name is required/,
+    );
+  });
+
+  it("moves a node with its subtree", () => {
+    const store = openStore();
+    const { branch, leafA } = seedTree(store);
+    const other = payload<{ node: { id: string } }>(
+      call(store, "luck_tree_upsert_node", {
+        projectKey: P,
+        kind: "branch",
+        name: "Other branch",
+      }),
+    );
+    const moved = payload<{ node: { parentId: string } }>(
+      call(store, "luck_tree_move_node", {
+        projectKey: P,
+        nodeId: leafA.id,
+        newParentId: other.node.id,
+      }),
+    );
+    expect(moved.node.parentId).toBe(other.node.id);
+    expect(store.getNode(P, branch.id)?.id).toBe(branch.id);
+  });
+
+  it("refuses a move that would break the kind rules", () => {
+    const store = openStore();
+    const { root, leafA } = seedTree(store);
+    const result = call(store, "luck_tree_move_node", {
+      projectKey: P,
+      nodeId: leafA.id,
+      newParentId: root.id,
+    });
+    expectError(result, /cannot be a child of a root/);
+  });
+
+  it("archives a node and its whole subtree, and the tree stops showing them", () => {
+    const store = openStore();
+    const { branch, leafA } = seedTree(store);
+    const archived = payload<{ archived: string[] }>(
+      call(store, "luck_tree_archive_node", {
+        projectKey: P,
+        nodeId: branch.id,
+      }),
+    );
+    expect(archived.archived).toContain(branch.id);
+    expect(archived.archived).toContain(leafA.id);
+    // The live tree no longer shows them; the rows are still in the database.
+    const live = store.listChildren(P, branch.id);
+    expect(live).toEqual([]);
+    const stored = store.listNodes(P, { includeArchived: true });
+    expect(stored.some((node) => node.id === leafA.id)).toBe(true);
+  });
+
+  it("never touches another project", () => {
+    const store = openStore();
+    const { branch } = seedTree(store);
+    const other = store.createNode({
+      projectKey: "/projects/other",
+      parentId: null,
+      kind: "root",
+      name: "Other root",
+      actor: ACTOR,
+    });
+    const result = call(store, "luck_tree_archive_node", {
+      projectKey: "/projects/other",
+      nodeId: branch.id,
+    });
+    expectError(result, /not found|does not exist/i);
+    // The node of the first project is untouched.
+    expect(store.getNode(P, branch.id)?.archivedAt ?? null).toBeNull();
+    expect(other.id).not.toBe(branch.id);
   });
 });
 

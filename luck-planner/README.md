@@ -35,6 +35,9 @@ The MCP server is injected into every agent created through Paseo (configurable 
 | `luck_tree_get_context` | The "where am I / what is around" call. Without a node id: the project overview (roots and their first-level children). With one: the full path root → … → node, its children, its sibling leaves, the bees touching it, its blocking bugs and its growth progress. |
 | `luck_tree_search` | FTS5 full-text search over the tree, with optional kind and status filters and an `includeArchived` switch. |
 | `luck_tree_upsert_leaf` | Records a planned or confirmed fact. With a leaf id it updates that leaf (any mutable field plus an optional status transition in the same call); without one it creates a leaf under a parent. The very first leaf of a fresh project bootstraps the skeleton root → trunk → branch. |
+| `luck_tree_upsert_node` | Shapes the structure: creates a node of any kind (root → trunk → branch → side branch) or renames an existing one — this is how the auto-created skeleton gets its real names and how a project with several areas gets a branch per area. |
+| `luck_tree_move_node` | Re-parents a node with its whole subtree, for the moment a fact turns out to belong to another branch. |
+| `luck_tree_archive_node` | Soft-deletes a node and everything below it: the rows stay in the database and the audit trail keeps them, the tree stops showing them. |
 | `luck_tree_add_bee` | A directed influence link between two leaves, with an impact description and a status. |
 | `luck_tree_report_bug` | An incident with a title, a description and a severity, optionally attached to the leaves it blocks. |
 | `luck_tree_set_goal` | Manages a high goal **before** the approval gate: `create` a draft, `update` a draft or proposed plan, or `propose` it for human review. There is no `approve` action — approval is the human's. |

@@ -119,6 +119,17 @@ leaf under it. Every later leaf must pass \`parentId\` from
 \`luck_tree_get_context\`; an empty result plus a missing \`parentId\` is the
 bootstrap case, not an error.
 
+**Shape the project before you fill it.** The bootstrap skeleton is a
+placeholder, not a structure: a project with several functional areas needs
+one trunk per area, and each area a branch per module. \`luck_tree_upsert_node\`
+creates a node of any kind (root → trunk → branch → subbranch → leaf) and
+renames an existing one — so the generic \`Trunk\`/\`General\` get their real
+names, and every leaf is filed under the branch it belongs to.
+\`luck_tree_move_node\` re-parents a node when a fact turns out to belong
+elsewhere, and \`luck_tree_archive_node\` soft-deletes a node with its whole
+subtree (the rows stay in the database, the audit trail keeps them, the tree
+stops showing them) when something was written in the wrong place.
+
 ---
 
 ## 3. Status transitions — the machine is not advisory

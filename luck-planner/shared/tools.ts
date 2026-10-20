@@ -31,6 +31,9 @@ export const MCP_TOOL_NAMES = [
   "luck_tree_get_context",
   "luck_tree_search",
   "luck_tree_upsert_leaf",
+  "luck_tree_upsert_node",
+  "luck_tree_move_node",
+  "luck_tree_archive_node",
   "luck_tree_add_bee",
   "luck_tree_report_bug",
   "luck_tree_set_goal",
@@ -153,3 +156,68 @@ export const historyInputSchema = z.object({
   entityId: idSchema,
 });
 export type HistoryInput = z.infer<typeof historyInputSchema>;
+
+/**
+ * `luck_tree_upsert_node`: create or update a node of **any** kind.
+ *
+ * The leaf-level tool (`luck_tree_upsert_leaf`) is deliberately narrow, and
+ * that narrowness has a cost the stage-D4 test pass made visible: an agent
+ * could add facts but could not shape the *structure* — the auto-created
+ * skeleton stayed "Trunk → General" forever, and a project with four
+ * functional areas could only be described as one flat list of leaves. The
+ * store has always supported the structural kinds; this tool exposes them:
+ *
+ * - **create** — `kind` plus `name` (and optionally `parentId`): a trunk
+ *   under a root, a branch under a trunk, a side branch under a branch. The
+ *   store validates the parent/child kinds, so an impossible shape is
+ *   refused with the reason.
+ * - **update** — `nodeId` plus any of `name`, `description`, `version`,
+ *   `payload`: the way the generic skeleton names ("Trunk", "General") get
+ *   their real names.
+ */
+export const upsertNodeInputSchema = z.object({
+  projectKey: projectKeySchema,
+  /** The node to update; omit it to create a new one. */
+  nodeId: idSchema.optional(),
+  /** The kind of the created node (ignored when updating). */
+  kind: nodeKindSchema.optional(),
+  /** The parent of the created node; `null` is valid for a root only. */
+  parentId: idSchema.nullable().optional(),
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  version: z.string().optional(),
+  payload: z.record(z.string(), z.unknown()).optional(),
+  status: leafStatusSchema.optional(),
+  actor: actorSchema.optional(),
+});
+export type UpsertNodeInput = z.infer<typeof upsertNodeInputSchema>;
+
+/**
+ * `luck_tree_move_node`: re-parents a node (with its whole subtree).
+ *
+ * The tree's shape is a decision an agent revisits: the area a fact belongs
+ * to changes when the project is understood better. The store validates the
+ * new parent/child kinds and refuses a move that would create a cycle.
+ */
+export const moveNodeInputSchema = z.object({
+  projectKey: projectKeySchema,
+  nodeId: idSchema,
+  newParentId: idSchema,
+  actor: actorSchema.optional(),
+});
+export type MoveNodeInput = z.infer<typeof moveNodeInputSchema>;
+
+/**
+ * `luck_tree_archive_node`: soft-deletes a node **and its whole subtree**.
+ *
+ * Archiving, not deleting: the audit trail keeps the row and the history
+ * stays readable, while the tree (and every diagram built from it) stops
+ * showing it. It is the way an agent cleans up a fact it wrote in the wrong
+ * place — and it is reversible for a human through the panel.
+ */
+export const archiveNodeInputSchema = z.object({
+  projectKey: projectKeySchema,
+  nodeId: idSchema,
+  actor: actorSchema.optional(),
+});
+export type ArchiveNodeInput = z.infer<typeof archiveNodeInputSchema>;

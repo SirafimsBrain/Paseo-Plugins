@@ -22827,8 +22827,47 @@ var historyInputSchema = external_exports.object({
   projectKey: projectKeySchema,
   entityId: idSchema
 });
+var upsertNodeInputSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  /** The node to update; omit it to create a new one. */
+  nodeId: idSchema.optional(),
+  /** The kind of the created node (ignored when updating). */
+  kind: nodeKindSchema.optional(),
+  /** The parent of the created node; `null` is valid for a root only. */
+  parentId: idSchema.nullable().optional(),
+  name: external_exports.string().min(1).optional(),
+  description: external_exports.string().optional(),
+  version: external_exports.string().optional(),
+  payload: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
+  status: leafStatusSchema.optional(),
+  actor: actorSchema.optional()
+});
+var moveNodeInputSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  nodeId: idSchema,
+  newParentId: idSchema,
+  actor: actorSchema.optional()
+});
+var archiveNodeInputSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  nodeId: idSchema,
+  actor: actorSchema.optional()
+});
 
 // server/mcp-tools.ts
+function defaultParentId(store, projectKey, kind) {
+  if (kind === "root") return null;
+  const roots = store.listChildren(projectKey, null);
+  const root = roots[0];
+  if (root === void 0) return null;
+  if (kind === "trunk") return root.id;
+  const trunks = store.listChildren(projectKey, root.id);
+  const trunk = trunks[0];
+  if (trunk === void 0) return null;
+  if (kind === "branch") return trunk.id;
+  const branches = store.listChildren(projectKey, trunk.id);
+  return branches[0]?.id ?? null;
+}
 function str(description) {
   return { type: "string", description };
 }
@@ -22937,6 +22976,79 @@ var MCP_TOOLS = [
         actor: str("Who performs the change (agent id).")
       },
       required: ["projectKey"]
+    }
+  },
+  {
+    name: "luck_tree_upsert_node",
+    title: "Create or update a node of any kind",
+    description: "Shape the project's structure. Without nodeId creates a node of the given kind (root, trunk, branch, subbranch) under parentId \u2014 the store validates the parent/child kinds, so an impossible shape is refused with the reason. With nodeId updates that node: name, description, version, payload or status. This is how the auto-created skeleton ('Trunk', 'General') gets its real names, and how a project with several functional areas gets a branch per area.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        nodeId: str("Existing node to update. Omit to create a new one."),
+        kind: {
+          type: "string",
+          enum: ["root", "trunk", "branch", "subbranch", "leaf"],
+          description: "Kind of the created node (ignored when updating)."
+        },
+        parentId: str(
+          "Parent of the created node. Null is valid for a root only; omit to place it under the project's single root."
+        ),
+        name: str("Node name (required when creating)."),
+        description: str("Longer description of the node."),
+        version: str("Version this node describes."),
+        payload: {
+          type: "object",
+          description: "JSON payload the node carries."
+        },
+        status: {
+          type: "string",
+          enum: [
+            "draft",
+            "ready",
+            "claimed",
+            "in_progress",
+            "blocked",
+            "done",
+            "cancelled",
+            "superseded"
+          ],
+          description: "Desired status (leaf state machine)."
+        },
+        actor: str("Who performs the change (agent id).")
+      },
+      required: ["projectKey"]
+    }
+  },
+  {
+    name: "luck_tree_move_node",
+    title: "Move a node to another parent",
+    description: "Re-parent a node (with its whole subtree) \u2014 the way an agent moves a fact into the branch it really belongs to when the project is understood better. The store validates the new parent/child kinds and refuses a move that would create a cycle.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        nodeId: str("The node to move."),
+        newParentId: str("Its new parent."),
+        actor: str("Who performs the change (agent id).")
+      },
+      required: ["projectKey", "nodeId", "newParentId"]
+    }
+  },
+  {
+    name: "luck_tree_archive_node",
+    title: "Archive a node and its subtree",
+    description: "Soft-delete a node and everything below it: the rows stay in the database and the audit trail keeps them, but the tree and every diagram built from it stop showing them. The way an agent cleans up a fact it wrote in the wrong place.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        nodeId: str("The node to archive."),
+        reason: str("Why it is archived (kept in the audit trail)."),
+        actor: str("Who performs the change (agent id).")
+      },
+      required: ["projectKey", "nodeId"]
     }
   },
   {
@@ -23114,6 +23226,81 @@ function dispatchMcpTool(name, args, context) {
         const parsed = upsertLeafInputSchema.safeParse(input2);
         if (!parsed.success) return invalidInput(parsed.error.issues);
         return dispatchUpsertLeaf(store, parsed.data, actor);
+      }
+      case "luck_tree_upsert_node": {
+        const parsed = upsertNodeInputSchema.safeParse(input2);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value = parsed.data;
+        if (value.nodeId !== void 0) {
+          const updated = store.updateNode({
+            projectKey: value.projectKey,
+            id: value.nodeId,
+            ...value.name === void 0 ? {} : { name: value.name },
+            ...value.description === void 0 ? {} : { description: value.description },
+            ...value.version === void 0 ? {} : { version: value.version },
+            ...value.payload === void 0 ? {} : { payload: value.payload },
+            actor
+          });
+          const node3 = value.status === void 0 ? updated : store.setStatus({
+            projectKey: value.projectKey,
+            id: value.nodeId,
+            status: value.status,
+            actor
+          });
+          return text({ created: false, node: node3 });
+        }
+        if (value.kind === void 0) {
+          return invalidInput([
+            {
+              path: ["kind"],
+              message: "kind is required when creating a node"
+            }
+          ]);
+        }
+        if (value.name === void 0) {
+          return invalidInput([
+            {
+              path: ["name"],
+              message: "name is required when creating a node"
+            }
+          ]);
+        }
+        const parentId = value.parentId === void 0 ? defaultParentId(store, value.projectKey, value.kind) : value.parentId;
+        const node2 = store.createNode({
+          projectKey: value.projectKey,
+          parentId,
+          kind: value.kind,
+          name: value.name,
+          ...value.description === void 0 ? {} : { description: value.description },
+          ...value.status === void 0 ? {} : { status: value.status },
+          ...value.version === void 0 ? {} : { version: value.version },
+          ...value.payload === void 0 ? {} : { payload: value.payload },
+          actor
+        });
+        return text({ created: true, node: node2 });
+      }
+      case "luck_tree_move_node": {
+        const parsed = moveNodeInputSchema.safeParse(input2);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value = parsed.data;
+        const node2 = store.moveNode({
+          projectKey: value.projectKey,
+          id: value.nodeId,
+          newParentId: value.newParentId,
+          actor
+        });
+        return text({ node: node2 });
+      }
+      case "luck_tree_archive_node": {
+        const parsed = archiveNodeInputSchema.safeParse(input2);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value = parsed.data;
+        const archived = store.archiveNode({
+          projectKey: value.projectKey,
+          id: value.nodeId,
+          actor
+        });
+        return text({ archived });
       }
       case "luck_tree_add_bee": {
         const parsed = addBeeInputSchema.safeParse(input2);
@@ -23390,7 +23577,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.30.1";
+var SERVER_VERSION = "0.31.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

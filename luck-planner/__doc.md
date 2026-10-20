@@ -16,10 +16,12 @@
 > remembered 2D/3D choice), **J1** (the plugin's English README and the link
 > from the repository README), **J2** (the live-daemon acceptance — the
 > install, the MCP round trip, the goal approval, the dashboard in the host's
-> browser, the SSE, the themes and the measurements) and **D4** (the MCP
+> browser, the SSE, the themes and the measurements), **D4** (the MCP
 > server registered in the agents' own config files — OpenCode, Kilo, Cline,
-> Cursor, Codex CLI) are done and all tests are green.
-> Stages A1–I4, J1, J2 and D4 are complete. Nothing in
+> Cursor, Codex CLI) and **D5** (the structural tools an agent needs to shape
+> a project: create/rename, move and archive any node) are done and all
+> tests are green.
+> Stages A1–I4, J1, J2, D4 and D5 are complete. Nothing in
 > this document is a released API: the roadmap in §7 describes work that is still
 > ahead.
 
@@ -474,6 +476,9 @@ transport-independent on purpose: the stdio server of stage D2 and
 | `luck_tree_get_context` | Orientation call. Without `nodeId`: overview — roots and their first level (`store.listChildren`). With `nodeId`: path root → … → node (`store.getNodePath`), children, sibling leaves, bees touching the node, blocking bugs and growth progress — the agent "descends one level" in one call instead of probing with searches. |
 | `luck_tree_search` | FTS5 search within one project (bm25 ranking, `key=value` filters inside free text, optional kinds/statuses arrays, archived excluded by default). |
 | `luck_tree_upsert_leaf` | Create a leaf under `parentId` (`name` required, status defaults to `draft`) or update `leafId` in place: any of name/description/version/payload plus an optional status transition in the same call. Stating the current status is a tolerated no-op; a real transition runs the state machine and its audit row; an illegal transition comes back as a readable `invalid status transition …` error that writes nothing. Editing a non-leaf or an unknown/foreign id is rejected with the node kind named. |
+| `luck_tree_upsert_node` | The **structure** of a project: create a node of any kind (`root` → `trunk` → `branch` → `subbranch` → `leaf`, the store validates the parent/child kinds) or update an existing one (name, description, version, payload, status). Added in stage D5 — the leaf-level tool alone left an agent unable to shape anything above the leaf, and the live test pass showed exactly that. |
+| `luck_tree_move_node` | Re-parent a node with its whole subtree — the way a fact moves into the branch it really belongs to. The store refuses a move that would break the kind rules or create a cycle. |
+| `luck_tree_archive_node` | Soft-delete a node **and its subtree**: the rows stay in the database and the audit trail keeps them, the tree and every diagram built from it stop showing them. |
 | `luck_tree_add_bee` | Directed influence edge between two live leaves of one project; self-loops, non-leaf ends and foreign ids are rejected by the store with readable messages. |
 | `luck_tree_report_bug` | Incident with severity; `nodeIds` attach blocking leaves immediately — every id must resolve inside the project or nothing is written. |
 | `luck_tree_set_goal` | Pre-approval goal management only: `create` (draft; `formalText` + `plan` required), `update` (draft/proposed edits), `propose` (draft → proposed). **Deliberately no `approve` action** — ADR-7: the store refuses `approved` from any path but the native panel/RPC. `create`/`propose` responses carry a note telling the agent a human approves; a repeated `propose` is a readable no-op error, not a second transition. |
@@ -866,22 +871,6 @@ its own `dashboard/tsconfig.json` with the DOM lib (the plugin client stays DOM-
 construction). `npm run typecheck` runs both. The pure modules the vitest suite imports
 (`params.ts`, `theme.ts`, `colors.ts`) touch no DOM APIs, so they typecheck under either
 configuration.
-
-### The tree grows upwards (the 2D flip, 0.30.1)
-
-A tree read left-to-right — the root at the far left, the leaves at the far
-right — is not how a human reads a tree. The depth axis became the vertical
-one and was inverted: the deepest level sits at the top (`y = 0`) and the root
-at the bottom, the trunk rising and the branches fanning out above it. One
-line in the adapter (`{ x: d.x, y: maxY - d.y }`), and the node components —
-which had *always* drawn their handles `Position.Top` / `Position.Bottom` for
-exactly this direction — finally point at each other instead of into empty
-space.
-
-The layout tests were rewritten for the new convention (the root is the
-lowest node of the diagram, the deepest leaves the highest) and the live
-dashboard confirmed it: the root at `y = 487`, the trunk at `424`, the branch
-at `362`, the leaves at `237…300` — the tree grows up.
 
 ### Data adapter and layout (stage G2 — `dashboard/src/graph.ts`, G2 nodes)
 
@@ -1353,6 +1342,22 @@ handler. `typecheck` (both configs) and the full suite are green: 27 files, 447 
 live-daemon check — the row visible in an agent's timeline with no "unavailable" placeholder —
 belongs to J2.
 
+### The tree grows upwards (the 2D flip, 0.30.1)
+
+A tree read left-to-right — the root at the far left, the leaves at the far
+right — is not how a human reads a tree. The depth axis became the vertical
+one and was inverted: the deepest level sits at the top (`y = 0`) and the root
+at the bottom, the trunk rising and the branches fanning out above it. One
+line in the adapter (`{ x: d.x, y: maxY - d.y }`), and the node components —
+which had *always* drawn their handles `Position.Top` / `Position.Bottom` for
+exactly this direction — finally point at each other instead of into empty
+space.
+
+The layout tests were rewritten for the new convention (the root is the
+lowest node of the diagram, the deepest leaves the highest) and the live
+dashboard confirmed it: the root at `y = 487`, the trunk at `424`, the branch
+at `362`, the leaves at `237…300` — the tree grows up.
+
 ### Agent config registrations (stage D4 — `server/agent-mcp-config.ts`, `shared/rpc.ts`, `index.server.ts`, `client/settings-screen.tsx`)
 
 Paseo injects the plugin's MCP server into an agent through the `agent.create`
@@ -1536,9 +1541,10 @@ renders, so the two views can never drift apart. Tube count equals internal-
 node count (hundreds in real projects; the leaves are the instanced bulk) —
 LOD for tubes is explicitly deferred to the I3–I4 measurement pass.
 
-**The data path.** `app.tsx` builds the model with `buildScene3D(tree.nodes)`
-in a memo keyed on the tree (collapse/filters are 2D-canvas concerns until
-I4) and hands it to `ThreeView`, which forwards it through `handle.setModel`
+**The data path.** `app.tsx` builds the model with `buildScene3D(tree.nodes, { filter })`
+in a memo keyed on the tree and the toolbar filters (the collapse state stays
+a 2D-canvas concern) and hands it to `ThreeView`, which forwards it through
+`handle.setModel`
 — seeded once when the lazy chunk lands, then on every layout change,
 without ever remounting the renderer. `mountScene3D` gained a tiny external
 store (`useSyncExternalStore`) behind that setter; `dispose()` is unchanged:
@@ -1898,12 +1904,13 @@ memory-flash itself is not touched — it already ships that solution.
 | A | A1–A2 | 0.1.0 | scaffold ✅; this document ✅; TEMP removed ✅ |
 | B | B1–B4 | 0.2.0–0.5.0 | zod schemas ✅ (0.2.0), SQLite store ✅ (0.3.0), CRUD + state machine + audit ✅ (0.4.0), FTS5 search + filters ✅ (0.5.0) |
 | C | C1–C4 | 0.6.0–0.9.0 | bees ✅ (0.6.0), bugs ✅ (0.7.0), goals + approval gate ✅ (0.8.0), growth rates ✅ (0.9.0) |
-| D | D1–D4 | 0.10.0–0.12.0, 0.30.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0), agent config-file registrations ✅ (0.30.0) |
+| D | D1–D5 | 0.10.0–0.12.0, 0.30.0–0.31.0 | MCP tool contracts + dispatch ✅ (0.10.0), stdio server + bundle ✅ (0.11.0), agent injection + skill + bootstrap ✅ (0.12.0), agent config-file registrations ✅ (0.30.0), structural tree tools ✅ (0.31.0) |
 | E | E1–E4 | 0.13.0–0.16.0 | RPCs ✅ (0.13.0), native panel ✅ (0.14.0), ⌘K + slash ✅ (0.15.0), settings screen ✅ (0.16.0) |
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
 | I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle ✅ (0.29.0) |
+
 | J | J1–J2 | — | README.md + root README link ✅ (J1, 0.29.0), final e2e acceptance on a live daemon ✅ (J2, 0.29.1–0.29.4 — three defects the live install exposed, all now pinned by tests) |
 
 Blocks B–D have file-disjoint boundaries and may be delegated to different agents.
