@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc, usePaseo } from "@getpaseo/plugin/client";
 import { openSearchInterfaceUrl } from "./open-search-ui";
 import {
@@ -15,7 +15,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 import { interfaceFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 
 /**
- * Bunny Search surface (sidebar item / ⌘K).
+ * Bunny Search screen (sidebar header row / ⌘K).
  *
  * Gives the user a persistent, glanceable answer to "is my web
  * search MCP connected and working": the current provider, the
@@ -23,7 +23,7 @@ import { interfaceFontFamily, scaledFont, useHostTypography } from "./use-host-t
  * box that runs a real query through the configured service.
  */
 
-export function BunnySearchSurface(props: PluginSurfaceProps) {
+export function BunnySearchSurface(props: PluginScreenProps) {
   const { theme } = props;
   const paseo = usePaseo();
   const typography = useHostTypography();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
@@ -27,7 +27,7 @@ import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } fr
  * connection list with per-connection Check, and the add form (with a
  * "Test" probe that runs before the connection is saved).
  */
-export function ConnectionsSurface({ theme }: PluginSurfaceProps) {
+export function ConnectionsSurface({ theme }: PluginScreenProps) {
   const typography = useHostTypography();
   const font = (base: number) => scaledFont(base, typography);
   const uiFont = interfaceFontFamily(typography);

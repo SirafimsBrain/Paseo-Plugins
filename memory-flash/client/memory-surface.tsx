@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
@@ -30,7 +30,7 @@ const KINDS: MemoryKind[] = ["decision", "procedure", "handoff", "bugfix", "patt
 /** A skill status row as returned by the RPC (SkillStatusTarget). */
 type SkillRow = SkillStatusTarget;
 
-export function MemorySurface({ theme }: PluginSurfaceProps) {
+export function MemorySurface({ theme }: PluginScreenProps) {
   const typography = useHostTypography();
   const font = (base: number) => scaledFont(base, typography);
   const uiFont = interfaceFontFamily(typography);

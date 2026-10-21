@@ -1,6 +1,6 @@
 # Memory Flash
 
-Shared persistent memory for coding agents on [Paseo](https://paseo.sh/): a local MCP server backed by SQLite that every agent (Cline, OpenCode, Kilo, Qwen Code, Codex, …) can read and write, plus a full management surface inside Paseo.
+Shared persistent memory for coding agents on [Paseo](https://paseo.sh/): a local MCP server backed by SQLite that every agent (Cline, OpenCode, Kilo, Qwen Code, Codex, …) can read and write, plus a full management screen inside Paseo.
 
 Paseo orchestrates agents and passes prompts, but it does not provide durable shared memory between agents. Memory Flash closes that gap: decisions, procedures, handoffs, bugfix notes, working patterns and pitfalls are stored in one tagged, searchable database that all agents share — across agents, projects and sessions.
 
@@ -17,7 +17,7 @@ Paseo orchestrates agents and passes prompts, but it does not provide durable sh
 - **Plugin updates never break a running agent (0.7.1)** — an agent keeps the MCP entry path it was given at creation and re-spawns it on every turn, while the daemon deletes the previous per-revision install directory on each update. The plugin therefore hands agents a **revision-independent entry** (`~/.paseo/plugins/memory-flash/mcp-server.js`, refreshed on every plugin load) instead of a path inside `<uuid>/checkout/`, and swaps it atomically. Without this, the first `paseo plugin update` after an agent was created made every subsequent turn fail with `MCP error -32000: Connection closed` while the memory server itself was perfectly healthy. Agents created before this version need to be recreated once.
 - **Direct MCP registration for Cline, Cursor, Codex CLI, OpenCode and Kilo** — these agents read MCP servers from their own config files (`~/.cline/data/settings/cline_mcp_settings.json`, `~/.cursor/mcp.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json`, `~/.config/kilo/kilo.jsonc`) rather than, or in addition to, the agent session. The plugin registers the server there directly: per-agent Register/Re-register/Remove buttons, a *Register for all local agent configs* one-click button, preservation of every other server in each file, and atomic writes. A config file that carries `//` comments is never rewritten — the plugin reports the path instead of silently dropping the comments. The Cline status also runs a live spawn check (real MCP `initialize` handshake against the registered command) and warns when the registered command does not answer.
 - **Agent skill** — a standard `SKILL.md` written as a *protocol*, not a description, because memory only pays off when every agent reads before it works and writes while it works. Read side: never start a non-trivial task with a single search (2–4 differently worded queries, filters varied, `memory_list_by_tag` and `memory_stats` to learn the base's real vocabulary), read the full memory with `memory_get` instead of trusting a snippet, and widen the query before concluding nothing is known. Write side: every bugfix (symptom, root cause, fix, verification), positive results as `pattern`, user corrections as `decision`, search-before-save so one fact yields one memory, and `memory_update` whenever functionality changes — all in English for cross-agent unification. Write side also fixes the *search index* half of a memory (0.7.0): the symptom is written the way a human reports it, the literal error string is pasted in, the file and symbol are named, and plain-language synonyms go into tags — because a measured failure was a *vocabulary gap* (a query sharing no words with the record), which no ranking system can bridge. Always a handoff at the end of a session. Installed with one click from the plugin settings into `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills` and `~/.kilo/skills` (per-target Install/Update/Remove buttons + *Install into all agents*).
-- **Management surface inside Paseo** (sidebar item + ⌘K) — browse and filter memories (kind chips, tag chips), full-text search with highlighted snippets, create/edit/delete with a live editor, per-memory revision history with one-click restore, statistics (totals, by kind/agent/project, top tags, database size).
+- **Management screen inside Paseo** (sidebar header row + ⌘K) — browse and filter memories (kind chips, tag chips), full-text search with highlighted snippets, create/edit/delete with a live editor, per-memory revision history with one-click restore, statistics (totals, by kind/agent/project, top tags, database size).
 - **Delegate maintenance to an agent** — the History & tasks tab composes a careful instruction (prefer update over delete, list before deleting, keep changes minimal) and sends it to a running agent picked from the live Paseo agent list; the agent then edits the database through its MCP tools.
 - **Remote hosts** — register remote machines running the Paseo server over the standard Paseo SSH transport and check reachability (the remote memory database path is reported). TCP and relay transports are stubs reserved for future work.
 - **Remote access over HTTP with API keys (0.5.0)** — the same MCP tools are also served over HTTP (Streamable HTTP: `POST http://<bind>:<port>/mcp`, JSON-RPC 2.0), so other machines can read and write the shared memory. Access is by API key only: a key is generated in the UI, shown **once**, and only its SHA-256 hash is stored; every request must carry `Authorization: Bearer <secret>`. Local agents keep using the stdio server and need no key. Keys can be scoped (`read` — search/read tools only, or `read_write` — the full tool set), can expire, and are deleted per machine in one click (the row is removed, so the label can be reused immediately). Failed authentications are rate-limited per IP, the `Authorization` header is never logged, and the memory host records the connecting client's UUID and host name (advisory identity headers) in its audit log. Bind defaults to `127.0.0.1`; use a Tailscale/LAN address for remote access. The endpoint lifecycle is debounced and serialised, so editing the bind address (including typing `0.0.0.0` character by character) restarts the socket exactly once on the final value, never leaves a stale listener on the previous port, and reports the interface that is really bound instead of the previous one. The companion [memory-flash-client](../memory-flash-client/README.md) plugin configures the other side.
@@ -63,7 +63,7 @@ The secret is never written to git, agent prompts or agent logs, and it is never
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash
 ```
 
-Requires Paseo ≥ 0.10.0 (verified against 0.10.3; uses the plugin SDK 0.10 settings screens and lifecycle hooks). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21; uses the plugin SDK screen/sidebar API, settings screens and lifecycle hooks). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
 
 After install: open **Settings → Plugins → Memory Flash** and press **Install into all agents** to place the skill where your agents look for it. The MCP server is injected into new agents automatically. Also press **Register for all local agent configs**: Cline, Cursor and Codex CLI do not pick up stdio MCP servers from the agent session, and OpenCode/Kilo lose a session-injected server as soon as OpenCode evicts an idle directory — a config entry is what keeps the memory tools alive there. The Cline row also shows a live spawn check of the registered command.
 
@@ -101,30 +101,68 @@ $PASEO_HOME/plugins/memory-flash/
 
 Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
 
-## Planned improvements with Paseo 0.11.0
+## Paseo 0.12.0 spec conformance
 
-Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
-with this plugin as-is: typecheck, the test suite, the real host bundler and a
-live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
-0.11.0 APIs relevant to this plugin:
+Verified against the **stable Paseo 0.12.0** release (2026-10-21).
+Full evidence: [__doc.md](./__doc.md) §16.
 
-- **`spawnProcess` / `execCommand` / `terminateProcess`**
-  (`@getpaseo/plugin/server`) — replace the `node:child_process` probes in
-  `server/mcp-probe.ts` (live spawn/initialize check) and
-  `server/remote-hosts.ts` with host-managed processes, including Windows
-  `.cmd`/`.bat` launching.
-- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
-  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
-  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
-  group the kind/tag chip rows with `SidebarRow`/`SidebarSeparator`, add an
-  `addSidebarFooterItem` quick entry, and open the surface on a single memory
-  via screen URL params (`PluginScreenProps.params`).
-- **`agent.closed` lifecycle event** — the skill demands a handoff at the end of
-  every session; the hook lets the plugin trigger or record that handoff when an
-  agent closes, and it is the foundation for the "timeline surfacing" roadmap
-  item.
+**What the new version changed for this plugin:**
 
-Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+- The SDK diff `@getpaseo/plugin@0.10.1 → 0.12.0` is **additive only** for
+every API this plugin uses; the `0.11.0 → 0.12.0` client declarations are
+byte-identical, so `requirements.paseo` is `>=0.11.0` (the API floor), not
+`>=0.12.0`.
+- The 0.10-era registrations were `@deprecated` in the SDK (`addSurface`,
+`addSidebarItem`, `openSurface`) but still shipped as working shims in the
+0.12.0 host — this was a migration for correctness, not a breakage fix.
+- **A previously documented date was wrong:** earlier notes said the host's
+compatibility shims were "scheduled for removal after **2027-03-29**". That
+date belongs to unrelated `COMPAT(...)` markers in 0.12.0
+(`codexFastPreference`, `pluginProviderLaunch`); the surface/sidebar shims
+carry no removal marker and the SDK's `@deprecated` tags state no version.
+See [__doc.md](./__doc.md) §16.1.
+- 0.12.0's `#7023` lets a plugin import Paseo *protocol types* with no
+plugin-local install (type-only imports are erased at compile time). This
+plugin does not import `@getpaseo/protocol`, so it is unaffected. `#6306`
+fixes the 60-second `paseo plugin reload` timeout.
+
+**Migrated in 0.8.3:**
+
+| Before | After |
+| ------ | ----- |
+| `client.addSurface(id, Component)` | `client.addScreen({ id, title, Component })` |
+| `client.addSidebarItem({ id, title, icon, surface })` | `client.addSidebarHeaderItem({ id, title, Component })` rendering `<SidebarRow icon="Database" />` |
+| `onSelect({ openSurface })` (both Command Center items) | `onSelect({ openScreen })` → `openScreen({ screenId })` |
+| screen component took `PluginSurfaceProps` | takes `PluginScreenProps` (adds `params`) |
+| `requirements.paseo: ">=0.10.0"` | `">=0.11.0"` |
+| `@getpaseo/plugin@0.10.1` | `@getpaseo/plugin@0.12.0` |
+
+**Spec violation found and fixed:** 0.12.0's client audit treats a
+cross-platform module touching a DOM global outside `client/web.ts` as a
+bug. `client/use-host-typography.ts` read `globalThis.localStorage`
+directly; it now calls `readHostTypography()` from the new `client/web.ts`,
+gated on `Platform.OS === "web"` with `null` on native so callers fall back
+to defaults.
+
+**Verification:** typecheck clean against SDK 0.12.0, vitest **15 suites /
+166 tests** pass (including the live HTTP endpoint suite and the stdio MCP
+e2e), the MCP bundle rebuilds, and no deprecated registrations remain.
+Live-verified on a real 0.12.0 daemon in an isolated home: installs as
+`running`, logs `Plugin ready`, creates `memory.db` on startup, reloads
+cleanly (`paseo plugin reload`, the fixed #6306 flow), and the real
+0.12.0 host compiler builds the client entry with zero legacy API calls
+in the compiled bundle.
+
+Still open, all optional and none conformance blockers:
+
+1. **Host-managed processes** — `spawnProcess` / `terminateProcess` in
+   `server/mcp-probe.ts` and `server/remote-hosts.ts`, for Windows
+   `.cmd`/`.bat` launching and host-owned process lifecycle.
+2. **Deep links through screen params** — open the management screen on an
+   exact memory via `PluginScreenProps.params`, with `PluginScreenTitle`
+   deriving the header, plus `SidebarRow`/`SidebarSeparator` chip grouping
+   and an `addSidebarFooterItem` quick entry. New capability → second-digit bump.
+3. **`agent.closed` lifecycle event** — the foundation for the "always a
+   handoff at the end of a session" rule and for timeline surfacing.
 
 Technical details, design decisions, alternatives considered, limitations and the roadmap: see [__doc.md](./__doc.md).
-# Test change

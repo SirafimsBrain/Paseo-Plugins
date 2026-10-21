@@ -24,8 +24,14 @@ usage in the panel styles; when unset, no `fontFamily` is forced so the host's
 
 ## Compatibility
 
-Verified against Paseo `0.10.1` (2026-09-29, SDK `@getpaseo/plugin@0.10.1`):
-no code changes required, and the manifest range `>=0.8.0` already covers it.
+Current: **verified against Paseo `0.12.0` (2026-10-21, SDK
+`@getpaseo/plugin@0.12.0`)** — no API migration was needed; the one change is
+the `client/web.ts` DOM-global fix (§16). The manifest range stays `>=0.8.0`
+on purpose: this plugin adopts none of the 0.11+ API, so raising the floor
+would be dishonest.
+
+Earlier, verified against Paseo `0.10.1` (2026-09-29, SDK `@getpaseo/plugin@0.10.1`):
+no code changes required, and the manifest range `>=0.8.0` already covered it.
 
 ### Installation
 
@@ -376,5 +382,105 @@ planned for implementation after the stable Paseo 0.11.0 release, on request:**
    provide additional entry points for the panel. Note for the future migration:
    this plugin does **not** use the deprecated `addSurface` / `addSidebarItem` /
    `openSurface` API (it contributes a workspace panel, a settings screen and a
-   Command Center item), so there is nothing to migrate before the compatibility
-   shims are removed after 2027-03-29 — only optional new surfaces to adopt.
+   Command Center item), so there is nothing to migrate ~~before the
+   compatibility shims are removed after 2027-03-29~~ (**the 2027-03-29 date
+   was wrong — see §16.1; and §16.2 confirms it: nothing had to be migrated in
+   the 0.12.0 audit either**) — only optional new surfaces to adopt.
+
+## 16. Paseo 0.12.0 — spec conformance (2026-10-21)
+
+Audited against the stable `0.12.0` release (2026-10-19).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.12.0>.
+The general spec rules (screen/sidebar API, `requirements.paseo` semantics,
+ID charset, the `client/web.ts` DOM-global rule, manifest fields) are
+spelled out in bunny-search §13; this section records what is specific to
+session-manager.
+
+This plugin is the **only one in the repository that needed no registration
+migration**, so its 0.12.0 diff is the smallest of the five — and it is also
+the plugin with the most DOM-global violations, which is a useful reminder
+that "no API migration" is not the same as "conformant".
+
+### 16.1 What 0.12.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| Registrations used | `client.addWorkspacePanel`, `client.addSettingsScreen`, `client.addCommandCenterItem` (×4) — **none deprecated** in 0.12.0. Command Center callbacks use `openPanel(id)` and `openSettings(id)`, both current. |
+| `addSurface` / `addSidebarItem` / `openSurface` | **Not used anywhere** in this plugin (confirmed by grep over `index.client.tsx` and `client/`). Nothing to migrate. This was already noted in §15 item 3 before 0.12.0 existed. |
+| SDK diff `@getpaseo/plugin@0.10.1 → 0.12.0` | **Additive only** for every API used here: `registerSettings`, `server.handle`, `server.on`/`server.before`, `useRpc`, `useSettings`, `usePaseo`, `@tanstack/react-query`, `PluginWorkspacePanelProps` (incl. `navigation.openAgent`, which the panel already guards as optional). |
+| `0.11.0 → 0.12.0` declarations | `client/contracts.d.ts` and `client/ui.d.ts` byte-identical. |
+| **The "2027-03-29" removal date** | §15 item 3 said the compatibility shims "are removed after 2027-03-29". **Wrong for 0.12.0**: that date belongs only to `COMPAT(codexFastPreference)` and `COMPAT(pluginProviderLaunch)`. The surface/sidebar shims have no COMPAT marker and no date; the SDK tags state no removal version. Moot for this plugin (it uses none of those APIs) but the claim is struck through in §15 and corrected in the README. |
+| `#7023` (protocol type imports) | No effect: this plugin imports no `@getpaseo/protocol` and — like memory-flash-client — has **no install-time build step**, because every import it references is on the host-supplied list. That property is unchanged. |
+| `#6306` | `paseo plugin reload` no longer fails with a 60 s timeout while the reload is still running. |
+| Other 0.12.0 plugin fixes (`#6760`, `#6690`, `#7253`, `#7110`, `#7270`, `#7341`) | None apply: no timeline items, no composer pills, no ACP agent, no `waitForReady`, no plugin preview. |
+| 0.12.0 features that would matter here | `spawnProcess`/`execCommand`/`terminateProcess` (§15.1) and the `agent.closed` hook (§15.2) — both still optional adoption, neither a conformance requirement. |
+
+### 16.2 Why `requirements.paseo` stays `>=0.8.0`
+
+The spec says *"Raise the minimum when adopting a newer API"*. This plugin
+adopts none: every registration and callback it calls exists in the 0.8-era
+SDK surface, and the one 0.10-era prop it uses (`navigation.openAgent`) is
+explicitly optional — the panel already renders its "Open agent in Paseo"
+link only when `navigation` is present, so an older app degrades instead of
+crashing. Raising the floor would lock out hosts that can run the plugin
+perfectly well.
+
+The four plugins that *did* migrate to `addScreen`/`addSidebarHeaderItem`/
+`openScreen` therefore carry `>=0.11.0`, while this one keeps `>=0.8.0`. That
+difference is deliberate and is the honest per-plugin floor in each case.
+
+What did change: the SDK pin is now `@getpaseo/plugin@0.12.0` for
+typecheck/tests, and 0.12.0 is the version verified.
+
+### 16.3 The 0.12.0 cross-platform audit — two violations, fixed
+
+The 0.12.0 client audit flags a DOM global (`window`, `document`,
+`localStorage`, `navigator`, `location`) in any `client/` module other than
+`client/web.ts` as a bug, and forbids HTML elements, `className` and `onClick`.
+
+This plugin had **two** DOM-global sites — one more than any other plugin
+here, because the panel builds its whole style sheet inside a `useMemo` and
+inline-did the typography read:
+
+| Target | Before | After |
+| --- | --- | --- |
+| `client/use-host-typography.ts` | read `globalThis.localStorage` directly | calls `readHostTypography()` from the new `client/web.ts` |
+| `client/session-manager-panel.tsx` (inside the `styles` `useMemo`) | inline `readHostTypographyFromLocalStorage((globalThis as …).localStorage)` | calls the same `readHostTypography()`; the import of `readHostTypographyFromLocalStorage` is gone from the panel |
+| `client/settings-screen.tsx` | clean — the one raw regex hit is the word "document" inside a JSDoc comment ("an unset or invalid document degrades to the…") | unchanged |
+| HTML elements / `className` / `onClick` in `client/` | none | none |
+| `"DOM"` in `lib`, `/// <reference lib="dom" />` | none | none |
+| `shared/host-fonts.ts` | takes the storage object as a **parameter**, never reaches for a global | unchanged |
+
+`client/web.ts` gates every export on `Platform.OS === "web"` and returns
+`null` on native, so callers keep the `?? defaultHostTypography()` fallback —
+behaviour is identical on every platform.
+
+### 16.4 Verification (2026-10-21, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm install` with `@getpaseo/plugin@0.12.0` | exit 0; lockfile updated |
+| `npm run typecheck` (`tsc --noEmit`) | **exit 0** |
+| `npm test` | **8 suites / 70 tests pass** |
+| 0.12.0 client audit (DOM globals outside `client/web.ts`, HTML, `className`, `onClick`) | **clean** (one prose hit in a comment, no code) |
+| Remaining deprecated registrations | **none** — none existed |
+| Contribution ID charset | conforms (`session-manager`, `session-manager-settings`, `open-session-manager`, `open-session-manager-old`, `open-session-manager-archived`, `open-session-manager-settings`) |
+| `requirements.paseo` | **unchanged `>=0.8.0`** — deliberately, §16.2 |
+| Install-time build step | **none** — every import is host-supplied, so installation still needs no npm-registry access |
+| Live install on a running 0.12.0 daemon | **PASS** — installed from the working tree into an isolated 0.12.0 daemon (scratch home, production config untouched): status `running`, `Plugin ready` in the log, no errors. The real 0.12.0 host compiler (`compilePlugin`) built the client entry (neither the deprecated nor the new contribution API is used, as designed). `paseo plugin reload session-manager` exits 0 and the plugin restarts cleanly (the 0.12.0 #6306 fix). |
+
+### 16.5 Not adopted (from §15; 0.12.0 changes none of them)
+
+1. **Host-managed processes** — `spawnProcess`/`terminateProcess`/
+   `execCommand` in `server/exec.ts` (the CLI discovery/deletion path behind
+   the Cline, OpenCode and Kilo adapters). Still a server-behavior change
+   needing its own test pass; `node:child_process` remains legal under
+   `server/`.
+2. **`agent.closed` lifecycle event** — invalidate the 30-second listing
+   cache and re-evaluate the "due for cleanup" hint the moment an agent
+   closes. New functionality.
+3. **Extra sidebar entry points** — `addSidebarFooterItem`, multi-row
+   `SidebarRow`/`SidebarSeparator`. New capability.
+
+Version `0.2.1` → `0.2.2` (the DOM-global audit fix, no API and no new
+capability → last digit), annotated tag `session-manager@0.2.2`.

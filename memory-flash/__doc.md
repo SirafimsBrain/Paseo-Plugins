@@ -734,8 +734,10 @@ planned for implementation after the stable Paseo 0.11.0 release, on request:**
    `.cmd`/`.bat` commands.
 2. **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
    `addSidebarItem` / `openSurface` (used in `index.client.tsx`) to `addScreen` /
-   `addSidebarHeaderItem` / `openScreen`; the host's compatibility shims are
-   scheduled for removal after **2027-03-29**. `PluginScreenProps.params` would
+   `addSidebarHeaderItem` / `openScreen`; ~~the host's compatibility shims are
+   scheduled for removal after **2027-03-29**.~~ **Superseded by §16.2: done in
+   0.8.3, and the 2027-03-29 date was wrong — no removal marker exists on these
+   shims in 0.12.0 (§16.1).** `PluginScreenProps.params` would
    let a deep link open the management surface on an exact memory (from search
    results, the history tab or a Command Center item), `PluginScreenTitle` can
    derive the header from it, and `SidebarRow` / `SidebarSeparator` /
@@ -747,3 +749,96 @@ planned for implementation after the stable Paseo 0.11.0 release, on request:**
    deterministic moment to trigger or record that handoff when an agent closes,
    and it is the natural foundation for roadmap item 3 (timeline surfacing of
    maintenance results).
+
+## 16. Paseo 0.12.0 — spec conformance (2026-10-21)
+
+Audited and migrated against the stable `0.12.0` release (2026-10-19).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.12.0>.
+The general spec rules (screen/sidebar API, `requirements.paseo` semantics,
+ID charset, the `client/web.ts` DOM-global rule, manifest fields) are spelled
+out in bunny-search §13; this section records what is specific to Memory
+Flash.
+
+### 16.1 What 0.12.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| SDK diff `@getpaseo/plugin@0.10.1 → 0.12.0` | **Additive only** for the API surface used here. `0.11.0 → 0.12.0` client declarations (`client/contracts.d.ts`, `client/ui.d.ts`) are byte-identical, so the migrated API is 0.11.0-compatible and `requirements.paseo` is `>=0.11.0`, not `>=0.12.0`. |
+| Deprecated client members | `addSurface`, `addSidebarItem` (+ `PluginSidebarContribution`), `openSurface` remain in 0.12.0 with `@deprecated` JSDoc and **no removal version**. The shipped 0.12.0 app bundle still implements them as shims over `addScreen` / the header-item registry / `openScreen`. |
+| **Correction: the "2027-03-29" removal date** | §15.2 and the old README stated the shims were "scheduled for removal after **2027-03-29**". **That is wrong for 0.12.0.** Grepping the 0.12.0 server package and the shipped app bundle, `2027-03-29` appears only on `COMPAT(codexFastPreference)` and `COMPAT(pluginProviderLaunch)` — unrelated to plugin screens. The surface/sidebar shims carry no COMPAT marker, no date, and the SDK tags carry no removal version. §15.2 is marked superseded. |
+| `#7023` — `Could not resolve type dependency` | Directly relevant to §10.1. The 0.5.1 workaround (dropping the `McpStdioServerConfig` type import from `@getpaseo/protocol/agent-types`, deriving the literal with `as const`) was **necessary on ≤0.11** and **is no longer necessary on 0.12**: the compiler now exempts *type-only* `@getpaseo/protocol/*` imports from the plugin-local install, erasing them at compile time. Runtime imports of a non-host-supplied package are still rejected. The workaround is kept — it costs nothing, keeps `npm ci` unnecessary for types, and still works on 0.11. |
+| `#6306` | `paseo plugin reload` no longer fails with a 60-second timeout while a reload is still running. Relevant: this plugin documents `paseo plugin reload` (§12) and its stable MCP-entry path must survive a reload. |
+| `#6760` | `providers.waitForReady` no longer throws in plugins on the mobile app. Not used by this plugin. |
+| Other 0.12.0 plugin fixes | `#6690`/`#7253` (timeline-plugin prompt rendering in the outline and Find), `#7110` (Escape closes an open plugin preview before stopping the agent), `#7270` (follow-ups to a plugin ACP agent), `#7341` (late-loading composer pills). None apply: this plugin renders no timeline items, no composer pills, no ACP agent. |
+| `PluginSurfaceProps` | Not deprecated — still the settings-screen prop type, so `client/settings-screen.tsx` keeps it. Only the management screen moved to `PluginScreenProps`. |
+| Manifest | `requirements.paseo` `>=0.10.0` → `>=0.11.0`. `mcp.entry` (`dist/mcp-server.js`) and the `[[\"npm\",\"ci\"],[\"npm\",\"run\",\"bundle\"]]` build step are unchanged and still required — the MCP server is a **runtime** bundle, not a type import, so `#7023` does not apply to it. |
+| `node:sqlite` requirement | Unchanged: Node ≥ 24.20 on the daemon host. 0.12.0 does not alter this. |
+
+### 16.2 Migration performed (version 0.8.2 → 0.8.3)
+
+`index.client.tsx`:
+
+| Before | After |
+| --- | --- |
+| `client.addSurface(SURFACE_ID, MemorySurface)` | `client.addScreen({ id, title: "Memory Flash", Component })` |
+| `client.addSidebarItem({ id, title, icon, surface })` | `client.addSidebarHeaderItem({ id, title, Component })` rendering `<SidebarRow icon="Database" active onPress>` |
+| `onSelect({ openSurface })` ×2 (global + workspace Command Center items) | `onSelect({ openScreen })` → `openScreen({ screenId })` |
+
+`client/memory-surface.tsx`: `PluginSurfaceProps` → `PluginScreenProps`.
+
+`client/use-host-typography.ts` now calls `readHostTypography()` from the new
+`client/web.ts` (gated on `Platform.OS === "web"`, `null` on native) instead
+of reading `globalThis.localStorage` itself — see §16.3.
+
+`package.json`: `@getpaseo/plugin` `0.10.1` → `0.12.0`, version `0.8.2` → `0.8.3`.
+`paseo-plugin.json`: `requirements.paseo` `>=0.10.0` → `>=0.11.0`.
+
+Deliberately **not** changed: `server/mcp-probe.ts` and `server/remote-hosts.ts`
+still use `node:child_process` (§15.1 `spawnProcess` adoption is a server
+behavior change needing its own test pass), and no `agent.closed` hook was
+added (§15.3 — new functionality).
+
+### 16.3 The 0.12.0 cross-platform audit
+
+The 0.12.0 client audit flags a DOM global (`window`, `document`,
+`localStorage`, `navigator`, `location`) in any `client/` module other than
+`client/web.ts` as a bug, and forbids HTML elements, `className` and `onClick`.
+
+| Target | Result |
+| --- | --- |
+| `client/use-host-typography.ts` | **was a violation** (read `globalThis.localStorage` directly) → **fixed** by the new `client/web.ts` |
+| Rest of `client/` | clean. Two raw regex hits are prose inside UI strings — `"…every detected agent location."` and `info="…Bearer <key>…"`. A word-boundary check for DOM identifiers used as **code** finds none. |
+| HTML elements / `className` / `onClick` in `client/` | none — React Native only |
+| `"DOM"` in `lib`, `/// <reference lib="dom" />` | none — `tsconfig.json` uses `"lib": ["ES2023"]` |
+| `shared/host-fonts.ts` | takes the storage object as a **parameter**; never reaches for a global — which is what lets `client/web.ts` be the only accessor |
+
+### 16.4 Verification (2026-10-21, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm install` with `@getpaseo/plugin@0.12.0` | exit 0; lockfile updated |
+| `npm run typecheck` | **exit 0** |
+| `npm test` | **15 suites / 166 tests pass** — includes the real-process stdio MCP e2e, the live HTTP endpoint suite driving the server with `fetch`, the API-key suites, the registration suites for Cline/Cursor/Codex/OpenCode/Kilo and the probe suite |
+| `npm run bundle` → `dist/mcp-server.js` | written, exit 0 |
+| 0.12.0 client audit (DOM globals outside `client/web.ts`, HTML, `className`, `onClick`) | **clean** |
+| `"DOM"` / `reference lib="dom"` | clean |
+| Remaining deprecated registrations in `client/` | **none** |
+| Contribution ID charset | conforms (`memory-flash`, `memory-flash-settings`, `open-memory-flash`, `open-memory-flash-workspace`) |
+| `requirements.paseo` | `>=0.11.0` — matches the APIs actually used |
+| Live install on a running 0.12.0 daemon | **PASS** — installed from the working tree into an isolated 0.12.0 daemon (scratch home, production config untouched): status `running`, `Plugin ready` in the log, `memory.db` created on startup, no errors. The real 0.12.0 host compiler (`compilePlugin`) built the client entry; the compiled bundle contains the new API and **zero** legacy registrations. `paseo plugin reload memory-flash` exits 0 and the plugin restarts cleanly (the 0.12.0 #6306 fix). |
+
+### 16.5 Not adopted (from §15; 0.12.0 changes none of them)
+
+1. **Host-managed processes** (`spawnProcess`/`terminateProcess` in
+   `server/mcp-probe.ts`, `server/remote-hosts.ts`) — available since 0.11.0,
+   still a server-behavior change; `node:child_process` remains legal under
+   `server/`.
+2. **Deep links through `PluginScreenProps.params`** (open on an exact memory,
+   `PluginScreenTitle` deriving the header) plus `SidebarRow`/`SidebarSeparator`
+   chip grouping and an `addSidebarFooterItem` quick entry — this is the
+   substantive remaining §15.2 item and would be new functionality.
+3. **`agent.closed` lifecycle event** — the handoff trigger. Still new
+   functionality.
+
+Version `0.8.2` → `0.8.3` (existing-registration migration + a real audit
+fix, no new capability → last digit), annotated tag `memory-flash@0.8.3`.

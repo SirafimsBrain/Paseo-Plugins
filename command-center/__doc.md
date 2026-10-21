@@ -303,7 +303,12 @@ The same defect existed in three sibling plugins and was fixed the same way — 
 
 ## 6. Compatibility
 
-Verified on 2026-10-02 against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1` + `@getpaseo/client@0.10.1`:
+Current: **verified on 2026-10-21 against Paseo `0.12.0`** with
+`@getpaseo/plugin@0.12.0` + `@getpaseo/client@0.12.0`, manifest requirement
+raised to `>=0.11.0`, client registrations migrated to the screen/sidebar API
+and the `client/web.ts` DOM-global audit fixed — see §10.
+
+Earlier, on 2026-10-02 against Paseo `0.10.3` with `@getpaseo/plugin@0.10.1` + `@getpaseo/client@0.10.1`:
 
 - `npm run typecheck` — clean.
 - `npx vitest run` — 9 suites, 98 tests, all green.
@@ -320,7 +325,7 @@ Paseo 0.10.0 (2026-09-28) and 0.10.1 (2026-09-29) are **additive** for every API
 - **Settings reorganization** — superseded in 0.5.0: the plugin now contributes its own settings screen via `client.addSettingsScreen` + `server.registerSettings` (§5d), which is the SDK-native mechanism on 0.10.x.
 - **Bug fixes** (workspace sidebar persistence, agent import, daemon startup, Pi/OpenCode/Codex edge cases) — none affect the plugin's RPC surface or client contributions.
 
-The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bumped to 0.5.0 (new functionality: settings screen, automation hooks, MCP injection, attachment source, `/cc` subcommands, history retention setting) and to 0.5.1 (bugfix: installation from a clean checkout, §5f).
+The plugin's manifest range was `>=0.8.0` through 0.5.1, which covered 0.10.x. The version was bumped to 0.5.0 (new functionality: settings screen, automation hooks, MCP injection, attachment source, `/cc` subcommands, history retention setting) and to 0.5.1 (bugfix: installation from a clean checkout, §5f). From 0.5.2 the range is `>=0.11.0`, because the client entry now uses the 0.11+ screen/sidebar API (§10).
 
 ## 7. Limitations
 
@@ -334,7 +339,8 @@ The plugin's manifest range `>=0.8.0` already covers 0.10.x. The version was bum
 - **History is linear and bounded** (default 50, user-configurable 10–500 via settings, §5d); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
 - **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required. `list`/`history` only open the surface: the slash context has no message channel to print into.
 - **Automation is best-effort.** Auto-run/bootstrap commands execute with template defaults and swallow errors (§5d); a failing automation never blocks the triggering event, and failures are only visible via the run history.
-- **Installation needs the npm registry.** The manifest build step is `npm ci`, because the scheduler bridge depends on `@getpaseo/client`, which Paseo does not supply to plugins (§5f). A host without registry access cannot install or update this plugin; the other four plugins in this repository have no such requirement.
+- **Installation needs the npm registry.** The manifest build step is `npm ci`, because the scheduler bridge depends on `@getpaseo/client`, which Paseo does not supply to plugins (§5f). A host without registry access cannot install or update this plugin; the other four plugins in this repository have no such requirement. (Paseo 0.12.0's `#7023` relaxed this for *type-only* `@getpaseo/protocol/*` imports — erased at compile time, no local install needed — but `@getpaseo/client` is imported for its **runtime** `DaemonClient`, so it must still be installed.)
+- **No deep links yet.** `PluginScreenProps.params` (0.11+) lets history, schedules and `/cc` open an exact command or schedule; the surface does not read `params` yet, so `/cc` still only opens the Command Center (§10 item 2).
 
 ## 8. Roadmap
 
@@ -375,9 +381,11 @@ planned for implementation after the stable Paseo 0.11.0 release, on request:**
    would make their outcome perceptible without watching the history tab.
 2. **Screen and sidebar modernization** — migrate the deprecated `addSurface` /
    `addSidebarItem` / `openSurface` (used in `index.client.tsx`) to `addScreen` /
-   `addSidebarHeaderItem` / `openScreen`. The host ships compatibility shims
+   `addSidebarHeaderItem` / `openScreen`. ~~The host ships compatibility shims
    (COMPAT markers in `evaluate.ts`) that are scheduled for removal after
-   **2027-03-29**, so the migration must land before then. The new API is more
+   **2027-03-29**, so the migration must land before then.~~ **Superseded by
+   §10.2: done in 0.5.2, and the 2027-03-29 date was wrong — no removal marker
+   exists on these shims in 0.12.0 (§10.1).** The new API is more
    than a rename: `PluginScreenProps.params` carries URL parameters into the
    surface (a deep link could open the library on an exact command, or the
    schedules tab on an exact schedule, from history, `/cc` or Command Center
@@ -400,3 +408,82 @@ planned for implementation after the stable Paseo 0.11.0 release, on request:**
    `supportsUsageReports()` (new protocol messages `usage.list_reports.*`).
    Command Center could aggregate its own run counts into Paseo's usage reports,
    complementing the existing "most used" analytics idea (roadmap item 7).
+
+## 10. Paseo 0.12.0 — spec conformance (2026-10-21)
+
+Audited and migrated against the stable `0.12.0` release (2026-10-19).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.12.0>.
+bunny-search §13 covers the general spec rules this plugin also had to meet
+(screen/sidebar API, `requirements.paseo` semantics, ID charset, the
+`client/web.ts` DOM-global rule); this section records what is specific to
+Command Center.
+
+### 10.1 What 0.12.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| SDK diff `@getpaseo/plugin@0.10.1 → 0.12.0` | **Additive only** for the API surface used here. `0.11.0 → 0.12.0` client declarations are byte-identical. |
+| SDK diff `@getpaseo/client@0.10.1 → 0.12.0` | **Additive only** for what the scheduler bridge uses. `exports` map identical. The `DaemonClient` class gained members (`listUsageReports`, `supportsBackgroundWorkspaces`, `sourceAgentId`/`background`/`callerAgentId` request fields, a `usage.list_reports` subscription) and one signature change: `readFile(..., timeout?)` gained an **optional trailing** parameter — a source-compatible widening. Nothing was removed. |
+| All 8 `schedule*` methods the bridge calls | Present in `@getpaseo/client@0.12.0`, same shapes: `scheduleList`, `scheduleCreate`, `schedulePause`, `scheduleResume`, `scheduleRunOnce`, `scheduleDelete`, `scheduleLogs`, `scheduleUpdate`. (Verified by matching each method's declaration in `dist/daemon-client.d.ts` against 0.10.1.) |
+| `PaseoApi` (type-only import in `server/executor.ts`, `client/dispatch.ts`) | Still exported from `@getpaseo/client`; used only as a type, so the bundle boundary rules are unchanged. |
+| Deprecated client members | `addSurface`, `addSidebarItem` (+ `PluginSidebarContribution`) and `openSurface` remain, `@deprecated`, no removal version. The 0.12.0 **app bundle** still implements them as shims over `addScreen` / the header-item registry / `openScreen`. |
+| **Correction: the "2027-03-29" removal date** | §9 of this document and the old README claimed the surface/sidebar shims were "scheduled for removal after 2027-03-29" (attributed to COMPAT markers in `evaluate.ts`). **That claim does not hold for 0.12.0.** Grepping the 0.12.0 server package and the shipped app bundle: `2027-03-29` appears only on `COMPAT(codexFastPreference)` and `COMPAT(pluginProviderLaunch)` — unrelated. The surface/sidebar shims carry **no** COMPAT marker and **no** date, and the SDK's `@deprecated` tags state no removal version. Treat removal as happening without notice, not as a dated deadline. |
+| `PluginSurfaceProps` | Not deprecated; still the settings-screen prop type, so `client/settings-screen.tsx` keeps it. Only the Command Center screen moved to `PluginScreenProps`. |
+| `#7023` (protocol type imports) | Relaxation, not a change this plugin can use: it exempts *type-only* `@getpaseo/protocol/*` imports from the plugin-local install. This plugin imports `@getpaseo/client` for its **runtime** `DaemonClient`, so the `npm ci` build step stays required (§5f, §7). |
+| `#6306` (reload timeout) | `paseo plugin reload` no longer fails with a 60 s timeout while a reload is still running — makes the documented reload workflow reliable. |
+| Manifest | `requirements.paseo` `>=0.8.0` → `>=0.11.0`. `name`/`icon`/`media` metadata needs ≥ 0.11.0 and remains unused (no runtime effect). The `version` manifest key is still **rejected** by 0.10.x — not reintroduced (§6). |
+
+### 10.2 Migration performed (version 0.5.1 → 0.5.2)
+
+`index.client.tsx`:
+
+| Before | After |
+| --- | --- |
+| `client.addSurface(SURFACE_ID, CommandCenterSurface)` | `client.addScreen({ id, title: "Command Center", Component })` |
+| `client.addSidebarItem({ id, title, icon, surface })` | `client.addSidebarHeaderItem({ id, title, Component })` rendering `<SidebarRow icon="TerminalSquare" active onPress>` |
+| `onSelect({ openSurface })` ×2 (global + workspace Command Center items) | `onSelect({ openScreen })` → `openScreen({ screenId })` |
+| `/cc` `onSubmit({ args, rpc, openSurface })` — 5 call sites | `onSubmit({ args, rpc, openScreen })` → `openScreen({ screenId })` |
+
+`client/command-center-surface.tsx`: `PluginSurfaceProps` → `PluginScreenProps`
+(this is the file that owns the tabs, so it is the one that would consume
+`params` for a deep link later).
+
+`client/use-host-typography.ts` no longer touches the page store; it calls
+`readHostTypography()` from the new `client/web.ts` (§13 of bunny-search
+explains the rule; the fix is byte-identical across plugins).
+
+`package.json`: `@getpaseo/plugin` and `@getpaseo/client` `0.10.1` → `0.12.0`,
+version `0.5.1` → `0.5.2`. `paseo-plugin.json`: `requirements.paseo`
+`>=0.8.0` → `>=0.11.0`.
+
+### 10.3 Verification (2026-10-21, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm install` with both 0.12.0 SDKs | exit 0; lockfile updated |
+| `npm run typecheck` (`tsc --noEmit`) | **exit 0** |
+| `npm test` | **9 suites / 98 tests pass** |
+| 0.12.0 client audit (DOM globals outside `client/web.ts`, HTML elements, `className`, `onClick`) | **clean** |
+| Remaining deprecated registrations in `client/` | **none** |
+| Contribution ID charset | conforms (`command-center`, `command-center-settings`, `open-command-center`, `open-command-center-workspace`, `cc`) |
+| `requirements.paseo` | `>=0.11.0` — matches the APIs actually used |
+| Live install on a running 0.12.0 daemon | **PASS** — installed from the working tree into an isolated 0.12.0 daemon (scratch home, production config untouched): status `running`, `Plugin ready` in the log, no errors. The real 0.12.0 host compiler (`compilePlugin`) built the client entry; the compiled bundle contains the new API and **zero** legacy registrations. `paseo plugin reload command-center` exits 0 and the plugin restarts cleanly (the 0.12.0 #6306 fix). |
+
+### 10.4 Not adopted (from §9; 0.12.0 changes none of them)
+
+1. `client.playAudio` — audible feedback for unattended runs. Available, optional.
+2. **Deep links through `PluginScreenProps.params`** — `PluginScreenTitle`
+   deriving the header, history/`/cc`/Command Center opening an exact command
+   or schedule. This is the substantive remaining §9 item and would be new
+   functionality → second-digit bump.
+3. Multi-row sidebar (`SidebarRow`/`SidebarSeparator`, `addSidebarFooterItem`)
+   — optional presentation work.
+4. Provider launch diagnostics (`ProviderRegistration.command`/`status`).
+5. `activeTurnBehavior` — queue vs. interrupt for single-target runs.
+6. `registerUsageSource` — still optional; 0.12.0 adds the client-side
+   `listUsageReports()`/`supportsUsageReports()` half, which does not by
+   itself make Command Center a sensible usage source.
+
+Version `0.5.1` → `0.5.2` (existing-registration migration + the DOM-global
+audit fix, no new capability → last digit), annotated tag
+`command-center@0.5.2`.

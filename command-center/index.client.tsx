@@ -1,5 +1,9 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type {
+  PluginClientContext,
+  PluginSidebarItemProps,
+} from "@getpaseo/plugin/client";
 import { defineAttachmentSource } from "@getpaseo/plugin";
+import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { CommandCenterSurface } from "./client/command-center-surface";
 import { CommandCenterSettingsScreen } from "./client/settings-screen";
 import {
@@ -10,16 +14,38 @@ import {
 } from "./shared/commands";
 import { createSchedule } from "./shared/schedules";
 
-const SURFACE_ID = "command-center";
+const SCREEN_ID = "command-center";
+
+/**
+ * Sidebar header row for the Command Center screen.
+ *
+ * Paseo 0.11+ renders sidebar items as plugin components: the item decides
+ * what a press does, the host owns the row's layout and highlight.
+ */
+function CommandCenterSidebarItem({
+  currentScreen,
+  openScreen,
+}: PluginSidebarItemProps) {
+  return (
+    <SidebarRow
+      icon="TerminalSquare"
+      active={currentScreen?.screenId === SCREEN_ID}
+      onPress={() => openScreen({ screenId: SCREEN_ID })}
+    />
+  );
+}
 
 export default function contribute(client: PluginClientContext) {
-  client.addSurface(SURFACE_ID, CommandCenterSurface);
-
-  client.addSidebarItem({
-    id: "command-center",
+  client.addScreen({
+    id: SCREEN_ID,
     title: "Command Center",
-    icon: "TerminalSquare",
-    surface: SURFACE_ID,
+    Component: CommandCenterSurface,
+  });
+
+  client.addSidebarHeaderItem({
+    id: SCREEN_ID,
+    title: "Command Center",
+    Component: CommandCenterSidebarItem,
   });
 
   client.addCommandCenterItem({
@@ -28,8 +54,8 @@ export default function contribute(client: PluginClientContext) {
     icon: "TerminalSquare",
     keywords: ["command", "center", "prompt", "shell", "orchestration"],
     context: "global",
-    onSelect({ openSurface }) {
-      openSurface(SURFACE_ID);
+    onSelect({ openScreen }) {
+      openScreen({ screenId: SCREEN_ID });
     },
   });
 
@@ -39,8 +65,8 @@ export default function contribute(client: PluginClientContext) {
     icon: "TerminalSquare",
     keywords: ["command", "center", "workspace"],
     context: "workspace",
-    onSelect({ openSurface }) {
-      openSurface(SURFACE_ID);
+    onSelect({ openScreen }) {
+      openScreen({ screenId: SCREEN_ID });
     },
   });
 
@@ -76,21 +102,21 @@ export default function contribute(client: PluginClientContext) {
     description: "Run a Command Center command by name",
     argumentHint: "list | history | schedule <name> <cron> | <command name>",
     context: "agent",
-    async onSubmit({ args, rpc, openSurface }) {
+    async onSubmit({ args, rpc, openScreen }) {
       const trimmed = args.trim();
       const [sub, ...rest] = trimmed.split(/\s+/);
 
       if (trimmed.length === 0 || sub === "list") {
         const { commands } = await rpc(listCommands, {});
         const lines = commands.map((command) => `• ${command.name}${command.category ? ` — ${command.category}` : ""}`);
-        openSurface(SURFACE_ID);
+        openScreen({ screenId: SCREEN_ID });
         return;
       }
 
       if (sub === "history") {
-        // The history tab is the surface for run history; the slash-command
+        // The history tab is the screen for run history; the slash-command
         // context has no message channel to print a listing into.
-        openSurface(SURFACE_ID);
+        openScreen({ screenId: SCREEN_ID });
         return;
       }
 
@@ -99,7 +125,7 @@ export default function contribute(client: PluginClientContext) {
         const { commands } = await rpc(listCommands, {});
         const match = commands.find((command) => command.name.toLowerCase() === name.toLowerCase());
         if (!match || match.type !== "prompt" || !match.provider) {
-          openSurface(SURFACE_ID);
+          openScreen({ screenId: SCREEN_ID });
           return;
         }
         const scheduleName = rest.slice(2).join(" ") || match.name;
@@ -113,7 +139,7 @@ export default function contribute(client: PluginClientContext) {
           cron: cron || "0 9 * * *",
           runOnCreate: false,
         });
-        openSurface(SURFACE_ID);
+        openScreen({ screenId: SCREEN_ID });
         return;
       }
 
@@ -123,7 +149,7 @@ export default function contribute(client: PluginClientContext) {
         (command) => command.name.toLowerCase() === target.toLowerCase(),
       );
       if (!match) {
-        openSurface(SURFACE_ID);
+        openScreen({ screenId: SCREEN_ID });
         return;
       }
       // Without a dialog the command runs with defaults: empty inputs fall back

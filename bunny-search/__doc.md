@@ -132,11 +132,11 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.10.3 and stable 0.11.0 (requirement `>=0.10.0`; bumped to `>=0.11.0` when the 0.11-only improvements in §10 are implemented) |
-| SDK | `@getpaseo/plugin@0.10.1` (0.11.0 verified for the SDK as a build/test target, see §10) |
+| Paseo | verified against 0.12.0 (2026-10-21); requirement `>=0.11.0` — the plugin uses the 0.11+ screen/sidebar API (§13). Earlier: verified against 0.10.3 and stable 0.11.0. |
+| SDK | `@getpaseo/plugin@0.12.0` (pinned for typecheck/tests; the host supplies the runtime instance) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`); vitest 9 hermetic suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors; stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0) |
+| Verification | typecheck clean (three-project `tsc -b`) against SDK 0.12.0; vitest 9 hermetic suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); 0.12.0 client audit clean (§13.3); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors; stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0) |
 
 ## 8. Alternatives considered
 
@@ -435,3 +435,105 @@ safe inside both bundles (host CJS evaluator and the MCP ESM bundle).
   (`ddgs 9.16.0`, Python 3.13.5) from `PATH`.
 - Version `0.3.1` → `0.4.0` (new functionality → second digit), annotated
   tag `bunny-search@0.4.0`.
+
+## 13. Paseo 0.12.0 — spec conformance (2026-10-21)
+
+Audited and migrated against the stable `0.12.0` release
+(2026-10-19). Evidence below; the release notes:
+<https://github.com/getpaseo/paseo/releases/tag/v0.12.0>.
+
+### 13.1 What 0.12.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| SDK diff `@getpaseo/plugin@0.10.1 → 0.12.0` | **Additive only** for the API surface this plugin uses. New since 0.10.1: the screen/sidebar API (`addScreen`, `addSidebarHeaderItem`, `addSidebarFooterItem`, `openScreen`, `PluginScreenProps.params`, `SidebarRow`/`SidebarSeparator`), `playAudio`, `spawnProcess`/`execCommand`/`terminateProcess`, `registerUsageSource`. Nothing the plugin used was removed or changed in meaning. |
+| `0.11.0 → 0.12.0` declaration diff | `client/contracts.d.ts` and `client/ui.d.ts` are **byte-identical** between the two releases: the screen/sidebar API landed in 0.11.0 and 0.12.0 adds no client contract change. The migration below is therefore 0.11.0-compatible, which is why `requirements.paseo` is `>=0.11.0` rather than `>=0.12.0`. |
+| Server SDK diff | Additive only: `registerUsageSource` (+ `dist/server/usage.*`) and `spawnProcess`/`execCommand`/`terminateProcess` (+ `dist/server/process.*`). |
+| Deprecated client members in 0.12.0 | `addSurface`, `addSidebarItem` (and its `PluginSidebarContribution` type) and `openSurface` remain in `client/contracts.d.ts` with `@deprecated Use addScreen` / `... addSidebarHeaderItem` / `... openScreen` JSDoc. No removal version is published. |
+| Deprecated members on the shipped 0.12.0 host | Still implemented as shims: the app bundle maps `addSurface(id, Component)` → `addScreen({ id, title: id, Component })`, `addSidebarItem(contribution)` → the header-item registry, and `openSurface(id)` → `openScreen({ screenId: id })`. Old plugins keep loading; the migration is driven by the `@deprecated` marks, not by breakage. |
+| `PluginSurfaceProps` | **Not deprecated.** It is still the prop type of settings-screen components, so `client/settings-screen.tsx` and the shared `openSearchInterfaceUrl(url, props, paseo)` helper keep it. Only the *screen* component moved to `PluginScreenProps` (it adds `params`). |
+| 0.12.0 fixes that touch this plugin's area | `#7023` — plugins importing Paseo *protocol types* no longer fail to install with `Could not resolve type dependency`; type-only `@getpaseo/protocol/...` imports are erased without a plugin-local install (runtime imports still resolve normally). This plugin still does **not** import `@getpaseo/protocol` (see the comment in `index.server.ts`), so it is unaffected either way. `#6306` — `paseo plugin reload` no longer fails with a 60 s timeout while the reload is still running, which makes the documented reload workflow below reliable. `#6760` — `providers.waitForReady` no longer throws in plugins on mobile (not used here). |
+| Manifest rules | `requirements.paseo` is an npm semver range checked on install, start, enable and reload; unknown keys inside `requirements` are rejected. `name`/`icon`/`media` metadata requires ≥ 0.11.0 and is still unused here (§10.2 item 3, unchanged — no runtime effect). |
+| ID charset | Plugin, screen, sidebar-item, Command Center, settings-screen and slash-command IDs must start with a lowercase letter and contain lowercase letters, numbers or hyphens. `bunny-search`, `bunny-search-settings`, `open-bunny-search` all conform. |
+
+### 13.2 Migration performed (version 0.4.1 → 0.4.2)
+
+`index.client.tsx` and `client/surface.tsx`:
+
+| Before (0.10-era) | After (0.11+/0.12 spec) |
+| --- | --- |
+| `client.addSurface(SURFACE_ID, BunnySearchSurface)` | `client.addScreen({ id: SCREEN_ID, title: "Bunny Search", Component: BunnySearchSurface })` |
+| `client.addSidebarItem({ id, title, icon, surface })` | `client.addSidebarHeaderItem({ id, title, Component })` with `BunnySearchSidebarItem` rendering `<SidebarRow icon="Globe" active={...} onPress={...} />` |
+| `onSelect({ openSurface }) { openSurface(SURFACE_ID) }` | `onSelect({ openScreen }) { openScreen({ screenId: SCREEN_ID }) }` |
+| `BunnySearchSurface(props: PluginSurfaceProps)` | `BunnySearchSurface(props: PluginScreenProps)` — gains `params`, so a Command Center item or slash command can deep-link `?q=<query>` later |
+
+Why a **header** item: the previous `addSidebarItem` registered into the
+sidebar's header list, so `addSidebarHeaderItem` preserves placement exactly.
+`addSidebarFooterItem` is reserved for the §10.2 item 2 status dot/Test button
+(unchanged: that extra row is a new capability, still optional work).
+Settings-row label and accessibility label both come from the contribution
+`title`; the row's own label defaults to it, so `SidebarRow` needs no `label`.
+The screen `title` is a plain string (`"Bunny Search"`) — no params are
+passed today, so a `PluginScreenTitle` function would be dead code.
+
+DOM-global rule (see §13.3) forced one more new file: `client/use-host-typography.ts`
+no longer touches the page store itself; it calls `readHostTypography()` from
+the new `client/web.ts`.
+
+`paseo-plugin.json`: `requirements.paseo` `>=0.10.0` → `>=0.11.0`
+(`addScreen`/`addSidebarHeaderItem`/`openScreen` do not exist on 0.10 hosts).
+`package.json`: `@getpaseo/plugin` `0.10.1` → `0.12.0`, version `0.4.1` → `0.4.2`
+(functionality change to existing registration → patch digit, per the project
+versioning rules).
+
+### 13.3 The 0.12.0 cross-platform audit — one real violation, fixed
+
+The 0.12.0 client audit is `document.|window.|localStorage|navigator.|<html element>|className=|onClick=`
+over `client/`, and *"A hit outside `client/web.ts` is a bug."* DOM globals
+must live in `client/web.ts`, declared only for what that module uses, with
+every export gated on `Platform.OS === "web"` plus a native fallback.
+
+| Audit target | Before | After |
+| --- | --- | --- |
+| `client/use-host-typography.ts` | read `globalThis.localStorage` directly (spec violation: a DOM global in a cross-platform module) | **fixed** — calls `readHostTypography()` from the new `client/web.ts`, which is gated on `Platform.OS === "web"` and returns `null` on native so callers fall back to defaults |
+| `client/surface.tsx`, `client/settings-screen.tsx`, `client/open-search-ui.ts` | clean | clean |
+| HTML elements / `className` / `onClick` in `client/` | none (React Native only) | none |
+| `"DOM"` in `lib`, or `/// <reference lib="dom" />` | none — `tsconfig.json` has `"lib": ["ES2023"]` | unchanged |
+| `shared/host-fonts.ts` | takes the storage object as a **parameter** (`Pick<Storage, "getItem">`), never reaches for a global itself | unchanged — shared code stays runtime-neutral, which is what lets `client/web.ts` be the only global accessor |
+
+The same `use-host-typography.ts` copy exists in command-center,
+memory-flash, memory-flash-client and session-manager; each needs the same
+one-file fix when it is audited (that is a per-plugin patch bump for each).
+
+### 13.4 Verification (2026-10-21, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm install` with `@getpaseo/plugin@0.12.0` | exit 0; lockfile updated |
+| `npm run typecheck` (three-project `tsc -b`) against 0.12.0 types | **exit 0** |
+| `npm test` | **9 suites / 95 tests pass** (2 gated live tests skipped, as designed) |
+| `npm run bundle` → `dist/mcp-server.js` | written, exit 0 |
+| 0.12.0 client audit (DOM globals outside `client/web.ts`, HTML elements, `className`, `onClick`) | **clean** |
+| `"DOM"`/`reference lib="dom"` in tsconfigs | clean (`lib: ["ES2023"]`) |
+| Remaining deprecated registrations in `client/` | **none** (`grep addSurface\|addSidebarItem\|openSurface` → no hits) |
+| All IDs conform to the lowercase/hyphen rule | yes |
+| `requirements.paseo` | `>=0.11.0` — matches the APIs actually used |
+| Live install on a running 0.12.0 daemon | **PASS** — installed from the working tree into an isolated 0.12.0 daemon (scratch `HOME`, production config untouched): status `running`, `Plugin ready` in the log, no client-contribution errors. The real 0.12.0 host compiler (`compilePlugin`) built the client entry; the compiled bundle contains the new API and **zero** legacy `addScreen`/`addSidebarItem`/`registerCommand`/`createComposerPill`/`registerAttachmentSource`/`registerTimelineDecorator`/`registerSurface`/`registerCommandCenterItem`/`appendArtifact`/`renderArtifact` calls. Server-side effects observed live: the settings mirror was written. `paseo plugin reload bunny-search` exits 0 (the 0.12.0 #6306 fix). |
+
+### 13.5 Not adopted (recorded, unchanged from §10.2)
+
+- **Item 1 — `spawnProcess`/`terminateProcess` in `server/probe.ts`.** Still
+  the better API (Windows `.cmd` handling, tree kill on timeout), but adopting
+  it is a server-behavior change needing its own test pass. Not required for
+  0.12.0 conformance: `node:child_process` remains legal in `server/`.
+- **Item 3 — registry metadata** (`name`/`icon`/`media` + `OVERVIEW.md`).
+  Still optional at runtime; `OVERVIEW.md` is what a *registry listing*
+  requires, not what installation requires.
+- **Item 4 — `registerUsageSource`.** Rejected earlier; 0.12.0 does not change
+  the reasoning.
+- **Deep-link quick search via `PluginScreenProps.params`** and a
+  `addSidebarFooterItem` status row: both now *possible* on this SDK, both
+  still optional. They would be new functionality → second-digit bump.
+
+Version `0.4.1` → `0.4.2` (existing-registration migration + a real audit
+fix, no new capability → last digit), annotated tag `bunny-search@0.4.2`.

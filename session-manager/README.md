@@ -67,10 +67,14 @@ installation. Updates: `paseo plugin update session-manager`.
 
 ## Requirements
 
-- Paseo `>=0.8.0` (declared in `paseo-plugin.json`).
-- Verified against Paseo `0.10.3` (2026-10-02, SDK `@getpaseo/plugin@0.10.1`):
-  `npm run typecheck` and `npm test` (70 tests, 8 suites) pass with no code
-  changes; see Compatibility in [`__doc.md`](./__doc.md).
+- Paseo `>=0.8.0` (declared in `paseo-plugin.json`). **Deliberately not
+  raised:** this plugin contributes a workspace panel, a settings screen and
+  Command Center items — none of the 0.11+ screen/sidebar API — so the floor
+  stays where the APIs actually reach. Only the SDK pin moved to 0.12.0.
+- Verified against Paseo `0.12.0` (2026-10-21, SDK `@getpaseo/plugin@0.12.0`):
+  `npm run typecheck` and `npm test` (70 tests, 8 suites) pass; see
+  Compatibility in [`__doc.md`](./__doc.md). Earlier: Paseo 0.10.3 against
+  SDK 0.10.1.
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
   `cline`, `opencode`, `kilo`. Qwen Code and `acpx` are read and written as files
   and need no CLI.
@@ -78,24 +82,60 @@ installation. Updates: `paseo plugin update session-manager`.
   the tests build throwaway stores under the OS temp directory and never touch
   the real home stores.
 
-## Planned improvements with Paseo 0.11.0
+## Paseo 0.12.0 spec conformance
 
-Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
-with this plugin as-is: typecheck, the test suite, the real host bundler and a
-live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged, and
-the SDK diff `0.10.1 → 0.11.0-beta.5` is purely additive. The new APIs relevant
-to this plugin:
+Verified against the **stable Paseo 0.12.0** release (2026-10-21).
+Full evidence: [`__doc.md`](./__doc.md) §16.
 
-- **`spawnProcess` / `execCommand` / `terminateProcess`**
-  (`@getpaseo/plugin/server`) — host-managed replacement for the plugin's own
-  `node:child_process` calls in `server/exec.ts`, with correct Windows
-  `.cmd`/`.bat` launching.
-- **`agent.closed` lifecycle event** — invalidate the listing cache and refresh
-  the "due for cleanup" hint as soon as an agent closes, instead of waiting for
-  the cache TTL.
-- **New sidebar contributions** (`addSidebarFooterItem`, multi-row `SidebarRow`)
-  — an extra persistent entry point beside the existing Command Center item.
+**This plugin needed no API migration.** It contributes a workspace panel
+(`addWorkspacePanel`), a settings screen (`addSettingsScreen`) and Command
+Center items (`addCommandCenterItem` with `openPanel`/`openSettings`) — none
+of which are deprecated in 0.12.0 — so it never used `addSurface`,
+`addSidebarItem` or `openSurface`. The SDK diff `@getpaseo/plugin@0.10.1 →
+0.12.0` is **additive only** for everything it calls, and the `0.11.0 → 0.12.0`
+declarations are byte-identical.
 
-Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+**`requirements.paseo` stays `>=0.8.0` on purpose.** Raising the floor is only
+honest when a plugin adopts a newer API; this one adopts none, so a 0.10.x
+host can still run it. The SDK pin moved to `@getpaseo/plugin@0.12.0` for
+typecheck/tests, and 0.12.0 was the release verified.
+
+**One real spec violation found and fixed.** 0.12.0's client audit treats a
+cross-platform module touching a DOM global outside `client/web.ts` as a bug.
+This plugin had **two** such sites — more than any other plugin here:
+
+| Site | Fix |
+| ---- | --- |
+| `client/use-host-typography.ts` read `globalThis.localStorage` | now calls `readHostTypography()` from the new `client/web.ts` |
+| `client/session-manager-panel.tsx` read `globalThis.localStorage` inline in its `styles` memo | same call, same module |
+
+`client/web.ts` is gated on `Platform.OS === "web"` and returns `null` on
+native so callers fall back to defaults. The audit is clean after the change.
+
+**A previously documented date was wrong:** earlier notes said the host's
+compatibility shims were "scheduled for removal after **2027-03-29**". That
+date belongs to unrelated `COMPAT(...)` markers in 0.12.0
+(`codexFastPreference`, `pluginProviderLaunch`); the surface/sidebar shims
+carry no removal marker and the SDK tags state no version. It made no
+difference to this plugin (it uses none of those APIs) but the claim is
+corrected everywhere it appeared.
+
+**Verification:** typecheck clean against SDK 0.12.0, vitest **8 suites /
+70 tests** pass, the DOM-global audit is clean, and no deprecated
+registrations exist. Live-verified on a real 0.12.0 daemon in an
+isolated home: installs as `running`, logs `Plugin ready`, reloads
+cleanly (`paseo plugin reload`, the fixed #6306 flow), and the real
+0.12.0 host compiler builds the client entry (neither the deprecated
+nor the new contribution API is used, as designed).
+
+Still open, all optional and none conformance blockers:
+
+1. **Host-managed processes** — `spawnProcess` / `terminateProcess` /
+   `execCommand` in `server/exec.ts`, for Windows `.cmd`/`.bat` launching
+   and host-owned process lifecycle.
+2. **`agent.closed` lifecycle event** — invalidate the 30-second listing
+   cache and refresh the "due for cleanup" hint the moment an agent closes.
+3. **Extra sidebar entry points** — `addSidebarFooterItem` and multi-row
+   `SidebarRow`/`SidebarSeparator`. New capability → second-digit bump.
 
 For the full technical description see [`__doc.md`](./__doc.md).

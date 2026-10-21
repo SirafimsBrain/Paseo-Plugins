@@ -14,9 +14,9 @@ import {
 } from "./intent";
 import {
   defaultHostTypography,
-  readHostTypographyFromLocalStorage,
   scaledFont,
 } from "../shared/host-fonts";
+import { readHostTypography } from "./web";
 
 const AGE_FILTERS: { label: string; days: number }[] = [
   { label: "Any age", days: 0 },
@@ -347,10 +347,10 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
 
   const styles = useMemo(
     () => {
-      const typography = readHostTypographyFromLocalStorage(
-        (globalThis as unknown as { localStorage?: { getItem(key: string): string | null } | undefined })
-          .localStorage,
-      ) ?? defaultHostTypography();
+      // The host-fonts read goes through `client/web.ts`: that module owns
+      // every DOM global in this plugin's client code (Paseo's cross-platform
+      // rules), and it is a no-op outside the browser.
+      const typography = readHostTypography() ?? defaultHostTypography();
       const font = (base: number) => scaledFont(base, typography);
       return {
       root: {

@@ -25,8 +25,8 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 - **Settings screen** — Paseo Settings → Plugins → Command Center: history retention (10–500), default provider/model for new prompt commands, and the automation hooks.
 - **Schedules** — any command (prompt or shell) can be scheduled on the standard Paseo scheduler, managed entirely from the plugin: the `Schedule` button next to `Edit` on a command card opens the form prefilled from the saved command (rendered prompt with default inputs, stored model, workspace), while the run dialog's `Schedule…` button freezes exactly the values you previewed. Pick a cadence preset or a cron expression, cap the number of runs, optionally fire once immediately; shell lines are wrapped into an agent instruction for each run. Schedules run on the daemon host (they also appear in the native Schedules sidebar), the plugin keeps the link to the creating command, and a dedicated tab offers pause/resume, run-now, an inline cadence editor and per-run tracking (status, timing, output/errors).
 - **Composer attachment source** — saved commands are searchable from the composer's attachment picker; picking one inserts the template text into the message.
-- **Entry points** — sidebar item, Command Center item (⌘K), and a `/cc` slash command in agent chats (`/cc <name>` runs with defaults; `/cc list`, `/cc history`, `/cc schedule <name> <cron> [name]` open the surface / create a schedule).
-- **Host typography** — text sizes in the surface are scaled by the interface text size from Paseo's Settings → Appearance, and a configured interface/code font family is applied to plugin text (see limitations in `__doc.md`).
+- **Entry points** — sidebar header row, Command Center item (⌘K), and a `/cc` slash command in agent chats (`/cc <name>` runs with defaults; `/cc list`, `/cc history`, `/cc schedule <name> <cron> [name]` open the Command Center screen / create a schedule).
+- **Host typography** — text sizes on the screen are scaled by the interface text size from Paseo's Settings → Appearance, and a configured interface/code font family is applied to plugin text (see limitations in `__doc.md`).
 
 ## Install
 
@@ -34,7 +34,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center
 ```
 
-Requires Paseo ≥ 0.8.0 (verified against 0.10.3; the settings screen, attachment source and lifecycle hooks use SDK 0.10 APIs).
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21; the screen/sidebar API, settings screen, attachment source and lifecycle hooks are all SDK 0.11+ APIs).
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/command-center/<revision>/checkout/command-center`, together with its dependencies. It talks to the standard Paseo scheduler through the low-level `@getpaseo/client` daemon client, which Paseo does **not** supply to plugins — so the manifest runs `npm ci` as its install-time build step, and the daemon installs the dependencies before bundling. That means the host needs npm-registry access at install and update time. Updates: `paseo plugin update command-center`.
 
@@ -58,28 +58,77 @@ $PASEO_HOME/plugins/command-center/
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
 
-## Planned improvements with Paseo 0.11.0
+## Paseo 0.12.0 spec conformance
 
-Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
-with this plugin as-is: typecheck, the test suite, the real host bundler and a
-live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
-0.11.0 APIs relevant to this plugin:
+Verified against the **stable Paseo 0.12.0** release (2026-10-21).
+Full evidence: [__doc.md](./__doc.md) §10.
 
-- **`client.playAudio({ base64, mimeType })`** — audible feedback when a
-  scheduled or automated run finishes or fails (those run unattended today).
-- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
-  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
-  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
-  adopt the multi-row `SidebarRow`/`SidebarSeparator` and `addSidebarFooterItem`,
-  and use screen URL params (`PluginScreenProps.params`) so history, schedules
-  and `/cc` can deep-link straight to an exact command or schedule.
-- **Provider launch diagnostics** — `ProviderRegistration.command`/`status` with
-  the `ProviderLaunch`/`ProviderStatus` schemas: per-provider launch command/env
-  overrides and a reported reason when a provider cannot start, surfaced in the
-  run dialog.
-- **`activeTurnBehavior`** (new in `@getpaseo/client` 0.11) — declare whether a
-  prompt command queues or interrupts when its target agent is mid-turn.
+**What the new version changed for this plugin:**
 
-Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+- Both SDK diffs (`@getpaseo/plugin@0.10.1 → 0.12.0` and
+`@getpaseo/client@0.10.1 → 0.12.0`) are **additive only** for every API this
+plugin uses. The `0.11.0 → 0.12.0` client declarations are byte-identical,
+so `requirements.paseo` is `>=0.11.0` — the API floor — not `>=0.12.0`.
+- All eight `schedule*` methods on the low-level `DaemonClient` that the
+scheduler bridge calls (`scheduleList`, `scheduleCreate`, `schedulePause`,
+`scheduleResume`, `scheduleRunOnce`, `scheduleDelete`, `scheduleLogs`,
+`scheduleUpdate`) are present in `@getpaseo/client@0.12.0` unchanged. The
+only signature change in that class is an optional trailing `timeout` on
+`readFile`, which this plugin does not call.
+- The 0.10-era registrations this plugin used are `@deprecated` in the SDK
+(`addSurface`, `addSidebarItem`, `openSurface`). They still work — the
+0.12.0 host ships them as shims over `addScreen`/`addSidebarHeaderItem`/
+`openScreen` — so this was a migration for correctness, not a breakage fix.
+- **Correction to an earlier claim:** the previous release notes in this
+repo said the host's compatibility shims were "scheduled for removal after
+2027-03-29". That date belongs to *other* `COMPAT(...)` markers in the
+0.12.0 sources (`codexFastPreference`, `pluginProviderLaunch`); the
+surface/sidebar shims carry **no** removal marker in the shipped 0.12.0
+app bundle, and the SDK's `@deprecated` tags state no removal version.
+Treat their removal as *when it happens*, not as a dated deadline.
+
+**Migrated in 0.5.2:**
+
+| Before | After |
+| ------ | ----- |
+| `client.addSurface(id, Component)` | `client.addScreen({ id, title, Component })` |
+| `client.addSidebarItem({ id, title, icon, surface })` | `client.addSidebarHeaderItem({ id, title, Component })` rendering `<SidebarRow icon="TerminalSquare" />` |
+| `onSelect({ openSurface })` (both Command Center items) | `onSelect({ openScreen })` → `openScreen({ screenId })` |
+| `/cc` slash command `onSubmit({ … openSurface })` | `onSubmit({ … openScreen })` — all five branches |
+| screen component took `PluginSurfaceProps` | takes `PluginScreenProps` (adds `params`) |
+| `requirements.paseo: ">=0.8.0"` | `">=0.11.0"` |
+| `@getpaseo/plugin@0.10.1`, `@getpaseo/client@0.10.1` | `0.12.0` / `0.12.0` |
+
+**Spec violation found and fixed:** 0.12.0's client audit says a
+cross-platform module touching a DOM global outside `client/web.ts` is a
+bug. `client/use-host-typography.ts` read `globalThis.localStorage`
+directly. It now calls `readHostTypography()` from the new `client/web.ts`,
+gated on `Platform.OS === "web"` with `null` on native so callers fall back
+to defaults. The audit is clean after the change.
+
+**Verification:** typecheck clean against both 0.12.0 SDKs, vitest
+**9 suites / 98 tests** pass, no deprecated registrations remain in
+`client/`, and every contribution ID conforms to the lowercase/hyphen rule.
+Live-verified on a real 0.12.0 daemon in an isolated home: installs as
+`running`, logs `Plugin ready`, reloads cleanly (`paseo plugin reload`,
+the fixed #6306 flow), and the real 0.12.0 host compiler builds the
+client entry with zero legacy API calls in the compiled bundle.
+
+Still open, all optional and none conformance blockers:
+
+1. **Audible run feedback** — `client.playAudio({ base64, mimeType })` for
+   unattended scheduled/automated runs.
+2. **Deep links through screen params** — `PluginScreenProps.params` lets
+   history, schedules and `/cc` open the library on an exact command or
+   schedule, and `PluginScreenTitle` can derive the header from them. New
+   capability → second-digit bump.
+3. **Multi-row sidebar** — `SidebarRow` / `SidebarSeparator` groups and an
+   `addSidebarFooterItem` slot, host-native instead of in-screen tabs.
+4. **Provider launch diagnostics** — `ProviderRegistration.command`/`status`
+   so the run dialog can show *why* a provider will not start.
+5. **Turn-aware dispatch** — `activeTurnBehavior` (queue vs. interrupt) for
+   single-target runs against an existing agent.
+6. **Usage reporting** — `server.registerUsageSource(...)`; still optional,
+   and 0.12.0 does not change the earlier reasoning about it.
 
 Technical details, design decisions, limitations and the roadmap: see [__doc.md](./__doc.md).

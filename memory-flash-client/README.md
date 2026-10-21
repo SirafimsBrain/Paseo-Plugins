@@ -14,7 +14,7 @@ It is the client half of Memory Flash's remote access: the memory host serves MC
 - **Key safety** — the API key is stored in `$PASEO_HOME/plugins/memory-flash-client/connections.json` with owner-only permissions (0600), never in git, never in an agent prompt, and never in a plugin log. The UI only ever shows the key's prefix. Deleting the key on the memory host cuts access.
 - **Agent skill** — the plugin ships its own `memory-flash-remote` `SKILL.md`, installed from the settings screen into `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills` and `~/.kilo/skills`. Availability is not usage: an agent that finds the `memory_*` tools on a machine without the memory plugin treats them as an optional extra. The skill tells it that this is a *shared team base* owned by another machine, and sets the same protocol the local plugin uses — 2–4 differently worded searches before a non-trivial task, `memory_get` instead of trusting a snippet, widen the query before concluding nothing is known, and write back every bugfix, positive result and user correction, searching first so one fact yields one memory, always ending with a handoff. It also states the two remote-specific facts: writes need a key issued with `read_write` scope (a `read` key exposes only `memory_search`, `memory_get`, `memory_list_by_tag` and `memory_stats`), and several configured hosts expose identically named tools.
 - **Coexistence check with memory-flash** — the plugin detects whether memory-flash itself is installed on this host (from the Paseo config and the plugin data directory) and states explicitly that running both is allowed: memory-flash is the single memory host of this machine, this plugin only adds remote connections, so the two never conflict. The check is computed, not hard-coded, so a genuine overlap later has a place to surface.
-- **Management surface inside Paseo** (sidebar item "Memory Hosts" + ⌘K entry) — the list of memory hosts with status, last check and key prefix, plus the add form (name, URL, secret) with Test and Add; and a settings screen for the identity and injection options.
+- **Management screen inside Paseo** (sidebar header row "Memory Hosts" + ⌘K entry) — the list of memory hosts with status, last check and key prefix, plus the add form (name, URL, secret) with Test and Add; and a settings screen for the identity and injection options.
 
 ## Install
 
@@ -22,7 +22,7 @@ It is the client half of Memory Flash's remote access: the memory host serves MC
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash-client
 ```
 
-Requires Paseo ≥ 0.10.0 (verified against 0.10.3) and Memory Flash 0.5.0+ with the HTTP endpoint enabled on the remote host.
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21) and Memory Flash 0.5.0+ with the HTTP endpoint enabled on the remote host.
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/memory-flash-client/<revision>/checkout/memory-flash-client`. Every import in this plugin is supplied by Paseo itself, so it has no install-time build step and no registry access requirement — the command above is the whole installation. Updates: `paseo plugin update memory-flash-client`.
 
@@ -45,7 +45,7 @@ You end up with two values: a URL like `http://100.64.0.2:8787/mcp` and a secret
 
 ### 2. Point this machine at the host
 
-7. Open the **Memory Hosts** surface in Paseo (or **Settings → Plugins → Memory Flash Client**).
+7. Open the **Memory Hosts** screen in Paseo (or **Settings → Plugins → Memory Flash Client**).
 8. Fill in the name, paste the URL and the secret, press **Test**, then **Add**.
    **Test** runs the same handshake a real agent performs: `GET /healthz`, then `initialize` and `tools/list` with the key. A green result reports the host name, the number of tools and the latency.
 9. The card turns green. Set **Client UUID** / **Host name** in the settings screen so the host's audit log can tell your machine apart.
@@ -84,25 +84,74 @@ $PASEO_HOME/plugins/memory-flash-client/
 └── connections.json   # remote memory hosts and their API keys (mode 0600)
 ```
 
-Requires Paseo ≥ 0.10.0 (uses the plugin SDK 0.10 settings, lifecycle hooks and `McpHttpServerConfig`).
+Requires Paseo ≥ 0.11.0 (uses the plugin SDK screen/sidebar API, settings, lifecycle hooks and `McpHttpServerConfig`).
 
-## Planned improvements with Paseo 0.11.0
+## Paseo 0.12.0 spec conformance
 
-Paseo `0.11.0-beta.5` (prerelease of 0.11.0, verified 2026-10-06) is compatible
-with this plugin as-is: typecheck, the test suite, the real host bundler and a
-live Git install on an isolated 0.11.0-beta.5 daemon all pass unchanged. New
-0.11.0 APIs relevant to this plugin:
+Verified against the **stable Paseo 0.12.0** release (2026-10-21).
+Full evidence: [__doc.md](./__doc.md) §15.
 
-- **Screen/sidebar modernization** — migrate the deprecated `addSurface` /
-  `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
-  `openScreen` (the host's compatibility shims are removed after **2027-03-29**),
-  lay the host list out with `SidebarRow`/`SidebarSeparator`, add an
-  `addSidebarFooterItem` entry, and deep-link to a specific connection through
-  screen URL params (`PluginScreenProps.params`).
-- **`agent.closed` lifecycle event** — release per-agent state of the injected
-  HTTP MCP connections and record which connections are actually used
-  (last-used stats) when an agent closes.
+**What the new version changed for this plugin:**
 
-Implementation is planned **after the stable Paseo 0.11.0 release, on request**.
+- The SDK diff `@getpaseo/plugin@0.10.1 → 0.12.0` is **additive only** for
+every API this plugin uses; `0.11.0 → 0.12.0` client declarations are
+byte-identical, so `requirements.paseo` is `>=0.11.0` (the API floor), not
+`>=0.12.0`.
+- The 0.10-era registrations were `@deprecated` (`addSurface`,
+`addSidebarItem`, `openSurface`) but still shipped as working shims in the
+0.12.0 host — a migration for correctness, not a breakage fix.
+- **A previously documented date was wrong:** earlier notes said the shims
+were "scheduled for removal after **2027-03-29**". That date belongs to
+unrelated `COMPAT(...)` markers in 0.12.0; the surface/sidebar shims carry no
+removal marker and the SDK tags state no version. See
+[__doc.md](./__doc.md) §15.1.
+- 0.12.0's `#7023` is worth noting for this plugin specifically: it lets a
+plugin import Paseo *protocol types* (type-only) with no local install, which
+is exactly the failure this plugin hit in 0.1.1 and worked around by dropping
+the `McpHttpServerConfig` import. The workaround is kept — it costs nothing
+and still works — but on 0.12.0 it is no longer load-bearing. `#6306` also
+fixes the 60-second `paseo plugin reload` timeout.
+- Still **no install-time build step**: this plugin references no package
+outside Paseo's host-supplied list, so it installs without npm-registry
+access. `#7023` relaxes *type* imports only; this plugin was already clean.
+
+**Migrated in 0.2.1:**
+
+| Before | After |
+| ------ | ----- |
+| `client.addSurface(id, Component)` | `client.addScreen({ id, title, Component })` |
+| `client.addSidebarItem({ id, title, icon, surface })` | `client.addSidebarHeaderItem({ id, title, Component })` rendering `<SidebarRow icon="Database" />` |
+| `onSelect({ openSurface })` | `onSelect({ openScreen })` → `openScreen({ screenId })` |
+| screen component took `PluginSurfaceProps` | takes `PluginScreenProps` (adds `params`) |
+| `requirements.paseo: ">=0.10.0"` | `">=0.11.0"` |
+| `@getpaseo/plugin@0.10.1` | `@getpaseo/plugin@0.12.0` |
+
+The screen title moved to `"Memory Hosts"` (the name the sidebar row and
+Command Center item already used) instead of the raw contribution id.
+
+**Spec violation found and fixed:** 0.12.0's client audit treats a
+cross-platform module touching a DOM global outside `client/web.ts` as a
+bug. `client/use-host-typography.ts` read `globalThis.localStorage`
+directly; it now calls `readHostTypography()` from the new `client/web.ts`,
+gated on `Platform.OS === "web"` with `null` on native so callers fall back
+to defaults.
+
+**Verification:** typecheck clean against SDK 0.12.0, vitest **6 suites /
+53 tests** pass, no deprecated registrations remain, and every contribution
+ID conforms to the lowercase/hyphen rule. Live-verified on a real
+0.12.0 daemon in an isolated home: installs as `running`, logs
+`Plugin ready`, reloads cleanly (`paseo plugin reload`, the fixed #6306
+flow), and the real 0.12.0 host compiler builds the client entry with
+zero legacy API calls in the compiled bundle.
+
+Still open, both optional and neither a conformance blocker:
+
+1. **Multi-row sidebar** — lay the host list out with
+   `SidebarRow`/`SidebarSeparator`, add an `addSidebarFooterItem` entry, and
+   deep-link to a specific connection via `PluginScreenProps.params` with
+   `PluginScreenTitle` deriving the header. New capability → second-digit bump.
+2. **`agent.closed` lifecycle event** — release per-agent state of the
+   injected HTTP MCP connections and record last-used stats when an agent
+   closes.
 
 See [__doc.md](./__doc.md) for the technical details: contracts, the probe sequence, the injection shape and the coexistence check.

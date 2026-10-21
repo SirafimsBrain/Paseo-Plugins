@@ -16,8 +16,8 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
   - **Brave Search** — official REST API with `X-Subscription-Token`;
   - **Custom JSON** — any JSON search endpoint: `{query}` placeholder in the URL (or `?q=`), heuristic field mapping (`title`/`name`/`heading`, `url`/`link`/`href`, `content`/`snippet`/`description`/`body`/`text`), array or nested `results`/`data`/`items`/`web` payloads.
 - **Test connection button** — Settings → Plugins → Bunny Search runs a real probe against the configured service (with the configured timeout) **and** a live MCP handshake check (spawn + `initialize`) of the bundled server, showing latency or a friendly, actionable error (connection refused, DNS, timeout, HTTP status, invalid JSON, rejected API key).
-- **Open search interface** — the API endpoint and the human-facing web interface are separate settings (`Search interface URL`). When the interface URL is empty it is derived from the API URL's origin (e.g. API `http://omnirouter/search` → interface `http://omnirouter`); DuckDuckGo and Brave fall back to their public front pages. The **Open in browser** action opens it inside Paseo's own browser tab on the desktop app, or the system browser elsewhere. The sidebar surface has a matching **Open** button.
-- **Connected indicator** — the sidebar surface shows a green/red/gray dot with the current provider, base URL, last-check latency and time, so "is my web search MCP working?" is always one glance away. A quick-search box runs a real query through the configured service without touching an agent.
+- **Open search interface** — the API endpoint and the human-facing web interface are separate settings (`Search interface URL`). When the interface URL is empty it is derived from the API URL's origin (e.g. API `http://omnirouter/search` → interface `http://omnirouter`); DuckDuckGo and Brave fall back to their public front pages. The **Open in browser** action opens it inside Paseo's own browser tab on the desktop app, or the system browser elsewhere. The sidebar screen has a matching **Open** button.
+- **Connected indicator** — the sidebar screen shows a green/red/gray dot with the current provider, base URL, last-check latency and time, so "is my web search MCP working?" is always one glance away. A quick-search box runs a real query through the configured service without touching an agent.
 - **Automatic MCP injection** — via the Paseo `agent.create` before-hook the MCP server is added to every agent created through Paseo (configurable, on by default; configurable tool name).
 - **Standalone use outside Paseo** — the MCP server reads `$PASEO_HOME/plugins/bunny-search/settings.json` and honors `BUNNY_SEARCH_*` environment variables (`SEARXNG_BASE_URL` is honored too, for drop-in compatibility with the reference MCP), so it also works with any MCP client.
 
@@ -27,7 +27,7 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.10.0 (verified against 0.10.3 and the stable 0.11.0 release; uses the plugin SDK settings screens and lifecycle hooks). Node ≥ 18 on the daemon host (global `fetch`).
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21; uses the plugin SDK screen/sidebar API and settings screens). Node ≥ 18 on the daemon host (global `fetch`).
 
 ### Python requirement (for the DDGS Python service)
 
@@ -92,39 +92,69 @@ $PASEO_HOME/plugins/bunny-search/
 
 The host keeps the authoritative settings in its own store (exposed to the plugin via the `settings.bunny-search.read` RPC and change subscription); the JSON file above is a mirror for the MCP server process, which is spawned by agent providers outside the plugin host and therefore cannot use the plugin API.
 
-## Paseo 0.11.0 compatibility and improvement plan
+## Paseo 0.12.0 spec conformance
 
-Verified against the **stable Paseo 0.11.0** release (2026-10-07), no code
-changes needed to run:
+Verified against the **stable Paseo 0.12.0** release (2026-10-21).
+Full evidence: [__doc.md](./__doc.md) §13.
 
-- Typecheck and the test suite (7 suites, 65 tests) pass against
-  `@getpaseo/plugin@0.11.0`; the 0.11.0 SDK diff over 0.10.1 is additive for
-  every API this plugin uses (nothing removed).
-- A fresh Git install on an isolated 0.11.0 daemon completed the manifest
-  build (`npm ci` + `npm run bundle`), reached status `running` and logged
-  `Plugin ready`; `paseo plugin reload` works on 0.11.0.
-- The install command above keeps working: 0.11.0 added a plugin registry
-  (`paseo plugin add owner/slug`), while explicit Git URLs still install
-  directly.
+**What the new version changed for this plugin:**
 
-Improvement plan against the new 0.11.0 APIs (implementation on request):
+- The SDK diff `@getpaseo/plugin@0.10.1 → 0.12.0` is **additive only** for
+every API this plugin uses — nothing removed, nothing changed in meaning.
+The `0.11.0 → 0.12.0` client declarations are byte-identical: the
+screen/sidebar API landed in 0.11.0, so `requirements.paseo` is
+`>=0.11.0`, not `>=0.12.0`.
+- The 0.10-era client registrations this plugin used are now marked
+`@deprecated` in the SDK (`addSurface`, `addSidebarItem`, `openSurface`).
+They still work — the 0.12.0 host ships them as shims over
+`addScreen`/`addSidebarHeaderItem`/`openScreen` — so this was a migration
+for correctness, not a breakage fix.
+- 0.12.0's `#7023` lets a plugin import Paseo *protocol types* without a
+plugin-local install. This plugin deliberately does not import
+`@getpaseo/protocol`, so it is unaffected either way. 0.12.0's `#6306`
+fixes the 60-second `paseo plugin reload` timeout.
 
-1. **Host-managed processes** — replace `node:child_process` in the connection
-   probe (`server/probe.ts`) with `spawnProcess()` / `terminateProcess()`,
-   gaining correct Windows `.cmd`/`.bat` launching and descendant cleanup.
-2. **Screens and sidebar** — migrate the deprecated `addSurface` /
-   `addSidebarItem` / `openSurface` to `addScreen` / `addSidebarHeaderItem` /
-   `addSidebarFooterItem` / `openScreen`, deep-link the quick search with a
-   prefilled query through screen URL params, and render the connection status
-   with host-native `SidebarRow` / `SidebarSeparator`.
-3. **Registry readiness** — add `name` / `icon` / `media` to
-   `paseo-plugin.json` and an `OVERVIEW.md` (per the `paseo plugin init`
-   template) so the plugin can be listed in the Paseo plugin registry.
-4. **Usage source** — deferred: no in-scope backend exposes quota data and the
-   account-based `registerUsageSource()` model fits poorly (see [__doc.md](./__doc.md)).
+**Migrated in 0.4.2:**
 
-Adopting items 1–2 raises `requirements.paseo` from `>=0.10.0` to `>=0.11.0`,
-because the plugin SDK is supplied by the host at runtime. Full evidence and
-the file-level implementation plan: [__doc.md](./__doc.md) §10.
+| Before | After |
+| ------ | ----- |
+| `client.addSurface(id, Component)` | `client.addScreen({ id, title, Component })` |
+| `client.addSidebarItem({ id, title, icon, surface })` | `client.addSidebarHeaderItem({ id, title, Component })` rendering `<SidebarRow icon="Globe" />` |
+| `onSelect({ openSurface })` | `onSelect({ openScreen })` → `openScreen({ screenId })` |
+| screen component took `PluginSurfaceProps` | takes `PluginScreenProps` (adds `params`, enabling future deep links) |
+| `requirements.paseo: ">=0.10.0"` | `">=0.11.0"` — the API floor actually used |
+| `@getpaseo/plugin@0.10.1` | `@getpaseo/plugin@0.12.0` (typecheck/tests target) |
+
+**One real spec violation found and fixed:** 0.12.0's client audit says a
+cross-platform module touching a DOM global outside `client/web.ts` is a
+bug. `client/use-host-typography.ts` read `globalThis.localStorage`
+directly. It now calls `readHostTypography()` from the new `client/web.ts`,
+which is gated on `Platform.OS === "web"` and returns `null` on native so
+callers fall back to defaults. The audit is clean after the change.
+
+**Verification:** typecheck clean against SDK 0.12.0, vitest **9 suites /
+95 tests** pass, the MCP bundle rebuilds, no deprecated registrations
+remain in `client/`, and every contribution ID conforms to the
+lowercase/hyphen rule. Live-verified on a real 0.12.0 daemon in an
+isolated home: installs as `running`, logs `Plugin ready`, reloads
+cleanly (`paseo plugin reload`, the fixed #6306 flow), and the real
+0.12.0 host compiler builds the client entry with zero legacy API
+calls in the compiled bundle.
+
+Still open, all optional and none of them conformance blockers:
+
+1. **Host-managed processes** — `spawnProcess` / `terminateProcess` in
+   `server/probe.ts`, for correct Windows `.cmd` launching and descendant
+   cleanup (§10.2 item 1).
+2. **Deep-link quick search** — pass `?q=` through
+   `PluginScreenProps.params`, and move the connection status into an
+   `addSidebarFooterItem` row with `SidebarRow` / `SidebarSeparator`. New
+   capability, so it would be a second-digit bump.
+3. **Registry readiness** — `name` / `icon` / `media` in
+   `paseo-plugin.json` plus an `OVERVIEW.md`, required only for a plugin
+   registry listing, not for installation (§10.2 item 3).
+4. **Usage source** — deferred: no in-scope backend exposes quota data and
+   the account-based `registerUsageSource()` model fits poorly (see
+   [__doc.md](./__doc.md) §10.2 item 4). 0.12.0 does not change this.
 
 Technical details, design decisions, alternatives considered, limitations and the roadmap: see [__doc.md](./__doc.md).

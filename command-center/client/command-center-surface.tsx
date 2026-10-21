@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -63,7 +63,7 @@ export function splitWorkspaceKey(key: string): { serverId: string; workspaceId:
   return { serverId: '', workspaceId: key };
 }
 
-export function CommandCenterSurface({ theme, host }: PluginSurfaceProps) {
+export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
   const paseo = usePaseo();
   const toast = useToast();
   const listRpc = useRpc(listCommands);

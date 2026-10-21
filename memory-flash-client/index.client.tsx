@@ -1,17 +1,45 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type {
+  PluginClientContext,
+  PluginSidebarItemProps,
+} from "@getpaseo/plugin/client";
+import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { ConnectionsSurface } from "./client/connections-surface";
 import { ConnectionsSettingsScreen } from "./client/settings-screen";
 
-const SURFACE_ID = "memory-flash-client";
+const SCREEN_ID = "memory-flash-client";
+
+/**
+ * Sidebar header row for the Memory Hosts screen.
+ *
+ * Paseo 0.11+ renders sidebar items as plugin components: the item decides
+ * what a press does, the host owns the row's layout and highlight. The
+ * contribution `title` is the Settings → Sidebar row label and the row's
+ * default label, so the row itself needs no `label`.
+ */
+function MemoryHostsSidebarItem({
+  currentScreen,
+  openScreen,
+}: PluginSidebarItemProps) {
+  return (
+    <SidebarRow
+      icon="Database"
+      active={currentScreen?.screenId === SCREEN_ID}
+      onPress={() => openScreen({ screenId: SCREEN_ID })}
+    />
+  );
+}
 
 export default function contribute(client: PluginClientContext) {
-  client.addSurface(SURFACE_ID, ConnectionsSurface);
-
-  client.addSidebarItem({
-    id: "memory-flash-client",
+  client.addScreen({
+    id: SCREEN_ID,
     title: "Memory Hosts",
-    icon: "Database",
-    surface: SURFACE_ID,
+    Component: ConnectionsSurface,
+  });
+
+  client.addSidebarHeaderItem({
+    id: SCREEN_ID,
+    title: "Memory Hosts",
+    Component: MemoryHostsSidebarItem,
   });
 
   client.addCommandCenterItem({
@@ -29,8 +57,8 @@ export default function contribute(client: PluginClientContext) {
       "connect",
     ],
     context: "global",
-    onSelect({ openSurface }) {
-      openSurface(SURFACE_ID);
+    onSelect({ openScreen }) {
+      openScreen({ screenId: SCREEN_ID });
     },
   });
 
