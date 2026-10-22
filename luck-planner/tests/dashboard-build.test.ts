@@ -97,6 +97,11 @@ describe("dist/dashboard (the built SPA)", () => {
     expect(js).toContain("/api/events");
     expect(js).toContain("tree-changed");
     expect(js).toContain("lp-live");
+    // K1 plain board: the card view ships in the first chunk with its
+    // zone/card classes and the default-view label.
+    expect(js).toContain("lp-plain-zone");
+    expect(js).toContain("lp-plain-card");
+    expect(js).toContain("In motion");
   });
 
   it("rebuilds deterministically, without touching the committed artifact", () => {
@@ -196,6 +201,43 @@ function seed(target: LuckPlannerStore): Node {
     actor: ACTOR,
   });
 }
+
+describe("source contracts the bundler cannot tell us", () => {
+  it("puts the Plain button before 2D and 3D in the toolbar", () => {
+    // ADR-10: the card board is the default view, and its button reads
+    // first — the order is the contract, not a rendering accident.
+    const toolbar = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Toolbar.tsx"),
+      "utf8",
+    );
+    const plain = toolbar.indexOf('onViewChange("plain")');
+    const two = toolbar.indexOf('onViewChange("2d")');
+    const three = toolbar.indexOf('onViewChange("3d")');
+    expect(plain).toBeGreaterThan(-1);
+    expect(plain).toBeLessThan(two);
+    expect(two).toBeLessThan(three);
+  });
+
+  it("hides the diagram layer switch and the details panel on the board", () => {
+    // The layer is a property of the diagrams (G5), and the K2 modal takes
+    // the panel's job on the board — the "click a node on the diagram"
+    // placeholder would only confuse there.
+    const toolbar = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Toolbar.tsx"),
+      "utf8",
+    );
+    expect(toolbar).toContain('props.view === "plain" ? null :');
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain('className={view === "plain" ? "lp-body lp-body-plain" : "lp-body"}');
+    expect(app).toContain("{view === \"plain\" ? null : (");
+    // The board renders through the same selection the diagrams use.
+    expect(app).toContain("selectedEntityId={selectedId}");
+    expect(app).toContain("plainReveal(plainBoard, hit.id)");
+  });
+});
 
 describe("the built SPA served by the real HTTP server", () => {
   it("serves the shell, its assets and the SPA fallback", async () => {

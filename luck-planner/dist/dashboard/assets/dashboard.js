@@ -3,9 +3,13 @@ import {
   BEE_STATUS_COLORS,
   BEE_STATUS_LABELS,
   BUG_BADGE_COLOR,
+  BUG_STATUSES,
+  BUG_STATUS_COLORS,
+  BUG_STATUS_LABELS,
   EMPTY_GRAPH,
   EMPTY_INTERACTION,
   EMPTY_OVERLAY,
+  GOAL_STATUSES,
   GOAL_STATUS_COLORS,
   GOAL_STATUS_LABELS,
   GRAPH_LAYERS,
@@ -39,15 +43,19 @@ import {
   goalStepSchema,
   graphNodeCenter,
   growthProgress,
+  growthRollups,
   growthSchema,
   growthSubjectTypeSchema,
   heatColor,
   historyEntrySchema,
   idSchema,
+  indexTree,
   isFilterActive,
   leafStatusSchema,
+  matchingWithAncestors,
   nodeKindSchema,
   nodeSchema,
+  openBugIdsByNode,
   pickCandidates,
   projectKeySchema,
   relatedByOpenBug,
@@ -60,17 +68,17 @@ import {
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-3NQFMTY6.js";
+} from "./chunk-chunk-3KRWBM5O.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
 
 // dashboard/src/main.tsx
-var import_react11 = __toESM(require_react());
+var import_react12 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // dashboard/src/app.tsx
-var import_react10 = __toESM(require_react());
+var import_react11 = __toESM(require_react());
 
 // node_modules/@getpaseo/plugin/dist/rpc.js
 var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
@@ -640,10 +648,331 @@ function createChangeStream(options) {
   };
 }
 
+// dashboard/src/plain.ts
+var PLAIN_ZONES = ["plan", "active", "done"];
+var PLAIN_ZONE_LABELS = {
+  plan: "Plan",
+  active: "In motion",
+  done: "Done"
+};
+var PLAIN_ZONE_GLYPHS = {
+  plan: "\u{1F3AF}",
+  active: "\u{1F6E0}",
+  done: "\u2705"
+};
+var PLAIN_ZONE_EMPTY_HINTS = {
+  plan: "Nothing planned yet \u2014 high goals proposed by agents and draft facts land here first.",
+  active: "Nothing in motion \u2014 claimed, in-progress and blocked work shows up here.",
+  done: "Nothing finished yet \u2014 completed and processed items collect at the bottom."
+};
+var LEAF_ZONES = {
+  draft: "plan",
+  ready: "plan",
+  claimed: "active",
+  in_progress: "active",
+  blocked: "active",
+  done: "done",
+  cancelled: "done",
+  superseded: "done"
+};
+var GOAL_ZONES = {
+  draft: "plan",
+  proposed: "plan",
+  approved: "plan",
+  in_progress: "active",
+  done: "done",
+  cancelled: "done",
+  superseded: "done"
+};
+var BUG_ZONES = {
+  open: "active",
+  investigating: "active",
+  resolved: "done",
+  cancelled: "done"
+};
+function zoneForLeaf(status) {
+  return LEAF_ZONES[status];
+}
+function zoneForGoal(status) {
+  return GOAL_ZONES[status];
+}
+function zoneForBug(status) {
+  return BUG_ZONES[status];
+}
+var EMPTY_PLAIN_BOARD = {
+  zones: PLAIN_ZONES.map((id2) => ({ id: id2, cardCount: 0, groups: [] })),
+  index: /* @__PURE__ */ new Map()
+};
+var PLAIN_VISIBLE_BUDGET = 120;
+function statusRank(order, status) {
+  const index2 = order.indexOf(status);
+  return index2 === -1 ? order.length : index2;
+}
+function severityRank(severity) {
+  const order = ["critical", "high", "medium", "low"];
+  return statusRank(order, severity);
+}
+function breadcrumb(index2, node) {
+  const names = [];
+  const visited = /* @__PURE__ */ new Set([node.id]);
+  let parentId = node.parentId;
+  while (parentId !== null && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = index2.byId.get(parentId);
+    if (parent === void 0) break;
+    names.unshift(parent.name);
+    parentId = parent.parentId;
+  }
+  return names.join(" \u203A ");
+}
+function groupId(kind, status) {
+  return `${kind}:${status}`;
+}
+function sectionKey(group, nodeId) {
+  return `${group}::${nodeId}`;
+}
+function buildSections(group, cards, nodesByCard, index2, sectioned) {
+  const roots = /* @__PURE__ */ new Map();
+  const drafts = /* @__PURE__ */ new Map();
+  const draftFor = (nodeId) => {
+    let draft = drafts.get(nodeId);
+    if (draft === void 0) {
+      draft = { nodeId, cards: [], children: /* @__PURE__ */ new Map() };
+      drafts.set(nodeId, draft);
+    }
+    return draft;
+  };
+  const byName = (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+  for (const card of cards) {
+    const node = nodesByCard.get(card.entityId);
+    const parentId = node?.parentId ?? null;
+    if (parentId === null || !index2.byId.has(parentId)) continue;
+    sectioned.add(card.entityId);
+    const chain = [];
+    const visited = /* @__PURE__ */ new Set([card.entityId]);
+    let cursor = parentId;
+    while (cursor !== null && !visited.has(cursor) && index2.byId.has(cursor)) {
+      visited.add(cursor);
+      chain.push(cursor);
+      cursor = index2.byId.get(cursor)?.parentId ?? null;
+    }
+    let parentDraft = null;
+    for (const ancestorId of chain.reverse()) {
+      const draft = draftFor(ancestorId);
+      if (parentDraft !== null) {
+        parentDraft.children.set(ancestorId, draft);
+      } else {
+        roots.set(ancestorId, draft);
+      }
+      parentDraft = draft;
+    }
+    parentDraft?.cards.push(card);
+  }
+  for (const draft of drafts.values()) draft.cards.sort(byName);
+  const emit = (draft, depth) => {
+    const node = index2.byId.get(draft.nodeId);
+    const children2 = [];
+    for (const child of node === void 0 ? [] : index2.childrenOf.get(draft.nodeId) ?? []) {
+      const childDraft = draft.children.get(child.id);
+      if (childDraft !== void 0) children2.push(emit(childDraft, depth + 1));
+    }
+    return {
+      key: sectionKey(group, draft.nodeId),
+      nodeId: draft.nodeId,
+      name: node?.name ?? draft.nodeId,
+      nodeKind: node?.kind ?? "branch",
+      depth,
+      cards: draft.cards,
+      children: children2
+    };
+  };
+  const ordered = [];
+  for (const root2 of index2.roots) {
+    const draft = roots.get(root2.id);
+    if (draft !== void 0) ordered.push(emit(draft, 0));
+  }
+  return ordered;
+}
+function buildPlainBoard(input, options = {}) {
+  if (input.nodes.length === 0 && input.goals.length === 0 && input.bugs.length === 0) {
+    return EMPTY_PLAIN_BOARD;
+  }
+  const index2 = indexTree(input.nodes);
+  const surviving = matchingWithAncestors(input.nodes, options.filter, { index: index2 });
+  const openBugs = openBugIdsByNode(input);
+  const growth = growthRollups(input);
+  const beeCounts = /* @__PURE__ */ new Map();
+  for (const bee of input.bees) {
+    beeCounts.set(bee.sourceLeafId, (beeCounts.get(bee.sourceLeafId) ?? 0) + 1);
+    beeCounts.set(bee.targetLeafId, (beeCounts.get(bee.targetLeafId) ?? 0) + 1);
+  }
+  const groups = /* @__PURE__ */ new Map();
+  const groupOf = (kind, status) => {
+    const id2 = groupId(kind, status);
+    let group = groups.get(id2);
+    if (group === void 0) {
+      group = { cardKind: kind, status, cards: [], nodesByCard: /* @__PURE__ */ new Map() };
+      groups.set(id2, group);
+    }
+    return group;
+  };
+  for (const node of input.nodes) {
+    if (node.kind !== "leaf" || !surviving.has(node.id)) continue;
+    const card = {
+      id: `leaf:${node.id}`,
+      entityId: node.id,
+      kind: "leaf",
+      nodeKind: node.kind,
+      name: node.name,
+      status: node.status,
+      revision: node.revision,
+      path: breadcrumb(index2, node),
+      version: node.version,
+      openBugCount: openBugs.get(node.id)?.length ?? 0,
+      beeCount: beeCounts.get(node.id) ?? 0,
+      growth: growth.get(node.id) ?? null
+    };
+    const group = groupOf("leaf", node.status);
+    group.cards.push(card);
+    group.nodesByCard.set(node.id, node);
+  }
+  const sortedGoals = [...input.goals].sort(
+    (a, b) => statusRank(GOAL_STATUSES, a.status) - statusRank(GOAL_STATUSES, b.status) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+  for (const goal of sortedGoals) {
+    const card = {
+      id: `goal:${goal.id}`,
+      entityId: goal.id,
+      kind: "goal",
+      name: goal.formalText,
+      status: goal.status,
+      revision: goal.revision,
+      formalText: goal.formalText,
+      planSteps: goal.plan.length,
+      materializedNodeId: goal.materializedNodeId
+    };
+    groupOf("goal", goal.status).cards.push(card);
+  }
+  const attachmentCounts = /* @__PURE__ */ new Map();
+  for (const attachment of input.bugAttachments) {
+    attachmentCounts.set(
+      attachment.bugId,
+      (attachmentCounts.get(attachment.bugId) ?? 0) + 1
+    );
+  }
+  const sortedBugs = [...input.bugs].sort(
+    (a, b) => severityRank(b.severity) - severityRank(a.severity) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+  for (const bug of sortedBugs) {
+    const card = {
+      id: `bug:${bug.id}`,
+      entityId: bug.id,
+      kind: "bug",
+      name: bug.title,
+      status: bug.status,
+      revision: bug.revision,
+      severity: bug.severity,
+      attachmentCount: attachmentCounts.get(bug.id) ?? 0
+    };
+    groupOf("bug", bug.status).cards.push(card);
+  }
+  const KIND_ORDER = ["goal", "leaf", "bug"];
+  const indexEntries = /* @__PURE__ */ new Map();
+  const zones = PLAIN_ZONES.map((zoneId) => {
+    const zoneGroups = [];
+    let zoneCount = 0;
+    for (const kind of KIND_ORDER) {
+      const statuses = kind === "leaf" ? LEAF_STATUSES : kind === "goal" ? GOAL_STATUSES : BUG_STATUSES;
+      const zoneStatuses = statuses.filter(
+        (status) => kind === "leaf" ? zoneForLeaf(status) === zoneId : kind === "goal" ? zoneForGoal(status) === zoneId : zoneForBug(status) === zoneId
+      );
+      for (const status of zoneStatuses) {
+        const draft = groups.get(groupId(kind, status));
+        if (draft === void 0) continue;
+        const sectioned = /* @__PURE__ */ new Set();
+        const sections = kind === "leaf" ? buildSections(
+          groupId(kind, status),
+          draft.cards,
+          draft.nodesByCard,
+          index2,
+          sectioned
+        ) : [];
+        const group = {
+          id: groupId(kind, status),
+          cardKind: kind,
+          status,
+          // Orphans (no reachable parent) are the only cards without a
+          // section above them.
+          cards: draft.cards.filter((card) => !sectioned.has(card.entityId)).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+          sections,
+          cardCount: draft.cards.length
+        };
+        zoneCount += group.cardCount;
+        zoneGroups.push(group);
+        const walk = (section, chain) => {
+          const nextChain = [...chain, section.key];
+          for (const card of section.cards) {
+            indexEntries.set(card.entityId, {
+              cardId: card.id,
+              kind: card.kind,
+              zoneId,
+              groupId: group.id,
+              sectionKeys: nextChain
+            });
+          }
+          for (const child of section.children) walk(child, nextChain);
+        };
+        for (const section of sections) walk(section, []);
+        for (const card of group.cards) {
+          indexEntries.set(card.entityId, {
+            cardId: card.id,
+            kind: card.kind,
+            zoneId,
+            groupId: group.id,
+            sectionKeys: []
+          });
+        }
+      }
+    }
+    return { id: zoneId, cardCount: zoneCount, groups: zoneGroups };
+  });
+  return { zones, index: indexEntries };
+}
+function togglePlainSection(collapsed, key) {
+  return toggleCollapsed(collapsed, key);
+}
+function defaultPlainCollapse(board, options = {}) {
+  const budget = options.budget ?? PLAIN_VISIBLE_BUDGET;
+  const collapsed = /* @__PURE__ */ new Set();
+  let visible = 0;
+  for (const zone of board.zones) {
+    for (const group of zone.groups) {
+      const queue = [...group.sections];
+      let cursor = 0;
+      while (cursor < queue.length) {
+        const section = queue[cursor];
+        cursor += 1;
+        if (visible + section.cards.length <= budget) {
+          visible += section.cards.length;
+          queue.push(...section.children);
+        } else {
+          collapsed.add(section.key);
+        }
+      }
+    }
+  }
+  return collapsed;
+}
+function plainReveal(board, entityId) {
+  const entry = board.index.get(entityId);
+  if (entry === void 0) return { sectionKeys: [], cardId: null };
+  return { sectionKeys: [...entry.sectionKeys], cardId: entry.cardId };
+}
+
 // dashboard/src/view-state.ts
 var VIEW_PARAM = "view";
 var VIEW_STORAGE_KEY = "luck-planner:view";
-var VIEWS = ["2d", "3d"];
+var VIEWS = ["plain", "2d", "3d"];
 function isView(value) {
   return value !== null && value !== void 0 && VIEWS.includes(value);
 }
@@ -669,7 +998,7 @@ function writeStoredView(storage, view) {
   }
 }
 function initialView(search, storage) {
-  return readViewParam(search) ?? readStoredView(storage) ?? "2d";
+  return readViewParam(search) ?? readStoredView(storage) ?? "plain";
 }
 function viewSearch(search, view) {
   const params = new URLSearchParams(search);
@@ -680,7 +1009,7 @@ function viewSearch(search, view) {
 
 // dashboard/src/webgl.ts
 var CONTEXT_TYPES = ["webgl2", "webgl", "experimental-webgl"];
-var WEBGL_UNAVAILABLE_HINT = "The 3D view needs WebGL, which this browser or launch flag has disabled \u2014 showing the 2D diagram.";
+var WEBGL_UNAVAILABLE_HINT = "The 3D view needs WebGL, which this browser or launch flag has disabled \u2014 showing the plain board.";
 var THREE_LOADING_STATUS = "Loading the 3D view\u2026";
 function threeFailedStatus(detail) {
   return `The 3D view could not start: ${detail}`;
@@ -726,9 +1055,9 @@ function detectWebGL(createCanvas = browserCanvas) {
 }
 function planViewSwitch(webgl, target) {
   if (target === "3d") {
-    return webgl.ok ? { view: "3d", status: null } : { view: "2d", status: WEBGL_UNAVAILABLE_HINT };
+    return webgl.ok ? { view: "3d", status: null } : { view: "plain", status: WEBGL_UNAVAILABLE_HINT };
   }
-  return { view: "2d", status: null };
+  return { view: target, status: null };
 }
 
 // dashboard/src/theme.ts
@@ -10545,21 +10874,333 @@ function Legend() {
   ] });
 }
 
-// dashboard/src/components/ThreeView.tsx
+// dashboard/src/components/PlainView.tsx
 var import_react8 = __toESM(require_react());
 var import_jsx_runtime7 = __toESM(require_jsx_runtime());
-function ThreeView(props) {
-  const containerRef = (0, import_react8.useRef)(null);
-  const handleRef = (0, import_react8.useRef)(null);
-  const stateRef = (0, import_react8.useRef)(props.onSceneState);
-  stateRef.current = props.onSceneState;
-  const selectRef = (0, import_react8.useRef)(props.onSelectNode);
-  selectRef.current = props.onSelectNode;
-  const sceneRef = (0, import_react8.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
-  sceneRef.current = { model: props.model, overlay: props.overlay, fitKey: props.fitKey };
-  const interactionRef = (0, import_react8.useRef)(props.interaction);
-  interactionRef.current = props.interaction;
+function descendantCardCount(section) {
+  let count = 0;
+  for (const child of section.children) {
+    count += child.cards.length + descendantCardCount(child);
+  }
+  return count;
+}
+function cardStatusColor(kind, status) {
+  if (kind === "leaf") return STATUS_COLORS[status];
+  if (kind === "goal") return GOAL_STATUS_COLORS[status];
+  return BUG_STATUS_COLORS[status];
+}
+function cardStatusLabel(kind, status) {
+  if (kind === "leaf") return STATUS_LABELS[status];
+  if (kind === "goal") return GOAL_STATUS_LABELS[status];
+  return BUG_STATUS_LABELS[status];
+}
+function cardGlyph(kind) {
+  if (kind === "goal") return "\u{1F3AF}";
+  if (kind === "bug") return "\u{1F41E}";
+  return "\u{1F343}";
+}
+function ZoneBand(props) {
+  const { zone } = props;
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "lp-plain-zone", "data-zone": zone.id, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("header", { className: "lp-plain-zone-header", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-zone-glyph", "aria-hidden": "true", children: PLAIN_ZONE_GLYPHS[zone.id] }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h2", { className: "lp-plain-zone-title", children: PLAIN_ZONE_LABELS[zone.id] }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-zone-count", children: [
+        zone.cardCount,
+        " ",
+        zone.cardCount === 1 ? "card" : "cards"
+      ] })
+    ] }),
+    zone.groups.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-zone-empty", children: PLAIN_ZONE_EMPTY_HINTS[zone.id] }) : zone.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      Group,
+      {
+        group,
+        collapsed: props.collapsed,
+        onToggleSection: props.onToggleSection,
+        selectedEntityId: props.selectedEntityId,
+        onSelectCard: props.onSelectCard
+      },
+      group.id
+    ))
+  ] });
+}
+function Group(props) {
+  const { group } = props;
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-group", "data-group": group.id, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("h3", { className: "lp-plain-group-title", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: cardGlyph(group.cardKind) }),
+      cardStatusLabel(group.cardKind, group.status),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "span",
+        {
+          className: "lp-plain-group-dot",
+          style: { backgroundColor: cardStatusColor(group.cardKind, group.status) },
+          "aria-hidden": "true"
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-group-count", children: group.cardCount })
+    ] }),
+    group.cards.map((card) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      Card,
+      {
+        card,
+        selected: card.entityId === props.selectedEntityId,
+        onSelectCard: props.onSelectCard
+      },
+      card.id
+    )),
+    group.sections.map((section) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      SectionNode,
+      {
+        section,
+        collapsed: props.collapsed,
+        onToggleSection: props.onToggleSection,
+        selectedEntityId: props.selectedEntityId,
+        onSelectCard: props.onSelectCard
+      },
+      section.key
+    ))
+  ] });
+}
+function SectionNode(props) {
+  const { section } = props;
+  const isCollapsed = props.collapsed.has(section.key);
+  const hidden = descendantCardCount(section);
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+    "div",
+    {
+      className: "lp-plain-section",
+      style: { marginInlineStart: `${section.depth * 14}px` },
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+          "button",
+          {
+            type: "button",
+            className: "lp-plain-section-toggle",
+            "aria-expanded": !isCollapsed,
+            onClick: () => props.onToggleSection(section.key),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-chevron", "aria-hidden": "true", children: isCollapsed ? "\u25B8" : "\u25BE" }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: KIND_GLYPHS[section.nodeKind] }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-section-name", children: section.name }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-section-count", children: [
+                section.cards.length,
+                hidden > 0 && isCollapsed ? ` +${hidden}` : ""
+              ] })
+            ]
+          }
+        ),
+        isCollapsed ? null : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+          section.cards.map((card) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+            Card,
+            {
+              card,
+              selected: card.entityId === props.selectedEntityId,
+              onSelectCard: props.onSelectCard
+            },
+            card.id
+          )),
+          section.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+            SectionNode,
+            {
+              section: child,
+              collapsed: props.collapsed,
+              onToggleSection: props.onToggleSection,
+              selectedEntityId: props.selectedEntityId,
+              onSelectCard: props.onSelectCard
+            },
+            child.key
+          ))
+        ] })
+      ]
+    }
+  );
+}
+function Card(props) {
+  const { card } = props;
+  const className = props.selected ? "lp-plain-card lp-plain-card-selected" : "lp-plain-card";
+  const body = /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-head", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-title", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { "aria-hidden": "true", children: [
+          cardGlyph(card.kind),
+          " "
+        ] }),
+        card.name
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-status", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+          "span",
+          {
+            className: "lp-plain-card-dot",
+            style: { backgroundColor: cardStatusColor(card.kind, card.status) },
+            "aria-hidden": "true"
+          }
+        ),
+        cardStatusLabel(card.kind, card.status)
+      ] })
+    ] }),
+    card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(LeafCardBody, { card }) : card.kind === "goal" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(GoalCardBody, { card }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(BugCardBody, { card })
+  ] });
+  if (card.kind === "leaf") {
+    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      "button",
+      {
+        type: "button",
+        id: `lp-plain-card-${card.entityId}`,
+        className,
+        "aria-pressed": props.selected,
+        onClick: () => props.onSelectCard("leaf", card.entityId),
+        children: body
+      }
+    );
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("article", { id: `lp-plain-card-${card.entityId}`, className, "data-kind": card.kind, children: body });
+}
+function LeafCardBody(props) {
+  const { card } = props;
+  const progress = card.growth === null || card.growth.total === 0 ? null : Math.round(card.growth.ratio * 100);
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+    card.path.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-plain-card-path", title: card.path, children: card.path }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-mono", children: [
+        "v",
+        card.version || "\u2014",
+        " \xB7 r",
+        card.revision
+      ] }),
+      progress !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "span",
+        {
+          className: "lp-plain-card-growth",
+          title: `${card.growth.completed}/${card.growth.total} growth steps${card.growth.failed > 0 ? ` \xB7 ${card.growth.failed} failed` : ""}`,
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+              "span",
+              {
+                className: "lp-plain-card-growth-fill",
+                style: { width: `${progress}%` },
+                "aria-hidden": "true"
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-growth-text", children: [
+              card.growth.completed,
+              "/",
+              card.growth.total,
+              " steps"
+            ] })
+          ]
+        }
+      ) : null,
+      card.openBugCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "span",
+        {
+          className: "lp-plain-card-bugs",
+          style: { color: BUG_BADGE_COLOR },
+          title: `${card.openBugCount} open incident(s) on this leaf`,
+          children: [
+            "\u{1F41E}\xD7",
+            card.openBugCount
+          ]
+        }
+      ) : null,
+      card.beeCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        "span",
+        {
+          className: "lp-plain-card-bees",
+          title: `${card.beeCount} influence link(s)`,
+          children: [
+            "\u{1F41D}\xD7",
+            card.beeCount
+          ]
+        }
+      ) : null
+    ] })
+  ] });
+}
+function GoalCardBody(props) {
+  const { card } = props;
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-meta", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-mono", children: [
+      "r",
+      card.revision
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { title: "Atomic steps in the agent's plan", children: [
+      "plan: ",
+      card.planSteps,
+      " ",
+      card.planSteps === 1 ? "step" : "steps"
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      "span",
+      {
+        className: "lp-plain-card-hint",
+        title: card.materializedNodeId === null ? "Not materialized in the tree yet (ADR-7: only approved plans grow a subtree)" : "Materialized in the tree",
+        children: card.materializedNodeId === null ? "not in tree yet" : "in tree"
+      }
+    )
+  ] });
+}
+function BugCardBody(props) {
+  const { card } = props;
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-meta", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-card-severity", "data-severity": card.severity, children: card.severity }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-mono", children: [
+      "r",
+      card.revision
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-hint", children: [
+      "on ",
+      card.attachmentCount,
+      " ",
+      card.attachmentCount === 1 ? "leaf" : "leaves"
+    ] })
+  ] });
+}
+function PlainView(props) {
+  const { board, loaded } = props;
+  const total = board.index.size;
   (0, import_react8.useEffect)(() => {
+    if (props.scrollTargetEntityId === null) return;
+    document.getElementById(`lp-plain-card-${props.scrollTargetEntityId}`)?.scrollIntoView({ block: "center" });
+  }, [props.scrollTargetEntityId]);
+  if (!loaded) {
+    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-hint", children: "Loading the tree\u2026" }) });
+  }
+  if (total === 0) {
+    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-empty", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-empty-title", children: props.emptyTitle ?? "Nothing on the board yet" }),
+      props.emptyText !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-empty-text", children: props.emptyText }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-empty-text", children: "Agents write the tree with the luck_tree_* MCP tools; goals proposed from the native panel land in the Plan zone at the top." })
+    ] }) });
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: board.zones.map((zone) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    ZoneBand,
+    {
+      zone,
+      collapsed: props.collapsed,
+      onToggleSection: props.onToggleSection,
+      selectedEntityId: props.selectedEntityId,
+      onSelectCard: props.onSelectCard
+    },
+    zone.id
+  )) });
+}
+
+// dashboard/src/components/ThreeView.tsx
+var import_react9 = __toESM(require_react());
+var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+function ThreeView(props) {
+  const containerRef = (0, import_react9.useRef)(null);
+  const handleRef = (0, import_react9.useRef)(null);
+  const stateRef = (0, import_react9.useRef)(props.onSceneState);
+  stateRef.current = props.onSceneState;
+  const selectRef = (0, import_react9.useRef)(props.onSelectNode);
+  selectRef.current = props.onSelectNode;
+  const sceneRef = (0, import_react9.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
+  sceneRef.current = { model: props.model, overlay: props.overlay, fitKey: props.fitKey };
+  const interactionRef = (0, import_react9.useRef)(props.interaction);
+  interactionRef.current = props.interaction;
+  (0, import_react9.useEffect)(() => {
     const container2 = containerRef.current;
     if (container2 === null) return;
     if (!props.webgl.ok) {
@@ -10599,13 +11240,13 @@ function ThreeView(props) {
       handleRef.current = null;
     };
   }, [props.webgl.ok]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     handleRef.current?.setScene(props.model, props.overlay, props.fitKey);
   }, [props.model, props.overlay, props.fitKey]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     handleRef.current?.setInteraction(props.interaction);
   }, [props.interaction]);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
     "div",
     {
       className: "lp-scene3d",
@@ -10617,8 +11258,8 @@ function ThreeView(props) {
 }
 
 // dashboard/src/components/Toolbar.tsx
-var import_react9 = __toESM(require_react());
-var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+var import_react10 = __toESM(require_react());
+var import_jsx_runtime9 = __toESM(require_jsx_runtime());
 var LIVE_LABELS = {
   connecting: "connecting",
   live: "live",
@@ -10630,34 +11271,34 @@ var LIVE_HINTS = {
   offline: "The change stream is down and reconnecting; the data on screen may be stale. Reload the tab if the plugin was restarted."
 };
 function Counter(props) {
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-counter", title: props.label, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-counter-value", children: props.value }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-counter-label", children: props.label })
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "lp-counter", title: props.label, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-counter-value", children: props.value }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-counter-label", children: props.label })
   ] });
 }
 function Toolbar(props) {
   const stats2 = props.stats;
-  const [draft, setDraft] = (0, import_react9.useState)("");
+  const [draft, setDraft] = (0, import_react10.useState)("");
   const submit = (event) => {
     event.preventDefault();
     const query = draft.trim();
     if (query.length > 0) props.onSearch(query);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("header", { className: "lp-toolbar", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-toolbar-identity", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("header", { className: "lp-toolbar", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-toolbar-identity", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "bees", value: stats2.bees }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "bees", value: stats2.bees }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
     ] }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-toolbar-controls", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-toolbar-controls", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "input",
         {
           className: "lp-toolbar-search",
@@ -10668,7 +11309,7 @@ function Toolbar(props) {
           onChange: (event) => setDraft(event.target.value)
         }
       ) }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -10679,12 +11320,12 @@ function Toolbar(props) {
             kind: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "", children: "All kinds" }),
-            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "", children: "All kinds" }),
+            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -10695,12 +11336,12 @@ function Toolbar(props) {
             status: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "", children: "All statuses" }),
-            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "", children: "All statuses" }),
+            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "input",
         {
           className: "lp-toolbar-filter",
@@ -10716,7 +11357,7 @@ function Toolbar(props) {
           })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      props.view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "button",
         {
           type: "button",
@@ -10727,8 +11368,19 @@ function Toolbar(props) {
         },
         candidate
       )) }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          "button",
+          {
+            type: "button",
+            className: props.view === "plain" ? "lp-view-button lp-view-button-active" : "lp-view-button",
+            "aria-pressed": props.view === "plain",
+            title: "Plain board: zones of planned, in-motion and done work as cards \u2014 the default view.",
+            onClick: () => props.onViewChange("plain"),
+            children: "Plain"
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
           "button",
           {
             type: "button",
@@ -10738,7 +11390,7 @@ function Toolbar(props) {
             children: "2D"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
           "button",
           {
             type: "button",
@@ -10751,25 +11403,25 @@ function Toolbar(props) {
         )
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
         "span",
         {
           className: `lp-live lp-live-${props.live}`,
           title: LIVE_HINTS[props.live],
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
             LIVE_LABELS[props.live]
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
     ] })
   ] });
 }
 
 // dashboard/src/app.tsx
-var import_jsx_runtime9 = __toESM(require_jsx_runtime());
+var import_jsx_runtime10 = __toESM(require_jsx_runtime());
 function applyTheme(theme) {
   const tokens = tokensFor(theme);
   const root2 = document.documentElement;
@@ -10823,47 +11475,51 @@ function syncViewToUrl(view) {
   );
 }
 function App() {
-  const params = (0, import_react10.useMemo)(() => parseDashboardParams(window.location.search), []);
-  const client = (0, import_react10.useMemo)(
+  const params = (0, import_react11.useMemo)(() => parseDashboardParams(window.location.search), []);
+  const client = (0, import_react11.useMemo)(
     () => params.token.length > 0 ? new DashboardApi(resolveApiOrigin(window.location.href), params.token, params.projectKey) : null,
     [params.projectKey, params.token]
   );
-  const [stats2, setStats] = (0, import_react10.useState)(null);
-  const [tree, setTree] = (0, import_react10.useState)(null);
-  const [collapsedIds, setCollapsedIds] = (0, import_react10.useState)(
+  const [stats2, setStats] = (0, import_react11.useState)(null);
+  const [tree, setTree] = (0, import_react11.useState)(null);
+  const [collapsedIds, setCollapsedIds] = (0, import_react11.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [statusLine, setStatusLine] = (0, import_react10.useState)("");
-  const [theme] = (0, import_react10.useState)(initialTheme);
-  const [detailsWidth, setDetailsWidth] = (0, import_react10.useState)(
+  const [plainCollapsed, setPlainCollapsed] = (0, import_react11.useState)(
+    () => /* @__PURE__ */ new Set()
+  );
+  const [plainScrollTarget, setPlainScrollTarget] = (0, import_react11.useState)(null);
+  const [statusLine, setStatusLine] = (0, import_react11.useState)("");
+  const [theme] = (0, import_react11.useState)(initialTheme);
+  const [detailsWidth, setDetailsWidth] = (0, import_react11.useState)(
     () => readStoredDetailsWidth(detailsStorage())
   );
-  const [selectedId, setSelectedId] = (0, import_react10.useState)(null);
-  const [detail, setDetail] = (0, import_react10.useState)(null);
-  const [detailLoading, setDetailLoading] = (0, import_react10.useState)(false);
-  const [detailError, setDetailError] = (0, import_react10.useState)("");
-  const [filters, setFilters] = (0, import_react10.useState)({
+  const [selectedId, setSelectedId] = (0, import_react11.useState)(null);
+  const [detail, setDetail] = (0, import_react11.useState)(null);
+  const [detailLoading, setDetailLoading] = (0, import_react11.useState)(false);
+  const [detailError, setDetailError] = (0, import_react11.useState)("");
+  const [filters, setFilters] = (0, import_react11.useState)({
     kind: "",
     status: "",
     version: ""
   });
-  const [focus, setFocus] = (0, import_react10.useState)(null);
-  const focusSeq = (0, import_react10.useRef)(0);
-  const [layer, setLayer] = (0, import_react10.useState)("status");
-  const webgl = (0, import_react10.useMemo)(() => detectWebGL(), []);
-  const storage = (0, import_react10.useMemo)(() => safeStorage(), []);
-  const [view, setView] = (0, import_react10.useState)(() => {
+  const [focus, setFocus] = (0, import_react11.useState)(null);
+  const focusSeq = (0, import_react11.useRef)(0);
+  const [layer, setLayer] = (0, import_react11.useState)("status");
+  const webgl = (0, import_react11.useMemo)(() => detectWebGL(), []);
+  const storage = (0, import_react11.useMemo)(() => safeStorage(), []);
+  const [view, setView] = (0, import_react11.useState)(() => {
     const wanted = initialView(window.location.search, storage);
     return planViewSwitch(webgl, wanted).view;
   });
-  const [live, setLive] = (0, import_react10.useState)("connecting");
-  const [detailRefresh, setDetailRefresh] = (0, import_react10.useState)(0);
-  const selectedIdRef = (0, import_react10.useRef)(null);
+  const [live, setLive] = (0, import_react11.useState)("connecting");
+  const [detailRefresh, setDetailRefresh] = (0, import_react11.useState)(0);
+  const selectedIdRef = (0, import_react11.useRef)(null);
   selectedIdRef.current = selectedId;
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
-  const load = (0, import_react10.useCallback)(async () => {
+  const load = (0, import_react11.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
       return;
@@ -10882,15 +11538,18 @@ function App() {
       setCollapsedIds(
         (previous) => previous.size > 0 ? previous : defaultCollapsedIds(nextTree.nodes)
       );
+      setPlainCollapsed(
+        (previous) => previous.size > 0 ? previous : defaultPlainCollapse(buildPlainBoard(nextTree))
+      );
       setStatusLine("");
     } catch (cause) {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
     }
   }, [client, params.projectKey]);
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     void load();
   }, [load]);
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     if (client === null) return;
     let opens = 0;
     const stream = createChangeStream({
@@ -10911,7 +11570,7 @@ function App() {
     });
     return () => stream.close();
   }, [client, load]);
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
@@ -10934,14 +11593,23 @@ function App() {
       stale = true;
     };
   }, [client, selectedId, detailRefresh]);
-  const onToggleNode = (0, import_react10.useCallback)((id2) => {
+  const onToggleNode = (0, import_react11.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
-  const requestFocus = (0, import_react10.useCallback)((nodeId) => {
+  const onTogglePlainSection = (0, import_react11.useCallback)((key) => {
+    setPlainCollapsed((previous) => togglePlainSection(previous, key));
+  }, []);
+  const onPlainCardSelect = (0, import_react11.useCallback)(
+    (kind, entityId) => {
+      if (kind === "leaf") setSelectedId(entityId);
+    },
+    []
+  );
+  const requestFocus = (0, import_react11.useCallback)((nodeId) => {
     focusSeq.current += 1;
     setFocus({ nodeId, seq: focusSeq.current });
   }, []);
-  const onLayerChange = (0, import_react10.useCallback)(
+  const onLayerChange = (0, import_react11.useCallback)(
     (next) => {
       setLayer(next);
       setStatusLine((previous) => {
@@ -10956,7 +11624,7 @@ function App() {
     },
     [tree]
   );
-  const onViewChange = (0, import_react10.useCallback)(
+  const onViewChange = (0, import_react11.useCallback)(
     (target) => {
       const plan = planViewSwitch(webgl, target);
       setView(plan.view);
@@ -10966,20 +11634,24 @@ function App() {
     },
     [storage, webgl]
   );
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     const wanted = initialView(window.location.search, storage);
     const plan = planViewSwitch(webgl, wanted);
     if (plan.status !== null) setStatusLine(plan.status);
     syncViewToUrl(plan.view);
   }, [storage, webgl]);
-  const onSceneState = (0, import_react10.useCallback)(
+  const onSceneState = (0, import_react11.useCallback)(
     (state, status) => {
       setStatusLine(status);
       if (state === "failed") setView("2d");
     },
     []
   );
-  const revealNode = (0, import_react10.useCallback)((nodeId) => {
+  const plainBoard = (0, import_react11.useMemo)(
+    () => tree === null ? EMPTY_PLAIN_BOARD : buildPlainBoard(tree, { filter: filters }),
+    [tree, filters]
+  );
+  const revealNode = (0, import_react11.useCallback)((nodeId) => {
     setCollapsedIds((previous) => {
       const next = new Set(previous);
       for (const ancestor of ancestorsOf(tree?.nodes ?? [], nodeId)) {
@@ -10993,7 +11665,7 @@ function App() {
       return filterExcludesNode(previous, node);
     });
   }, [tree]);
-  const onSearch = (0, import_react10.useCallback)(
+  const onSearch = (0, import_react11.useCallback)(
     async (query) => {
       if (client === null) return;
       try {
@@ -11004,6 +11676,15 @@ function App() {
         }
         const hit = result.results[0].node;
         revealNode(hit.id);
+        const reveal = plainReveal(plainBoard, hit.id);
+        if (reveal.sectionKeys.length > 0) {
+          setPlainCollapsed((previous) => {
+            const next = new Set(previous);
+            for (const key of reveal.sectionKeys) next.delete(key);
+            return next;
+          });
+        }
+        if (reveal.cardId !== null) setPlainScrollTarget(hit.id);
         setSelectedId(hit.id);
         requestFocus(hit.id);
         setStatusLine(
@@ -11013,29 +11694,29 @@ function App() {
         setStatusLine(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [client, revealNode, requestFocus]
+    [client, plainBoard, revealNode, requestFocus]
   );
-  const graph = (0, import_react10.useMemo)(
+  const graph = (0, import_react11.useMemo)(
     () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters, layer }),
     [tree, collapsedIds, filters, layer]
   );
-  const scene3dModel = (0, import_react10.useMemo)(
+  const scene3dModel = (0, import_react11.useMemo)(
     () => tree === null ? null : buildScene3D(tree.nodes, { filter: filters }),
     [tree, filters]
   );
-  const scene3dOverlay = (0, import_react10.useMemo)(
+  const scene3dOverlay = (0, import_react11.useMemo)(
     () => tree === null || scene3dModel === null ? null : buildSceneOverlay(tree, scene3dModel, { layer }),
     [tree, scene3dModel, layer]
   );
-  const scene3dFitKey = (0, import_react10.useMemo)(
+  const scene3dFitKey = (0, import_react11.useMemo)(
     () => tree === null ? "" : `${tree.nodes.length}:${tree.nodes[0]?.id ?? ""}`,
     [tree]
   );
-  const scene3dCandidates = (0, import_react10.useMemo)(
+  const scene3dCandidates = (0, import_react11.useMemo)(
     () => scene3dModel === null ? [] : pickCandidates(scene3dModel),
     [scene3dModel]
   );
-  const scene3dInteraction = (0, import_react10.useMemo)(() => {
+  const scene3dInteraction = (0, import_react11.useMemo)(() => {
     if (tree === null || scene3dModel === null) return EMPTY_INTERACTION;
     const selected2 = selectedId === null ? null : tree.nodes.find((node) => node.id === selectedId) ?? null;
     const position = selectedId === null ? null : scene3dModel.nodes.find((node) => node.id === selectedId)?.position ?? null;
@@ -11067,14 +11748,14 @@ function App() {
     tree
   ]);
   const scene3dEmpty = scene3dModel !== null && scene3dModel.nodes.length === 0;
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     if (view !== "3d") return;
     setStatusLine((previous) => {
       if (scene3dEmpty) return SCENE_EMPTY_HINT;
       return previous === SCENE_EMPTY_HINT ? "" : previous;
     });
   }, [scene3dEmpty, view]);
-  const resolveName = (0, import_react10.useCallback)(
+  const resolveName = (0, import_react11.useCallback)(
     (id2) => {
       const node = tree?.nodes.find((candidate) => candidate.id === id2);
       return node !== void 0 ? node.name : `\u2026${id2.slice(0, 8)}`;
@@ -11082,20 +11763,20 @@ function App() {
     [tree]
   );
   const filtersActive = isFilterActive(filters);
-  const onDetailsWidthChange = (0, import_react10.useCallback)((width) => {
+  const onDetailsWidthChange = (0, import_react11.useCallback)((width) => {
     setDetailsWidth(clampDetailsWidth(width));
   }, []);
-  const onDetailsWidthCommit = (0, import_react10.useCallback)((width) => {
+  const onDetailsWidthCommit = (0, import_react11.useCallback)((width) => {
     const clamped = clampDetailsWidth(width);
     setDetailsWidth(clamped);
     storeDetailsWidth(detailsStorage(), clamped);
   }, []);
-  const onDetailsWidthReset = (0, import_react10.useCallback)(() => {
+  const onDetailsWidthReset = (0, import_react11.useCallback)(() => {
     setDetailsWidth(DEFAULT_DETAILS_WIDTH);
     forgetDetailsWidth(detailsStorage());
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-app", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "lp-app", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
       Toolbar,
       {
         projectKey: params.projectKey,
@@ -11112,15 +11793,28 @@ function App() {
         webglOk: webgl.ok
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
       "div",
       {
-        className: "lp-body",
+        className: view === "plain" ? "lp-body lp-body-plain" : "lp-body",
         style: {
           "--lp-details-width": `${detailsWidth}px`
         },
         children: [
-          view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          view === "plain" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+            PlainView,
+            {
+              board: plainBoard,
+              loaded: tree !== null,
+              collapsed: plainCollapsed,
+              onToggleSection: onTogglePlainSection,
+              selectedEntityId: selectedId,
+              onSelectCard: onPlainCardSelect,
+              scrollTargetEntityId: plainScrollTarget,
+              emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
+              emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the board again." : void 0
+            }
+          ) : view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
             ThreeView,
             {
               webgl,
@@ -11131,7 +11825,7 @@ function App() {
               onSelectNode: setSelectedId,
               onSceneState
             }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          ) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
             Canvas,
             {
               graph,
@@ -11144,7 +11838,7 @@ function App() {
               emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+          view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
             DetailsPanel,
             {
               detail,
@@ -11160,16 +11854,16 @@ function App() {
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Legend, {})
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(Legend, {})
   ] });
 }
 
 // dashboard/src/main.tsx
-var import_jsx_runtime10 = __toESM(require_jsx_runtime());
+var import_jsx_runtime11 = __toESM(require_jsx_runtime());
 var container = document.getElementById("root");
 if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_react11.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(import_react12.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(App, {}) })
 );

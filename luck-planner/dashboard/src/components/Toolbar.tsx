@@ -16,6 +16,10 @@
  * 2D/3D control: it always reports the request, the app decides it through
  * `planViewSwitch`, and the button's tooltip tells a tab without WebGL why
  * 3D will not open before the user even presses it.
+ *
+ * **K1** adds the plain board as a third view and puts its button **before**
+ * 2D/3D (ADR-10: the card board is the default). The layer switch is a
+ * property of the diagrams, so it hides itself while Plain is on.
  */
 import { useState } from "react";
 import type { ChangeEvent, FormEvent, ReactElement } from "react";
@@ -190,24 +194,39 @@ export function Toolbar(props: ToolbarProps): ReactElement {
             })
           }
         />
-        <div className="lp-view-switch" role="group" aria-label="Layer" title="Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.">
-          {GRAPH_LAYERS.map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              className={
-                candidate === props.layer
-                  ? "lp-view-button lp-view-button-active"
-                  : "lp-view-button"
-              }
-              aria-pressed={candidate === props.layer}
-              onClick={() => props.onLayerChange(candidate)}
-            >
-              {GRAPH_LAYER_LABELS[candidate]}
-            </button>
-          ))}
-        </div>
+        {props.view === "plain" ? null : (
+          <div className="lp-view-switch" role="group" aria-label="Layer" title="Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.">
+            {GRAPH_LAYERS.map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                className={
+                  candidate === props.layer
+                    ? "lp-view-button lp-view-button-active"
+                    : "lp-view-button"
+                }
+                aria-pressed={candidate === props.layer}
+                onClick={() => props.onLayerChange(candidate)}
+              >
+                {GRAPH_LAYER_LABELS[candidate]}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="lp-view-switch" role="group" aria-label="View">
+          <button
+            type="button"
+            className={
+              props.view === "plain"
+                ? "lp-view-button lp-view-button-active"
+                : "lp-view-button"
+            }
+            aria-pressed={props.view === "plain"}
+            title="Plain board: zones of planned, in-motion and done work as cards — the default view."
+            onClick={() => props.onViewChange("plain")}
+          >
+            Plain
+          </button>
           <button
             type="button"
             className={

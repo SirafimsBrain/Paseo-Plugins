@@ -32447,6 +32447,20 @@ var BEE_STATUS_LABELS = {
   cancelled: "Cancelled"
 };
 var BUG_BADGE_COLOR = "#e05d5d";
+var BUG_STATUS_COLORS = {
+  open: "#e05d5d",
+  // the same red as the node badge it echoes
+  investigating: "#e0a84f",
+  // being looked at — the in-progress amber
+  resolved: "#4fa860",
+  cancelled: "#5c6470"
+};
+var BUG_STATUS_LABELS = {
+  open: "Open",
+  investigating: "Investigating",
+  resolved: "Resolved",
+  cancelled: "Cancelled"
+};
 var SELECTION_COLOR = "#eef2ff";
 var GROWTH_STATUS_COLORS = {
   active: "#5b9dff",
@@ -33840,6 +33854,7 @@ export {
   LEAF_STATUSES,
   nodeSchema,
   historyEntrySchema,
+  GOAL_STATUSES,
   goalStepSchema,
   goalSchema,
   growthSubjectTypeSchema,
@@ -33848,6 +33863,7 @@ export {
   BEE_STATUSES,
   beeSchema,
   bugSeveritySchema,
+  BUG_STATUSES,
   bugSchema,
   bugNodeSchema,
   KIND_COLORS,
@@ -33861,6 +33877,8 @@ export {
   BEE_STATUS_COLORS,
   BEE_STATUS_LABELS,
   BUG_BADGE_COLOR,
+  BUG_STATUS_COLORS,
+  BUG_STATUS_LABELS,
   SELECTION_COLOR,
   GROWTH_STATUS_COLORS,
   GROWTH_STATUS_LABELS,
@@ -33871,9 +33889,13 @@ export {
   GRAPH_LAYERS,
   GRAPH_LAYER_LABELS,
   isFilterActive,
+  indexTree,
   defaultCollapsedIds,
   toggleCollapsed,
   buildGraph,
+  growthRollups,
+  matchingWithAncestors,
+  openBugIdsByNode,
   ancestorsOf,
   graphNodeCenter,
   relatedByOpenBug,

@@ -6,18 +6,25 @@
  * assume one: a workspace browser may run with WebGL disabled
  * (`--disable-webgl`), a phone client may have none, and a driver blocklist
  * can turn a working tab into a black rectangle. The spike's answer, pinned
- * here, is the **fallback**: the dashboard stays on the 2D diagram and says
- * why, instead of switching into a scene that cannot render.
+ * here, is the **fallback**: the dashboard stays on a view that works and
+ * says why, instead of switching into a scene that cannot render.
  *
  * Detection runs once per tab and takes a canvas factory so the policy can
  * be exercised without a DOM (the vitest environment has none) — the same
  * injected-boundary discipline as `dashboard/src/live.ts`.
  *
+ * Stage K1 retargets the fallback: without WebGL the tab keeps the **plain
+ * board** (the default view, DOM-only) instead of the 2D diagram — the
+ * answer to "the scene cannot render" is now the view that cannot fail.
+ *
  * Client/server neutral: plain types and strings, no Node, no React.
  */
 
-/** Which diagram the tab is showing. */
-export type DashboardView = "2d" | "3d";
+/**
+ * Which view the tab is showing (stage K1 widens the I1 union): `plain` is
+ * the card board (ADR-10, the default), `2d`/`3d` are the diagrams.
+ */
+export type DashboardView = "plain" | "2d" | "3d";
 
 /** Outcome of the WebGL probe. */
 export interface WebGLSupport {
@@ -40,12 +47,12 @@ export type WebGLCanvasFactory = () => WebGLCanvasLike | null;
 const CONTEXT_TYPES = ["webgl2", "webgl", "experimental-webgl"] as const;
 
 /**
- * Shown when 3D was asked for without WebGL: the tab keeps the 2D diagram
- * and the explanation lands in the status line (never a silent no-op, and
- * never colour-only).
+ * Shown when 3D was asked for without WebGL: the tab keeps the plain board
+ * (the default view, DOM-only — it cannot fail) and the explanation lands
+ * in the status line (never a silent no-op, and never colour-only).
  */
 export const WEBGL_UNAVAILABLE_HINT =
-  "The 3D view needs WebGL, which this browser or launch flag has disabled — showing the 2D diagram.";
+  "The 3D view needs WebGL, which this browser or launch flag has disabled — showing the plain board.";
 
 /** Status line while the lazy `dashboard-3d.js` chunk is arriving. */
 export const THREE_LOADING_STATUS = "Loading the 3D view…";
@@ -135,12 +142,13 @@ export interface ViewSwitchPlan {
 }
 
 /**
- * Resolves a request from the toolbar's 2D/3D switch.
+ * Resolves a request from the toolbar's Plain/2D/3D switch.
  *
- * - `2d` always wins, silently: it is the view that cannot fail.
- * - `3d` needs {@link WebGLSupport.ok}; without it the tab stays on 2D and
- *   the caller installs {@link WEBGL_UNAVAILABLE_HINT} — the acceptance case
- *   for `--disable-webgl` (PLAN.md I1).
+ * - `plain` and `2d` always win, silently: both cannot fail (DOM-only).
+ * - `3d` needs {@link WebGLSupport.ok}; without it the tab stays on the
+ *   plain board and the caller installs {@link WEBGL_UNAVAILABLE_HINT} —
+ *   the acceptance case for `--disable-webgl` (PLAN.md I1, fallback
+ *   retargeted to the default view by stage K1).
  */
 export function planViewSwitch(
   webgl: WebGLSupport,
@@ -149,7 +157,7 @@ export function planViewSwitch(
   if (target === "3d") {
     return webgl.ok
       ? { view: "3d", status: null }
-      : { view: "2d", status: WEBGL_UNAVAILABLE_HINT };
+      : { view: "plain", status: WEBGL_UNAVAILABLE_HINT };
   }
-  return { view: "2d", status: null };
+  return { view: target, status: null };
 }

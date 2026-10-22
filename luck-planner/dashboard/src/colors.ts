@@ -16,8 +16,8 @@ import { LEAF_STATUSES, NODE_KINDS } from "../../shared/tree";
 import type { LeafStatus, NodeKind } from "../../shared/tree";
 import { GOAL_STATUSES } from "../../shared/goals";
 import type { GoalStatus } from "../../shared/goals";
-import { BEE_STATUSES } from "../../shared/links";
-import type { BeeStatus } from "../../shared/links";
+import { BEE_STATUSES, BUG_STATUSES } from "../../shared/links";
+import type { BeeStatus, BugStatus } from "../../shared/links";
 import { GROWTH_STATUSES } from "../../shared/growth";
 import type { GrowthStatus } from "../../shared/growth";
 
@@ -130,6 +130,22 @@ export const BEE_STATUS_LABELS: Record<BeeStatus, string> = {
 
 /** Incident badge (🐞 ×N) painted on nodes with open incidents. */
 export const BUG_BADGE_COLOR = "#e05d5d";
+
+/** Accent colour of an incident card, by bug status (stage K1). */
+export const BUG_STATUS_COLORS: Record<BugStatus, string> = {
+  open: "#e05d5d", // the same red as the node badge it echoes
+  investigating: "#e0a84f", // being looked at — the in-progress amber
+  resolved: "#4fa860",
+  cancelled: "#5c6470",
+};
+
+/** Human labels of the bug statuses (rendered in text on the cards). */
+export const BUG_STATUS_LABELS: Record<BugStatus, string> = {
+  open: "Open",
+  investigating: "Investigating",
+  resolved: "Resolved",
+  cancelled: "Cancelled",
+};
 
 /**
  * The selected node in the 3D scene (stage I4): its marker, its ring and the
@@ -259,6 +275,11 @@ export function paletteIsComplete(): boolean {
       (status) =>
         GROWTH_STATUS_COLORS[status] !== undefined &&
         GROWTH_STATUS_LABELS[status] !== undefined,
+    ) &&
+    BUG_STATUSES.every(
+      (status) =>
+        BUG_STATUS_COLORS[status] !== undefined &&
+        BUG_STATUS_LABELS[status] !== undefined,
     )
   );
 }

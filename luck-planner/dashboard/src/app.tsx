@@ -38,6 +38,13 @@
  *   node) and a search flies the camera to the node. The toolbar filters
  *   narrow the 3D tree by the same rule the 2D diagram uses, and the 2D/3D
  *   choice is remembered in the URL and in the tab's own storage.
+ * - **K1 plain board** (ADR-10): the default view is a card board — zones
+ *   of planned / in-motion / done work built by the pure adapter
+ *   (`dashboard/src/plain.ts`) from the same `/api/tree` payload, with
+ *   collapsible tree sections and the same toolbar filters (one
+ *   `matchingWithAncestors` rule for three views). The details panel hides
+ *   itself here — the K2 modal takes its job — and a search opens the
+ *   sections down to the hit and scrolls its card into view.
  *
  * State rules kept deliberately small so later stages can extend them
  * without a rewrite: one `load()` effect keyed on the resolved client, one
@@ -78,6 +85,14 @@ import {
 import { createChangeStream } from "./live";
 import { buildSceneOverlay, EMPTY_OVERLAY } from "./overlay-3d";
 import {
+  buildPlainBoard,
+  defaultPlainCollapse,
+  EMPTY_PLAIN_BOARD,
+  plainReveal,
+  togglePlainSection,
+  type PlainCardKind,
+} from "./plain";
+import {
   EMPTY_INTERACTION,
   focusTarget,
   pickCandidates,
@@ -100,6 +115,7 @@ import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./th
 import { Canvas } from "./components/Canvas";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { Legend } from "./components/Legend";
+import { PlainView } from "./components/PlainView";
 import { ThreeView, type ThreeViewState } from "./components/ThreeView";
 import { Toolbar, type ToolbarFilters } from "./components/Toolbar";
 
@@ -209,6 +225,13 @@ export function App(): ReactElement {
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
+  // K1 plain board: collapsed *sections* (keys from `plain.ts`), separate
+  // from the 2D canvas collapse — the two views remember their own shape.
+  const [plainCollapsed, setPlainCollapsed] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  // K1: the entity the toolbar search should scroll into view on the board.
+  const [plainScrollTarget, setPlainScrollTarget] = useState<string | null>(null);
   const [statusLine, setStatusLine] = useState("");
   const [theme] = useState<ThemeName>(initialTheme);
   // The details panel is resizable; the width survives a reload.
@@ -275,9 +298,15 @@ export function App(): ReactElement {
       setTree(nextTree);
       // First payload only: apply the default collapse policy (G2 acceptance —
       // a 1000-node project must open as a readable skeleton). Later refreshes
-      // keep whatever the user expanded or collapsed by hand.
+      // keep whatever the user expanded or collapsed by hand. The plain board
+      // gets the same treatment with its own budget (K1).
       setCollapsedIds((previous) =>
         previous.size > 0 ? previous : defaultCollapsedIds(nextTree.nodes),
+      );
+      setPlainCollapsed((previous) =>
+        previous.size > 0
+          ? previous
+          : defaultPlainCollapse(buildPlainBoard(nextTree)),
       );
       setStatusLine("");
     } catch (cause) {
@@ -354,6 +383,23 @@ export function App(): ReactElement {
     setCollapsedIds((previous) => toggleCollapsed(previous, id));
   }, []);
 
+  /** K1: toggles one plain-board section (pure helper of `plain.ts`). */
+  const onTogglePlainSection = useCallback((key: string): void => {
+    setPlainCollapsed((previous) => togglePlainSection(previous, key));
+  }, []);
+
+  /**
+   * K1: a card click. Leaf cards select their node — the detail fetch this
+   * triggers is what the K2 modal will render. Goal and bug cards become
+   * clickable with that modal; in K1 they are informative.
+   */
+  const onPlainCardSelect = useCallback(
+    (kind: PlainCardKind, entityId: string): void => {
+      if (kind === "leaf") setSelectedId(entityId);
+    },
+    [],
+  );
+
   const requestFocus = useCallback((nodeId: string): void => {
     focusSeq.current += 1;
     setFocus({ nodeId, seq: focusSeq.current });
@@ -422,6 +468,16 @@ export function App(): ReactElement {
     [],
   );
 
+  // K1 plain board: the card view over the same payload and the same
+  // toolbar filters (one `matchingWithAncestors` rule for three views).
+  const plainBoard = useMemo(
+    () =>
+      tree === null
+        ? EMPTY_PLAIN_BOARD
+        : buildPlainBoard(tree, { filter: filters }),
+    [tree, filters],
+  );
+
   /**
    * Makes sure a node is actually on screen: expands its collapsed
    * ancestors and clears whichever filter excludes it (search should never
@@ -453,6 +509,17 @@ export function App(): ReactElement {
         }
         const hit = result.results[0].node;
         revealNode(hit.id);
+        // K1: the board must show the hit too — open the sections down to
+        // its card and scroll it into view (the G4 "found = visible" rule).
+        const reveal = plainReveal(plainBoard, hit.id);
+        if (reveal.sectionKeys.length > 0) {
+          setPlainCollapsed((previous) => {
+            const next = new Set(previous);
+            for (const key of reveal.sectionKeys) next.delete(key);
+            return next;
+          });
+        }
+        if (reveal.cardId !== null) setPlainScrollTarget(hit.id);
         setSelectedId(hit.id);
         requestFocus(hit.id);
         setStatusLine(
@@ -464,7 +531,7 @@ export function App(): ReactElement {
         setStatusLine(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [client, revealNode, requestFocus],
+    [client, plainBoard, revealNode, requestFocus],
   );
 
   const graph = useMemo(
@@ -475,6 +542,8 @@ export function App(): ReactElement {
     [tree, collapsedIds, filters, layer],
   );
 
+  // K1 plain board: the card view over the same payload and the same
+  // toolbar filters (one `matchingWithAncestors` rule for three views).
   // I2 3D layout: the same payload, a radial projection. Rebuilt when the
   // tree changes and when the toolbar filters narrow it (I4: both views show
   // the same nodes) — the collapse state stays a 2D-canvas concern.
@@ -613,14 +682,30 @@ export function App(): ReactElement {
         webglOk={webgl.ok}
       />
       <div
-        className="lp-body"
+        className={view === "plain" ? "lp-body lp-body-plain" : "lp-body"}
         style={
           {
             "--lp-details-width": `${detailsWidth}px`,
           } as React.CSSProperties
         }
       >
-        {view === "3d" ? (
+        {view === "plain" ? (
+          <PlainView
+            board={plainBoard}
+            loaded={tree !== null}
+            collapsed={plainCollapsed}
+            onToggleSection={onTogglePlainSection}
+            selectedEntityId={selectedId}
+            onSelectCard={onPlainCardSelect}
+            scrollTargetEntityId={plainScrollTarget}
+            emptyTitle={filtersActive ? "No nodes match the filters" : undefined}
+            emptyText={
+              filtersActive
+                ? "Loosen or clear the kind/status/version filters to see the board again."
+                : undefined
+            }
+          />
+        ) : view === "3d" ? (
           <ThreeView
             webgl={webgl}
             model={scene3dModel}
@@ -646,16 +731,20 @@ export function App(): ReactElement {
             }
           />
         )}
-        <DetailsPanel
-          detail={detail}
-          loading={detailLoading}
-          error={detailError}
-          resolveName={resolveName}
-          width={detailsWidth}
-          onWidthChange={onDetailsWidthChange}
-          onWidthCommit={onDetailsWidthCommit}
-          onWidthReset={onDetailsWidthReset}
-        />
+        {/* K1: the modal of stage K2 takes the panel's job on the board —
+            the "click a node on the diagram" placeholder would only confuse. */}
+        {view === "plain" ? null : (
+          <DetailsPanel
+            detail={detail}
+            loading={detailLoading}
+            error={detailError}
+            resolveName={resolveName}
+            width={detailsWidth}
+            onWidthChange={onDetailsWidthChange}
+            onWidthCommit={onDetailsWidthCommit}
+            onWidthReset={onDetailsWidthReset}
+          />
+        )}
       </div>
       <Legend />
     </div>

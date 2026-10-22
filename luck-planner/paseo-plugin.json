@@ -1,6 +1,6 @@
 {
   "id": "luck-planner",
-  "description": "Project planning tree for coding agents: tech-stack root, module branches, fact leaves with statuses, influence links, incident bugs, high goals and growth rates, with 2D/3D dashboards.",
+  "description": "Project planning tree for coding agents: tech-stack root, module branches, fact leaves with statuses, influence links, incident bugs, high goals and growth rates, with a plain card board and 2D/3D dashboards.",
   "requirements": {
     "paseo": ">=0.11.0"
   },

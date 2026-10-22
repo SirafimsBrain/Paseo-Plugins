@@ -133,17 +133,20 @@ describe("planViewSwitch", () => {
   });
 
   it("refuses 3D without WebGL and explains it in words", () => {
-    // The I1 acceptance case: launched with `--disable-webgl`, pressing 3D
-    // must keep the diagram and put the reason in the status line — never a
+    // The I1 acceptance case, retargeted by K1: launched with
+    // `--disable-webgl`, pressing 3D must keep the plain board (the default
+    // view, DOM-only) and put the reason in the status line — never a
     // silent no-op and never colour-only.
     const plan = planViewSwitch(BLOCKED, "3d");
-    expect(plan.view).toBe("2d");
+    expect(plan.view).toBe("plain");
     expect(plan.status).toBe(WEBGL_UNAVAILABLE_HINT);
     expect(plan.status).toContain("WebGL");
-    expect(plan.status).toContain("2D");
+    expect(plan.status).toContain("plain board");
   });
 
-  it("returns to 2D silently — the view that cannot fail", () => {
+  it("returns to the views that cannot fail, silently", () => {
+    expect(planViewSwitch(OK, "plain")).toEqual({ view: "plain", status: null });
+    expect(planViewSwitch(BLOCKED, "plain")).toEqual({ view: "plain", status: null });
     expect(planViewSwitch(OK, "2d")).toEqual({ view: "2d", status: null });
     expect(planViewSwitch(BLOCKED, "2d")).toEqual({ view: "2d", status: null });
   });
@@ -261,6 +264,23 @@ describe("the lazy 3D chunk in dist/dashboard", () => {
     ]) {
       expect(scene, marker).toContain(marker);
     }
+  });
+
+  it("keeps the K1 plain board app-side, out of the lazy 3D chunk", () => {
+    // Same split as I2–I4: the card board is a first-chunk consumer of the
+    // same payload — the scene renders the tree, it never builds a board.
+    const appGraph = [
+      fs.readFileSync(APP_JS, "utf8"),
+      ...fs
+        .readdirSync(ASSETS_DIR)
+        .filter((name) => name.startsWith("chunk-chunk-"))
+        .map((name) => fs.readFileSync(path.join(ASSETS_DIR, name), "utf8")),
+    ].join("\n");
+    const scene = fs.readFileSync(SCENE_JS, "utf8");
+    for (const marker of ["buildPlainBoard", "plainReveal", "defaultPlainCollapse"]) {
+      expect(appGraph, marker).toContain(marker);
+    }
+    expect(scene).not.toContain("buildPlainBoard");
   });
 
   it("index.html never links the 3D chunk eagerly", () => {

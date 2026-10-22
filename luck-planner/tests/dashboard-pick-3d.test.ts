@@ -385,10 +385,12 @@ describe("I4: the toolbar filters narrow the 3D tree", () => {
 // The 2D/3D choice is remembered
 // ---------------------------------------------------------------------------
 
-describe("I4: remembering the 2D/3D choice", () => {
+describe("I4/K1: remembering the Plain/2D/3D choice", () => {
   it("reads the view from the URL", () => {
     expect(readViewParam("?token=t&view=3d")).toBe("3d");
     expect(readViewParam("?token=t&view=2d")).toBe("2d");
+    // K1: the plain board is a first-class URL value.
+    expect(readViewParam("?token=t&view=plain")).toBe("plain");
     // Nothing, something unknown, a broken value: no view.
     expect(readViewParam("?token=t")).toBeNull();
     expect(readViewParam("?view=4d")).toBeNull();
@@ -424,7 +426,7 @@ describe("I4: remembering the 2D/3D choice", () => {
     expect(() => writeStoredView(null, "3d")).not.toThrow();
   });
 
-  it("prefers the URL over the stored choice and falls back to 2D", () => {
+  it("prefers the URL over the stored choice and defaults to plain", () => {
     const memory = new Map<string, string>([[VIEW_STORAGE_KEY, "2d"]]);
     const storage: ViewStorage = {
       getItem: (key) => memory.get(key) ?? null,
@@ -433,8 +435,12 @@ describe("I4: remembering the 2D/3D choice", () => {
       },
     };
     expect(initialView("?view=3d", storage)).toBe("3d");
+    // An explicit earlier choice is honoured — the default only decides
+    // when nothing else does.
     expect(initialView("", storage)).toBe("2d");
-    expect(initialView("", null)).toBe("2d");
+    // K1: a tab that says nothing opens the plain board.
+    expect(initialView("", null)).toBe("plain");
+    expect(initialView("?view=plain", null)).toBe("plain");
   });
 
   it("writes the view into the URL without losing the token or the project", () => {

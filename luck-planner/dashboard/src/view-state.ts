@@ -1,7 +1,7 @@
 /**
- * Where the dashboard remembers which diagram the user wants (stage I4).
+ * Where the dashboard remembers which view the user wants (stages I4, K1).
  *
- * The 2D/3D switch is a *preference*, not a mode of the session: a user who
+ * The Plain/2D/3D switch is a *preference*, not a mode of the session: a user who
  * lives in the 3D scene should find it there after a reload, and a link
  * shared with "3d" in it should open in 3D. Two carriers, in this order:
  *
@@ -10,9 +10,14 @@
  * 2. **localStorage** — the tab's own memory, used when the URL says
  *    nothing.
  *
+ * Stage K1 widens the union with `plain` (the card board, ADR-10) and makes
+ * it the *default*: a tab with no URL parameter and no stored choice opens
+ * on the board that cannot fail. An explicit earlier choice of 2D/3D is
+ * still honoured — the default only decides when nothing else does.
+ *
  * Pure over injected inputs, like `theme.ts`: the search string and the
  * storage object are parameters, so the rule is testable without a DOM
- * (`tests/dashboard-view-state.test.ts`).
+ * (`tests/dashboard-pick-3d.test.ts`, the I4 suite).
  *
  * WebGL is *not* consulted here: whether the 3D view can actually be shown
  * is the probe's and `planViewSwitch`'s business (stage I1) — this module
@@ -36,8 +41,8 @@ export interface ViewStorage {
   setItem(key: string, value: string): void;
 }
 
-/** The two views, in the order the toolbar shows them. */
-const VIEWS: readonly DashboardView[] = ["2d", "3d"];
+/** The three views, in the order the toolbar shows them (K1: Plain first). */
+const VIEWS: readonly DashboardView[] = ["plain", "2d", "3d"];
 
 /** Whether a string names a view at all. */
 function isView(value: string | null | undefined): value is DashboardView {
@@ -82,10 +87,11 @@ export function writeStoredView(storage: ViewStorage | null, view: DashboardView
 
 /**
  * The view a tab should open in: the URL wins, the stored choice is the
- * fallback, and 2D is the default (the diagram that always works).
+ * fallback, and the plain board is the default (stage K1 — the card view
+ * that needs neither WebGL nor React Flow and always opens).
  */
 export function initialView(search: string, storage: ViewStorage | null): DashboardView {
-  return readViewParam(search) ?? readStoredView(storage) ?? "2d";
+  return readViewParam(search) ?? readStoredView(storage) ?? "plain";
 }
 
 /**
