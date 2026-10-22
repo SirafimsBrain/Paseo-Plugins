@@ -10,7 +10,8 @@ import {
   SettingsSection,
   SettingsSwitch,
 } from "@getpaseo/plugin/client/ui";
-import { scaledFont, useHostFontScale } from "./use-host-typography";
+import { scaledFont } from "./host-font-scale";
+import { useHostFontScale } from "./use-host-typography";
 import {
   DEFAULT_HTTP_PORT,
   generateAccessToken,
@@ -42,13 +43,21 @@ import {
  * on the machine, so the plugin never writes them by itself: each target has
  * its own button here, and one pair of buttons for all of them.
  */
-export function LuckPlannerSettingsScreen({ theme }: PluginSurfaceProps) {
+export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps) {
   const settings = useSettings(luckPlannerSettings);
   const fontScale = useHostFontScale();
   const font = (base: number) => scaledFont(base, fontScale);
   const fg = theme.colors.foreground;
   const danger = theme.colors.statusDanger;
   const accent = theme.colors.accent;
+  // The host's compact layout is true on phones and narrow windows: the
+  // spacing follows it, the host's own `SettingsCard`/`SettingsSection`
+  // components adapt the rest.
+  const compact = layout.compact;
+  const containerStyle = {
+    padding: compact ? 8 : 12,
+    gap: compact ? 6 : 8,
+  };
 
   const agentStatusRpc = useRpc(agentMcpStatus);
   const agentRegisterRpc = useRpc(agentMcpRegister);
@@ -109,14 +118,14 @@ export function LuckPlannerSettingsScreen({ theme }: PluginSurfaceProps) {
 
   if (settings.status === "loading") {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, containerStyle]}>
         <Text style={{ color: fg, fontSize: font(13) }}>Loading settings…</Text>
       </View>
     );
   }
   if (settings.status !== "ready") {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, containerStyle]}>
         <Text style={{ color: danger, fontSize: font(12) }}>
           Settings are invalid: {settings.error}
         </Text>
@@ -135,7 +144,7 @@ export function LuckPlannerSettingsScreen({ theme }: PluginSurfaceProps) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, containerStyle]}>
       {settings.saveError ? (
         <Text style={{ color: danger, fontSize: font(12), marginBottom: 4 }}>
           {settings.saveError}

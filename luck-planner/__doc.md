@@ -1989,19 +1989,22 @@ English only (project rule).
 
 ## 10. Compatibility
 
-Verified on 2026-10-19 in the plugin's development environment with
-`@getpaseo/plugin@0.11.2` (the manifest requires Paseo `>= 0.11.0`):
+Verified on 2026-10-22 in the plugin's development environment with
+`@getpaseo/plugin@0.12.0` (the manifest requires Paseo `>= 0.11.0`; the
+0.12.0 conformance pass is §10.5):
 
 - `npm run typecheck` — clean, in both configurations (the root one and
   `dashboard/tsconfig.json`, which the root excludes).
-- `npm test` — 31 suites, 536 tests, all green. The suite includes a
+- `npm test` — 36 suites, 611 tests, all green. The suite includes a
   real-process stdio e2e (it spawns the built `dist/mcp-server.js` and speaks
   JSON-RPC over the pipe: handshake → `tools/list` → `tools/call`), the HTTP
   server suites (a real socket on loopback, an SSE stream that a second
   connection to the same file wakes up), the dashboard suites (the built
   artifact, the 2D/3D bundle split, the rebuild determinism against a fresh
-  build in a temp root) and the 3D budget tests (10 000 nodes, a build and a
-  60-frame animation budget).
+  build in a temp root), the 3D budget tests (10 000 nodes, a build and a
+  60-frame animation budget) and the client audit of §10.5 (the DOM globals,
+  DOM props and HTML elements of `client/`, and the host's interface-size
+  parsing).
 - Node ≥ 24.20 on the daemon host: the store uses the built-in `node:sqlite`
   with FTS5 (`porter`, `unicode61`).
 - The MCP bundle depends on nothing beyond Node built-ins, so an agent's own
@@ -2171,3 +2174,91 @@ The ordering the daemon actually uses, measured on the live install:
 | +8 s, +36 ms | the daemon rewrites `config.json` with the new path | from here on the config is the truth |
 | +8 s, +160 ms | the settings arrive → `applySettings` | the first moment the current bundle is knowable — the refresh happens here |
 | +8 s, +170 ms | the dashboard endpoint starts and resolves the dashboard directory | it reads the *current* revision's build ✓ |
+
+### 10.5 Paseo 0.12.0 spec conformance (0.32.2)
+
+Verified on 2026-10-22 against the **stable Paseo 0.12.0** release
+(`paseo --version` → `0.12.0`) with the plugin SDK `@getpaseo/plugin@0.12.0`.
+The 2026-10-21 conformance pass of the other five plugins in this repository
+deliberately left this one out — it was still in development — so this section
+is its first full pass.
+
+**The SDK diff is additive, and none of it touches this plugin.**
+
+| Diff | What changed | Effect on luck-planner |
+| ---- | ------------ | ---------------------- |
+| `@getpaseo/plugin@0.11.0 → 0.12.0` | `dist/server/acp.d.ts` (`AcpOptions.workspaceOnlyCatalog`) and `dist/server/provider.d.ts` (`ProviderRegistration.requiresConfiguration`) | none — the plugin registers no provider and no ACP agent |
+| `@getpaseo/client@0.11.2 → 0.12.0` | additive: `SendMessageOptions.sourceAgentId`, background workspaces, `readFile` timeout | none — the plugin's client calls are the workspace list and `timeline.append` |
+| `@getpaseo/protocol@0.11.2 → 0.12.0` | timeline and agent types | none — the plugin's rows are built against its own zod schema (`shared/timeline.ts`) |
+
+The **client** declarations are byte-identical from 0.11.0 to 0.12.0, so the
+manifest floor stays `>= 0.11.0`: the newest API the plugin uses is
+`addScreen` / `openScreen`, which arrived in 0.11. Raising the floor to
+`>= 0.12.0` would lock out hosts that run the plugin perfectly well — the
+manifest documents the *API* floor, not the tested version.
+
+**The deprecated surface API was never used.** The plugin registers
+`addWorkspacePanel`, `addSettingsScreen`, `addScreen`,
+`addCommandCenterItem`, `addSlashCommand` and `addTimelineRenderer`, and it
+opens its screen with `openScreen`. The compiled client bundle (§10.6) carries
+the new API and **zero** `addSurface` / `addSidebarItem` / `openSurface`
+calls.
+
+**One real spec violation, found and fixed.** Paseo's plugin spec keeps DOM
+globals out of cross-platform components: `window`, `document`,
+`localStorage`, `navigator` and `location` belong in `client/web.ts`, declared
+only for what that module uses and gated on `Platform.OS === "web"`. The
+plugin read `localStorage` straight from `client/use-host-typography.ts` — the
+host's interface size (Settings → Appearance → Fonts), the same value the
+other plugins in this repository read the same way. The read now goes through
+`client/web.ts`, the only module allowed to name a DOM global, and the pure
+parsing moved to `client/host-font-scale.ts`, which takes the raw settings
+document as a parameter and never reaches for a global itself.
+
+`tests/client-dom-globals.test.ts` runs the spec's own client audit over
+`client/` — DOM globals, DOM props (`className`, `onClick`) and HTML
+elements — and fails on a hit outside `client/web.ts`. The rule is a test, not
+a review step, and the same suite pins the interface-size parsing (the three
+spellings the host has used, and every malformed shape falling back to the
+default scale).
+
+**Improvements made on the new SDK.**
+
+- The settings screen and the dashboard screen now honour `layout.compact`:
+  the host's compact layout (phones, narrow windows) gets tighter spacing.
+  The workspace panel and the timeline rows already did.
+- The dashboard address on the "Open dashboard" screen is a real link
+  (`ExternalLink` from `@getpaseo/plugin/client/ui`): one tap reaches the
+  dashboard in the system browser when the in-app tab was closed, refused or
+  never opened. The address stays selectable, as before.
+
+**Live verification on a real 0.12.0 daemon** (a scratch home on its own
+port; the production daemon and its configuration untouched):
+
+| # | Check | Result |
+| - | ----- | ------ |
+| 1 | `paseo plugin install <the working tree>` | ✅ `running`, no error column |
+| 2 | `paseo plugin logs luck-planner` | ✅ `Plugin ready`, the MCP entry published, the skill up to date, the dashboard listening |
+| 3 | `paseo plugin reload luck-planner` | ✅ exits 0 in 1.5 s and the plugin restarts cleanly (the 0.12.0 `#6306` fix) |
+| 4 | the **published** MCP entry | ✅ `initialize` → `serverInfo { name: "luck-planner", version: "0.32.2" }`, `tools/list` → all eleven tools, `luck_tree_search` answered |
+| 5 | the dashboard endpoint | ✅ `GET /health` → `{"ok":true,"server":"luck-planner","version":"0.32.2"}`, `GET /` → the built web app |
+| 6 | the real 0.12.0 host compiler | ✅ the client and the server entry build; the client bundle carries the new API and **zero** deprecated calls (§10.6) |
+
+### 10.6 The host compiler as the oracle
+
+The client entry is not typechecked by TypeScript alone: the host compiles it
+with its own bundler, and that compiler enforces the runtime boundaries (a
+`client/` module in the daemon bundle, a `node:` import in the app bundle, a
+module in the plugin root) and the SDK boundaries (`@getpaseo/plugin/client`
+in the daemon bundle, `react` in a shared module). A plugin can typecheck
+cleanly and still be refused by the host.
+
+For this pass the compiler was taken from the installed 0.12.0 application
+itself — `app.asar` → `@getpaseo/server/dist/server/server/plugins/compiler.js`,
+the exact `compilePlugin` the daemon runs — and pointed at this plugin's
+working tree. It resolved the plugin's own `tsconfig.json`, walked the import
+graph with the TypeScript resolver (erased type imports included) and built
+both bundles. The result is the evidence in row 6 of §10.5.
+
+The same compiler is what makes the "zero deprecated calls" claim meaningful:
+it is the build the user's daemon performs at install time, not a look-alike.

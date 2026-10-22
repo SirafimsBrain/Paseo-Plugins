@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import type { PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { StyleSheet, Text, View } from "react-native";
 import { timelineRowText, type TimelineData } from "../shared/timeline";
-import { scaledFont, useHostFontScale } from "./use-host-typography";
+import { scaledFont } from "./host-font-scale";
+import { useHostFontScale } from "./use-host-typography";
 
 /**
  * Renderer for the plugin's own timeline rows (PLAN.md stage H2): the daemon

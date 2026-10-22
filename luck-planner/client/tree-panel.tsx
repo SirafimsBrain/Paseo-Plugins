@@ -30,7 +30,8 @@ import {
   type TreeSection,
 } from "../shared/panel";
 import { type DashboardOpenReport, openDashboard } from "./dashboard-screen";
-import { scaledFont, useHostFontScale } from "./use-host-typography";
+import { scaledFont } from "./host-font-scale";
+import { useHostFontScale } from "./use-host-typography";
 
 /**
  * Native workspace panel for the planning tree (PLAN.md stage E2).

@@ -11,7 +11,7 @@ Coding agents keep their plan in their own context window, and a chat log is a p
 - **Incidents (bugs)** — a problem with a severity, optionally attached to the leaves it blocks. A blocking incident (`open` or `investigating`) is visible everywhere its leaves are.
 - **High goals** — a formal task with a plan, created and proposed by an agent and **approved by a human**. There is deliberately no MCP action that approves a goal: the approval gate is the human's call through the panel. An approved goal materializes as a branch of the tree, and the plan's steps become the goal's growth record.
 - **Growth** — the steps of a node or a goal and their state, rolled up over the subtree. The same number paints the heat map in 2D and the glow rings in 3D: one computation, two views, never two different answers.
-- **MCP tools** — eight read/write tools, available to every agent in the workspace (see below).
+- **MCP tools** — eleven read/write tools, available to every agent in the workspace (see below).
 - **Registration in the agents' own config files** — the plugin can register its MCP server directly in the config of OpenCode, Kilo, Cline, Cursor, Qwen Code and Codex CLI, one button per agent in the settings. That matters because a session-injected server is fragile: OpenCode and Kilo keep session registrations in memory and drop them when an idle directory is evicted, and the terminal agents ignore session-delivered MCP servers altogether. A config-file entry survives the eviction and is the only way in for the latter.
 - **The dashboard** — a read-only web app on the loopback interface: a 2D diagram with search, filters and a details panel, and a 3D WebGL scene of the same tree (see "The dashboard").
 - **The native panel** — the tree, the filters and the details inside Paseo's workspace panel, with timeline rows for the two facts worth an audit line: a goal that crossed the approval gate, and a leaf that reached `done`.
@@ -103,12 +103,30 @@ npm test
 
 The source is split by boundary: `shared/` (types and schemas, client/server neutral), `server/` (the store, the MCP server, the HTTP server, the timeline), `client/` (the panel, the settings screen, the slash commands, the dashboard screen), `dashboard/` (the web app: the pure adapter in `graph.ts`, the 3D layout in `tree-3d.ts`, the 3D overlay in `overlay-3d.ts`, the 3D interaction in `pick-3d.ts` and the scene in `dashboard-3d.tsx`).
 
+## Paseo 0.12.0 spec conformance
+
+Verified against the **stable Paseo 0.12.0** release (2026-10-22) with the plugin SDK `@getpaseo/plugin@0.12.0`. Full evidence: [`__doc.md` §10.5](./__doc.md#105-paseo-0120-spec-conformance-0322).
+
+**What the new version changed for this plugin:**
+
+- The SDK diff is **additive only** for every API this plugin uses: the client declarations are byte-identical from 0.11.0 to 0.12.0, and the two changed files (the ACP and the provider declarations) cover registrations this plugin does not have. `requirements.paseo` therefore stays `>=0.11.0` — the newest API it uses is `addScreen` / `openScreen`, which arrived in 0.11.
+- The plugin never used the deprecated `addSurface` / `addSidebarItem` / `openSurface`; it registers `addScreen`, `addWorkspacePanel`, `addSettingsScreen`, `addCommandCenterItem`, `addSlashCommand` and `addTimelineRenderer`. The client entry, built by the **real 0.12.0 host compiler**, contains zero deprecated calls.
+- **One real spec violation was found and fixed.** The plugin read the host's `localStorage` outside `client/web.ts`, which Paseo's cross-platform rules forbid: DOM globals belong in that one module, gated on `Platform.OS === "web"`. The read moved to `client/web.ts`, the parsing to a pure module, and the spec's own client audit now runs as a test.
+
+**Improved in 0.32.2:**
+
+- The settings screen and the dashboard screen honour the host's compact layout (phones, narrow windows).
+- The dashboard address is a real link: one tap reaches the dashboard in the system browser when the in-app tab was closed or refused.
+
+**Verified live on a 0.12.0 daemon** (a scratch home; the production daemon untouched): the install from the working tree (`running`), `Plugin ready` in the log, a clean `paseo plugin reload`, the published MCP entry answering `initialize` / `tools/list` / `luck_tree_search`, the dashboard's `/health` and the built web app, and both entries built by the real 0.12.0 host compiler.
+
 ## Known limitations
 
 - The 3D view needs WebGL; without it the tab stays on the 2D diagram and says why.
 - Collapsing a branch is a 2D-canvas concern: the 3D scene always shows the whole tree (the filters narrow it in both views).
 - The 3D scene picks the node nearest along the click ray, using a sphere around each node — a very thin branch tube is picked at its junction, not along its whole length.
 - The dashboard is designed for a desktop-sized tab; the native panel is the mobile-friendly surface.
+- The dashboard is served on the **daemon host's** loopback interface, so it opens on the machine that runs the daemon. With a remote daemon, the native panel still works (it speaks to the daemon over the host connection), but the dashboard URL points at the desktop's own loopback and the tab stays empty. The MCP tools and the panel are unaffected.
 
 ## License
 

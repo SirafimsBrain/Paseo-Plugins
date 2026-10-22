@@ -4,10 +4,12 @@ import type {
   PluginSurfaceProps,
 } from "@getpaseo/plugin/client";
 import { openExternalUrl, usePaseo, useRpc } from "@getpaseo/plugin/client";
+import { ExternalLink } from "@getpaseo/plugin/client/ui";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { dashboardStatus, type DashboardStatus } from "../shared/rpc";
 import { openDashboardUrl, type DashboardOpeners } from "./open-dashboard";
-import { scaledFont, useHostFontScale } from "./use-host-typography";
+import { scaledFont } from "./host-font-scale";
+import { useHostFontScale } from "./use-host-typography";
 
 /**
  * "Open dashboard" action (PLAN.md stage F2, `__doc.md` §6).
@@ -143,11 +145,14 @@ function reportColor(
  * the tab can be reopened (or copied) after the fact.
  */
 export function LuckPlannerDashboardScreen(props: PluginScreenProps) {
-  const { theme, params } = props;
+  const { theme, params, layout } = props;
   const fontScale = useHostFontScale();
   const font = (base: number) => scaledFont(base, fontScale);
   const paseo = usePaseo();
   const statusRpc = useRpc(dashboardStatus);
+  // Phones and narrow windows get the compact spacing the host asks for.
+  const compact = layout.compact;
+  const containerStyle = { padding: compact ? 12 : 16 };
 
   const projectKey = params[DASHBOARD_PROJECT_PARAM] ?? "";
   const workspaceId = params[DASHBOARD_WORKSPACE_PARAM] || undefined;
@@ -190,7 +195,7 @@ export function LuckPlannerDashboardScreen(props: PluginScreenProps) {
 
   if (projectKey.length === 0) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, containerStyle]}>
         <Text style={{ color: fgMuted, fontSize: font(13) }}>
           Open this screen from a workspace (⌘K → “Open luck-planner dashboard”)
           so the dashboard knows which project to show.
@@ -200,7 +205,7 @@ export function LuckPlannerDashboardScreen(props: PluginScreenProps) {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, containerStyle]}>
       <Text style={{ color: fg, fontSize: font(15), fontWeight: "600" }}>
         Luck Planner dashboard
       </Text>
@@ -223,13 +228,21 @@ export function LuckPlannerDashboardScreen(props: PluginScreenProps) {
           </Text>
         )}
         {report?.url ? (
-          <Text
-            selectable
-            numberOfLines={3}
-            style={{ color: fgMuted, fontSize: font(11), marginTop: 6 }}
+          // The address is a real link: on a host where the in-app tab did not
+          // open (or was closed), one tap reaches the dashboard in the system
+          // browser.
+          <ExternalLink
+            href={report.url}
+            accessibilityLabel="Open the dashboard in your browser"
           >
-            {report.url}
-          </Text>
+            <Text
+              selectable
+              numberOfLines={3}
+              style={{ color: accent, fontSize: font(11), marginTop: 6 }}
+            >
+              {report.url}
+            </Text>
+          </ExternalLink>
         ) : null}
       </View>
 
