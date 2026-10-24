@@ -24,16 +24,16 @@ import {
   require_jsx_runtime,
   require_react,
   require_with_selector
-} from "./chunk-chunk-O75LBYBY.js";
+} from "./chunk-chunk-3KRWBM5O.js";
 import {
   __commonJS,
   __export,
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
 
-// node_modules/scheduler/cjs/scheduler.production.js
+// node_modules/@react-three/fiber/node_modules/scheduler/cjs/scheduler.production.js
 var require_scheduler_production = __commonJS({
-  "node_modules/scheduler/cjs/scheduler.production.js"(exports) {
+  "node_modules/@react-three/fiber/node_modules/scheduler/cjs/scheduler.production.js"(exports) {
     "use strict";
     function push(heap, node) {
       var index = heap.length;
@@ -304,9 +304,9 @@ var require_scheduler_production = __commonJS({
   }
 });
 
-// node_modules/scheduler/index.js
+// node_modules/@react-three/fiber/node_modules/scheduler/index.js
 var require_scheduler = __commonJS({
-  "node_modules/scheduler/index.js"(exports, module) {
+  "node_modules/@react-three/fiber/node_modules/scheduler/index.js"(exports, module) {
     "use strict";
     if (true) {
       module.exports = require_scheduler_production();
@@ -44245,11 +44245,11 @@ var WebGLRenderer = class {
 // node_modules/@react-three/fiber/dist/events-e51d7528.esm.js
 var import_jsx_runtime = __toESM(require_jsx_runtime());
 
-// node_modules/zustand/esm/traditional.mjs
+// node_modules/@react-three/fiber/node_modules/zustand/esm/traditional.mjs
 var import_react = __toESM(require_react(), 1);
 var import_with_selector = __toESM(require_with_selector(), 1);
 
-// node_modules/zustand/esm/vanilla.mjs
+// node_modules/@react-three/fiber/node_modules/zustand/esm/vanilla.mjs
 var createStoreImpl = (createState) => {
   let state2;
   const listeners = /* @__PURE__ */ new Set();
@@ -44273,7 +44273,7 @@ var createStoreImpl = (createState) => {
 };
 var createStore = ((createState) => createState ? createStoreImpl(createState) : createStoreImpl);
 
-// node_modules/zustand/esm/traditional.mjs
+// node_modules/@react-three/fiber/node_modules/zustand/esm/traditional.mjs
 var { useSyncExternalStoreWithSelector } = import_with_selector.default;
 var identity = (arg) => arg;
 function useStoreWithEqualityFn(api, selector = identity, equalityFn) {

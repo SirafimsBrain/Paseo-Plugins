@@ -68,7 +68,7 @@ import {
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-O75LBYBY.js";
+} from "./chunk-chunk-3KRWBM5O.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
@@ -113,6 +113,9 @@ var PluginAttachmentItemSchema = external_exports.object({
 var PluginAttachmentSearchPayloadSchema = external_exports.object({
   items: external_exports.array(PluginAttachmentItemSchema)
 });
+
+// node_modules/@getpaseo/plugin/dist/icons.js
+var PLUGIN_SVG_ICON_MAX_BYTES = 64 * 1024;
 
 // shared/rpc.ts
 var agentMcpTargetIdSchema = external_exports.enum([
@@ -6777,11 +6780,11 @@ function XYResizer({ domNode, nodeId, getStoreItems, onChange, onEnd }) {
   };
 }
 
-// node_modules/@xyflow/react/node_modules/zustand/esm/traditional.mjs
+// node_modules/zustand/esm/traditional.mjs
 var import_react = __toESM(require_react(), 1);
 var import_with_selector = __toESM(require_with_selector(), 1);
 
-// node_modules/@xyflow/react/node_modules/zustand/esm/vanilla.mjs
+// node_modules/zustand/esm/vanilla.mjs
 var createStoreImpl = (createState) => {
   let state;
   const listeners = /* @__PURE__ */ new Set();
@@ -6813,7 +6816,7 @@ var createStoreImpl = (createState) => {
 };
 var createStore = (createState) => createState ? createStoreImpl(createState) : createStoreImpl;
 
-// node_modules/@xyflow/react/node_modules/zustand/esm/traditional.mjs
+// node_modules/zustand/esm/traditional.mjs
 var { useDebugValue } = import_react.default;
 var { useSyncExternalStoreWithSelector } = import_with_selector.default;
 var identity3 = (arg) => arg;
@@ -6836,7 +6839,7 @@ var createWithEqualityFnImpl = (createState, defaultEqualityFn) => {
 };
 var createWithEqualityFn = (createState, defaultEqualityFn) => createState ? createWithEqualityFnImpl(createState, defaultEqualityFn) : createWithEqualityFnImpl;
 
-// node_modules/@xyflow/react/node_modules/zustand/esm/shallow.mjs
+// node_modules/zustand/esm/shallow.mjs
 function shallow$1(objA, objB) {
   if (Object.is(objA, objB)) {
     return true;

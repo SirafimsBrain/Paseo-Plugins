@@ -461,9 +461,9 @@ var require_react = __commonJS({
   }
 });
 
-// node_modules/react-dom/node_modules/scheduler/cjs/scheduler.production.js
+// node_modules/scheduler/cjs/scheduler.production.js
 var require_scheduler_production = __commonJS({
-  "node_modules/react-dom/node_modules/scheduler/cjs/scheduler.production.js"(exports) {
+  "node_modules/scheduler/cjs/scheduler.production.js"(exports) {
     "use strict";
     function push(heap, node2) {
       var index = heap.length;
@@ -734,9 +734,9 @@ var require_scheduler_production = __commonJS({
   }
 });
 
-// node_modules/react-dom/node_modules/scheduler/index.js
+// node_modules/scheduler/index.js
 var require_scheduler = __commonJS({
-  "node_modules/react-dom/node_modules/scheduler/index.js"(exports, module) {
+  "node_modules/scheduler/index.js"(exports, module) {
     "use strict";
     if (true) {
       module.exports = require_scheduler_production();
@@ -15022,7 +15022,7 @@ ${content.join("\n")}
 var version = {
   major: 4,
   minor: 6,
-  patch: 7
+  patch: 6
 };
 
 // node_modules/zod/v4/core/schemas.js

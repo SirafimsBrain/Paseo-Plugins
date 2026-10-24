@@ -2617,7 +2617,7 @@ ${content.join("\n")}
 var version = {
   major: 4,
   minor: 6,
-  patch: 7
+  patch: 6
 };
 
 // node_modules/zod/v4/core/schemas.js
