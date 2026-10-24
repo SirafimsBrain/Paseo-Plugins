@@ -131,3 +131,7 @@ Verified against the **stable Paseo 0.12.0** release (2026-10-22) with the plugi
 ## License
 
 MIT. See [LICENSE](../LICENSE).
+
+## Plain view (default)
+
+The dashboard opens on the **Plain** view: a card board (zones PLAN / ACTIVE / DONE) built from the same `/api/tree` payload as the 2D and 3D diagrams. Clicking a card opens a modal with the full record (node, goal, or incident). The 2D and 3D views remain available in the toolbar and are remembered per tab.
