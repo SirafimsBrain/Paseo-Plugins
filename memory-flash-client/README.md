@@ -22,7 +22,7 @@ It is the client half of Memory Flash's remote access: the memory host serves MC
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash-client
 ```
 
-Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21) and Memory Flash 0.5.0+ with the HTTP endpoint enabled on the remote host.
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.13.0 release, 2026-10-24) and Memory Flash 0.5.0+ with the HTTP endpoint enabled on the remote host.
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/memory-flash-client/<revision>/checkout/memory-flash-client`. Every import in this plugin is supplied by Paseo itself, so it has no install-time build step and no registry access requirement — the command above is the whole installation. Updates: `paseo plugin update memory-flash-client`.
 
@@ -85,6 +85,44 @@ $PASEO_HOME/plugins/memory-flash-client/
 ```
 
 Requires Paseo ≥ 0.11.0 (uses the plugin SDK screen/sidebar API, settings, lifecycle hooks and `McpHttpServerConfig`).
+
+## Paseo 0.13.0 compatibility
+
+Verified against the **stable Paseo 0.13.0** release (2026-10-24).
+Full evidence: [__doc.md](./__doc.md) §16. **No code change was needed, and
+no deprecated 0.13.0 API remains in this plugin** — it is still `0.2.1` and
+`requirements.paseo` still `>=0.11.0`.
+
+**Evidence caveat:** the plugin is **not installed on the machine the pass
+ran on**, so unlike the other four it has no live 0.13.0 daemon evidence —
+its result rests on the SDK diff, typecheck, the full test suite, the real
+0.13.0 host compiler and the real 0.13.0 manifest parser. The 0.12.0 live
+evidence (§15 of [__doc.md](./__doc.md)) stands until the next install or
+update on a 0.13.0 host.
+
+**Nothing deprecated reaches it.** The plugin imports its UI from
+`@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`, never from the
+`client/react-native` entry that 0.13.0 deprecates (removal 2027-04-20, with
+`useRevealedText`); its hooks are `before("agent.create")` and
+`registerSettings`, so the always-empty `agent.turn_ended` `timeline` does not
+apply; and it neither creates agents (the `git`/`worktreeName` options
+`createAgent` now rejects) nor contributes a panel or uses `SettingsGroup`.
+0.13.0's connected hosts (`PaseoApi.hosts`) are Paseo-to-Paseo delegation and
+do not overlap with this plugin's remote memory hosts over HTTP API keys.
+
+**New in 0.13.0, not adopted (all optional):** plugin translations
+(`defineTranslations` / `useTranslation` / `client.i18n` — connection labels
+stay valid English `PluginText`), `Markdown` / `StreamedText` / `Loading` /
+`DocumentFrame`, inline-SVG icons, file panels, agent panels, `useTabState`,
+`createWorkspace`, and `PaseoApi.hosts`. The full inventory is in the root
+[README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24).
+
+**Verification:** typecheck clean against SDK 0.13.0, vitest **6 suites /
+53 tests** pass, and both entries build with the **real 0.13.0 host compiler**
+(from the installed `app.asar`) with no boundary errors and zero deprecated
+calls. The manifest passes the real 0.13.0 parser, and the plugin still has
+**no install-time build step**. The SDK was installed with `--no-save`, so
+`package.json` still pins `@getpaseo/plugin@0.12.0`.
 
 ## Paseo 0.12.0 spec conformance
 

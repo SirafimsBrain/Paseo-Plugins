@@ -71,16 +71,56 @@ installation. Updates: `paseo plugin update session-manager`.
   raised:** this plugin contributes a workspace panel, a settings screen and
   Command Center items — none of the 0.11+ screen/sidebar API — so the floor
   stays where the APIs actually reach. Only the SDK pin moved to 0.12.0.
-- Verified against Paseo `0.12.0` (2026-10-21, SDK `@getpaseo/plugin@0.12.0`):
+- Verified against Paseo `0.13.0` (2026-10-24, SDK `@getpaseo/plugin@0.13.0`
+  installed with `--no-save`, so the declared pin stays `0.12.0`):
   `npm run typecheck` and `npm test` (70 tests, 8 suites) pass; see
-  Compatibility in [`__doc.md`](./__doc.md). Earlier: Paseo 0.10.3 against
-  SDK 0.10.1.
+  Compatibility in [`__doc.md`](./__doc.md) §17. Earlier: Paseo `0.12.0` /
+  SDK 0.12.0 (2026-10-21), Paseo `0.10.3` / SDK 0.10.1.
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
   `cline`, `opencode`, `kilo`. Qwen Code and `acpx` are read and written as files
   and need no CLI.
 - `npm test` (vitest) and `npm run typecheck` run the server-side test suites;
   the tests build throwaway stores under the OS temp directory and never touch
   the real home stores.
+
+## Paseo 0.13.0 compatibility
+
+Verified against the **stable Paseo 0.13.0** release (2026-10-24).
+Full evidence: [`__doc.md`](./__doc.md) §17. **No code change was needed**,
+so the plugin is still `0.2.2` and `requirements.paseo` still `>=0.8.0`.
+
+**Deprecated in 0.13.0 and still used here (works today, deliberately not
+migrated):**
+
+| Deprecated | Status |
+| ---------- | ------ |
+| the `@getpaseo/plugin/client/react-native` entry point — this panel imports `ScrollView` and `useToast` from it | `@deprecated` in favour of `@getpaseo/plugin/client/ui`; the host keeps the entry in its exempt list under `COMPAT(pluginReactNativeEntrypoint)` and **removes it on 2027-04-20**, together with `useRevealedText` (unused here). The migration is one import line. |
+| `addWorkspacePanel`'s `context: "workspace"` field | `@deprecated` ("Omit context") and now optional; still typechecks and is still accepted. |
+
+**Deprecated in 0.13.0 that does not reach this plugin:** the panel
+`params.agentId` / `addAgentPanel` pair (no agent panel here), the
+`agent.turn_ended` `timeline`, which is now **always empty** (this plugin
+registers no lifecycle hooks), `SettingsGroup` → `SettingsSection`, and
+`@getpaseo/client`'s `CreateAgentRequestOptions.git` / `worktreeName`, which
+`createAgent` now **rejects at runtime** (this plugin creates no agents and
+declares no `@getpaseo/client` dependency).
+
+**New in 0.13.0, not adopted (all optional):** file panels
+(`addFilePanel`), agent panels (`addAgentPanel`), `useTabState`, plugin
+translations (`defineTranslations` / `useTranslation` / `client.i18n` — the
+plugin's English strings stay valid `PluginText`), `Markdown`,
+`StreamedText`, `Loading`, `DocumentFrame`, inline-SVG and component icons,
+`createWorkspace`, and `PaseoApi.hosts`. The full inventory is in the root
+[README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24).
+
+**Verification:** typecheck clean against SDK 0.13.0, vitest **8 suites /
+70 tests** pass, and both entries build with the **real 0.13.0 host
+compiler** (`compilePlugin` extracted from the installed `app.asar`) with no
+bundler-boundary errors; the manifest passes the real 0.13.0 parser. Live:
+`running` on this machine's 0.13.0 daemon with `Plugin ready` and no plugin
+errors in the daemon or app logs. The SDK was installed with `--no-save`, so
+`package.json` still pins `@getpaseo/plugin@0.12.0` — the host supplies the
+runtime SDK and no code needed the 0.13.0 API.
 
 ## Paseo 0.12.0 spec conformance
 

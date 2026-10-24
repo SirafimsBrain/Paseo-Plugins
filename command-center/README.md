@@ -34,7 +34,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center
 ```
 
-Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21; the screen/sidebar API, settings screen, attachment source and lifecycle hooks are all SDK 0.11+ APIs).
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.13.0 release, 2026-10-24; the screen/sidebar API, settings screen, attachment source and lifecycle hooks are all SDK 0.11+ APIs — 0.13.0 adds nothing this plugin needs).
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/command-center/<revision>/checkout/command-center`, together with its dependencies. It talks to the standard Paseo scheduler through the low-level `@getpaseo/client` daemon client, which Paseo does **not** supply to plugins — so the manifest runs `npm ci` as its install-time build step, and the daemon installs the dependencies before bundling. That means the host needs npm-registry access at install and update time. Updates: `paseo plugin update command-center`.
 
@@ -57,6 +57,60 @@ $PASEO_HOME/plugins/command-center/
 ├── history.json     # the last N runs (settings.historyLimit)
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
+
+## Paseo 0.13.0 compatibility
+
+Verified against the **stable Paseo 0.13.0** release (2026-10-24).
+Full evidence: [__doc.md](./__doc.md) §11. **No code change was needed**, so
+the plugin is still `0.5.2` and `requirements.paseo` still `>=0.11.0`.
+
+This plugin had the most 0.13.0 exposure of the five — the scheduler bridge,
+the `agent.turn_ended` automation and the deprecated UI entry point — and all
+three were checked specifically:
+
+- **`@getpaseo/client@0.13.0` keeps every `schedule*` method.** All nine the
+bridge calls (`scheduleCreate`, `scheduleList`, `scheduleInspect`,
+`scheduleLogs`, `schedulePause`, `scheduleResume`, `scheduleDelete`,
+`scheduleRunOnce`, `scheduleUpdate`) are present with **byte-identical**
+option and payload types.
+- **The `agent.turn_ended` change does not bite.** 0.13.0 sends an **empty
+`timeline`** on turn-ended hooks (fetch history with
+`timeline.refetch({ direction: "tail", limit: 20 })` instead); the automation
+here reads only `event.outcome`, so nothing was lost.
+- **The `createAgent` rejection does not bite.** `@getpaseo/client` now
+deprecates `CreateAgentRequestOptions.git` / `worktreeName` and **rejects them
+at runtime**. Command Center never passes them: agent creation uses the
+high-level `paseo.agents.create(...)` / `paseo.workspaces.ref(id).agents.create({ worktree: { mode: "branch-off", … } })`,
+and `PaseoAgentCreateOptions.worktree` is not deprecated.
+
+**Deprecated in 0.13.0 and still used here (works today, deliberately not
+migrated):** the `@getpaseo/plugin/client/react-native` entry point —
+`client/command-center-surface.tsx` imports `Modal` and `useToast` from it.
+It is `@deprecated` in favour of `@getpaseo/plugin/client/ui`, kept exempt in
+the host under `COMPAT(pluginReactNativeEntrypoint)` and **removed on
+2027-04-20** together with `useRevealedText` (unused here). Everything else
+already imports from `client/ui`.
+
+**Deprecated in 0.13.0 that does not reach this plugin:** panel `context` /
+`agentId` and `addAgentPanel` (the Command Center is a screen),
+`SettingsGroup` → `SettingsSection`.
+
+**New in 0.13.0, not adopted (all optional):** plugin translations
+(`defineTranslations` / `useTranslation` / `client.i18n` — command names and
+labels stay valid English `PluginText`), `Markdown` in `client/ui`,
+`StreamedText` / `Loading` / `DocumentFrame`, inline-SVG icons, file panels,
+agent panels, `useTabState`, `createWorkspace`, and `PaseoApi.hosts`. The full
+inventory is in the root
+[README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24).
+
+**Verification:** typecheck clean against both 0.13.0 SDKs, vitest **9
+suites / 98 tests** pass (including the scheduler-bridge suites), and both
+entries build with the **real 0.13.0 host compiler** (from the installed
+`app.asar`) with no boundary errors and exactly one deprecated item in the
+client bundle — the `client/react-native` specifier above. The manifest passes
+the real 0.13.0 parser. Live: `running` on this machine's 0.13.0 daemon with
+`Plugin ready` and no plugin errors in the daemon or app logs. The SDKs were
+installed with `--no-save`, so `package.json` still pins both at `0.12.0`.
 
 ## Paseo 0.12.0 spec conformance
 

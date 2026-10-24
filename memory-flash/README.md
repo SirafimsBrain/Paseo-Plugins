@@ -63,7 +63,7 @@ The secret is never written to git, agent prompts or agent logs, and it is never
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash
 ```
 
-Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21; uses the plugin SDK screen/sidebar API, settings screens and lifecycle hooks). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.13.0 release, 2026-10-24; uses the plugin SDK screen/sidebar API, settings screens and lifecycle hooks — 0.13.0 adds nothing this plugin needs). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
 
 After install: open **Settings → Plugins → Memory Flash** and press **Install into all agents** to place the skill where your agents look for it. The MCP server is injected into new agents automatically. Also press **Register for all local agent configs**: Cline, Cursor and Codex CLI do not pick up stdio MCP servers from the agent session, and OpenCode/Kilo lose a session-injected server as soon as OpenCode evicts an idle directory — a config entry is what keeps the memory tools alive there. The Cline row also shows a live spawn check of the registered command.
 
@@ -100,6 +100,50 @@ $PASEO_HOME/plugins/memory-flash/
 ```
 
 Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
+
+## Paseo 0.13.0 compatibility
+
+Verified against the **stable Paseo 0.13.0** release (2026-10-24).
+Full evidence: [__doc.md](./__doc.md) §17. **No code change was needed, and
+no deprecated 0.13.0 API remains in this plugin** — it is still `0.8.3` and
+`requirements.paseo` still `>=0.11.0`.
+
+**Nothing deprecated reaches it.** The plugin already imports its UI from
+`@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`, so it never used
+the `client/react-native` entry that 0.13.0 deprecates (removal 2027-04-20,
+with `useRevealedText`); it registers `addScreen`, `addSidebarHeaderItem`,
+`addSettingsScreen` and `addCommandCenterItem`, none deprecated; and it uses
+neither the always-empty `agent.turn_ended` `timeline` nor the
+`CreateAgentRequestOptions.git`/`worktreeName` options that `createAgent` now
+rejects at runtime.
+
+**Deprecated in 0.13.0 that does not reach this plugin:** panel `context` /
+`agentId` and `addAgentPanel`, `SettingsGroup` → `SettingsSection`.
+
+**New in 0.13.0, not adopted (all optional):** plugin translations
+(`defineTranslations` / `useTranslation` / `client.i18n` — memory-flash is
+deliberately English-only and its strings stay valid `PluginText`), `Markdown`
+for memory bodies, `StreamedText` / `Loading` / `DocumentFrame`, inline-SVG
+icons, file panels (for exports/backups), agent panels, `useTabState`,
+`createWorkspace` and `PaseoApi.hosts` (connected hosts are Paseo-to-Paseo
+delegation — a different mechanism from this plugin's remote memory hosts over
+HTTP API keys). The full inventory is in the root
+[README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24).
+
+**One manifest note worth keeping:** the manifest's `mcp` key is not part of
+the host's 0.13.0 schema and is *stripped* (not rejected) by it. The plugin
+never depended on the host reading it — it publishes its own entry, which the
+0.13.0 daemon log confirms (`[memory-flash] MCP entry: … (exists)` right
+before `[paseo] Plugin ready`).
+
+**Verification:** typecheck clean against SDK 0.13.0, vitest **15 suites /
+166 tests** pass (the MCP bundle is rebuilt first, as at install time), and
+both entries build with the **real 0.13.0 host compiler** (from the installed
+`app.asar`) with no boundary errors and zero deprecated calls. The manifest
+passes the real 0.13.0 parser. Live: `running` on this machine's 0.13.0
+daemon with `Plugin ready` and no plugin errors in the daemon or app logs.
+The SDK was installed with `--no-save`, so `package.json` still pins
+`@getpaseo/plugin@0.12.0`.
 
 ## Paseo 0.12.0 spec conformance
 

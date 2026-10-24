@@ -195,7 +195,13 @@ The residual risk is inherent to the design and accepted: a client that stores a
 
 ## 12. Compatibility
 
-Current: **verified on 2026-10-21 against Paseo `0.12.0`** with
+Current: **verified on 2026-10-24 against Paseo `0.13.0`** with
+`@getpaseo/plugin@0.13.0` (installed with `--no-save`, so the manifest pin
+stays `0.12.0`) — no code change needed and no deprecated API left in the
+plugin; static evidence only, because the plugin is not installed on the
+machine the pass ran on — see §16.
+
+Earlier, on 2026-10-21 against Paseo `0.12.0` with
 `@getpaseo/plugin@0.12.0`, manifest requirement raised to `>=0.11.0`, client
 registrations migrated to the screen/sidebar API and the `client/web.ts`
 DOM-global audit fixed — see §15.
@@ -340,3 +346,63 @@ The 0.12.0 client audit flags a DOM global (`window`, `document`,
 Version `0.2.0` → `0.2.1` (existing-registration migration + a real audit
 fix, no new capability → last digit), annotated tag
 `memory-flash-client@0.2.1`.
+
+## 16. Paseo 0.13.0 — compatibility pass (2026-10-24)
+
+Audited against the stable `0.13.0` release (2026-10-24).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.13.0>.
+The repository-wide inventory of what 0.13.0 adds and deprecates is in the
+root [README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24);
+this section records what is specific to memory-flash-client.
+
+**Result: compatible, no code change and no deprecated API in it.** Version
+stays `0.2.1` — no bump and no tag, because this pass changed no code.
+
+**Evidence caveat, stated plainly:** this plugin is **not installed on the
+machine the pass ran on**, so it has no live 0.13.0 daemon evidence (§16.3).
+Its result rests on the SDK diff, typecheck, the full test suite, the real
+0.13.0 host compiler and the real 0.13.0 manifest parser — the same static
+oracle the other four also passed.
+
+### 16.1 What 0.13.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` — none deprecated in 0.13.0. |
+| UI imports | Everything comes from `@getpaseo/plugin/client` and **`@getpaseo/plugin/client/ui`** — this plugin never used `client/react-native`, so the entry 0.13.0 deprecates (removal after 2027-04-20, with `useRevealedText`) does not touch it. The compiled client bundle contains **zero** deprecated items. |
+| SDK diff `@getpaseo/plugin@0.12.0 → 0.13.0` | **Additive** for everything used here: contribution text fields gained `Text extends PluginText = string`, panels gained `params`/`revision`/`tab`, `PluginIconProps` moved to `icons` and is still re-exported from `client` and `client/ui`. Typecheck against 0.13.0 is clean. |
+| `agent.turn_ended` `timeline` (always empty in 0.13.0) | Not applicable — the plugin's hooks are `before("agent.create")` (MCP injection) and `registerSettings`; it reads no timeline. |
+| `SettingsGroup` → `SettingsSection`, panel `context`/`agentId`, `CreateAgentRequestOptions.git`/`worktreeName` | None used; the plugin creates no agents and contributes no panel. |
+| Client audit (DOM globals outside `client/web.ts`) | Still clean — §15.3's fix holds, the rule is unchanged in 0.13.0. |
+| Manifest | Passes the real 0.13.0 `readPluginManifest`; `requirements.paseo` stays `>=0.11.0`. |
+| Install-time build | Still **none** — every import is on the 0.13.0 host-supplied list, so the plugin installs with no npm-registry access. The `McpHttpServerConfig` workaround of 0.1.1 (§12) is still kept and still harmless. |
+| Remote-host side | The plugin's HTTP probe talks to a **memory-flash** host (0.5.0+), not to Paseo's SDK; 0.13.0's connected-hosts work (`PaseoApi.hosts`) is a different mechanism and does not overlap with or affect the connections registry (§3). |
+
+### 16.2 New 0.13.0 surface, not adopted (optional)
+
+1. **Plugin translations** (`defineTranslations`, `useTranslation`,
+   `client.i18n`) — connection labels and status strings stay English
+   `PluginText`; localising the screen would be new functionality.
+2. **`Markdown`, `StreamedText`, `Loading`, `DocumentFrame`, inline-SVG
+   icons** — rendering conveniences; `Icon` now also accepts a component or
+   `{ svg }`, and `SidebarIcon` is `PluginIcon`.
+3. **`useTabState` / `addAgentPanel` / file panels** — no matching surface in
+   this plugin yet.
+4. **Multi-row sidebar via `SidebarRow`/`SidebarSeparator` and
+   `addSidebarFooterItem`** — open since §15.5; 0.13.0 neither adds pressure
+   nor removes the option.
+5. **`PaseoApi.hosts`** — connected hosts are Paseo-to-Paseo delegation;
+   this plugin's "host" is a remote memory-flash HTTP endpoint, so the two
+   stay separate.
+
+### 16.3 Verification (2026-10-24, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.13.0 @getpaseo/client@0.13.0 @getpaseo/protocol@0.13.0` — **`package.json`/`package-lock.json` untouched**; the pin stays `0.12.0` on purpose (the host supplies the runtime SDK, no code needed 0.13.0 API, and a pin bump would be a code change with its own version bump). |
+| `npm run typecheck` (`tsc --noEmit`) against 0.13.0 | **exit 0** |
+| `npm test` | **6 suites / 53 tests pass** (HTTP probe against a stub memory-flash server, MCP-injection, settings-schema round-trip, agent-skill suite) |
+| Real 0.13.0 host compiler (`compilePlugin` + `plugin-sdk-specifiers.js` from the installed `app.asar`) | **Both entries compile, no boundary errors**; client bundle has **zero** deprecated calls. |
+| 0.13.0 manifest schema | `readPluginManifest` accepts the manifest (`{ id, requirements }`). |
+| Live on a 0.13.0 daemon | **Not available** — the plugin is not installed on this machine (the daemon there runs session-manager, command-center, memory-flash, bunny-search and luck-planner). The §15.4 0.12.0 live evidence stands; a 0.13.0 live check happens the first time the plugin is installed or updated on a 0.13.0 host. |
+| Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |

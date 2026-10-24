@@ -27,7 +27,7 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.11.0 (verified against the stable 0.12.0 release, 2026-10-21; uses the plugin SDK screen/sidebar API and settings screens). Node ≥ 18 on the daemon host (global `fetch`).
+Requires Paseo ≥ 0.11.0 (verified against the stable 0.13.0 release, 2026-10-24; uses the plugin SDK screen/sidebar API and settings screens — 0.13.0 adds nothing this plugin needs). Node ≥ 18 on the daemon host (global `fetch`).
 
 ### Python requirement (for the DDGS Python service)
 
@@ -91,6 +91,47 @@ $PASEO_HOME/plugins/bunny-search/
 ```
 
 The host keeps the authoritative settings in its own store (exposed to the plugin via the `settings.bunny-search.read` RPC and change subscription); the JSON file above is a mirror for the MCP server process, which is spawned by agent providers outside the plugin host and therefore cannot use the plugin API.
+
+## Paseo 0.13.0 compatibility
+
+Verified against the **stable Paseo 0.13.0** release (2026-10-24).
+Full evidence: [__doc.md](./__doc.md) §14. **No code change was needed, and
+no deprecated 0.13.0 API remains in this plugin** — it is still `0.4.2` and
+`requirements.paseo` still `>=0.11.0`.
+
+**Nothing deprecated reaches it.** The plugin imports its UI from
+`@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`, never from the
+`client/react-native` entry that 0.13.0 deprecates (removal 2027-04-20, with
+`useRevealedText`); it registers `addScreen`, `addSidebarHeaderItem`,
+`addSettingsScreen` and `addCommandCenterItem`, none deprecated; and it uses
+neither the always-empty `agent.turn_ended` `timeline`, nor `SettingsGroup`,
+nor the `CreateAgentRequestOptions.git`/`worktreeName` options that
+`createAgent` now rejects at runtime.
+
+**Deprecated in 0.13.0 that does not reach this plugin:** panel `context` /
+`agentId` and `addAgentPanel`, and the `defineAttachmentSource` label/icon
+shape change (this plugin contributes no attachment source).
+
+**New in 0.13.0, not adopted (all optional):** plugin translations
+(`defineTranslations` / `useTranslation` / `client.i18n` — provider and label
+strings stay valid English `PluginText`; the translated plugin listing that
+0.13.0 adds only matters once the registry listing of
+[__doc.md](./__doc.md) §10.2 item 3 exists), `Markdown` / `StreamedText` /
+`Loading` / `DocumentFrame`, inline-SVG and component icons (`Icon` now also
+accepts a component or `{ svg }`, and `SidebarIcon` is `PluginIcon`), file
+panels, agent panels, `useTabState`, `createWorkspace`, and `PaseoApi.hosts`.
+The full inventory is in the root
+[README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24).
+
+**Verification:** typecheck clean (`tsc -b`, three projects) against SDK
+0.13.0, vitest **9 suites / 95 tests** pass (plus 2 live-search tests skipped
+without `BUNNY_LIVE=1`), and both entries build with the **real 0.13.0 host
+compiler** (from the installed `app.asar`) with no boundary errors and zero
+deprecated calls. The manifest passes the real 0.13.0 parser. Live:
+`running` on this machine's 0.13.0 daemon with `Plugin ready`, and the
+server-side effect visible in the log — `[bunny-search] settings mirrored:
+~/.paseo/plugins/bunny-search/settings.json`. The SDK was installed with
+`--no-save`, so `package.json` still pins `@getpaseo/plugin@0.12.0`.
 
 ## Paseo 0.12.0 spec conformance
 

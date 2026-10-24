@@ -461,6 +461,13 @@ Shared conventions: export and backup are non-destructive and atomic; import and
 
 ## 10. Compatibility
 
+Current: **verified on 2026-10-24 against Paseo `0.13.0`** with
+`@getpaseo/plugin@0.13.0` (installed with `--no-save`, so the manifest pin
+stays `0.12.0`) — no code change needed and no deprecated API left in the
+plugin; see §17. Before that, **verified on 2026-10-21 against Paseo
+`0.12.0`** with `@getpaseo/plugin@0.12.0` — the screen/sidebar migration and
+the `client/web.ts` fix shipped as 0.8.3; see §16.
+
 Verified on 2026-09-30 against Paseo `0.10.2` with `@getpaseo/plugin@0.10.1`:
 
 - `npm run typecheck` — clean.
@@ -842,3 +849,60 @@ The 0.12.0 client audit flags a DOM global (`window`, `document`,
 
 Version `0.8.2` → `0.8.3` (existing-registration migration + a real audit
 fix, no new capability → last digit), annotated tag `memory-flash@0.8.3`.
+
+## 17. Paseo 0.13.0 — compatibility pass (2026-10-24)
+
+Audited against the stable `0.13.0` release (2026-10-24).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.13.0>.
+The repository-wide inventory of what 0.13.0 adds and deprecates is in the
+root [README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24);
+this section records what is specific to memory-flash.
+
+**Result: compatible, no code change and no deprecated API in it.** Version
+stays `0.8.3` — no bump and no tag, because this pass changed no code.
+
+### 17.1 What 0.13.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` (×2) — none deprecated in 0.13.0. |
+| UI imports | Everything comes from `@getpaseo/plugin/client` and **`@getpaseo/plugin/client/ui`** — this plugin never used `client/react-native`, so the entry 0.13.0 deprecated (and removes on 2027-04-20) does not touch it. The compiled client bundle contains **zero** deprecated items. |
+| SDK diff `@getpaseo/plugin@0.12.0 → 0.13.0` | **Additive** for everything used here: contribution text fields gained `Text extends PluginText = string`, `PluginWorkspacePanelProps` gained `params`/`revision`/`tab`, `PluginIconProps` moved to `icons` (still re-exported from `client` and `client/ui`). Typecheck against 0.13.0 is clean. |
+| `agent.turn_ended` `timeline` (always empty in 0.13.0) | Not applicable — the plugin registers no `agent.turn_ended` hook (its lifecycle hooks are `before("agent.create")` and the MCP-injection paths, unchanged). |
+| `SettingsGroup` → `SettingsSection`, panel `context`/`agentId`, `CreateAgentRequestOptions.git`/`worktreeName` | None used. The plugin creates no agents and contributes no workspace/agent panel. |
+| Client audit (DOM globals outside `client/web.ts`) | Still clean — §16.3's fix holds, the rule is unchanged in 0.13.0. |
+| Manifest | Passes the real 0.13.0 `readPluginManifest`. Worth recording: the manifest's extra **`mcp`** key is not part of the host's schema and is *stripped* (not rejected) by it, and the plugin has never depended on the host reading it — it publishes its own MCP entry, which the 0.13.0 daemon log confirms (`[memory-flash] MCP entry: …/mcp-server.js (exists)` immediately before `[paseo] Plugin ready`). |
+| `requirements.paseo` | Stays `>=0.11.0`: 0.13.0 adds no API this plugin uses, and the floor is the API promise, not the newest host tested (§16). |
+| Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]`; esbuild bundles the standalone MCP server. The 0.13.0 `i18next` dependency belongs to the SDK package the host supplies, so it does not enter this plugin's install. |
+
+### 17.2 New 0.13.0 surface, not adopted (optional)
+
+1. **Plugin translations** (`defineTranslations`, `useTranslation`,
+   `client.i18n`) — memory-flash is deliberately English-only and its strings
+   stay valid `PluginText`; localising the management screen and the agent
+   skill would be new functionality.
+2. **`Markdown` in `client/ui`** — render memory bodies/notes with the host's
+   renderer instead of a `Text` in a `ScrollView`.
+3. **`StreamedText`, `Loading`, `DocumentFrame`, inline-SVG icons** —
+   rendering conveniences; `Icon` now also accepts a component or `{ svg }`.
+4. **File panels** (`addFilePanel`, `useFileText`) — open an exported memory
+   or a backup file in a file tab (both are listed as "planned" in the
+   storage layout).
+5. **`useTabState` / `addAgentPanel` / `params.agentId`** — per-tab state and
+   per-agent panels; the management surface is a screen and keeps its state
+   in the store.
+6. **`PaseoApi.hosts` / `createWorkspace`** — the connected-host work behind
+   0.13.0's delegation feature is server-side; memory-flash's own remote-host
+   registry (HTTP API keys, §11) is a different mechanism and is unaffected.
+
+### 17.3 Verification (2026-10-24, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.13.0 @getpaseo/client@0.13.0 @getpaseo/protocol@0.13.0` — **`package.json`/`package-lock.json` untouched**; the pin stays `0.12.0` on purpose (the host supplies the runtime SDK, no code needed 0.13.0 API, and a pin bump would be a code change with its own version bump). |
+| `npm run typecheck` (`tsc --noEmit`) against 0.13.0 | **exit 0** |
+| `npm test` (with `pretest` rebuilding `dist/mcp-server.js`) | **15 suites / 166 tests pass** — including the real-process stdio MCP e2e, the handshake-survives-a-plugin-update suite and the live HTTP endpoint suite |
+| Real 0.13.0 host compiler (`compilePlugin` + `plugin-sdk-specifiers.js` from the installed `app.asar`) | **Both entries compile, no boundary errors**; client bundle has **zero** deprecated calls. |
+| 0.13.0 manifest schema | `readPluginManifest` accepts `{ id, build, mcp, requirements }` (`mcp` stripped, §17.1). |
+| Live on a 0.13.0 daemon | **PASS** — installed from the git checkout at `373fa7b1` on this machine's `daemonVersion "0.13.0"` daemon: status `running`, `[memory-flash] MCP entry: … (exists)` + `[paseo] Plugin ready` in the log, no plugin or contribution errors in `~/.paseo/daemon.log` or the app's `main.log`. The MCP server processes for it are running from `~/.paseo/plugins/memory-flash/mcp-server.js`. |
+| Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |

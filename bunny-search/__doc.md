@@ -132,11 +132,11 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.12.0 (2026-10-21); requirement `>=0.11.0` — the plugin uses the 0.11+ screen/sidebar API (§13). Earlier: verified against 0.10.3 and stable 0.11.0. |
-| SDK | `@getpaseo/plugin@0.12.0` (pinned for typecheck/tests; the host supplies the runtime instance) |
+| Paseo | verified against 0.13.0 (2026-10-24, §14); requirement `>=0.11.0` — the plugin uses the 0.11+ screen/sidebar API (§13). Earlier: verified against 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
+| SDK | `@getpaseo/plugin@0.13.0` (installed with `--no-save` for the 2026-10-24 pass; the declared pin stays `0.12.0` and the host supplies the runtime instance) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`) against SDK 0.12.0; vitest 9 hermetic suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); 0.12.0 client audit clean (§13.3); static reproduction of the host's bundler boundary check against a staged copy — no boundary errors; stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0) |
+| Verification | typecheck clean (three-project `tsc -b`) against SDK 0.13.0; vitest 9 hermetic suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); both entries built by the real 0.13.0 host compiler with no boundary errors and zero deprecated calls (§14.3); 0.12.0 client audit still clean (§13.3); stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0) |
 
 ## 8. Alternatives considered
 
@@ -537,3 +537,63 @@ one-file fix when it is audited (that is a per-plugin patch bump for each).
 
 Version `0.4.1` → `0.4.2` (existing-registration migration + a real audit
 fix, no new capability → last digit), annotated tag `bunny-search@0.4.2`.
+
+## 14. Paseo 0.13.0 — compatibility pass (2026-10-24)
+
+Audited against the stable `0.13.0` release (2026-10-24).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.13.0>.
+The repository-wide inventory of what 0.13.0 adds and deprecates is in the
+root [README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24);
+this section records what is specific to bunny-search.
+
+**Result: compatible, no code change and no deprecated API in it.** Version
+stays `0.4.2` — no bump and no tag, because this pass changed no code.
+
+### 14.1 What 0.13.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` — none deprecated in 0.13.0. The plugin contributes no attachment source, so the `defineAttachmentSource` shape change (`PluginText` labels, `PluginSerializableIcon` icon) does not reach it either. |
+| UI imports | Everything comes from `@getpaseo/plugin/client` and **`@getpaseo/plugin/client/ui`** — this plugin never used `client/react-native`, so the entry 0.13.0 deprecates (removal after 2027-04-20, with `useRevealedText`) does not touch it. The compiled client bundle contains **zero** deprecated items. |
+| SDK diff `@getpaseo/plugin@0.12.0 → 0.13.0` | **Additive** for everything used here: contribution text fields gained `Text extends PluginText = string`, panels gained `params`/`revision`/`tab`, `PluginIconProps` moved to `icons` and is still re-exported from `client` and `client/ui`. Typecheck (`tsc -b`, three projects) against 0.13.0 is clean. |
+| `agent.turn_ended` `timeline` (always empty in 0.13.0) | Not applicable — no lifecycle hooks are registered. |
+| `SettingsGroup` → `SettingsSection`, panel `context`/`agentId`, `CreateAgentRequestOptions.git`/`worktreeName` | None used; the plugin creates no agents and contributes no panel. |
+| Client audit (DOM globals outside `client/web.ts`) | Still clean — §13.3's fix holds, the rule is unchanged in 0.13.0. |
+| Manifest | Passes the real 0.13.0 `readPluginManifest`; `requirements.paseo` stays `>=0.11.0` (§7: the API floor actually used). |
+| Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]` — esbuild bundles `dist/mcp-server.js`. The SDK's new `i18next` dependency belongs to the package the host supplies and does not enter this plugin's install. |
+| MCP server side | The bundled stdio server speaks no Paseo SDK API (it is a standalone Node bundle); nothing in 0.13.0 reaches it. |
+
+### 14.2 New 0.13.0 surface, not adopted (optional)
+
+Carrying the §10.2 / §13.5 list forward, plus what 0.13.0 added:
+
+1. **Host-managed processes** (`spawnProcess` / `terminateProcess`) in
+   `server/probe.ts` — unchanged reasoning, still optional.
+2. **Deep-link quick search** through `PluginScreenProps.params` and an
+   `addSidebarFooterItem` status row — still optional; `params` already
+   exists since 0.11.
+3. **Plugin translations** (`defineTranslations`, `useTranslation`,
+   `client.i18n`) — provider/label strings stay English `PluginText`;
+   localising the settings screen would be new functionality.
+4. **`Markdown`, `StreamedText`, `Loading`, `DocumentFrame`, inline-SVG
+   icons** — rendering conveniences; `Icon` now also takes a component or
+   `{ svg }`, and `SidebarIcon` is `PluginIcon`.
+5. **File panels, agent panels, `useTabState`** — no matching surface in this
+   plugin yet.
+6. **Registry readiness (`name` / `icon` / `media` + `OVERVIEW.md`)** — 0.13.0
+   adds translated listings (`translations` in `paseo-plugin.json` and
+   `OVERVIEW.<locale>.md`), which only matters once the plugin is listed
+   (§10.2 item 3). Not a conformance requirement.
+7. **`PaseoApi.hosts`, `createWorkspace`** — out of scope for a search tool.
+
+### 14.3 Verification (2026-10-24, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.13.0 @getpaseo/client@0.13.0 @getpaseo/protocol@0.13.0` — **`package.json`/`package-lock.json` untouched**; the pin stays `0.12.0` on purpose (the host supplies the runtime SDK, no code needed 0.13.0 API, and a pin bump would be a code change with its own version bump). |
+| `npm run typecheck` (`tsc -b tsconfig.json`) against 0.13.0 | **exit 0** |
+| `npm test` (with `pretest` rebuilding `dist/mcp-server.js`) | **9 suites / 95 tests pass**, 1 suite with 2 live-search tests skipped by default (they need `BUNNY_LIVE=1`, §7) |
+| Real 0.13.0 host compiler (`compilePlugin` + `plugin-sdk-specifiers.js` from the installed `app.asar`) | **Both entries compile, no boundary errors**; client bundle has **zero** deprecated calls. |
+| 0.13.0 manifest schema | `readPluginManifest` accepts the manifest (`{ id, build, requirements }`). |
+| Live on a 0.13.0 daemon | **PASS** — installed from the git checkout at `373fa7b1` on this machine's `daemonVersion "0.13.0"` daemon: status `running`, `[paseo] Plugin ready`, and the server-side effect observed in the log: `[bunny-search] settings mirrored: ~/.paseo/plugins/bunny-search/settings.json`. No plugin or contribution errors in `~/.paseo/daemon.log` or the app's `main.log`. |
+| Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |
