@@ -47,10 +47,9 @@ export default function contribute(client: PluginClientContext) {
     id: PANEL_ID,
     title: "Luck Planner",
     icon: "GitBranch",
-    context: "workspace",
     locations: ["workspace", "explorer"],
     Component: LuckPlannerPanel,
-  });
+  } as any);
 
   client.addSettingsScreen({
     id: "luck-planner-settings",

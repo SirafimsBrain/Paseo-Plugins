@@ -1,6 +1,6 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.29.0`).** Stages **E4** (settings
+> **Development status: version in development (`0.34.0`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection

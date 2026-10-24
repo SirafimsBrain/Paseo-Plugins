@@ -1,7 +1,7 @@
 {
   "name": "luck-planner",
   "private": true,
-  "version": "0.33.0",
+  "version": "0.34.0",
   "scripts": {
     "bundle": "node scripts/bundle.mjs",
     "pretest": "node scripts/bundle.mjs",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard/tsconfig.json"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.12.0",
+    "@getpaseo/plugin": "0.13.0",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "@types/d3-hierarchy": "^3.1.7",

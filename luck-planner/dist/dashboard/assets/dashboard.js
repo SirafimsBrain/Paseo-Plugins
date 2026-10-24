@@ -68,17 +68,17 @@ import {
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-3KRWBM5O.js";
+} from "./chunk-chunk-O75LBYBY.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
 
 // dashboard/src/main.tsx
-var import_react12 = __toESM(require_react());
+var import_react13 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // dashboard/src/app.tsx
-var import_react11 = __toESM(require_react());
+var import_react12 = __toESM(require_react());
 
 // node_modules/@getpaseo/plugin/dist/rpc.js
 var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
@@ -6777,11 +6777,11 @@ function XYResizer({ domNode, nodeId, getStoreItems, onChange, onEnd }) {
   };
 }
 
-// node_modules/zustand/esm/traditional.mjs
+// node_modules/@xyflow/react/node_modules/zustand/esm/traditional.mjs
 var import_react = __toESM(require_react(), 1);
 var import_with_selector = __toESM(require_with_selector(), 1);
 
-// node_modules/zustand/esm/vanilla.mjs
+// node_modules/@xyflow/react/node_modules/zustand/esm/vanilla.mjs
 var createStoreImpl = (createState) => {
   let state;
   const listeners = /* @__PURE__ */ new Set();
@@ -6813,7 +6813,7 @@ var createStoreImpl = (createState) => {
 };
 var createStore = (createState) => createState ? createStoreImpl(createState) : createStoreImpl;
 
-// node_modules/zustand/esm/traditional.mjs
+// node_modules/@xyflow/react/node_modules/zustand/esm/traditional.mjs
 var { useDebugValue } = import_react.default;
 var { useSyncExternalStoreWithSelector } = import_with_selector.default;
 var identity3 = (arg) => arg;
@@ -6836,7 +6836,7 @@ var createWithEqualityFnImpl = (createState, defaultEqualityFn) => {
 };
 var createWithEqualityFn = (createState, defaultEqualityFn) => createState ? createWithEqualityFnImpl(createState, defaultEqualityFn) : createWithEqualityFnImpl;
 
-// node_modules/zustand/esm/shallow.mjs
+// node_modules/@xyflow/react/node_modules/zustand/esm/shallow.mjs
 function shallow$1(objA, objB) {
   if (Object.is(objA, objB)) {
     return true;
@@ -10543,6 +10543,8 @@ function Canvas(props) {
 
 // dashboard/src/components/DetailsPanel.tsx
 var import_react7 = __toESM(require_react());
+
+// dashboard/src/components/NodeDetailContent.tsx
 var import_jsx_runtime5 = __toESM(require_jsx_runtime());
 function formatTime(ts) {
   return new Date(ts).toLocaleString(void 0, {
@@ -10559,69 +10561,7 @@ function Row(props) {
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-row-value", children: props.children })
   ] });
 }
-function ResizeHandle(props) {
-  const start2 = (0, import_react7.useRef)(null);
-  const last = (0, import_react7.useRef)(props.width);
-  const onPointerMove = (0, import_react7.useCallback)(
-    (event) => {
-      const origin = start2.current;
-      if (origin === null) return;
-      const next = origin.width + (origin.x - event.clientX);
-      last.current = next;
-      props.onWidthChange(next);
-    },
-    [props]
-  );
-  const stop = (0, import_react7.useCallback)(() => {
-    if (start2.current === null) return;
-    start2.current = null;
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", stop);
-    window.removeEventListener("pointercancel", stop);
-    props.onWidthCommit(last.current);
-  }, [onPointerMove, props]);
-  const onPointerDown2 = (0, import_react7.useCallback)(
-    (event) => {
-      event.preventDefault();
-      start2.current = { x: event.clientX, width: props.width };
-      last.current = props.width;
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", stop);
-      window.addEventListener("pointercancel", stop);
-    },
-    [onPointerMove, props.width, stop]
-  );
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-    "div",
-    {
-      className: "lp-resize-handle",
-      role: "separator",
-      "aria-orientation": "vertical",
-      "aria-label": "Resize the details panel",
-      "aria-valuenow": Math.round(props.width),
-      title: "Drag to resize \xB7 double-click to reset",
-      onPointerDown: onPointerDown2,
-      onDoubleClick: props.onWidthReset
-    }
-  );
-}
-function DetailsPanel(props) {
-  const { detail, loading, error, resolveName } = props;
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("aside", { className: "lp-details", "aria-label": "Node details", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-      ResizeHandle,
-      {
-        width: props.width,
-        onWidthChange: props.onWidthChange,
-        onWidthCommit: props.onWidthCommit,
-        onWidthReset: props.onWidthReset
-      }
-    ),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { className: "lp-details-title", children: "Details" }),
-    error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(NodeDetails, { detail, resolveName })
-  ] });
-}
-function NodeDetails(props) {
+function NodeDetailContent(props) {
   const { detail, resolveName } = props;
   const { node, path, children: children2, bees, bugs, blockingBugs, history, growth } = detail;
   const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
@@ -10808,13 +10748,204 @@ function NodeDetails(props) {
   ] });
 }
 
-// dashboard/src/components/Legend.tsx
+// dashboard/src/components/DetailsPanel.tsx
 var import_jsx_runtime6 = __toESM(require_jsx_runtime());
+function ResizeHandle(props) {
+  const start2 = (0, import_react7.useRef)(null);
+  const last = (0, import_react7.useRef)(props.width);
+  const onPointerMove = (0, import_react7.useCallback)(
+    (event) => {
+      const origin = start2.current;
+      if (origin === null) return;
+      const next = origin.width + (origin.x - event.clientX);
+      last.current = next;
+      props.onWidthChange(next);
+    },
+    [props]
+  );
+  const stop = (0, import_react7.useCallback)(() => {
+    if (start2.current === null) return;
+    start2.current = null;
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    props.onWidthCommit(last.current);
+  }, [onPointerMove, props]);
+  const onPointerDown2 = (0, import_react7.useCallback)(
+    (event) => {
+      event.preventDefault();
+      start2.current = { x: event.clientX, width: props.width };
+      last.current = props.width;
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    },
+    [onPointerMove, props.width, stop]
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    "div",
+    {
+      className: "lp-resize-handle",
+      role: "separator",
+      "aria-orientation": "vertical",
+      "aria-label": "Resize the details panel",
+      "aria-valuenow": Math.round(props.width),
+      title: "Drag to resize \xB7 double-click to reset",
+      onPointerDown: onPointerDown2,
+      onDoubleClick: props.onWidthReset
+    }
+  );
+}
+function DetailsPanel(props) {
+  const { detail, loading, error, resolveName } = props;
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("aside", { className: "lp-details", "aria-label": "Node details", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      ResizeHandle,
+      {
+        width: props.width,
+        onWidthChange: props.onWidthChange,
+        onWidthCommit: props.onWidthCommit,
+        onWidthReset: props.onWidthReset
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h2", { className: "lp-details-title", children: "Details" }),
+    error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(NodeDetailContent, { detail, resolveName })
+  ] });
+}
+
+// dashboard/src/components/DetailModal.tsx
+var import_react8 = __toESM(require_react());
+var import_react_dom2 = __toESM(require_react_dom());
+var import_jsx_runtime7 = __toESM(require_jsx_runtime());
+function DetailModal(props) {
+  const closeRef = (0, import_react8.useRef)(null);
+  const previousFocus = (0, import_react8.useRef)(null);
+  (0, import_react8.useEffect)(() => {
+    if (!props.open) return;
+    previousFocus.current = document.activeElement;
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        props.onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+      previousFocus.current?.focus?.();
+    };
+  }, [props.open, props.onClose]);
+  if (!props.open) return null;
+  return (0, import_react_dom2.createPortal)(
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      "div",
+      {
+        className: "lp-modal-overlay",
+        role: "presentation",
+        onClick: (event) => {
+          if (event.target === event.currentTarget) props.onClose();
+        },
+        children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+          "div",
+          {
+            className: "lp-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-labelledby": "lp-modal-title",
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-modal-header", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h2", { id: "lp-modal-title", className: "lp-modal-title", children: props.title }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+                  "button",
+                  {
+                    ref: closeRef,
+                    type: "button",
+                    className: "lp-modal-close",
+                    onClick: props.onClose,
+                    "aria-label": "Close",
+                    children: "\xD7"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-modal-body", children: props.children })
+            ]
+          }
+        )
+      }
+    ),
+    document.body
+  );
+}
+
+// dashboard/src/components/GoalDetailContent.tsx
+var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+function GoalDetailContent(props) {
+  const { goal } = props;
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-body", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Goal" }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "lp-details-path", children: goal.formalText }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-label", children: "Status" }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-value", children: goal.status })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-label", children: "Revision" }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-details-row-value", children: [
+          "r",
+          goal.revision
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-label", children: "Materialized" }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-value", children: goal.materializedNodeId ?? "not yet" })
+      ] })
+    ] }),
+    goal.plan.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("h3", { className: "lp-details-subtitle", children: [
+        "Plan (",
+        goal.plan.length,
+        ")"
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ol", { className: "lp-details-list", children: goal.plan.map((step) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "lp-details-child", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-child-name", children: step.title }),
+        step.description ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-hint", children: step.description }) : null
+      ] }, step.id)) })
+    ] }) : null
+  ] });
+}
+
+// dashboard/src/components/BugDetailContent.tsx
+var import_jsx_runtime9 = __toESM(require_jsx_runtime());
+function BugDetailContent(props) {
+  const { bug } = props;
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-details-body", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { className: "lp-details-subtitle", children: "Incident" }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "lp-details-path", children: bug.title }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-details-section", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-details-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-details-row-label", children: "Severity" }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-details-row-value", children: bug.severity })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-details-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-details-row-label", children: "Status" }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-details-row-value", children: bug.status })
+      ] })
+    ] }),
+    bug.description ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-details-section", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "lp-details-hint", children: bug.description }) }) : null
+  ] });
+}
+
+// dashboard/src/components/Legend.tsx
+var import_jsx_runtime10 = __toESM(require_jsx_runtime());
 function Legend() {
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "lp-legend", "aria-label": "Legend", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-title", children: "Legend" }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-group", children: NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "lp-legend-item", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("footer", { className: "lp-legend", "aria-label": "Legend", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-title", children: "Legend" }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-group", children: NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { className: "lp-legend-item", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
         "span",
         {
           className: "lp-legend-swatch",
@@ -10822,12 +10953,12 @@ function Legend() {
           "aria-hidden": "true"
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-glyph", "aria-hidden": "true", children: KIND_GLYPHS[kind] }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-glyph", "aria-hidden": "true", children: KIND_GLYPHS[kind] }),
       KIND_LABELS[kind]
     ] }, kind)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-group", children: LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "lp-legend-item", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-group", children: LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { className: "lp-legend-item", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
         "span",
         {
           className: "lp-legend-swatch",
@@ -10837,9 +10968,9 @@ function Legend() {
       ),
       STATUS_LABELS[status]
     ] }, status)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-group", children: BEE_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "lp-legend-item", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-group", children: BEE_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { className: "lp-legend-item", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
         "span",
         {
           className: "lp-legend-swatch",
@@ -10847,18 +10978,18 @@ function Legend() {
           "aria-hidden": "true"
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { "aria-hidden": "true", children: "\u{1F41D} " }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { "aria-hidden": "true", children: "\u{1F41D} " }),
       BEE_STATUS_LABELS[status]
     ] }, status)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-divider", "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
       "span",
       {
         className: "lp-legend-group lp-legend-heat",
         "aria-label": "Growth heat ramp",
         title: "Growth layer: the share of completed growth steps of a node's subtree",
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-ramp", "aria-hidden": "true", children: HEAT_RAMP.map((stop) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-ramp", "aria-hidden": "true", children: HEAT_RAMP.map((stop) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
             "span",
             {
               className: "lp-legend-ramp-stop",
@@ -10866,17 +10997,17 @@ function Legend() {
             },
             stop.at
           )) }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: "growth 0 % \u2192 100 %" })
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { children: "growth 0 % \u2192 100 %" })
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree \xB7 the growth bar under a node counts completed steps (its own record plus everything below it) \xB7 in 3D the same palette: \u{1F41D} fly along arcs, \u{1F41E} pulse on their leaves, \u{1F3AF} rings float over their subtree, growth glows as rings \xB7 a click selects in both views; in 3D the selected node wears a white ring and its links are drawn as curves" })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree \xB7 the growth bar under a node counts completed steps (its own record plus everything below it) \xB7 in 3D the same palette: \u{1F41D} fly along arcs, \u{1F41E} pulse on their leaves, \u{1F3AF} rings float over their subtree, growth glows as rings \xB7 a click selects in both views; in 3D the selected node wears a white ring and its links are drawn as curves" })
   ] });
 }
 
 // dashboard/src/components/PlainView.tsx
-var import_react8 = __toESM(require_react());
-var import_jsx_runtime7 = __toESM(require_jsx_runtime());
+var import_react9 = __toESM(require_react());
+var import_jsx_runtime11 = __toESM(require_jsx_runtime());
 function descendantCardCount(section) {
   let count = 0;
   for (const child of section.children) {
@@ -10901,17 +11032,17 @@ function cardGlyph(kind) {
 }
 function ZoneBand(props) {
   const { zone } = props;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { className: "lp-plain-zone", "data-zone": zone.id, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("header", { className: "lp-plain-zone-header", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-zone-glyph", "aria-hidden": "true", children: PLAIN_ZONE_GLYPHS[zone.id] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h2", { className: "lp-plain-zone-title", children: PLAIN_ZONE_LABELS[zone.id] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-zone-count", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("section", { className: "lp-plain-zone", "data-zone": zone.id, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("header", { className: "lp-plain-zone-header", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-zone-glyph", "aria-hidden": "true", children: PLAIN_ZONE_GLYPHS[zone.id] }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("h2", { className: "lp-plain-zone-title", children: PLAIN_ZONE_LABELS[zone.id] }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-zone-count", children: [
         zone.cardCount,
         " ",
         zone.cardCount === 1 ? "card" : "cards"
       ] })
     ] }),
-    zone.groups.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-zone-empty", children: PLAIN_ZONE_EMPTY_HINTS[zone.id] }) : zone.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    zone.groups.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-zone-empty", children: PLAIN_ZONE_EMPTY_HINTS[zone.id] }) : zone.groups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
       Group,
       {
         group,
@@ -10926,11 +11057,11 @@ function ZoneBand(props) {
 }
 function Group(props) {
   const { group } = props;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-group", "data-group": group.id, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("h3", { className: "lp-plain-group-title", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: cardGlyph(group.cardKind) }),
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-group", "data-group": group.id, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("h3", { className: "lp-plain-group-title", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { "aria-hidden": "true", children: cardGlyph(group.cardKind) }),
       cardStatusLabel(group.cardKind, group.status),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
         "span",
         {
           className: "lp-plain-group-dot",
@@ -10938,9 +11069,9 @@ function Group(props) {
           "aria-hidden": "true"
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-group-count", children: group.cardCount })
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-group-count", children: group.cardCount })
     ] }),
-    group.cards.map((card) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    group.cards.map((card) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
       Card,
       {
         card,
@@ -10949,7 +11080,7 @@ function Group(props) {
       },
       card.id
     )),
-    group.sections.map((section) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    group.sections.map((section) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
       SectionNode,
       {
         section,
@@ -10966,13 +11097,13 @@ function SectionNode(props) {
   const { section } = props;
   const isCollapsed = props.collapsed.has(section.key);
   const hidden = descendantCardCount(section);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
     "div",
     {
       className: "lp-plain-section",
       style: { marginInlineStart: `${section.depth * 14}px` },
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
           "button",
           {
             type: "button",
@@ -10980,18 +11111,18 @@ function SectionNode(props) {
             "aria-expanded": !isCollapsed,
             onClick: () => props.onToggleSection(section.key),
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-chevron", "aria-hidden": "true", children: isCollapsed ? "\u25B8" : "\u25BE" }),
-              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { "aria-hidden": "true", children: KIND_GLYPHS[section.nodeKind] }),
-              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-section-name", children: section.name }),
-              /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-section-count", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-chevron", "aria-hidden": "true", children: isCollapsed ? "\u25B8" : "\u25BE" }),
+              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { "aria-hidden": "true", children: KIND_GLYPHS[section.nodeKind] }),
+              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-section-name", children: section.name }),
+              /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-section-count", children: [
                 section.cards.length,
                 hidden > 0 && isCollapsed ? ` +${hidden}` : ""
               ] })
             ]
           }
         ),
-        isCollapsed ? null : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-          section.cards.map((card) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        isCollapsed ? null : /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
+          section.cards.map((card) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
             Card,
             {
               card,
@@ -11000,7 +11131,7 @@ function SectionNode(props) {
             },
             card.id
           )),
-          section.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+          section.children.map((child) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
             SectionNode,
             {
               section: child,
@@ -11019,17 +11150,17 @@ function SectionNode(props) {
 function Card(props) {
   const { card } = props;
   const className = props.selected ? "lp-plain-card lp-plain-card-selected" : "lp-plain-card";
-  const body = /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-head", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-title", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { "aria-hidden": "true", children: [
+  const body = /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-head", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-title", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { "aria-hidden": "true", children: [
           cardGlyph(card.kind),
           " "
         ] }),
         card.name
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-status", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-status", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
           "span",
           {
             className: "lp-plain-card-dot",
@@ -11040,10 +11171,10 @@ function Card(props) {
         cardStatusLabel(card.kind, card.status)
       ] })
     ] }),
-    card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(LeafCardBody, { card }) : card.kind === "goal" ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(GoalCardBody, { card }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(BugCardBody, { card })
+    card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(LeafCardBody, { card }) : card.kind === "goal" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(GoalCardBody, { card }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BugCardBody, { card })
   ] });
   if (card.kind === "leaf") {
-    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
       "button",
       {
         type: "button",
@@ -11055,27 +11186,27 @@ function Card(props) {
       }
     );
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("article", { id: `lp-plain-card-${card.entityId}`, className, "data-kind": card.kind, children: body });
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("article", { id: `lp-plain-card-${card.entityId}`, className, "data-kind": card.kind, children: body });
 }
 function LeafCardBody(props) {
   const { card } = props;
   const progress = card.growth === null || card.growth.total === 0 ? null : Math.round(card.growth.ratio * 100);
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-    card.path.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "lp-plain-card-path", title: card.path, children: card.path }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-mono", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
+    card.path.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "lp-plain-card-path", title: card.path, children: card.path }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-mono", children: [
         "v",
         card.version || "\u2014",
         " \xB7 r",
         card.revision
       ] }),
-      progress !== null ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+      progress !== null ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
         "span",
         {
           className: "lp-plain-card-growth",
           title: `${card.growth.completed}/${card.growth.total} growth steps${card.growth.failed > 0 ? ` \xB7 ${card.growth.failed} failed` : ""}`,
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
               "span",
               {
                 className: "lp-plain-card-growth-fill",
@@ -11083,7 +11214,7 @@ function LeafCardBody(props) {
                 "aria-hidden": "true"
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-growth-text", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-growth-text", children: [
               card.growth.completed,
               "/",
               card.growth.total,
@@ -11092,7 +11223,7 @@ function LeafCardBody(props) {
           ]
         }
       ) : null,
-      card.openBugCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+      card.openBugCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
         "span",
         {
           className: "lp-plain-card-bugs",
@@ -11104,7 +11235,7 @@ function LeafCardBody(props) {
           ]
         }
       ) : null,
-      card.beeCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+      card.beeCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
         "span",
         {
           className: "lp-plain-card-bees",
@@ -11120,18 +11251,18 @@ function LeafCardBody(props) {
 }
 function GoalCardBody(props) {
   const { card } = props;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-meta", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-mono", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-meta", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-mono", children: [
       "r",
       card.revision
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { title: "Atomic steps in the agent's plan", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { title: "Atomic steps in the agent's plan", children: [
       "plan: ",
       card.planSteps,
       " ",
       card.planSteps === 1 ? "step" : "steps"
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
       "span",
       {
         className: "lp-plain-card-hint",
@@ -11143,13 +11274,13 @@ function GoalCardBody(props) {
 }
 function BugCardBody(props) {
   const { card } = props;
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-card-meta", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "lp-plain-card-severity", "data-severity": card.severity, children: card.severity }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-mono", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-meta", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-card-severity", "data-severity": card.severity, children: card.severity }),
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-mono", children: [
       "r",
       card.revision
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "lp-plain-card-hint", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-hint", children: [
       "on ",
       card.attachmentCount,
       " ",
@@ -11160,20 +11291,20 @@ function BugCardBody(props) {
 function PlainView(props) {
   const { board, loaded } = props;
   const total = board.index.size;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     if (props.scrollTargetEntityId === null) return;
     document.getElementById(`lp-plain-card-${props.scrollTargetEntityId}`)?.scrollIntoView({ block: "center" });
   }, [props.scrollTargetEntityId]);
   if (!loaded) {
-    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-hint", children: "Loading the tree\u2026" }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-hint", children: "Loading the tree\u2026" }) });
   }
   if (total === 0) {
-    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "lp-plain-empty", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-empty-title", children: props.emptyTitle ?? "Nothing on the board yet" }),
-      props.emptyText !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-empty-text", children: props.emptyText }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "lp-plain-empty-text", children: "Agents write the tree with the luck_tree_* MCP tools; goals proposed from the native panel land in the Plan zone at the top." })
+    return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-empty", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-empty-title", children: props.emptyTitle ?? "Nothing on the board yet" }),
+      props.emptyText !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-empty-text", children: props.emptyText }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-empty-text", children: "Agents write the tree with the luck_tree_* MCP tools; goals proposed from the native panel land in the Plan zone at the top." })
     ] }) });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: board.zones.map((zone) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: board.zones.map((zone) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     ZoneBand,
     {
       zone,
@@ -11187,20 +11318,20 @@ function PlainView(props) {
 }
 
 // dashboard/src/components/ThreeView.tsx
-var import_react9 = __toESM(require_react());
-var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+var import_react10 = __toESM(require_react());
+var import_jsx_runtime12 = __toESM(require_jsx_runtime());
 function ThreeView(props) {
-  const containerRef = (0, import_react9.useRef)(null);
-  const handleRef = (0, import_react9.useRef)(null);
-  const stateRef = (0, import_react9.useRef)(props.onSceneState);
+  const containerRef = (0, import_react10.useRef)(null);
+  const handleRef = (0, import_react10.useRef)(null);
+  const stateRef = (0, import_react10.useRef)(props.onSceneState);
   stateRef.current = props.onSceneState;
-  const selectRef = (0, import_react9.useRef)(props.onSelectNode);
+  const selectRef = (0, import_react10.useRef)(props.onSelectNode);
   selectRef.current = props.onSelectNode;
-  const sceneRef = (0, import_react9.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
+  const sceneRef = (0, import_react10.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
   sceneRef.current = { model: props.model, overlay: props.overlay, fitKey: props.fitKey };
-  const interactionRef = (0, import_react9.useRef)(props.interaction);
+  const interactionRef = (0, import_react10.useRef)(props.interaction);
   interactionRef.current = props.interaction;
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     const container2 = containerRef.current;
     if (container2 === null) return;
     if (!props.webgl.ok) {
@@ -11240,13 +11371,13 @@ function ThreeView(props) {
       handleRef.current = null;
     };
   }, [props.webgl.ok]);
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     handleRef.current?.setScene(props.model, props.overlay, props.fitKey);
   }, [props.model, props.overlay, props.fitKey]);
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     handleRef.current?.setInteraction(props.interaction);
   }, [props.interaction]);
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
     "div",
     {
       className: "lp-scene3d",
@@ -11258,8 +11389,8 @@ function ThreeView(props) {
 }
 
 // dashboard/src/components/Toolbar.tsx
-var import_react10 = __toESM(require_react());
-var import_jsx_runtime9 = __toESM(require_jsx_runtime());
+var import_react11 = __toESM(require_react());
+var import_jsx_runtime13 = __toESM(require_jsx_runtime());
 var LIVE_LABELS = {
   connecting: "connecting",
   live: "live",
@@ -11271,34 +11402,34 @@ var LIVE_HINTS = {
   offline: "The change stream is down and reconnecting; the data on screen may be stale. Reload the tab if the plugin was restarted."
 };
 function Counter(props) {
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "lp-counter", title: props.label, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-counter-value", children: props.value }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-counter-label", children: props.label })
+  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("span", { className: "lp-counter", title: props.label, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-counter-value", children: props.value }),
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-counter-label", children: props.label })
   ] });
 }
 function Toolbar(props) {
   const stats2 = props.stats;
-  const [draft, setDraft] = (0, import_react10.useState)("");
+  const [draft, setDraft] = (0, import_react11.useState)("");
   const submit = (event) => {
     event.preventDefault();
     const query = draft.trim();
     if (query.length > 0) props.onSearch(query);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("header", { className: "lp-toolbar", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-toolbar-identity", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
+  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("header", { className: "lp-toolbar", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-toolbar-identity", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "bees", value: stats2.bees }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "bees", value: stats2.bees }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
     ] }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-toolbar-controls", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-toolbar-controls", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         "input",
         {
           className: "lp-toolbar-search",
@@ -11309,7 +11440,7 @@ function Toolbar(props) {
           onChange: (event) => setDraft(event.target.value)
         }
       ) }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -11320,12 +11451,12 @@ function Toolbar(props) {
             kind: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "", children: "All kinds" }),
-            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "", children: "All kinds" }),
+            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -11336,12 +11467,12 @@ function Toolbar(props) {
             status: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "", children: "All statuses" }),
-            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "", children: "All statuses" }),
+            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         "input",
         {
           className: "lp-toolbar-filter",
@@ -11357,7 +11488,7 @@ function Toolbar(props) {
           })
         }
       ),
-      props.view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+      props.view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         "button",
         {
           type: "button",
@@ -11368,8 +11499,8 @@ function Toolbar(props) {
         },
         candidate
       )) }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
           "button",
           {
             type: "button",
@@ -11380,7 +11511,7 @@ function Toolbar(props) {
             children: "Plain"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
           "button",
           {
             type: "button",
@@ -11390,7 +11521,7 @@ function Toolbar(props) {
             children: "2D"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
           "button",
           {
             type: "button",
@@ -11403,25 +11534,25 @@ function Toolbar(props) {
         )
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
         "span",
         {
           className: `lp-live lp-live-${props.live}`,
           title: LIVE_HINTS[props.live],
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
             LIVE_LABELS[props.live]
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
     ] })
   ] });
 }
 
 // dashboard/src/app.tsx
-var import_jsx_runtime10 = __toESM(require_jsx_runtime());
+var import_jsx_runtime14 = __toESM(require_jsx_runtime());
 function applyTheme(theme) {
   const tokens = tokensFor(theme);
   const root2 = document.documentElement;
@@ -11475,51 +11606,52 @@ function syncViewToUrl(view) {
   );
 }
 function App() {
-  const params = (0, import_react11.useMemo)(() => parseDashboardParams(window.location.search), []);
-  const client = (0, import_react11.useMemo)(
+  const params = (0, import_react12.useMemo)(() => parseDashboardParams(window.location.search), []);
+  const client = (0, import_react12.useMemo)(
     () => params.token.length > 0 ? new DashboardApi(resolveApiOrigin(window.location.href), params.token, params.projectKey) : null,
     [params.projectKey, params.token]
   );
-  const [stats2, setStats] = (0, import_react11.useState)(null);
-  const [tree, setTree] = (0, import_react11.useState)(null);
-  const [collapsedIds, setCollapsedIds] = (0, import_react11.useState)(
+  const [stats2, setStats] = (0, import_react12.useState)(null);
+  const [tree, setTree] = (0, import_react12.useState)(null);
+  const [collapsedIds, setCollapsedIds] = (0, import_react12.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [plainCollapsed, setPlainCollapsed] = (0, import_react11.useState)(
+  const [plainCollapsed, setPlainCollapsed] = (0, import_react12.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [plainScrollTarget, setPlainScrollTarget] = (0, import_react11.useState)(null);
-  const [statusLine, setStatusLine] = (0, import_react11.useState)("");
-  const [theme] = (0, import_react11.useState)(initialTheme);
-  const [detailsWidth, setDetailsWidth] = (0, import_react11.useState)(
+  const [plainScrollTarget, setPlainScrollTarget] = (0, import_react12.useState)(null);
+  const [statusLine, setStatusLine] = (0, import_react12.useState)("");
+  const [theme] = (0, import_react12.useState)(initialTheme);
+  const [detailsWidth, setDetailsWidth] = (0, import_react12.useState)(
     () => readStoredDetailsWidth(detailsStorage())
   );
-  const [selectedId, setSelectedId] = (0, import_react11.useState)(null);
-  const [detail, setDetail] = (0, import_react11.useState)(null);
-  const [detailLoading, setDetailLoading] = (0, import_react11.useState)(false);
-  const [detailError, setDetailError] = (0, import_react11.useState)("");
-  const [filters, setFilters] = (0, import_react11.useState)({
+  const [selectedId, setSelectedId] = (0, import_react12.useState)(null);
+  const [modal, setModal] = (0, import_react12.useState)(null);
+  const [detail, setDetail] = (0, import_react12.useState)(null);
+  const [detailLoading, setDetailLoading] = (0, import_react12.useState)(false);
+  const [detailError, setDetailError] = (0, import_react12.useState)("");
+  const [filters, setFilters] = (0, import_react12.useState)({
     kind: "",
     status: "",
     version: ""
   });
-  const [focus, setFocus] = (0, import_react11.useState)(null);
-  const focusSeq = (0, import_react11.useRef)(0);
-  const [layer, setLayer] = (0, import_react11.useState)("status");
-  const webgl = (0, import_react11.useMemo)(() => detectWebGL(), []);
-  const storage = (0, import_react11.useMemo)(() => safeStorage(), []);
-  const [view, setView] = (0, import_react11.useState)(() => {
+  const [focus, setFocus] = (0, import_react12.useState)(null);
+  const focusSeq = (0, import_react12.useRef)(0);
+  const [layer, setLayer] = (0, import_react12.useState)("status");
+  const webgl = (0, import_react12.useMemo)(() => detectWebGL(), []);
+  const storage = (0, import_react12.useMemo)(() => safeStorage(), []);
+  const [view, setView] = (0, import_react12.useState)(() => {
     const wanted = initialView(window.location.search, storage);
     return planViewSwitch(webgl, wanted).view;
   });
-  const [live, setLive] = (0, import_react11.useState)("connecting");
-  const [detailRefresh, setDetailRefresh] = (0, import_react11.useState)(0);
-  const selectedIdRef = (0, import_react11.useRef)(null);
+  const [live, setLive] = (0, import_react12.useState)("connecting");
+  const [detailRefresh, setDetailRefresh] = (0, import_react12.useState)(0);
+  const selectedIdRef = (0, import_react12.useRef)(null);
   selectedIdRef.current = selectedId;
-  (0, import_react11.useEffect)(() => {
+  (0, import_react12.useEffect)(() => {
     applyTheme(theme);
   }, [theme]);
-  const load = (0, import_react11.useCallback)(async () => {
+  const load = (0, import_react12.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
       return;
@@ -11546,10 +11678,10 @@ function App() {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
     }
   }, [client, params.projectKey]);
-  (0, import_react11.useEffect)(() => {
+  (0, import_react12.useEffect)(() => {
     void load();
   }, [load]);
-  (0, import_react11.useEffect)(() => {
+  (0, import_react12.useEffect)(() => {
     if (client === null) return;
     let opens = 0;
     const stream = createChangeStream({
@@ -11570,7 +11702,7 @@ function App() {
     });
     return () => stream.close();
   }, [client, load]);
-  (0, import_react11.useEffect)(() => {
+  (0, import_react12.useEffect)(() => {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
@@ -11593,23 +11725,30 @@ function App() {
       stale = true;
     };
   }, [client, selectedId, detailRefresh]);
-  const onToggleNode = (0, import_react11.useCallback)((id2) => {
+  const onToggleNode = (0, import_react12.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
-  const onTogglePlainSection = (0, import_react11.useCallback)((key) => {
+  const onTogglePlainSection = (0, import_react12.useCallback)((key) => {
     setPlainCollapsed((previous) => togglePlainSection(previous, key));
   }, []);
-  const onPlainCardSelect = (0, import_react11.useCallback)(
+  const onPlainCardSelect = (0, import_react12.useCallback)(
     (kind, entityId) => {
-      if (kind === "leaf") setSelectedId(entityId);
+      if (kind === "leaf") {
+        setSelectedId(entityId);
+        setModal({ kind: "node", id: entityId });
+      } else if (kind === "goal") {
+        setModal({ kind: "goal", id: entityId });
+      } else if (kind === "bug") {
+        setModal({ kind: "bug", id: entityId });
+      }
     },
     []
   );
-  const requestFocus = (0, import_react11.useCallback)((nodeId) => {
+  const requestFocus = (0, import_react12.useCallback)((nodeId) => {
     focusSeq.current += 1;
     setFocus({ nodeId, seq: focusSeq.current });
   }, []);
-  const onLayerChange = (0, import_react11.useCallback)(
+  const onLayerChange = (0, import_react12.useCallback)(
     (next) => {
       setLayer(next);
       setStatusLine((previous) => {
@@ -11624,7 +11763,7 @@ function App() {
     },
     [tree]
   );
-  const onViewChange = (0, import_react11.useCallback)(
+  const onViewChange = (0, import_react12.useCallback)(
     (target) => {
       const plan = planViewSwitch(webgl, target);
       setView(plan.view);
@@ -11634,24 +11773,24 @@ function App() {
     },
     [storage, webgl]
   );
-  (0, import_react11.useEffect)(() => {
+  (0, import_react12.useEffect)(() => {
     const wanted = initialView(window.location.search, storage);
     const plan = planViewSwitch(webgl, wanted);
     if (plan.status !== null) setStatusLine(plan.status);
     syncViewToUrl(plan.view);
   }, [storage, webgl]);
-  const onSceneState = (0, import_react11.useCallback)(
+  const onSceneState = (0, import_react12.useCallback)(
     (state, status) => {
       setStatusLine(status);
       if (state === "failed") setView("2d");
     },
     []
   );
-  const plainBoard = (0, import_react11.useMemo)(
+  const plainBoard = (0, import_react12.useMemo)(
     () => tree === null ? EMPTY_PLAIN_BOARD : buildPlainBoard(tree, { filter: filters }),
     [tree, filters]
   );
-  const revealNode = (0, import_react11.useCallback)((nodeId) => {
+  const revealNode = (0, import_react12.useCallback)((nodeId) => {
     setCollapsedIds((previous) => {
       const next = new Set(previous);
       for (const ancestor of ancestorsOf(tree?.nodes ?? [], nodeId)) {
@@ -11665,7 +11804,7 @@ function App() {
       return filterExcludesNode(previous, node);
     });
   }, [tree]);
-  const onSearch = (0, import_react11.useCallback)(
+  const onSearch = (0, import_react12.useCallback)(
     async (query) => {
       if (client === null) return;
       try {
@@ -11696,27 +11835,27 @@ function App() {
     },
     [client, plainBoard, revealNode, requestFocus]
   );
-  const graph = (0, import_react11.useMemo)(
+  const graph = (0, import_react12.useMemo)(
     () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters, layer }),
     [tree, collapsedIds, filters, layer]
   );
-  const scene3dModel = (0, import_react11.useMemo)(
+  const scene3dModel = (0, import_react12.useMemo)(
     () => tree === null ? null : buildScene3D(tree.nodes, { filter: filters }),
     [tree, filters]
   );
-  const scene3dOverlay = (0, import_react11.useMemo)(
+  const scene3dOverlay = (0, import_react12.useMemo)(
     () => tree === null || scene3dModel === null ? null : buildSceneOverlay(tree, scene3dModel, { layer }),
     [tree, scene3dModel, layer]
   );
-  const scene3dFitKey = (0, import_react11.useMemo)(
+  const scene3dFitKey = (0, import_react12.useMemo)(
     () => tree === null ? "" : `${tree.nodes.length}:${tree.nodes[0]?.id ?? ""}`,
     [tree]
   );
-  const scene3dCandidates = (0, import_react11.useMemo)(
+  const scene3dCandidates = (0, import_react12.useMemo)(
     () => scene3dModel === null ? [] : pickCandidates(scene3dModel),
     [scene3dModel]
   );
-  const scene3dInteraction = (0, import_react11.useMemo)(() => {
+  const scene3dInteraction = (0, import_react12.useMemo)(() => {
     if (tree === null || scene3dModel === null) return EMPTY_INTERACTION;
     const selected2 = selectedId === null ? null : tree.nodes.find((node) => node.id === selectedId) ?? null;
     const position = selectedId === null ? null : scene3dModel.nodes.find((node) => node.id === selectedId)?.position ?? null;
@@ -11748,14 +11887,14 @@ function App() {
     tree
   ]);
   const scene3dEmpty = scene3dModel !== null && scene3dModel.nodes.length === 0;
-  (0, import_react11.useEffect)(() => {
+  (0, import_react12.useEffect)(() => {
     if (view !== "3d") return;
     setStatusLine((previous) => {
       if (scene3dEmpty) return SCENE_EMPTY_HINT;
       return previous === SCENE_EMPTY_HINT ? "" : previous;
     });
   }, [scene3dEmpty, view]);
-  const resolveName = (0, import_react11.useCallback)(
+  const resolveName = (0, import_react12.useCallback)(
     (id2) => {
       const node = tree?.nodes.find((candidate) => candidate.id === id2);
       return node !== void 0 ? node.name : `\u2026${id2.slice(0, 8)}`;
@@ -11763,20 +11902,20 @@ function App() {
     [tree]
   );
   const filtersActive = isFilterActive(filters);
-  const onDetailsWidthChange = (0, import_react11.useCallback)((width) => {
+  const onDetailsWidthChange = (0, import_react12.useCallback)((width) => {
     setDetailsWidth(clampDetailsWidth(width));
   }, []);
-  const onDetailsWidthCommit = (0, import_react11.useCallback)((width) => {
+  const onDetailsWidthCommit = (0, import_react12.useCallback)((width) => {
     const clamped = clampDetailsWidth(width);
     setDetailsWidth(clamped);
     storeDetailsWidth(detailsStorage(), clamped);
   }, []);
-  const onDetailsWidthReset = (0, import_react11.useCallback)(() => {
+  const onDetailsWidthReset = (0, import_react12.useCallback)(() => {
     setDetailsWidth(DEFAULT_DETAILS_WIDTH);
     forgetDetailsWidth(detailsStorage());
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "lp-app", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "lp-app", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
       Toolbar,
       {
         projectKey: params.projectKey,
@@ -11793,7 +11932,7 @@ function App() {
         webglOk: webgl.ok
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
       "div",
       {
         className: view === "plain" ? "lp-body lp-body-plain" : "lp-body",
@@ -11801,7 +11940,7 @@ function App() {
           "--lp-details-width": `${detailsWidth}px`
         },
         children: [
-          view === "plain" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+          view === "plain" ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
             PlainView,
             {
               board: plainBoard,
@@ -11814,7 +11953,7 @@ function App() {
               emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
               emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the board again." : void 0
             }
-          ) : view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+          ) : view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
             ThreeView,
             {
               webgl,
@@ -11825,7 +11964,7 @@ function App() {
               onSelectNode: setSelectedId,
               onSceneState
             }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+          ) : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
             Canvas,
             {
               graph,
@@ -11838,7 +11977,7 @@ function App() {
               emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
             }
           ),
-          view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+          view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
             DetailsPanel,
             {
               detail,
@@ -11854,16 +11993,39 @@ function App() {
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(Legend, {})
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
+      DetailModal,
+      {
+        open: modal !== null,
+        title: modal === null ? "" : modal.kind === "node" ? tree?.nodes.find((n) => n.id === modal.id)?.name ?? "Node" : modal.kind === "goal" ? "Goal" : "Incident",
+        onClose: () => {
+          if (modal?.kind === "node") setSelectedId(null);
+          setModal(null);
+        },
+        children: [
+          modal?.kind === "node" && detail !== null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(NodeDetailContent, { detail, resolveName }) : null,
+          modal?.kind === "node" && detail === null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : null,
+          modal?.kind === "goal" && tree !== null ? (() => {
+            const goal = tree.goals.find((g) => g.id === modal.id);
+            return goal ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(GoalDetailContent, { goal }) : null;
+          })() : null,
+          modal?.kind === "bug" && tree !== null ? (() => {
+            const bug = tree.bugs.find((b) => b.id === modal.id);
+            return bug ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(BugDetailContent, { bug }) : null;
+          })() : null
+        ]
+      }
+    ),
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Legend, {})
   ] });
 }
 
 // dashboard/src/main.tsx
-var import_jsx_runtime11 = __toESM(require_jsx_runtime());
+var import_jsx_runtime15 = __toESM(require_jsx_runtime());
 var container = document.getElementById("root");
 if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(import_react12.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(import_react13.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(App, {}) })
 );

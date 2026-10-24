@@ -1,0 +1,219 @@
+import type { ReactElement, ReactNode } from "react";
+import type { NodeResponse } from "../../../shared/api";
+import { growthProgress } from "../../../shared/growth";
+import {
+  BEE_STATUS_COLORS,
+  BEE_STATUS_LABELS,
+  BUG_BADGE_COLOR,
+  KIND_COLORS,
+  KIND_GLYPHS,
+  KIND_LABELS,
+  STATUS_COLORS,
+  STATUS_LABELS,
+} from "../colors";
+
+export interface NodeDetailContentProps {
+  readonly detail: NodeResponse;
+  readonly resolveName: (id: string) => string;
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleString(undefined, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function Row(props: { label: string; children: ReactNode }): ReactElement {
+  return (
+    <div className="lp-details-row">
+      <span className="lp-details-row-label">{props.label}</span>
+      <span className="lp-details-row-value">{props.children}</span>
+    </div>
+  );
+}
+
+export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
+  const { detail, resolveName } = props;
+  const { node, path, children, bees, bugs, blockingBugs, history, growth } =
+    detail;
+  const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
+  const progress = growth === null ? null : growthProgress(growth.steps);
+  const shownHistory = history.slice(-20).reverse();
+
+  return (
+    <div className="lp-details-body">
+      <div
+        className="lp-details-node-name"
+        style={{ borderLeftColor: KIND_COLORS[node.kind] }}
+      >
+        <span aria-hidden="true">{KIND_GLYPHS[node.kind]} </span>
+        {node.name}
+      </div>
+
+      <p className="lp-details-path" title={path.map((n) => n.name).join(" › ")}>
+        {path.map((step) => step.name).join(" › ")}
+      </p>
+
+      <div className="lp-details-section">
+        <Row label="Kind">{KIND_LABELS[node.kind]}</Row>
+        <Row label="Status">
+          <span
+            className="lp-details-dot"
+            style={{ backgroundColor: STATUS_COLORS[node.status] }}
+            aria-hidden="true"
+          />
+          {STATUS_LABELS[node.status]}
+        </Row>
+        <Row label="Version">
+          <span className="lp-details-mono">
+            v{node.version || "—"} · r{node.revision}
+          </span>
+        </Row>
+        <Row label="Updated">
+          {formatTime(node.updatedAt)}
+          {node.updatedBy ? ` · ${node.updatedBy}` : ""}
+        </Row>
+      </div>
+
+      {progress !== null && progress.total > 0 ? (
+        <div className="lp-details-section">
+          <h3 className="lp-details-subtitle">Growth</h3>
+          <div
+            className="lp-details-progress"
+            role="img"
+            aria-label={`Growth: ${progress.completed} of ${progress.total} steps completed`}
+          >
+            <div
+              className="lp-details-progress-fill"
+              style={{ width: `${Math.round(progress.ratio * 100)}%` }}
+            />
+          </div>
+          <span className="lp-details-hint">
+            {progress.completed}/{progress.total} steps
+            {progress.failed > 0 ? ` · ${progress.failed} failed` : ""}
+            {growth !== null ? ` · ${growth.status}` : ""}
+          </span>
+        </div>
+      ) : null}
+
+      {bugs.length > 0 ? (
+        <div className="lp-details-section">
+          <h3 className="lp-details-subtitle">
+            Incidents ({bugs.length})
+          </h3>
+          <ul className="lp-details-list">
+            {bugs.map((bug) => {
+              const isBlocking = blockingIds.has(bug.id);
+              return (
+                <li
+                  key={bug.id}
+                  className={
+                    isBlocking ? "lp-details-bug lp-details-bug-blocking" : "lp-details-bug"
+                  }
+                  style={{
+                    borderColor: isBlocking ? BUG_BADGE_COLOR : undefined,
+                  }}
+                  title={bug.description}
+                >
+                  <span
+                    className="lp-details-bug-sev"
+                    style={{
+                      color: isBlocking ? BUG_BADGE_COLOR : undefined,
+                    }}
+                  >
+                    {bug.severity}
+                  </span>
+                  <span className="lp-details-bug-title">{bug.title}</span>
+                  <span className="lp-details-hint">{bug.status}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
+      {bees.length > 0 ? (
+        <div className="lp-details-section">
+          <h3 className="lp-details-subtitle">Influence links ({bees.length})</h3>
+          <ul className="lp-details-list">
+            {bees.map((bee) => {
+              const otherId =
+                bee.sourceLeafId === node.id ? bee.targetLeafId : bee.sourceLeafId;
+              const direction = bee.sourceLeafId === node.id ? "→" : "←";
+              return (
+                <li key={bee.id} className="lp-details-bee">
+                  <span
+                    className="lp-details-bee-status"
+                    style={{ color: BEE_STATUS_COLORS[bee.status] }}
+                  >
+                    {direction} {BEE_STATUS_LABELS[bee.status]}
+                  </span>
+                  <span className="lp-details-bee-target">{resolveName(otherId)}</span>
+                  {bee.impact ? (
+                    <span className="lp-details-hint">{bee.impact}</span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
+      {children.length > 0 ? (
+        <div className="lp-details-section">
+          <h3 className="lp-details-subtitle">Children ({children.length})</h3>
+          <ul className="lp-details-list">
+            {children.slice(0, 12).map((child) => (
+              <li key={child.id} className="lp-details-child">
+                <span aria-hidden="true">{KIND_GLYPHS[child.kind]} </span>
+                <span className="lp-details-child-name">{child.name}</span>
+                <span
+                  className="lp-details-dot"
+                  style={{ backgroundColor: STATUS_COLORS[child.status] }}
+                  aria-hidden="true"
+                />
+                <span className="lp-details-hint">
+                  {STATUS_LABELS[child.status]}
+                </span>
+              </li>
+            ))}
+            {children.length > 12 ? (
+              <li className="lp-details-hint">…and {children.length - 12} more</li>
+            ) : null}
+          </ul>
+        </div>
+      ) : null}
+
+      {history.length > 0 ? (
+        <div className="lp-details-section">
+          <h3 className="lp-details-subtitle">
+            History ({history.length}
+            {history.length > shownHistory.length
+              ? `, last ${shownHistory.length}`
+              : ""}
+            )
+          </h3>
+          <ul className="lp-details-list">
+            {shownHistory.map((entry) => (
+              <li key={entry.id} className="lp-details-history-row">
+                <span className="lp-details-mono">r{entry.revision}</span>
+                <span className="lp-details-history-action">{entry.action}</span>
+                <span className="lp-details-hint">
+                  {formatTime(entry.at)}
+                  {entry.actor ? ` · ${entry.actor}` : ""}
+                </span>
+                {entry.result ? (
+                  <span className="lp-details-hint">{entry.result}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}

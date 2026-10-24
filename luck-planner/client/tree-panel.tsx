@@ -147,7 +147,7 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
       })
         .then((result) => {
           if (cancelled) return;
-          setSearchHits(result.results.map((hit) => hit.node));
+          setSearchHits(result.results.map((hit: any) => hit.node));
         })
         .catch(() => {
           if (!cancelled) setSearchHits([]);

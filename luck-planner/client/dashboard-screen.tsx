@@ -105,7 +105,7 @@ export async function openDashboard(
     openExternal: (url) => openExternalUrl(url),
     listWorkspaceIds: async () => {
       const { entries } = await request.paseo.workspaces.list();
-      return entries.map((entry) => entry.id);
+      return entries.map((entry: { id: string }) => entry.id);
     },
   };
 

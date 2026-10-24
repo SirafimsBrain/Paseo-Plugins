@@ -70,7 +70,7 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
     void agentStatusRpc({})
       .then((result) => {
         setAgentRows(
-          result.targets.map((row) => ({
+          result.targets.map((row: any) => ({
             id: row.id,
             label: row.label,
             path: row.path,
@@ -96,13 +96,13 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
       const call = action === "register" ? agentRegisterRpc : agentUnregisterRpc;
       void call({ target })
         .then((result) => {
-          const failed = result.results.filter((row) => !row.ok);
+          const failed = result.results.filter((row: any) => !row.ok);
           setAgentMessage(
             failed.length === 0
               ? action === "register"
                 ? "Registered in the agent config file(s)."
                 : "Removed from the agent config file(s)."
-              : failed.map((row) => `${row.label}: ${row.error}`).join("; "),
+              : failed.map((row: any) => `${row.label}: ${row.error}`).join("; "),
           );
         })
         .catch((cause: unknown) => {

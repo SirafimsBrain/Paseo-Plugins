@@ -2617,7 +2617,7 @@ ${content.join("\n")}
 var version = {
   major: 4,
   minor: 6,
-  patch: 6
+  patch: 7
 };
 
 // node_modules/zod/v4/core/schemas.js
@@ -23588,7 +23588,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.33.0";
+var SERVER_VERSION = "0.34.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

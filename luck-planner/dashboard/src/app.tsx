@@ -114,6 +114,10 @@ import {
 import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./theme";
 import { Canvas } from "./components/Canvas";
 import { DetailsPanel } from "./components/DetailsPanel";
+import { DetailModal } from "./components/DetailModal";
+import { NodeDetailContent } from "./components/NodeDetailContent";
+import { GoalDetailContent } from "./components/GoalDetailContent";
+import { BugDetailContent } from "./components/BugDetailContent";
 import { Legend } from "./components/Legend";
 import { PlainView } from "./components/PlainView";
 import { ThreeView, type ThreeViewState } from "./components/ThreeView";
@@ -241,6 +245,9 @@ export function App(): ReactElement {
 
   // G4 interaction state.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [modal, setModal] = useState<
+    { kind: "node" | "goal" | "bug"; id: string } | null
+  >(null);
   const [detail, setDetail] = useState<NodeResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
@@ -395,7 +402,14 @@ export function App(): ReactElement {
    */
   const onPlainCardSelect = useCallback(
     (kind: PlainCardKind, entityId: string): void => {
-      if (kind === "leaf") setSelectedId(entityId);
+      if (kind === "leaf") {
+        setSelectedId(entityId);
+        setModal({ kind: "node", id: entityId });
+      } else if (kind === "goal") {
+        setModal({ kind: "goal", id: entityId });
+      } else if (kind === "bug") {
+        setModal({ kind: "bug", id: entityId });
+      }
     },
     [],
   );
@@ -746,6 +760,41 @@ export function App(): ReactElement {
           />
         )}
       </div>
+      <DetailModal
+        open={modal !== null}
+        title={
+          modal === null
+            ? ""
+            : modal.kind === "node"
+              ? (tree?.nodes.find((n) => n.id === modal.id)?.name ?? "Node")
+              : modal.kind === "goal"
+                ? "Goal"
+                : "Incident"
+        }
+        onClose={() => {
+          if (modal?.kind === "node") setSelectedId(null);
+          setModal(null);
+        }}
+      >
+        {modal?.kind === "node" && detail !== null ? (
+          <NodeDetailContent detail={detail} resolveName={resolveName} />
+        ) : null}
+        {modal?.kind === "node" && detail === null ? (
+          <p className="lp-details-empty">Loading…</p>
+        ) : null}
+        {modal?.kind === "goal" && tree !== null
+          ? (() => {
+              const goal = tree.goals.find((g) => g.id === modal.id);
+              return goal ? <GoalDetailContent goal={goal} /> : null;
+            })()
+          : null}
+        {modal?.kind === "bug" && tree !== null
+          ? (() => {
+              const bug = tree.bugs.find((b) => b.id === modal.id);
+              return bug ? <BugDetailContent bug={bug} /> : null;
+            })()
+          : null}
+      </DetailModal>
       <Legend />
     </div>
   );
