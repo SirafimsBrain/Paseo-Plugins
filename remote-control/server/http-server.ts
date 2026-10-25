@@ -1,0 +1,241 @@
+import { timingSafeEqual } from "node:crypto";
+import * as fs from "node:fs";
+import * as http from "node:http";
+import * as path from "node:path";
+import { resolveConsoleDir, resolvePluginVersion } from "./paths";
+
+export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".wasm": "application/wasm",
+};
+
+function contentTypeFor(file: string): string {
+  return CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+}
+
+const PLACEHOLDER_HTML = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>remote-control console</title></head>
+<body style="font-family: system-ui, sans-serif; margin: 3rem; line-height: 1.5">
+<h1>remote-control console</h1>
+<p>The console web app is not built in this checkout (run the plugin build).</p>
+</body>
+</html>
+`;
+
+export interface ConsoleHttpServerOptions {
+  token: string;
+  port: number;
+  host?: string;
+  version?: string;
+  consoleDir?: string;
+}
+
+export class ConsoleHttpServer {
+  private readonly token: string;
+  private readonly host: string;
+  private readonly version: string;
+  private readonly consoleDir: string;
+  private readonly options: ConsoleHttpServerOptions;
+  private server: http.Server | null = null;
+  private boundPort: number | null = null;
+  private boundAddress: string | null = null;
+
+  constructor(options: ConsoleHttpServerOptions) {
+    if (options.token.length === 0) {
+      throw new Error("the console HTTP server requires a non-empty access token");
+    }
+    this.options = options;
+    this.token = options.token;
+    this.host = options.host ?? DEFAULT_CONSOLE_HOST;
+    this.version = options.version ?? resolvePluginVersion();
+    this.consoleDir = options.consoleDir ?? resolveConsoleDir();
+  }
+
+  get listening(): boolean {
+    return this.server !== null && this.server.listening;
+  }
+
+  get boundHost(): string {
+    return this.boundAddress ?? this.host;
+  }
+
+  get boundTcpPort(): number {
+    return this.boundPort ?? this.options.port;
+  }
+
+  get origin(): string | null {
+    if (!this.listening) return null;
+    return `http://${this.boundHost}:${this.boundTcpPort}`;
+  }
+
+  get url(): string | null {
+    const origin = this.origin;
+    if (origin === null) return null;
+    return `${origin}/?token=${encodeURIComponent(this.token)}`;
+  }
+
+  start(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const server = http.createServer((req, res) => {
+        this.handleRequest(req, res);
+      });
+      server.on("error", (error) => {
+        if (server.listening) return;
+        reject(error);
+      });
+      server.on("clientError", (_error, socket) => {
+        socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+      });
+      this.server = server;
+      server.listen(this.options.port, this.host, () => {
+        const address = server.address();
+        if (address && typeof address === "object") {
+          this.boundPort = address.port;
+          this.boundAddress = address.address;
+        }
+        resolve();
+      });
+    });
+  }
+
+  stop(): Promise<void> {
+    return new Promise((resolve) => {
+      const server = this.server;
+      this.server = null;
+      if (!server) return resolve();
+      if (!server.listening) return resolve();
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+  }
+
+  private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const url = new URL(req.url ?? "/", "http://localhost");
+
+    if (url.pathname === "/health") {
+      if (req.method !== "GET") {
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      this.sendJson(res, 200, { ok: true, server: "remote-control", version: this.version });
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/")) {
+      if (!this.authorized(req, url)) {
+        this.sendJson(res, 401, { error: "unauthorized" });
+        return;
+      }
+      if (req.method !== "GET") {
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      if (url.pathname === "/api/state") {
+        this.sendJson(res, 200, { ok: true, listening: true });
+        return;
+      }
+      this.sendJson(res, 404, { error: "not found" });
+      return;
+    }
+
+    this.serveStatic(req, res, url);
+  }
+
+  private authorized(req: http.IncomingMessage, url: URL): boolean {
+    const fromQuery = url.searchParams.get("token");
+    if (fromQuery !== null && this.tokenMatches(fromQuery)) return true;
+    const header = req.headers.authorization;
+    if (typeof header === "string") {
+      const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+      if (match && this.tokenMatches(match[1].trim())) return true;
+    }
+    return false;
+  }
+
+  private tokenMatches(provided: string): boolean {
+    const expected = Buffer.from(this.token, "utf8");
+    const actual = Buffer.from(provided, "utf8");
+    if (expected.length !== actual.length) return false;
+    return timingSafeEqual(expected, actual);
+  }
+
+  private serveStatic(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      this.sendJson(res, 405, { error: "method not allowed" });
+      return;
+    }
+    const indexFile = path.join(this.consoleDir, "index.html");
+    if (!fs.existsSync(indexFile)) {
+      this.sendHtml(res, 200, PLACEHOLDER_HTML, req.method === "HEAD");
+      return;
+    }
+    const root = path.resolve(this.consoleDir);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch {
+      this.sendJson(res, 400, { error: "malformed path" });
+      return;
+    }
+    const relative = decoded.replace(/^\/+/, "");
+    const candidate = path.resolve(root, relative);
+    const inside = candidate === root || candidate.startsWith(`${root}${path.sep}`);
+    if (relative.length > 0 && inside && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      this.sendFile(res, candidate, req.method === "HEAD");
+      return;
+    }
+    if (path.extname(relative).length === 0) {
+      this.sendFile(res, indexFile, req.method === "HEAD");
+      return;
+    }
+    this.sendJson(res, 404, { error: "not found" });
+  }
+
+  private sendFile(res: http.ServerResponse, file: string, headOnly: boolean): void {
+    let data: Buffer;
+    try {
+      data = fs.readFileSync(file);
+    } catch {
+      this.sendJson(res, 404, { error: "not found" });
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": contentTypeFor(file),
+      "Content-Length": data.byteLength,
+      "Cache-Control": "no-store",
+    });
+    if (headOnly) res.end();
+    else res.end(data);
+  }
+
+  private sendHtml(res: http.ServerResponse, status: number, html: string, headOnly: boolean): void {
+    const body = Buffer.from(html, "utf8");
+    res.writeHead(status, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Length": body.byteLength,
+      "Cache-Control": "no-store",
+    });
+    if (headOnly) res.end();
+    else res.end(body);
+  }
+
+  private sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+    const payload = `${JSON.stringify(body)}\n`;
+    res.writeHead(status, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Length": Buffer.byteLength(payload),
+      "Cache-Control": "no-store",
+    });
+    res.end(payload);
+  }
+}
