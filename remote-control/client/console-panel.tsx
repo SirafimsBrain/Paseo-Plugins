@@ -13,6 +13,8 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
   const consoleUrlRpc = useRpc(consoleUrl);
 
   const [listening, setListening] = useState(false);
+  const [transport, setTransport] = useState<"ws" | "sse-post" | null>(null);
+  const [transportConnections, setTransportConnections] = useState(0);
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,6 +22,8 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
     try {
       const result = await stateRpc({});
       setListening(result.listening);
+      setTransport(result.transport);
+      setTransportConnections(result.transportConnections);
       setUrl(result.consoleUrl);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -49,7 +53,10 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
   return (
     <View style={styles.container}>
       <Text style={{ color: fg, fontSize: 13, fontWeight: "600" }}>Remote Control</Text>
-      <Text style={{ color: muted, fontSize: 12 }}>Console: {listening ? "listening" : "stopped"}</Text>
+      <Text style={{ color: muted, fontSize: 12 }}>
+        Console: {listening ? "listening" : "stopped"}
+        {listening && transport ? ` (transport ${transport}, ${transportConnections} live)` : ""}
+      </Text>
       <Text style={{ color: muted, fontSize: 12 }}>Project: {projectRootPath ?? "(none)"}</Text>
       {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
       <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>

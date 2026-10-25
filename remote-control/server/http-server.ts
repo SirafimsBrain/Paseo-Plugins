@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { resolveConsoleDir, resolvePluginVersion } from "./paths";
+import type { TransportBridge } from "./transport";
 
 export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 
@@ -38,6 +39,8 @@ export interface ConsoleHttpServerOptions {
   host?: string;
   version?: string;
   consoleDir?: string;
+  /** WebSocket bridge for the terminal transport (A3); disposed on stop(). */
+  transport?: TransportBridge;
 }
 
 export class ConsoleHttpServer {
@@ -45,10 +48,20 @@ export class ConsoleHttpServer {
   private readonly host: string;
   private readonly version: string;
   private readonly consoleDir: string;
+  private readonly transport: TransportBridge | null;
   private readonly options: ConsoleHttpServerOptions;
   private server: http.Server | null = null;
   private boundPort: number | null = null;
   private boundAddress: string | null = null;
+
+  /**
+   * Fallback channel probe (ADR-6/ADR-12 groundwork): a trivial SSE stream
+   * with heartbeats. No state changes are emitted yet — that arrives with
+   * the change-feed stage; here the route only proves the workspace
+   * browser streams from the plugin server at all.
+   */
+  private eventClients = new Set<http.ServerResponse>();
+  private eventTicker: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ConsoleHttpServerOptions) {
     if (options.token.length === 0) {
@@ -59,6 +72,12 @@ export class ConsoleHttpServer {
     this.host = options.host ?? DEFAULT_CONSOLE_HOST;
     this.version = options.version ?? resolvePluginVersion();
     this.consoleDir = options.consoleDir ?? resolveConsoleDir();
+    this.transport = options.transport ?? null;
+  }
+
+  /** Number of live transport connections (WebSocket bridge). */
+  get transportConnections(): number {
+    return this.transport?.activeConnections ?? 0;
   }
 
   get listening(): boolean {
@@ -97,6 +116,7 @@ export class ConsoleHttpServer {
         socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
       });
       this.server = server;
+      if (this.transport) this.transport.attachHttpServer(server);
       server.listen(this.options.port, this.host, () => {
         const address = server.address();
         if (address && typeof address === "object") {
@@ -112,8 +132,19 @@ export class ConsoleHttpServer {
     return new Promise((resolve) => {
       const server = this.server;
       this.server = null;
-      if (!server) return resolve();
-      if (!server.listening) return resolve();
+      const transport = this.transport;
+      this.eventClients.clear();
+      if (this.eventTicker !== null) {
+        clearInterval(this.eventTicker);
+        this.eventTicker = null;
+      }
+      // Dispose the bridge first: Node does not track upgraded WebSocket
+      // sockets in closeAllConnections(), so a live terminal connection
+      // would otherwise keep server.close() hanging for the socket lifetime.
+      transport?.dispose();
+      if (!server || !server.listening) {
+        return resolve();
+      }
       server.close(() => resolve());
       server.closeAllConnections();
     });
@@ -144,11 +175,48 @@ export class ConsoleHttpServer {
         this.sendJson(res, 200, { ok: true, listening: true });
         return;
       }
+      if (url.pathname === "/api/events") {
+        this.serveEvents(req, res);
+        return;
+      }
       this.sendJson(res, 404, { error: "not found" });
       return;
     }
 
     this.serveStatic(req, res, url);
+  }
+
+  /** Number of open SSE subscriptions. */
+  get sseSubscribers(): number {
+    return this.eventClients.size;
+  }
+
+  private serveEvents(req: http.IncomingMessage, res: http.ServerResponse): void {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store",
+      Connection: "keep-alive",
+    });
+    res.write("retry: 3000\n\n");
+    this.eventClients.add(res);
+    if (this.eventTicker === null) {
+      this.eventTicker = setInterval(() => {
+        for (const client of this.eventClients) {
+          try {
+            client.write(": heartbeat\n\n");
+          } catch {
+            this.eventClients.delete(client);
+          }
+        }
+      }, 15_000);
+    }
+    req.on("close", () => {
+      this.eventClients.delete(res);
+      if (this.eventClients.size === 0 && this.eventTicker !== null) {
+        clearInterval(this.eventTicker);
+        this.eventTicker = null;
+      }
+    });
   }
 
   private authorized(req: http.IncomingMessage, url: URL): boolean {

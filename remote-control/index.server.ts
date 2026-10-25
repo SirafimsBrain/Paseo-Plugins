@@ -10,11 +10,16 @@ export default function contribute(server: PluginServerContext): () => void {
   void endpoint.settled();
 
   server.handle(consoleUrl, () => ({ url: endpoint.url() }));
-  server.handle(state, () => ({
-    consoleUrl: endpoint.url(),
-    listening: endpoint.status().listening,
-    version: resolvePluginVersion(),
-  }));
+  server.handle(state, () => {
+    const status = endpoint.status();
+    return {
+      consoleUrl: status.url,
+      listening: status.listening,
+      version: resolvePluginVersion(),
+      transport: status.transport,
+      transportConnections: status.transportConnections,
+    };
+  });
 
   console.log(`[remote-control] plugin ready (version ${resolvePluginVersion()})`);
 

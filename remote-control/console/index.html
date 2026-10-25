@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>remote-control console</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 2rem 3rem; line-height: 1.5; }
+    h1 { margin: 0 0 0.5rem; }
+    #transport-probe { border: 1px solid currentColor; border-radius: 8px; padding: 0.25rem 1rem; max-width: 40rem; }
+    #transport-probe li[data-refresh="done"][data-state="pass"] { color: green; }
+    #transport-probe li[data-refresh="done"][data-state="fail"] { color: crimson; }
+  </style>
+</head>
+<body>
+  <h1>remote-control console</h1>
+  <p>Transport probe (stage A3): the WebSocket bridge is the terminal
+     transport candidate; SSE is measured as the fallback path.</p>
+  <ul id="transport-probe"></ul>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

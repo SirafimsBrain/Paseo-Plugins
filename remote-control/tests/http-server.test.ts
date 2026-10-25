@@ -26,7 +26,7 @@ describe("console http server", () => {
   it("health is public", async () => {
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { ok?: boolean; server?: string };
     expect(body.ok).toBe(true);
     expect(body.server).toBe("remote-control");
   });
