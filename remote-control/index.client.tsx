@@ -1,24 +1,29 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { RemoteControlPanel } from "./client/console-panel";
+import { RemoteControlScreen, SCREEN_ID } from "./client/console-screen";
+import { RemoteControlSidebarItem } from "./client/console-sidebar-item";
 import { consoleUrl } from "./shared/rpc";
 
 export default function contribute(client: PluginClientContext): () => void {
-  client.addWorkspacePanel({
-    id: "remote-control",
+  client.addScreen({
+    id: SCREEN_ID,
     title: "Remote Control",
-    icon: "Terminal",
-    locations: ["workspace", "explorer"],
-    Component: RemoteControlPanel,
-  } as any);
+    Component: RemoteControlScreen,
+  });
+
+  client.addSidebarHeaderItem({
+    id: SCREEN_ID,
+    title: "Remote Control",
+    Component: RemoteControlSidebarItem,
+  });
 
   client.addCommandCenterItem({
     id: "remote-control-open-console",
     title: "Open remote-control console",
     icon: "Globe",
-    keywords: ["remote", "control", "console", "terminal"],
-    context: "workspace",
-    async onSelect({ rpc }) {
-      await rpc(consoleUrl, {});
+    keywords: ["remote", "control", "console", "terminal", "ssh", "rdp", "vnc"],
+    context: "global",
+    async onSelect({ openScreen }) {
+      openScreen({ screenId: SCREEN_ID });
     },
   });
 
