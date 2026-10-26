@@ -54,7 +54,29 @@ Conditions of the decision:
 - `tests/http-server.test.ts`: adapted to `@types/node` 22.20.5 typing
   (`res.json()` now yields `unknown`) — no behavior change.
 
-## Stage A2 notes
+## Ghostty config import (stage B1)
+
+- `server/ghostty-config.ts`: `discoverGhosttyConfigPaths` / `findGhosttyConfigPath`
+  (XDG_CONFIG_HOME → `~/.config/ghostty/config` → macOS Application Support →
+  `~/.ghostty/config`), `parseGhosttyConfig` (comments, `key = value` and
+  `key=value`, `config-file` includes with cycle + depth guards), and
+  `mapGhosttySettings` (supported keys → typed `GhosttySettings`, everything
+  else — including the keys orca dropped in review: `window-padding-color`,
+  `window-padding-balance`, `selection-word-chars` — collected, de-duplicated,
+  into `ignored`).
+- Comment stripping treats `#` as a comment marker only when it is not
+  immediately followed by a hex colour (3/6/8 hex digits), so values such as
+  `background = #1e1e2e` survive.
+- `shared/ghostty-settings.ts`: zod schemas for the imported settings and the
+  import preview.
+- Persistence (interim, until the SQLite store lands in D1): JSON file at
+  `$PASEO_HOME/plugins/remote-control/ghostty-settings.json`, via
+  `loadGhosttySettings` / `applyGhosttySettings`.
+- REST: `GET /api/ghostty/import` (preview) and `POST /api/ghostty/import/apply`
+  (body `{ settings }` or a bare settings object), both token-gated.
+- Console: minimal Settings card with Preview / Apply buttons (in
+  `console/src/main.ts`), rendering the preview JSON.
+- Tests: `tests/ghostty-config.test.ts` (38 total tests green).
 
 - Token: empty plugin setting → random hex per session; a pinned value is
   used as is. `GET /health` needs no token, everything else (including

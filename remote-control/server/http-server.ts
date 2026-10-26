@@ -4,6 +4,11 @@ import * as http from "node:http";
 import * as path from "node:path";
 import { resolveConsoleDir, resolvePluginVersion } from "./paths";
 import type { TransportBridge } from "./transport";
+import {
+  applyGhosttySettings,
+  loadGhosttySettings,
+  previewGhosttyImport,
+} from "./ghostty-config";
 
 export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 
@@ -167,16 +172,42 @@ export class ConsoleHttpServer {
         this.sendJson(res, 401, { error: "unauthorized" });
         return;
       }
-      if (req.method !== "GET") {
-        this.sendJson(res, 405, { error: "method not allowed" });
-        return;
-      }
       if (url.pathname === "/api/state") {
+        if (req.method !== "GET") {
+          this.sendJson(res, 405, { error: "method not allowed" });
+          return;
+        }
         this.sendJson(res, 200, { ok: true, listening: true });
         return;
       }
       if (url.pathname === "/api/events") {
+        if (req.method !== "GET") {
+          this.sendJson(res, 405, { error: "method not allowed" });
+          return;
+        }
         this.serveEvents(req, res);
+        return;
+      }
+      if (url.pathname === "/api/ghostty/import") {
+        if (req.method === "GET") {
+          this.sendJson(res, 200, previewGhosttyImport());
+          return;
+        }
+        if (req.method === "POST") {
+          void this.readJsonBody(req)
+            .then((body) => {
+              const settings = (body && typeof body === "object" && "settings" in body)
+                ? (body as { settings: unknown }).settings
+                : body;
+              applyGhosttySettings(settings as never);
+              this.sendJson(res, 200, { ok: true, settings: loadGhosttySettings() });
+            })
+            .catch((cause) => {
+              this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+            });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
         return;
       }
       this.sendJson(res, 404, { error: "not found" });
@@ -216,6 +247,26 @@ export class ConsoleHttpServer {
         clearInterval(this.eventTicker);
         this.eventTicker = null;
       }
+    });
+  }
+
+  private readJsonBody(req: http.IncomingMessage): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      req.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8").trim();
+        if (text.length === 0) {
+          resolve({});
+          return;
+        }
+        try {
+          resolve(JSON.parse(text));
+        } catch (cause) {
+          reject(cause instanceof Error ? cause : new Error(String(cause)));
+        }
+      });
+      req.on("error", reject);
     });
   }
 

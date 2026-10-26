@@ -190,17 +190,88 @@ function updateRunState(list: HTMLElement): void {
   }
 }
 
+// Ghostty import (stage B1) — thin glue over the REST endpoints.
+function tokenParam(): string {
+  return `?token=${encodeURIComponent(token)}`;
+}
+
+function pretty(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+async function previewGhostty(): Promise<void> {
+  const resultEl = document.getElementById("ghostty-result");
+  const applyBtn = document.getElementById("ghostty-apply") as HTMLButtonElement | null;
+  if (!(resultEl instanceof HTMLElement)) return;
+  try {
+    const response = await fetch(`/api/ghostty/import${tokenParam()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const preview = (await response.json()) as {
+      found: boolean;
+      path: string | null;
+      settings: unknown;
+      ignored: string[];
+      errors: string[];
+    };
+    resultEl.textContent = pretty(preview);
+    if (applyBtn) {
+      applyBtn.disabled = !preview.found;
+      applyBtn.dataset.settings = JSON.stringify(preview.settings);
+    }
+  } catch (error) {
+    resultEl.textContent = `preview failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function applyGhostty(): Promise<void> {
+  const resultEl = document.getElementById("ghostty-result");
+  const applyBtn = document.getElementById("ghostty-apply") as HTMLButtonElement | null;
+  if (!(resultEl instanceof HTMLElement) || !applyBtn) return;
+  let settings: unknown = {};
+  try {
+    settings = JSON.parse(applyBtn.dataset.settings ?? "{}");
+  } catch {
+    resultEl.textContent = "no preview to apply";
+    return;
+  }
+  try {
+    const response = await fetch(`/api/ghostty/import/apply${tokenParam()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    resultEl.textContent = `applied:\n${pretty(result)}`;
+  } catch (error) {
+    resultEl.textContent = `apply failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+function wireGhostty(): void {
+  const previewBtn = document.getElementById("ghostty-preview");
+  const applyBtn = document.getElementById("ghostty-apply");
+  if (previewBtn instanceof HTMLButtonElement) {
+    previewBtn.addEventListener("click", () => void previewGhostty());
+  }
+  if (applyBtn instanceof HTMLButtonElement) {
+    applyBtn.addEventListener("click", () => void applyGhostty());
+  }
+}
+
 function main(): void {
   token = locationToken();
   const list = document.getElementById("transport-probe");
-  if (!(list instanceof HTMLElement)) return;
-  const runState = document.createElement("div");
-  runState.id = "run-state";
-  runState.dataset.state = "running";
-  list.before(runState);
-  for (const step of probes()) {
-    renderProbe(list, step);
+  if (list instanceof HTMLElement) {
+    const runState = document.createElement("div");
+    runState.id = "run-state";
+    runState.dataset.state = "running";
+    list.before(runState);
+    for (const step of probes()) {
+      renderProbe(list, step);
+    }
   }
+  wireGhostty();
 }
 
 main();
