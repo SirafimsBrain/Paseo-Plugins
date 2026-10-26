@@ -54,7 +54,13 @@ Conditions of the decision:
 - `tests/http-server.test.ts`: adapted to `@types/node` 22.20.5 typing
   (`res.json()` now yields `unknown`) — no behavior change.
 
-## Connections and SSH (stages D1–D5)
+## Install (note)
+
+`@lydell/node-pty` declares its platform binary as an *optional* dependency,
+which Paseo's `npm ci` step was omitting, causing the plugin to fail to load
+on linux-x64 with "could not find @lydell/node-pty-linux-x64". The platform
+package is now also listed as a direct dependency (npm skips it on platforms
+where its `os`/`cpu` constraints do not match, so this stays portable).
 
 - `shared/connections.ts`: zod schemas for groups/connections (hierarchy, validation).
 - `shared/protocols.ts`: protocol registry (ssh/rdp/vnc) with default ports, payload schemas, secret fields, launchable flags.
