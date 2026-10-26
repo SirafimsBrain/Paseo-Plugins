@@ -54,7 +54,12 @@ Conditions of the decision:
 - `tests/http-server.test.ts`: adapted to `@types/node` 22.20.5 typing
   (`res.json()` now yields `unknown`) — no behavior change.
 
-## Install (note)
+## Web admin panel
+
+The loopback console is now a single-page admin panel (left nav: Sessions,
+Connections, Secrets, Terminal, Settings) with modal dialogs for create/edit.
+Vanilla TS (no React in the console bundle) — esbuild carries everything into
+`dist/console/main.js`. SSE keeps Sessions and Connections fresh.
 
 Paseo runs `npm ci` with optional dependencies omitted, so `@lydell/node-pty`
 could not load its platform binary. The plugin ships a prebuilt

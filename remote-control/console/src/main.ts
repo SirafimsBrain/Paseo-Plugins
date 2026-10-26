@@ -1,654 +1,544 @@
-// Transport probe page (stage A3). Runs the checks inside the real Paseo
-// workspace browser and renders the outcome in the DOM (memory #7: checks
-// go through DOM/JS, never screenshots).
-//
-// Probe matrix:
-// - t1-connect: the WebSocket bridge accepts the token from the URL query.
-// - t2-binary-echo: a 256-byte pattern round-trips byte-exact over binary
-//   frames (the PTY framing to come in B3).
-// - t3-ping-pong: JSON control frame {"t":"ping"} is answered {"t":"pong"}.
-// - t4-events: the SSE fallback route /api/events streams (EventSource).
-//
-// The page is automated-friendly: every probe is an <li> with
-// `data-test`/`data-state`/`data-detail`, a `#run-state` element settles
-// into `data-state="running|pass|fail|partial"`, and `window.__rcProbeDone`
-// becomes true once no probe is pending — test harnesses poll these, they
-// do not screenshot.
-
-import { openWebSocketTransport, TransportError } from "./transport";
-import type { TransportSocket } from "./transport";
 import { mountTerminal } from "./terminal";
 
-const PROBE_TIMEOUT_MS = 5000;
+let token = new URLSearchParams(window.location.search).get("token") ?? "";
 
-let token = "";
-
-function locationToken(): string {
-  return new URLSearchParams(window.location.search).get("token") ?? "";
-}
-
-function wsUrl(): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/term?token=${encodeURIComponent(token)}`;
-}
-
-function eventsUrl(): string {
-  return `/api/events?token=${encodeURIComponent(token)}`;
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) return false;
-  for (let i = 0; i < a.byteLength; i += 1) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
-function buildPattern(length: number): Uint8Array {
-  const pattern = new Uint8Array(length);
-  for (let i = 0; i < length; i += 1) {
-    pattern[i] = (i * 7 + 91) & 0xff;
-  }
-  return pattern;
-}
-
-/** Closes the socket no matter which way the step settles. */
-function finishWith(socket: TransportSocket, guard: number, settle: () => void): void {
-  window.clearTimeout(guard);
-  socket.close(1000, "probe done");
-  settle();
-}
-
-async function probeConnect(): Promise<string> {
-  const socket = await openWebSocketTransport(wsUrl(), {}, PROBE_TIMEOUT_MS);
-  if (socket.readyState !== "open") {
-    socket.close(1000, "probe done");
-    throw new TransportError("state", "handshake resolved but socket is not open");
-  }
-  socket.close(1000, "probe done");
-  return "reached open state";
-}
-
-async function probeBinaryEcho(): Promise<string> {
-  const pattern = buildPattern(256);
-  // The sink is installed before the send, so no echo can slip past it.
-  let sink: ((data: Uint8Array) => void) | null = null;
-  const socket = await openWebSocketTransport(wsUrl(), { onBinary: (data) => sink?.(data) }, PROBE_TIMEOUT_MS);
-  return await new Promise<string>((resolve, reject) => {
-    const guard = window.setTimeout(() => {
-      reject(new TransportError("timeout", "no echo within 5s"));
-    }, PROBE_TIMEOUT_MS);
-    sink = (data) => {
-      if (bytesEqual(data, pattern)) {
-        finishWith(socket, guard, () => resolve(`echo ${data.byteLength} bytes byte-exact`));
-        return;
-      }
-      finishWith(socket, guard, () => reject(new TransportError("mismatch", "echo differs byte-wise")));
-    };
-    socket.sendBinary(pattern);
-  });
-}
-
-async function probePingPong(): Promise<string> {
-  let sink: ((frame: Record<string, unknown>) => void) | null = null;
-  const socket = await openWebSocketTransport(wsUrl(), { onControl: (frame) => sink?.(frame) }, PROBE_TIMEOUT_MS);
-  return await new Promise<string>((resolve, reject) => {
-    const guard = window.setTimeout(() => {
-      reject(new TransportError("timeout", "no pong within 5s"));
-    }, PROBE_TIMEOUT_MS);
-    sink = (frame) => {
-      if (frame.t === "pong") {
-        finishWith(socket, guard, () => resolve('{"t":"ping"} → {"t":"pong"}'));
-        return;
-      }
-      finishWith(socket, guard, () => {
-        reject(new TransportError("mismatch", `unexpected control frame ${JSON.stringify(frame)}`));
-      });
-    };
-    socket.sendControl({ t: "ping" });
-  });
-}
-
-function probeEvents(): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const source = new EventSource(eventsUrl());
-    let settled = false;
-    const guard = window.setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      source.close();
-      reject(new TransportError("timeout", "no open events within 5s"));
-    }, PROBE_TIMEOUT_MS);
-    const settle = (settler: () => void): void => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(guard);
-      source.close();
-      settler();
-    };
-    source.onopen = () => settle(() => resolve("stream opened"));
-    source.onerror = () => settle(() => reject(new TransportError("sse", "eventsource error")));
-  });
-}
-
-interface ProbeStep {
-  id: string;
-  title: string;
-  run: () => Promise<string>;
-}
-
-function probes(): ProbeStep[] {
-  return [
-    { id: "t1-connect", title: "ws connect (token via query)", run: probeConnect },
-    { id: "t2-binary-echo", title: "binary echo roundtrip", run: probeBinaryEcho },
-    { id: "t3-ping-pong", title: "control ping→pong", run: probePingPong },
-    { id: "t4-events", title: "SSE /api/events (fallback)", run: probeEvents },
-  ];
-}
-
-function renderProbe(list: HTMLElement, step: ProbeStep): void {
-  const item = document.createElement("li");
-  item.dataset.test = step.id;
-  item.dataset.state = "pending";
-  item.dataset.refresh = "running";
-  item.textContent = `${step.title} — pending`;
-  list.append(item);
-  void step.run().then(
-    (detail) => {
-      item.dataset.state = "pass";
-      item.dataset.refresh = "done";
-      item.dataset.detail = detail;
-      item.textContent = `${step.title} — PASS (${detail})`;
-      updateRunState(list);
-    },
-    (error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      item.dataset.state = "fail";
-      item.dataset.refresh = "done";
-      item.dataset.detail = message;
-      item.textContent = `${step.title} — FAIL (${message})`;
-      updateRunState(list);
-    },
-  );
-}
-
-function updateRunState(list: HTMLElement): void {
-  const items = Array.from(list.querySelectorAll<HTMLLIElement>("li"));
-  const pending = items.filter((item) => item.dataset.refresh !== "done");
-  const failed = items.filter((item) => item.dataset.state === "fail");
-  const container = document.getElementById("run-state");
-  if (container === null) return;
-  const state = pending.length > 0
-    ? "running"
-    : failed.length === 0
-      ? "pass"
-      : failed.length === items.length
-        ? "fail"
-        : "partial";
-  container.dataset.state = state;
-  if (pending.length === 0) {
-    (window as unknown as { __rcProbeDone?: boolean }).__rcProbeDone = true;
-  }
-}
-
-// Ghostty import (stage B1) — thin glue over the REST endpoints.
 function tokenParam(): string {
   return `?token=${encodeURIComponent(token)}`;
 }
 
-function pretty(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-async function previewGhostty(): Promise<void> {
-  const resultEl = document.getElementById("ghostty-result");
-  const applyBtn = document.getElementById("ghostty-apply") as HTMLButtonElement | null;
-  if (!(resultEl instanceof HTMLElement)) return;
-  try {
-    const response = await fetch(`/api/ghostty/import${tokenParam()}`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const preview = (await response.json()) as {
-      found: boolean;
-      path: string | null;
-      settings: unknown;
-      ignored: string[];
-      errors: string[];
-    };
-    resultEl.textContent = pretty(preview);
-    if (applyBtn) {
-      applyBtn.disabled = !preview.found;
-      applyBtn.dataset.settings = JSON.stringify(preview.settings);
-    }
-  } catch (error) {
-    resultEl.textContent = `preview failed: ${error instanceof Error ? error.message : String(error)}`;
+async function api(path: string, init?: RequestInit): Promise<any> {
+  const res = await fetch(`${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`, init);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${text}`.trim());
   }
+  const ct = res.headers.get("content-type") ?? "";
+  if (ct.includes("application/json")) return res.json();
+  return res.text();
 }
 
-async function applyGhostty(): Promise<void> {
-  const resultEl = document.getElementById("ghostty-result");
-  const applyBtn = document.getElementById("ghostty-apply") as HTMLButtonElement | null;
-  if (!(resultEl instanceof HTMLElement) || !applyBtn) return;
-  let settings: unknown = {};
-  try {
-    settings = JSON.parse(applyBtn.dataset.settings ?? "{}");
-  } catch {
-    resultEl.textContent = "no preview to apply";
-    return;
-  }
-  try {
-    const response = await fetch(`/api/ghostty/import/apply${tokenParam()}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings }),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const result = await response.json();
-    resultEl.textContent = `applied:\n${pretty(result)}`;
-  } catch (error) {
-    resultEl.textContent = `apply failed: ${error instanceof Error ? error.message : String(error)}`;
-  }
-}
+// ---------- modal ----------
+const modalRoot = document.getElementById("modal-root")!;
 
-function wireGhostty(): void {
-  const previewBtn = document.getElementById("ghostty-preview");
-  const applyBtn = document.getElementById("ghostty-apply");
-  if (previewBtn instanceof HTMLButtonElement) {
-    previewBtn.addEventListener("click", () => void previewGhostty());
-  }
-  if (applyBtn instanceof HTMLButtonElement) {
-    applyBtn.addEventListener("click", () => void applyGhostty());
-  }
-}
-
-// Sessions (stage B3/B4)
-interface SessionInfo {
-  id: string;
-  kind: string;
-  title: string;
-  state: string;
-  pid: number | null;
-  exitCode: number | null;
-  startedAt: number;
-}
-
-let selectedSessionId: string | null = null;
-let sessionSocket: WebSocket | null = null;
-let sessionTerminal: Awaited<ReturnType<typeof mountTerminal>> | null = null;
-
-async function fetchSessions(): Promise<SessionInfo[]> {
-  const response = await fetch(`/api/sessions${tokenParam()}`);
-  if (!response.ok) return [];
-  const body = (await response.json()) as { sessions: SessionInfo[] };
-  return body.sessions ?? [];
-}
-
-function renderSessionList(sessions: SessionInfo[]): void {
-  const list = document.getElementById("session-list");
-  if (!(list instanceof HTMLElement)) return;
-  list.replaceChildren();
-  for (const session of sessions) {
-    const item = document.createElement("li");
-    item.style.padding = "0.25rem 0";
-    item.style.cursor = "pointer";
-    item.style.fontFamily = "monospace";
-    item.style.fontSize = "0.85rem";
-    item.textContent = `${session.id} · ${session.kind} · ${session.state} · pid ${session.pid ?? "-"}`;
-    if (session.id === selectedSessionId) {
-      item.style.fontWeight = "bold";
-    }
-    item.addEventListener("click", () => void selectSession(session.id));
-    const killBtn = document.createElement("button");
-    killBtn.textContent = "kill";
-    killBtn.style.marginLeft = "0.5rem";
-    killBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      void killSession(session.id);
-    });
-    item.append(killBtn);
-    list.append(item);
-  }
-}
-
-async function createSession(): Promise<void> {
-  const response = await fetch(`/api/sessions${tokenParam()}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "local" }),
+function openModal(content: (close: () => void) => HTMLElement): void {
+  modalRoot.classList.remove("hidden");
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const close = () => {
+    modalRoot.classList.add("hidden");
+    modalRoot.replaceChildren();
+  };
+  const modal = content(close);
+  modal.className = "modal";
+  backdrop.append(modal);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) close();
   });
-  if (!response.ok) return;
-  const body = (await response.json()) as { session: SessionInfo };
-  if (body.session) {
-    await selectSession(body.session.id);
-    await refreshSessions();
+  modalRoot.append(backdrop);
+}
+
+function field(label: string, input: HTMLElement): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const l = document.createElement("label");
+  l.textContent = label;
+  wrap.append(l, input);
+  return wrap;
+}
+
+function input(value = "", type = "text", placeholder = ""): HTMLInputElement {
+  const el = document.createElement("input");
+  el.type = type;
+  el.value = value;
+  el.placeholder = placeholder;
+  return el;
+}
+
+// ---------- state ----------
+const state = {
+  view: "sessions" as string,
+  sessions: [] as any[],
+  connections: [] as any[],
+  groups: [] as any[],
+  selectedSession: null as string | null,
+  terminal: null as Awaited<ReturnType<typeof mountTerminal>> | null,
+  terminalSocket: null as WebSocket | null,
+};
+
+// ---------- nav ----------
+const NAV = [
+  { id: "sessions", label: "Sessions" },
+  { id: "connections", label: "Connections" },
+  { id: "secrets", label: "Secrets" },
+  { id: "terminal", label: "Terminal" },
+  { id: "settings", label: "Settings" },
+];
+
+function renderNav(): void {
+  const nav = document.getElementById("nav")!;
+  nav.replaceChildren();
+  for (const item of NAV) {
+    const btn = document.createElement("button");
+    btn.textContent = item.label;
+    if (item.id === state.view) btn.classList.add("active");
+    btn.addEventListener("click", () => {
+      state.view = item.id;
+      render();
+    });
+    nav.append(btn);
   }
 }
 
-async function killSession(id: string): Promise<void> {
-  await fetch(`/api/sessions/${encodeURIComponent(id)}/kill${tokenParam()}`, { method: "POST" });
-  if (selectedSessionId === id) {
-    selectedSessionId = null;
-    if (sessionSocket) {
-      sessionSocket.close();
-      sessionSocket = null;
-    }
-    if (sessionTerminal) {
-      sessionTerminal.dispose();
-      sessionTerminal = null;
-    }
-  }
-  await refreshSessions();
+function render(): void {
+  renderNav();
+  const main = document.getElementById("main")!;
+  main.replaceChildren();
+  const h1 = document.createElement("h1");
+  h1.textContent = NAV.find((n) => n.id === state.view)?.label ?? "";
+  main.append(h1);
+  const view = VIEWS[state.view];
+  if (view) view(main);
 }
 
+// ---------- sessions view ----------
 async function refreshSessions(): Promise<void> {
-  const sessions = await fetchSessions();
-  renderSessionList(sessions);
+  try {
+    const body = await api("/api/sessions");
+    state.sessions = body.sessions ?? [];
+    if (state.view === "sessions") render();
+  } catch (e) {
+    console.error(e);
+  }
 }
 
-async function selectSession(id: string): Promise<void> {
-  selectedSessionId = id;
-  const status = document.getElementById("session-status");
-  if (status instanceof HTMLElement) status.textContent = `selected ${id}`;
-  const container = document.getElementById("session-terminal");
-  if (!(container instanceof HTMLElement)) return;
-
-  // Tear down previous terminal/socket.
-  if (sessionSocket) {
-    sessionSocket.close();
-    sessionSocket = null;
-  }
-  if (sessionTerminal) {
-    sessionTerminal.dispose();
-    sessionTerminal = null;
-  }
-  container.replaceChildren();
-  sessionTerminal = await mountTerminal(container, {
-    fontSize: 13,
-    fontFamily: "monospace",
-    cursorBlink: true,
-    cursorStyle: "block",
-    theme: { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc" },
-    banner: "",
+function sessionsView(main: HTMLElement): void {
+  const row = document.createElement("div");
+  row.className = "row";
+  const newBtn = document.createElement("button");
+  newBtn.className = "primary";
+  newBtn.textContent = "New local session";
+  newBtn.addEventListener("click", async () => {
+    await api("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "local" }) });
+    await refreshSessions();
   });
+  row.append(newBtn);
+  main.append(row);
 
-  const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/term?token=${encodeURIComponent(token)}`;
-  const socket = new WebSocket(wsUrl);
-  socket.binaryType = "arraybuffer";
-  sessionSocket = socket;
-  socket.onopen = () => {
-    socket.send(JSON.stringify({ t: "attach", sessionId: id }));
-  };
-  socket.onmessage = (event) => {
-    const data = event.data;
-    if (typeof data === "string") {
-      try {
-        const frame = JSON.parse(data) as { t?: string };
-        if (frame.t === "exit") {
-          if (status instanceof HTMLElement) status.textContent = `session ${id} exited`;
-        }
-      } catch {
-        // ignore
-      }
-      return;
-    }
-    if (data instanceof ArrayBuffer && sessionTerminal) {
-      sessionTerminal.terminal.write(new TextDecoder().decode(data));
-    }
-  };
-  socket.onclose = () => {
-    if (status instanceof HTMLElement) status.textContent = `socket closed for ${id}`;
-  };
-  if (sessionTerminal) {
-    sessionTerminal.terminal.onData((value: string) => {
-      if (sessionSocket && sessionSocket.readyState === WebSocket.OPEN) {
-        sessionSocket.send(new TextEncoder().encode(value));
-      }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>ID</th><th>Kind</th><th>Title</th><th>State</th><th>PID</th><th>Started</th><th>Exit</th><th>Actions</th></tr>";
+  table.append(thead);
+  const tbody = document.createElement("tbody");
+  for (const s of state.sessions) {
+    const tr = document.createElement("tr");
+    const started = new Date(s.startedAt).toLocaleTimeString();
+    tr.innerHTML = `<td class="mono">${s.id}</td><td>${s.kind}</td><td>${s.title}</td><td>${s.state}</td><td>${s.pid ?? "-"}</td><td>${started}</td><td>${s.exitCode ?? "-"}</td>`;
+    const actions = document.createElement("td");
+    const killBtn = document.createElement("button");
+    killBtn.className = "danger";
+    killBtn.textContent = "kill";
+    killBtn.addEventListener("click", async () => {
+      await api(`/api/sessions/${encodeURIComponent(s.id)}/kill`, { method: "POST" });
+      await refreshSessions();
     });
-    sessionTerminal.fitAddon.observeResize();
+    const openBtn = document.createElement("button");
+    openBtn.textContent = "open";
+    openBtn.addEventListener("click", async () => {
+      state.selectedSession = s.id;
+      state.view = "terminal";
+      render();
+    });
+    actions.append(openBtn, killBtn);
+    tr.append(actions);
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  main.append(table);
+  if (state.sessions.length === 0) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "No sessions yet.";
+    main.append(p);
   }
 }
 
-function wireSessions(): void {
-  const newBtn = document.getElementById("session-new");
-  if (newBtn instanceof HTMLButtonElement) {
-    newBtn.addEventListener("click", () => void createSession());
+// ---------- connections view ----------
+async function refreshConnections(): Promise<void> {
+  try {
+    const groups = await api("/api/groups");
+    const conns = await api("/api/connections");
+    state.groups = groups.groups ?? [];
+    state.connections = conns.connections ?? [];
+    if (state.view === "connections") render();
+  } catch (e) { console.error(e); }
+}
+
+function connectionsView(main: HTMLElement): void {
+  const row = document.createElement("div");
+  row.className = "row";
+  const newGroupBtn = document.createElement("button");
+  newGroupBtn.textContent = "New group";
+  newGroupBtn.addEventListener("click", () => {
+    const nameInput = input("", "text", "group name");
+    openModal((close) => {
+      const m = document.createElement("div");
+      m.innerHTML = "<h3>New group</h3>";
+      m.append(field("Name", nameInput));
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", close);
+      const ok = document.createElement("button");
+      ok.className = "primary";
+      ok.textContent = "Create";
+      ok.addEventListener("click", async () => {
+        await api("/api/groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nameInput.value }) });
+        close();
+        await refreshConnections();
+      });
+      actions.append(cancel, ok);
+      m.append(actions);
+      return m;
+    });
+  });
+  const newConnBtn = document.createElement("button");
+  newConnBtn.className = "primary";
+  newConnBtn.textContent = "New connection";
+  newConnBtn.addEventListener("click", () => {
+    const nameI = input("", "text", "name");
+    const hostI = input("", "text", "host");
+    const portI = input("", "text", "port (empty=default)");
+    const userI = input("", "text", "username");
+    const protoI = document.createElement("select");
+    for (const p of ["ssh", "rdp", "vnc"]) {
+      const o = document.createElement("option");
+      o.value = p; o.textContent = p.toUpperCase();
+      protoI.append(o);
+    }
+    const groupI = document.createElement("select");
+    const noneOpt = document.createElement("option");
+    noneOpt.value = ""; noneOpt.textContent = "(root)";
+    groupI.append(noneOpt);
+    for (const g of state.groups) {
+      const o = document.createElement("option");
+      o.value = g.id; o.textContent = g.name;
+      groupI.append(o);
+    }
+    openModal((close) => {
+      const m = document.createElement("div");
+      m.innerHTML = "<h3>New connection</h3>";
+      m.append(
+        field("Group", groupI),
+        field("Name", nameI),
+        field("Protocol", protoI),
+        field("Host", hostI),
+        field("Port", portI),
+        field("Username", userI),
+      );
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", close);
+      const ok = document.createElement("button");
+      ok.className = "primary";
+      ok.textContent = "Create";
+      ok.addEventListener("click", async () => {
+        const port = portI.value.trim() === "" ? null : Number(portI.value);
+        await api("/api/connections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            groupId: groupI.value || null,
+            name: nameI.value,
+            protocol: protoI.value,
+            host: hostI.value,
+            port,
+            username: userI.value,
+          }),
+        });
+        close();
+        await refreshConnections();
+      });
+      actions.append(cancel, ok);
+      m.append(actions);
+      return m;
+    });
+  });
+  row.append(newGroupBtn, newConnBtn);
+  main.append(row);
+
+  // Groups
+  if (state.groups.length > 0) {
+    const glist = document.createElement("ul");
+    glist.style.listStyle = "none";
+    glist.style.padding = "0";
+    for (const g of state.groups) {
+      const li = document.createElement("li");
+      li.className = "mono";
+      li.textContent = `${g.name} (${g.id})`;
+      glist.append(li);
+    }
+    main.append(glist);
   }
-  void refreshSessions();
-  // Keep the list fresh via SSE.
+
+  // Connections table
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>Name</th><th>Protocol</th><th>Target</th><th>Actions</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  for (const c of state.connections) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${c.name}</td><td>${c.protocol}</td><td class="mono">${c.username ? c.username + "@" : ""}${c.host}${c.port ? ":" + c.port : ""}</td>`;
+    const actions = document.createElement("td");
+    if (c.protocol === "ssh") {
+      const launchBtn = document.createElement("button");
+      launchBtn.className = "primary";
+      launchBtn.textContent = "Launch";
+      launchBtn.addEventListener("click", async () => {
+        const res = await api("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connectionId: c.id }) });
+        if (res.session) {
+          state.selectedSession = res.session.id;
+          state.view = "terminal";
+          await refreshSessions();
+          render();
+        }
+      });
+      actions.append(launchBtn);
+    }
+    const delBtn = document.createElement("button");
+    delBtn.className = "danger";
+    delBtn.textContent = "delete";
+    delBtn.addEventListener("click", async () => {
+      await api(`/api/connections/${encodeURIComponent(c.id)}`, { method: "DELETE" });
+      await refreshConnections();
+    });
+    actions.append(delBtn);
+    tr.append(actions);
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  main.append(table);
+  if (state.connections.length === 0) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "No connections yet.";
+    main.append(p);
+  }
+}
+
+// ---------- secrets view ----------
+async function refreshSecrets(): Promise<void> {
+  // no-op placeholder; secrets view fetches on render
+}
+
+function secretsView(main: HTMLElement): void {
+  const statusRow = document.createElement("div");
+  statusRow.className = "row";
+  const statusBtn = document.createElement("button");
+  statusBtn.textContent = "Refresh status";
+  const lockBtn = document.createElement("button");
+  lockBtn.textContent = "Lock";
+  lockBtn.addEventListener("click", async () => {
+    await api("/api/vault/lock", { method: "POST" });
+    render();
+  });
+  statusRow.append(statusBtn, lockBtn);
+  main.append(statusRow);
+
+  const result = document.createElement("pre");
+  result.id = "secret-result";
+  main.append(result);
+
+  void (async () => {
+    try {
+      const vs = await api("/api/vault/status");
+      result.textContent = JSON.stringify(vs, null, 2);
+    } catch (e) {
+      result.textContent = String(e);
+    }
+  })();
+
+  const newBtn = document.createElement("button");
+  newBtn.className = "primary";
+  newBtn.textContent = "New secret";
+  newBtn.addEventListener("click", () => {
+    const nameI = input("", "text", "secret name");
+    const valueI = input("", "text", "secret value");
+    const pwI = input("", "password", "master password (if locked)");
+    openModal((close) => {
+      const m = document.createElement("div");
+      m.innerHTML = "<h3>New secret</h3>";
+      m.append(field("Name", nameI), field("Value", valueI), field("Master password (setup/unlock if needed)", pwI));
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", close);
+      const ok = document.createElement("button");
+      ok.className = "primary";
+      ok.textContent = "Save";
+      ok.addEventListener("click", async () => {
+        // ensure unlocked
+        let vs = await api("/api/vault/status");
+        if (!vs.initialized) {
+          await api("/api/vault/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pwI.value }) });
+          await api("/api/vault/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pwI.value }) });
+        } else if (!vs.unlocked) {
+          await api("/api/vault/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pwI.value }) });
+        }
+        await api("/api/secrets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nameI.value, value: valueI.value }) });
+        close();
+        render();
+      });
+      actions.append(cancel, ok);
+      m.append(actions);
+      return m;
+    });
+  });
+  main.append(newBtn);
+
+  // list
+  void (async () => {
+    try {
+      const vs = await api("/api/vault/status");
+      if (!vs.unlocked) return;
+      const body = await api("/api/secrets");
+      const list = document.createElement("ul");
+      list.style.listStyle = "none";
+      list.style.padding = "0";
+      for (const name of body.names ?? []) {
+        const li = document.createElement("li");
+        li.className = "row";
+        const span = document.createElement("span");
+        span.className = "mono";
+        span.textContent = name;
+        const viewBtn = document.createElement("button");
+        viewBtn.textContent = "view";
+        viewBtn.addEventListener("click", async () => {
+          const r = await api(`/api/secrets/${encodeURIComponent(name)}`);
+          result.textContent = `${name} = ${r.value}`;
+        });
+        const delBtn = document.createElement("button");
+        delBtn.className = "danger";
+        delBtn.textContent = "delete";
+        delBtn.addEventListener("click", async () => {
+          await api(`/api/secrets/${encodeURIComponent(name)}`, { method: "DELETE" });
+          render();
+        });
+        li.append(span, viewBtn, delBtn);
+        list.append(li);
+      }
+      main.append(list);
+    } catch (e) {
+      console.error(e);
+    }
+  })();
+}
+
+// ---------- terminal view ----------
+function terminalView(main: HTMLElement): void {
+  const info = document.createElement("p");
+  info.className = "muted";
+  info.textContent = "Select a session from the Sessions view and click 'open', or create one. The terminal attaches over WebSocket.";
+  main.append(info);
+  const container = document.createElement("div");
+  container.id = "terminal";
+  main.append(container);
+  if (state.selectedSession) {
+    void (async () => {
+      const mt = await mountTerminal(container, { fontSize: 14, fontFamily: "monospace", cursorBlink: true, cursorStyle: "block", theme: { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc" }, banner: "" });
+      state.terminal = mt;
+      const ws = new WebSocket(`ws://${window.location.host}/term?token=${encodeURIComponent(token)}`);
+      ws.binaryType = "arraybuffer";
+      state.terminalSocket = ws;
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ t: "attach", sessionId: state.selectedSession }));
+      };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === "string") return;
+        if (ev.data instanceof ArrayBuffer) {
+          mt.terminal.write(new TextDecoder().decode(ev.data));
+        }
+      };
+      mt.terminal.onData((v: string) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(v));
+      });
+      mt.fitAddon.observeResize();
+    })();
+  } else {
+    container.textContent = "No session selected. Go to Sessions and click 'open'.";
+  }
+}
+
+// ---------- settings view ----------
+function settingsView(main: HTMLElement): void {
+  const card = document.createElement("div");
+  card.className = "card";
+  const status = document.createElement("pre");
+  status.textContent = "loading…";
+  card.append(status);
+  main.append(card);
+
+  void (async () => {
+    try {
+      const vs = await api("/api/vault/status");
+      const sess = await api("/api/sessions");
+      status.textContent = JSON.stringify({ vault: vs, sessions: sess.sessions?.length ?? 0 }, null, 2);
+    } catch (e) {
+      status.textContent = String(e);
+    }
+  })();
+
+  // Ghostty import
+  const gcard = document.createElement("div");
+  gcard.className = "card";
+  gcard.innerHTML = "<h2>Ghostty settings import</h2>";
+  const previewBtn = document.createElement("button");
+  previewBtn.textContent = "Preview import";
+  const applyBtn = document.createElement("button");
+  applyBtn.className = "primary";
+  applyBtn.textContent = "Apply";
+  applyBtn.disabled = true;
+  const gresult = document.createElement("pre");
+  gcard.append(previewBtn, applyBtn, gresult);
+  main.append(gcard);
+
+  let lastSettings: unknown = {};
+  previewBtn.addEventListener("click", async () => {
+    const preview = await api("/api/ghostty/import");
+    gresult.textContent = JSON.stringify(preview, null, 2);
+    lastSettings = preview.settings;
+    applyBtn.disabled = !preview.found;
+  });
+  applyBtn.addEventListener("click", async () => {
+    const r = await api("/api/ghostty/import/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: lastSettings }) });
+    gresult.textContent = JSON.stringify(r, null, 2);
+  });
+}
+
+const VIEWS: Record<string, (m: HTMLElement) => void> = {
+  sessions: sessionsView,
+  connections: connectionsView,
+  secrets: secretsView,
+  terminal: terminalView,
+  settings: settingsView,
+};
+
+// ---------- SSE ----------
+function startSse(): void {
   try {
     const source = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
-    source.addEventListener("message", () => void refreshSessions());
-    // session-updated is sent as a named event
-    source.addEventListener("session-updated", () => void refreshSessions());
+    source.addEventListener("session-updated", () => {
+      if (state.view === "sessions") refreshSessions();
+    });
   } catch {
     // ignore
   }
 }
 
-// Secrets (stage C)
-interface VaultStatusInfo {
-  initialized: boolean;
-  unlocked: boolean;
-  entries: string[];
-}
-
-async function vaultStatus(): Promise<VaultStatusInfo | null> {
-  const r = await fetch(`/api/vault/status${tokenParam()}`);
-  if (!r.ok) return null;
-  return (await r.json()) as VaultStatusInfo;
-}
-
-async function refreshSecrets(): Promise<void> {
-  const resultEl = document.getElementById("secret-result");
-  const list = document.getElementById("secret-list");
-  if (!(list instanceof HTMLElement)) return;
-  const vs = await vaultStatus();
-  if (resultEl instanceof HTMLElement) {
-    resultEl.textContent = vs ? JSON.stringify(vs, null, 2) : "vault unavailable";
-  }
-  list.replaceChildren();
-  if (!vs || !vs.unlocked) return;
-  const r = await fetch(`/api/secrets${tokenParam()}`);
-  if (!r.ok) return;
-  const body = (await r.json()) as { names: string[] };
-  for (const name of body.names ?? []) {
-    const item = document.createElement("li");
-    item.style.padding = "0.25rem 0";
-    item.style.fontFamily = "monospace";
-    item.style.fontSize = "0.85rem";
-    item.textContent = name;
-    const viewBtn = document.createElement("button");
-    viewBtn.textContent = "view";
-    viewBtn.style.marginLeft = "0.5rem";
-    viewBtn.addEventListener("click", async () => {
-      const res = await fetch(`/api/secrets/${encodeURIComponent(name)}${tokenParam()}`);
-      if (!res.ok) return;
-      const b = (await res.json()) as { value: string };
-      if (resultEl instanceof HTMLElement) resultEl.textContent = `${name} = ${b.value}`;
-    });
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "delete";
-    delBtn.style.marginLeft = "0.5rem";
-    delBtn.addEventListener("click", async () => {
-      await fetch(`/api/secrets/${encodeURIComponent(name)}${tokenParam()}`, { method: "DELETE" });
-      await refreshSecrets();
-    });
-    item.append(viewBtn, delBtn);
-    list.append(item);
-  }
-}
-
-function wireSecrets(): void {
-  const statusBtn = document.getElementById("vault-status-btn");
-  if (statusBtn instanceof HTMLButtonElement) {
-    statusBtn.addEventListener("click", () => void refreshSecrets());
-  }
-  const lockBtn = document.getElementById("vault-lock-btn");
-  if (lockBtn instanceof HTMLButtonElement) {
-    lockBtn.addEventListener("click", async () => {
-      await fetch(`/api/vault/lock${tokenParam()}`, { method: "POST" });
-      await refreshSecrets();
-    });
-  }
-  const newBtn = document.getElementById("secret-new");
-  if (newBtn instanceof HTMLButtonElement) {
-    newBtn.addEventListener("click", async () => {
-      const name = prompt("Secret name");
-      if (!name) return;
-      const value = prompt("Secret value") ?? "";
-      // Ensure unlocked: try setup if needed
-      let vs = await vaultStatus();
-      if (!vs || !vs.initialized) {
-        const password = prompt("Master password (setup)") ?? "";
-        if (!password) return;
-        await fetch(`/api/vault/setup${tokenParam()}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
-        });
-        await fetch(`/api/vault/unlock${tokenParam()}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
-        });
-      } else if (!vs.unlocked) {
-        const password = prompt("Master password (unlock)") ?? "";
-        if (!password) return;
-        await fetch(`/api/vault/unlock${tokenParam()}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
-        });
-      }
-      await fetch(`/api/secrets${tokenParam()}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, value }),
-      });
-      await refreshSecrets();
-    });
-  }
-  void refreshSecrets();
-}
-
-// Connections (stage D)
-interface ConnectionInfo {
-  id: string;
-  groupId: string | null;
-  name: string;
-  protocol: string;
-  host: string;
-  port: number | null;
-  username: string;
-}
-
-async function fetchConnections(): Promise<ConnectionInfo[]> {
-  const r = await fetch(`/api/connections${tokenParam()}`);
-  if (!r.ok) return [];
-  const b = (await r.json()) as { connections: ConnectionInfo[] };
-  return b.connections ?? [];
-}
-
-async function refreshConnections(): Promise<void> {
-  const list = document.getElementById("conn-list");
-  const status = document.getElementById("conn-status");
-  if (!(list instanceof HTMLElement)) return;
-  const conns = await fetchConnections();
-  list.replaceChildren();
-  for (const c of conns) {
-    const item = document.createElement("li");
-    item.style.padding = "0.25rem 0";
-    item.style.fontFamily = "monospace";
-    item.style.fontSize = "0.85rem";
-    item.textContent = `${c.name} · ${c.protocol} · ${c.username ? c.username + "@" : ""}${c.host}${c.port ? ":" + c.port : ""}`;
-    if (c.protocol === "ssh") {
-      const launchBtn = document.createElement("button");
-      launchBtn.textContent = "launch";
-      launchBtn.style.marginLeft = "0.5rem";
-      launchBtn.addEventListener("click", async () => {
-        const res = await fetch(`/api/sessions${tokenParam()}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ connectionId: c.id }),
-        });
-        if (res.ok) {
-          const b = (await res.json()) as { session: { id: string } };
-          if (b.session) await selectSession(b.session.id);
-        }
-        await refreshSessions();
-      });
-      item.append(launchBtn);
-    }
-    list.append(item);
-  }
-  if (status instanceof HTMLElement) status.textContent = `${conns.length} connection(s)`;
-}
-
-function wireConnections(): void {
-  const newGroupBtn = document.getElementById("conn-new-group");
-  if (newGroupBtn instanceof HTMLButtonElement) {
-    newGroupBtn.addEventListener("click", async () => {
-      const name = prompt("Group name");
-      if (!name) return;
-      await fetch(`/api/groups${tokenParam()}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      await refreshConnections();
-    });
-  }
-  const newConnBtn = document.getElementById("conn-new");
-  if (newConnBtn instanceof HTMLButtonElement) {
-    newConnBtn.addEventListener("click", async () => {
-      const name = prompt("Connection name");
-      if (!name) return;
-      const host = prompt("Host");
-      if (!host) return;
-      const protocol = prompt("Protocol (ssh/rdp/vnc)", "ssh") ?? "ssh";
-      const username = prompt("Username", "") ?? "";
-      const portRaw = prompt("Port (empty = default)", "");
-      const port = portRaw && portRaw.trim().length > 0 ? Number(portRaw) : null;
-      await fetch(`/api/connections${tokenParam()}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, host, protocol, username, port }),
-      });
-      await refreshConnections();
-    });
-  }
-  void refreshConnections();
-}
-
-function main(): void {
-  token = locationToken();
-  const list = document.getElementById("transport-probe");
-  if (list instanceof HTMLElement) {
-    const runState = document.createElement("div");
-    runState.id = "run-state";
-    runState.dataset.state = "running";
-    list.before(runState);
-    for (const step of probes()) {
-      renderProbe(list, step);
-    }
-  }
-  wireGhostty();
-  wireSessions();
-  wireSecrets();
-  wireConnections();
-
-  const terminalContainer = document.getElementById("terminal");
-  if (terminalContainer instanceof HTMLElement) {
-    void mountTerminal(terminalContainer, {
-      fontSize: 14,
-      fontFamily: "monospace",
-      cursorBlink: true,
-      cursorStyle: "block",
-      theme: { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc" },
-      banner: "remote-control console (ghostty-web) — stage B2\r\n",
-    }).catch((error) => {
-      terminalContainer.textContent = `terminal failed to mount: ${error instanceof Error ? error.message : String(error)}`;
-    });
-  }
-}
-
-main();
+// ---------- init ----------
+render();
+void refreshSessions();
+void refreshConnections();
+startSse();

@@ -5,49 +5,40 @@
   <title>remote-control console</title>
   <style>
     :root { color-scheme: light dark; }
-    body { font-family: system-ui, sans-serif; margin: 2rem 3rem; line-height: 1.5; }
-    h1 { margin: 0 0 0.5rem; }
-    #transport-probe { border: 1px solid currentColor; border-radius: 8px; padding: 0.25rem 1rem; max-width: 40rem; }
-    #transport-probe li[data-refresh="done"][data-state="pass"] { color: green; }
-    #transport-probe li[data-refresh="done"][data-state="fail"] { color: crimson; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+    nav { width: 220px; border-right: 1px solid #8884; padding: 1rem 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
+    nav button { text-align: left; padding: 0.5rem 0.75rem; border: none; background: transparent; cursor: pointer; border-radius: 6px; font-size: 0.95rem; }
+    nav button.active { background: #8882; font-weight: 600; }
+    main { flex: 1; padding: 1.5rem 2rem; overflow: auto; }
+    h1 { margin: 0 0 1rem; font-size: 1.4rem; }
+    h2 { margin: 1.2rem 0 0.5rem; font-size: 1.1rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #8883; }
+    button { cursor: pointer; padding: 0.4rem 0.8rem; border: 1px solid #8886; border-radius: 6px; background: transparent; }
+    button.primary { background: #3b82f6; color: white; border-color: #3b82f6; }
+    button.danger { color: #ef4444; border-color: #ef4444; }
+    input, select { padding: 0.4rem 0.6rem; border: 1px solid #8886; border-radius: 6px; font-size: 0.9rem; }
+    .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
+    .card { border: 1px solid #8883; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
+    .muted { color: #888; font-size: 0.85rem; }
+    .mono { font-family: monospace; font-size: 0.85rem; }
+    /* modal */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal { background: #fff; color: #111; border-radius: 10px; padding: 1.25rem; min-width: 320px; max-width: 520px; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+    @media (prefers-color-scheme: dark) { .modal { background: #1f2937; color: #f3f4f6; } }
+    .modal h3 { margin: 0 0 0.75rem; }
+    .modal .field { display: flex; flex-direction: column; gap: 0.25rem; margin: 0.5rem 0; }
+    .modal .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+    .hidden { display: none !important; }
+    #terminal { width: 100%; height: 360px; border: 1px solid #8884; border-radius: 8px; }
+    pre { white-space: pre-wrap; font-size: 0.8rem; background: #0001; padding: 0.5rem; border-radius: 6px; }
   </style>
 </head>
 <body>
-  <h1>remote-control console</h1>
-  <p>Transport probe (stage A3) + Ghostty import (B1) + terminal (B2) +
-     sessions (B3/B4) + secrets (C).</p>
-  <section id="terminal-section" style="margin-top:2rem;">
-    <h2 style="font-size:1.1rem; margin:0 0 0.5rem;">Terminal (ghostty-web, stage B2)</h2>
-    <div id="terminal" style="width:100%; height:240px; border:1px solid currentColor; border-radius:8px;"></div>
-  </section>
-  <section id="sessions-section" style="margin-top:2rem; border:1px solid currentColor; border-radius:8px; padding:0.5rem 1rem; max-width:40rem;">
-    <h2 style="margin:0 0 0.5rem; font-size:1.1rem;">Sessions (stage B3/B4)</h2>
-    <button id="session-new">New local session</button>
-    <ul id="session-list" style="list-style:none; padding:0; margin:0.5rem 0;"></ul>
-    <div id="session-terminal" style="width:100%; height:240px; border:1px solid currentColor; border-radius:8px; margin-top:0.5rem;"></div>
-    <pre id="session-status" style="white-space:pre-wrap; font-size:0.85rem; margin-top:0.5rem;"></pre>
-  </section>
-  <section id="ghostty-import" style="margin-top:2rem; border:1px solid currentColor; border-radius:8px; padding:0.5rem 1rem; max-width:40rem;">
-    <h2 style="margin:0 0 0.5rem; font-size:1.1rem;">Ghostty settings import (stage B1)</h2>
-    <button id="ghostty-preview">Preview import</button>
-    <button id="ghostty-apply" disabled>Apply</button>
-    <pre id="ghostty-result" style="white-space:pre-wrap; font-size:0.85rem;"></pre>
-  </section>
-  <section id="connections-section" style="margin-top:2rem; border:1px solid currentColor; border-radius:8px; padding:0.5rem 1rem; max-width:40rem;">
-    <h2 style="margin:0 0 0.5rem; font-size:1.1rem;">Connections (stage D)</h2>
-    <button id="conn-new-group">New group</button>
-    <button id="conn-new">New connection</button>
-    <ul id="conn-list" style="list-style:none; padding:0; margin:0.5rem 0;"></ul>
-    <pre id="conn-status" style="white-space:pre-wrap; font-size:0.85rem; margin-top:0.5rem;"></pre>
-  </section>
-    <h2 style="margin:0 0 0.5rem; font-size:1.1rem;">Secrets (pass vault, stage C)</h2>
-    <button id="vault-status-btn">Status</button>
-    <button id="vault-lock-btn">Lock</button>
-    <button id="secret-new">New secret</button>
-    <ul id="secret-list" style="list-style:none; padding:0; margin:0.5rem 0;"></ul>
-    <pre id="secret-result" style="white-space:pre-wrap; font-size:0.85rem; margin-top:0.5rem;"></pre>
-  </section>
-  <ul id="transport-probe"></ul>
+  <nav id="nav"></nav>
+  <main id="main"></main>
+  <div id="modal-root" class="hidden"></div>
   <script type="module" src="./main.js"></script>
 </body>
 </html>
