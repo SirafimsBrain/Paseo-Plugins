@@ -31,6 +31,7 @@ export interface ConsoleEndpointOptions {
   logError?: (message: string) => void;
   resolveSession?: (id: string) => import("./pty").PtyHandle | null;
   sessions?: import("./sessions").SessionRegistry;
+  vault?: import("./vault").VaultService;
   onServerStarted?: (server: ConsoleHttpServer) => void;
 }
 
@@ -156,6 +157,7 @@ export class ConsoleEndpoint {
           consoleDir: this.options.consoleDir,
           transport,
           sessions: this.options.sessions,
+          vault: this.options.vault,
         });
         await server.start();
         this.options.onServerStarted?.(server);

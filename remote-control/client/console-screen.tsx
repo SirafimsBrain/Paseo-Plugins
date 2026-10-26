@@ -6,7 +6,7 @@ import {
   useRpc,
 } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { consoleUrl, state } from "../shared/rpc";
+import { consoleUrl, state, vaultLock, vaultSetup, vaultUnlock } from "../shared/rpc";
 import { openConsoleUrl } from "./open-console";
 
 const SCREEN_ID = "remote-control";
@@ -17,6 +17,9 @@ export function RemoteControlScreen(props: PluginScreenProps) {
   const { theme } = props;
   const stateRpc = useRpc(state);
   const consoleUrlRpc = useRpc(consoleUrl);
+  const vaultSetupRpc = useRpc(vaultSetup);
+  const vaultUnlockRpc = useRpc(vaultUnlock);
+  const vaultLockRpc = useRpc(vaultLock);
   const paseo = usePaseo();
 
   const [listening, setListening] = useState(false);
@@ -26,6 +29,8 @@ export function RemoteControlScreen(props: PluginScreenProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [vault, setVault] = useState<{ initialized: boolean; unlocked: boolean; entries: number } | null>(null);
+
   const refresh = useCallback(async () => {
     try {
       const result = await stateRpc({});
@@ -33,10 +38,35 @@ export function RemoteControlScreen(props: PluginScreenProps) {
       setTransport(result.transport);
       setTransportConnections(result.transportConnections);
       setUrl(result.consoleUrl);
+      setVault(result.vault);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, [stateRpc]);
+
+  const doUnlock = useCallback(async () => {
+    const password = (globalThis as unknown as { prompt?: (m: string) => string | null }).prompt?.("Master password");
+    if (!password) return;
+    try {
+      if (!vault?.initialized) {
+        await vaultSetupRpc({ password });
+      }
+      const result = await vaultUnlockRpc({ password });
+      if (!result.ok) setError("unlock failed");
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [vault, refresh, vaultSetupRpc, vaultUnlockRpc]);
+
+  const doLock = useCallback(async () => {
+    try {
+      await vaultLockRpc({});
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [refresh, vaultLockRpc]);
 
   useEffect(() => {
     void refresh();
@@ -89,9 +119,18 @@ export function RemoteControlScreen(props: PluginScreenProps) {
       {url ? <Text style={{ color: muted, fontSize: 12 }}>{url}</Text> : null}
       {message ? <Text style={{ color: theme.colors.statusSuccess, fontSize: 12 }}>{message}</Text> : null}
       {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
-      <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>
-        <Text style={{ color: accent, fontSize: 13 }}>Open console</Text>
-      </Pressable>
+      <Text style={{ color: muted, fontSize: 13 }}>
+        Vault: {vault ? (vault.initialized ? (vault.unlocked ? "unlocked" : "locked") : "not initialized") : "…"}
+        {vault?.initialized ? ` (${vault.entries} secrets)` : ""}
+      </Text>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable onPress={doUnlock} style={[styles.button, { borderColor: accent }]}>
+          <Text style={{ color: accent, fontSize: 13 }}>{vault?.initialized ? "Unlock" : "Setup"}</Text>
+        </Pressable>
+        <Pressable onPress={doLock} style={[styles.button, { borderColor: accent }]}>
+          <Text style={{ color: accent, fontSize: 13 }}>Lock</Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }

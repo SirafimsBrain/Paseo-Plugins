@@ -16,5 +16,28 @@ export const state = defineRpc({
     version: z.string(),
     transport: z.enum(["ws", "sse-post"]).nullable(),
     transportConnections: z.number().int().nonnegative(),
+    vault: z.object({
+      initialized: z.boolean(),
+      unlocked: z.boolean(),
+      entries: z.number().int().nonnegative(),
+    }),
   }),
+});
+
+export const vaultSetup = defineRpc({
+  name: "remote-control.vault.setup",
+  input: z.object({ password: z.string().min(1), keyId: z.string().optional() }),
+  output: z.object({ generated: z.boolean() }),
+});
+
+export const vaultUnlock = defineRpc({
+  name: "remote-control.vault.unlock",
+  input: z.object({ password: z.string().min(1) }),
+  output: z.object({ ok: z.boolean() }),
+});
+
+export const vaultLock = defineRpc({
+  name: "remote-control.vault.lock",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean() }),
 });

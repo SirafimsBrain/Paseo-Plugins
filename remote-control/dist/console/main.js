@@ -3440,6 +3440,101 @@ function wireSessions() {
   } catch {
   }
 }
+async function vaultStatus() {
+  const r2 = await fetch(`/api/vault/status${tokenParam()}`);
+  if (!r2.ok) return null;
+  return await r2.json();
+}
+async function refreshSecrets() {
+  const resultEl = document.getElementById("secret-result");
+  const list = document.getElementById("secret-list");
+  if (!(list instanceof HTMLElement)) return;
+  const vs = await vaultStatus();
+  if (resultEl instanceof HTMLElement) {
+    resultEl.textContent = vs ? JSON.stringify(vs, null, 2) : "vault unavailable";
+  }
+  list.replaceChildren();
+  if (!vs || !vs.unlocked) return;
+  const r2 = await fetch(`/api/secrets${tokenParam()}`);
+  if (!r2.ok) return;
+  const body = await r2.json();
+  for (const name of body.names ?? []) {
+    const item = document.createElement("li");
+    item.style.padding = "0.25rem 0";
+    item.style.fontFamily = "monospace";
+    item.style.fontSize = "0.85rem";
+    item.textContent = name;
+    const viewBtn = document.createElement("button");
+    viewBtn.textContent = "view";
+    viewBtn.style.marginLeft = "0.5rem";
+    viewBtn.addEventListener("click", async () => {
+      const res = await fetch(`/api/secrets/${encodeURIComponent(name)}${tokenParam()}`);
+      if (!res.ok) return;
+      const b2 = await res.json();
+      if (resultEl instanceof HTMLElement) resultEl.textContent = `${name} = ${b2.value}`;
+    });
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "delete";
+    delBtn.style.marginLeft = "0.5rem";
+    delBtn.addEventListener("click", async () => {
+      await fetch(`/api/secrets/${encodeURIComponent(name)}${tokenParam()}`, { method: "DELETE" });
+      await refreshSecrets();
+    });
+    item.append(viewBtn, delBtn);
+    list.append(item);
+  }
+}
+function wireSecrets() {
+  const statusBtn = document.getElementById("vault-status-btn");
+  if (statusBtn instanceof HTMLButtonElement) {
+    statusBtn.addEventListener("click", () => void refreshSecrets());
+  }
+  const lockBtn = document.getElementById("vault-lock-btn");
+  if (lockBtn instanceof HTMLButtonElement) {
+    lockBtn.addEventListener("click", async () => {
+      await fetch(`/api/vault/lock${tokenParam()}`, { method: "POST" });
+      await refreshSecrets();
+    });
+  }
+  const newBtn = document.getElementById("secret-new");
+  if (newBtn instanceof HTMLButtonElement) {
+    newBtn.addEventListener("click", async () => {
+      const name = prompt("Secret name");
+      if (!name) return;
+      const value = prompt("Secret value") ?? "";
+      let vs = await vaultStatus();
+      if (!vs || !vs.initialized) {
+        const password = prompt("Master password (setup)") ?? "";
+        if (!password) return;
+        await fetch(`/api/vault/setup${tokenParam()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password })
+        });
+        await fetch(`/api/vault/unlock${tokenParam()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password })
+        });
+      } else if (!vs.unlocked) {
+        const password = prompt("Master password (unlock)") ?? "";
+        if (!password) return;
+        await fetch(`/api/vault/unlock${tokenParam()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password })
+        });
+      }
+      await fetch(`/api/secrets${tokenParam()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, value })
+      });
+      await refreshSecrets();
+    });
+  }
+  void refreshSecrets();
+}
 function main() {
   token = locationToken();
   const list = document.getElementById("transport-probe");
@@ -3454,6 +3549,7 @@ function main() {
   }
   wireGhostty();
   wireSessions();
+  wireSecrets();
   const terminalContainer = document.getElementById("terminal");
   if (terminalContainer instanceof HTMLElement) {
     void mountTerminal(terminalContainer, {

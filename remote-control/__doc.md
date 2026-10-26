@@ -54,7 +54,28 @@ Conditions of the decision:
 - `tests/http-server.test.ts`: adapted to `@types/node` 22.20.5 typing
   (`res.json()` now yields `unknown`) — no behavior change.
 
-## PTY and sessions (stages B3/B4)
+## Pass vault (stages C1–C3)
+
+- `server/vault.ts`: `VaultService` over an isolated `GNUPGHOME` + `PASSWORD_STORE_DIR`
+  (defaults `$PASEO_HOME/pass-gnupg` and `$PASEO_HOME/pass-store`), supporting
+  `setup` (generates a RSA key with the master password as its passphrase,
+  writes `.gpg-id`, creates an encrypted probe), `unlock` (trial decryption,
+  caches the passphrase in a Buffer), `lock` (zeroes the buffer, kills
+  gpg-agent), `status`, `listEntries`, `get`, `set`, `delete`. Auto-lock by
+  inactivity supported (default off). `gpg-agent.conf` sets cache ttl 0 so
+  unlock actually verifies the password.
+- `shared/vault.ts` + RPCs `vault.setup/unlock/lock`; `state` now reports
+  `vault: { initialized, unlocked, entries }`.
+- REST: `/api/vault/{status,setup,unlock,lock}`, `/api/secrets[/:name]`
+  (GET/POST/PATCH/DELETE), token-gated; only names are listed, values fetched
+  on demand.
+- `client/console-screen.tsx`: vault status, Setup/Unlock (prompt) and Lock
+  buttons. Console: secrets section (status, lock, new secret, list with
+  view/delete).
+- Cleanup: `vault.lock()` on plugin dispose. C3: wrong password not cached,
+  buffer zeroed on lock, auto-lock timer, foreign store dir via `storeDir`
+  option, scenario tests skip gracefully when gpg is absent.
+- Tests: `tests/vault.test.ts` (12 tests, gpg-gated).
 
 - `server/pty.ts`: `Pty` wraps `@lydell/node-pty` (linux-x64 prebuild, no
   native compile needed), ring buffer (`RingBuffer`, default 64 KiB) with

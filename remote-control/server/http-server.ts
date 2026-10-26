@@ -49,6 +49,8 @@ export interface ConsoleHttpServerOptions {
   transport?: TransportBridge;
   /** Session registry for /api/sessions routes and SSE broadcasts. */
   sessions?: SessionRegistry;
+  /** Vault service for /api/vault and /api/secrets routes. */
+  vault?: import("./vault").VaultService;
 }
 
 export class ConsoleHttpServer {
@@ -58,6 +60,7 @@ export class ConsoleHttpServer {
   private readonly consoleDir: string;
   private readonly transport: TransportBridge | null;
   private readonly sessions: SessionRegistry | null;
+  private readonly vault: import("./vault").VaultService | null;
   private readonly options: ConsoleHttpServerOptions;
   private server: http.Server | null = null;
   private boundPort: number | null = null;
@@ -83,6 +86,7 @@ export class ConsoleHttpServer {
     this.consoleDir = options.consoleDir ?? resolveConsoleDir();
     this.transport = options.transport ?? null;
     this.sessions = options.sessions ?? null;
+    this.vault = options.vault ?? null;
     if (this.sessions) {
       this.sessions.setOnEvent((event) => {
         this.broadcastSse(event.type, event);
@@ -251,8 +255,108 @@ export class ConsoleHttpServer {
         this.sendJson(res, 200, { session });
         return;
       }
+      if (url.pathname === "/api/vault/status") {
+        if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
+        this.sendJson(res, 200, this.vault.status());
+        return;
+      }
+      if (url.pathname === "/api/vault/setup") {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
+        void this.readJsonBody(req).then(async (body) => {
+          const password = body && typeof body === "object" && "password" in body ? String((body as { password: unknown }).password) : "";
+          const keyId = body && typeof body === "object" && "keyId" in body ? String((body as { keyId: unknown }).keyId) : undefined;
+          try {
+            const result = await this.vault!.setup(password, keyId);
+            this.sendJson(res, 200, result);
+          } catch (cause) {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          }
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
+        return;
+      }
+      if (url.pathname === "/api/vault/unlock") {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
+        void this.readJsonBody(req).then(async (body) => {
+          const password = body && typeof body === "object" && "password" in body ? String((body as { password: unknown }).password) : "";
+          const result = await this.vault!.unlock(password);
+          this.sendJson(res, 200, result);
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
+        return;
+      }
+      if (url.pathname === "/api/vault/lock") {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
+        this.vault.lock();
+        this.sendJson(res, 200, { ok: true });
+        return;
+      }
+      if (url.pathname === "/api/secrets") {
+        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
+        if (req.method === "GET") {
+          const prefix = url.searchParams.get("prefix") ?? undefined;
+          this.sendJson(res, 200, { names: this.vault.listEntries(prefix) });
+          return;
+        }
+        if (req.method === "POST") {
+          void this.readJsonBody(req).then(async (body) => {
+            const name = body && typeof body === "object" && "name" in body ? String((body as { name: unknown }).name) : "";
+            const value = body && typeof body === "object" && "value" in body ? String((body as { value: unknown }).value) : "";
+            await this.vault!.set(name, value);
+            this.sendJson(res, 201, { ok: true });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      const secretMatch = /^\/api\/secrets\/(.+)$/.exec(url.pathname);
+      if (secretMatch && this.vault) {
+        const vault = this.vault;
+        const name = decodeURIComponent(secretMatch[1]);
+        if (req.method === "GET") {
+          void (async () => {
+            try {
+              const value = await vault.get(name);
+              this.sendJson(res, 200, { value });
+            } catch (cause) {
+              this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+            }
+          })();
+          return;
+        }
+        if (req.method === "PATCH") {
+          void this.readJsonBody(req).then(async (body) => {
+            const value = body && typeof body === "object" && "value" in body ? String((body as { value: unknown }).value) : "";
+            await this.vault!.set(name, value);
+            this.sendJson(res, 200, { ok: true });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        if (req.method === "DELETE") {
+          void this.vault.delete(name).then((ok) => {
+            this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
       if (url.pathname === "/api/ghostty/import") {
         if (req.method === "GET") {
+          this.sendJson(res, 200, previewGhosttyImport());
           return;
         }
         if (req.method === "POST") {
