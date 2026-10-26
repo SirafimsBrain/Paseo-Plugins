@@ -4,6 +4,7 @@ import * as http from "node:http";
 import * as path from "node:path";
 import { resolveConsoleDir, resolvePluginVersion } from "./paths";
 import type { TransportBridge } from "./transport";
+import type { SessionRegistry } from "./sessions";
 import {
   applyGhosttySettings,
   loadGhosttySettings,
@@ -46,6 +47,8 @@ export interface ConsoleHttpServerOptions {
   consoleDir?: string;
   /** WebSocket bridge for the terminal transport (A3); disposed on stop(). */
   transport?: TransportBridge;
+  /** Session registry for /api/sessions routes and SSE broadcasts. */
+  sessions?: SessionRegistry;
 }
 
 export class ConsoleHttpServer {
@@ -54,6 +57,7 @@ export class ConsoleHttpServer {
   private readonly version: string;
   private readonly consoleDir: string;
   private readonly transport: TransportBridge | null;
+  private readonly sessions: SessionRegistry | null;
   private readonly options: ConsoleHttpServerOptions;
   private server: http.Server | null = null;
   private boundPort: number | null = null;
@@ -78,6 +82,12 @@ export class ConsoleHttpServer {
     this.version = options.version ?? resolvePluginVersion();
     this.consoleDir = options.consoleDir ?? resolveConsoleDir();
     this.transport = options.transport ?? null;
+    this.sessions = options.sessions ?? null;
+    if (this.sessions) {
+      this.sessions.setOnEvent((event) => {
+        this.broadcastSse(event.type, event);
+      });
+    }
   }
 
   /** Number of live transport connections (WebSocket bridge). */
@@ -188,9 +198,61 @@ export class ConsoleHttpServer {
         this.serveEvents(req, res);
         return;
       }
+      if (url.pathname === "/api/sessions") {
+        if (!this.sessions) {
+          this.sendJson(res, 503, { error: "sessions unavailable" });
+          return;
+        }
+        if (req.method === "GET") {
+          this.sendJson(res, 200, { sessions: this.sessions.list() });
+          return;
+        }
+        if (req.method === "POST") {
+          void this.readJsonBody(req)
+            .then((body) => {
+              const kind = (body && typeof body === "object" && "kind" in body)
+                ? String((body as { kind: unknown }).kind)
+                : "local";
+              if (kind !== "local") {
+                this.sendJson(res, 400, { error: `unsupported session kind: ${kind}` });
+                return;
+              }
+              const title = (body && typeof body === "object" && "title" in body)
+                ? String((body as { title: unknown }).title)
+                : undefined;
+              const session = this.sessions!.createLocal({ title });
+              this.sendJson(res, 201, { session });
+            })
+            .catch((cause) => {
+              this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+            });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      const sessionMatch = /^\/api\/sessions\/([^/]+)\/(kill|reconnect)$/.exec(url.pathname);
+      if (sessionMatch && this.sessions) {
+        const sessionId = decodeURIComponent(sessionMatch[1]);
+        if (req.method !== "POST") {
+          this.sendJson(res, 405, { error: "method not allowed" });
+          return;
+        }
+        if (sessionMatch[2] === "kill") {
+          const ok = this.sessions.kill(sessionId);
+          this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
+          return;
+        }
+        const session = this.sessions.reconnect(sessionId);
+        if (!session) {
+          this.sendJson(res, 404, { error: "not found" });
+          return;
+        }
+        this.sendJson(res, 200, { session });
+        return;
+      }
       if (url.pathname === "/api/ghostty/import") {
         if (req.method === "GET") {
-          this.sendJson(res, 200, previewGhosttyImport());
           return;
         }
         if (req.method === "POST") {
@@ -220,6 +282,17 @@ export class ConsoleHttpServer {
   /** Number of open SSE subscriptions. */
   get sseSubscribers(): number {
     return this.eventClients.size;
+  }
+
+  broadcastSse(eventName: string, data: unknown): void {
+    const payload = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of this.eventClients) {
+      try {
+        client.write(payload);
+      } catch {
+        this.eventClients.delete(client);
+      }
+    }
   }
 
   private serveEvents(req: http.IncomingMessage, res: http.ServerResponse): void {

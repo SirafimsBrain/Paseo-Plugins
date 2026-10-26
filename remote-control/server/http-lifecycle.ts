@@ -29,6 +29,9 @@ export interface ConsoleEndpointOptions {
   consoleDir?: string;
   log?: (message: string) => void;
   logError?: (message: string) => void;
+  resolveSession?: (id: string) => import("./pty").PtyHandle | null;
+  sessions?: import("./sessions").SessionRegistry;
+  onServerStarted?: (server: ConsoleHttpServer) => void;
 }
 
 const SETTLE_MS = 150;
@@ -142,6 +145,7 @@ export class ConsoleEndpoint {
       const transport = new WebSocketTransport({
         token: this.token,
         log: this.options.log,
+        resolveSession: this.options.resolveSession,
       });
       try {
         const server = new ConsoleHttpServer({
@@ -151,8 +155,10 @@ export class ConsoleEndpoint {
           version: this.options.version,
           consoleDir: this.options.consoleDir,
           transport,
+          sessions: this.options.sessions,
         });
         await server.start();
+        this.options.onServerStarted?.(server);
         return server;
       } catch (cause) {
         transport.dispose();

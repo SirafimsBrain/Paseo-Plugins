@@ -3302,6 +3302,144 @@ function wireGhostty() {
     applyBtn.addEventListener("click", () => void applyGhostty());
   }
 }
+var selectedSessionId = null;
+var sessionSocket = null;
+var sessionTerminal = null;
+async function fetchSessions() {
+  const response = await fetch(`/api/sessions${tokenParam()}`);
+  if (!response.ok) return [];
+  const body = await response.json();
+  return body.sessions ?? [];
+}
+function renderSessionList(sessions) {
+  const list = document.getElementById("session-list");
+  if (!(list instanceof HTMLElement)) return;
+  list.replaceChildren();
+  for (const session of sessions) {
+    const item = document.createElement("li");
+    item.style.padding = "0.25rem 0";
+    item.style.cursor = "pointer";
+    item.style.fontFamily = "monospace";
+    item.style.fontSize = "0.85rem";
+    item.textContent = `${session.id} \xB7 ${session.kind} \xB7 ${session.state} \xB7 pid ${session.pid ?? "-"}`;
+    if (session.id === selectedSessionId) {
+      item.style.fontWeight = "bold";
+    }
+    item.addEventListener("click", () => void selectSession(session.id));
+    const killBtn = document.createElement("button");
+    killBtn.textContent = "kill";
+    killBtn.style.marginLeft = "0.5rem";
+    killBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void killSession(session.id);
+    });
+    item.append(killBtn);
+    list.append(item);
+  }
+}
+async function createSession() {
+  const response = await fetch(`/api/sessions${tokenParam()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "local" })
+  });
+  if (!response.ok) return;
+  const body = await response.json();
+  if (body.session) {
+    await selectSession(body.session.id);
+    await refreshSessions();
+  }
+}
+async function killSession(id) {
+  await fetch(`/api/sessions/${encodeURIComponent(id)}/kill${tokenParam()}`, { method: "POST" });
+  if (selectedSessionId === id) {
+    selectedSessionId = null;
+    if (sessionSocket) {
+      sessionSocket.close();
+      sessionSocket = null;
+    }
+    if (sessionTerminal) {
+      sessionTerminal.dispose();
+      sessionTerminal = null;
+    }
+  }
+  await refreshSessions();
+}
+async function refreshSessions() {
+  const sessions = await fetchSessions();
+  renderSessionList(sessions);
+}
+async function selectSession(id) {
+  selectedSessionId = id;
+  const status = document.getElementById("session-status");
+  if (status instanceof HTMLElement) status.textContent = `selected ${id}`;
+  const container = document.getElementById("session-terminal");
+  if (!(container instanceof HTMLElement)) return;
+  if (sessionSocket) {
+    sessionSocket.close();
+    sessionSocket = null;
+  }
+  if (sessionTerminal) {
+    sessionTerminal.dispose();
+    sessionTerminal = null;
+  }
+  container.replaceChildren();
+  sessionTerminal = await mountTerminal(container, {
+    fontSize: 13,
+    fontFamily: "monospace",
+    cursorBlink: true,
+    cursorStyle: "block",
+    theme: { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc" },
+    banner: ""
+  });
+  const wsUrl2 = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/term?token=${encodeURIComponent(token)}`;
+  const socket = new WebSocket(wsUrl2);
+  socket.binaryType = "arraybuffer";
+  sessionSocket = socket;
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ t: "attach", sessionId: id }));
+  };
+  socket.onmessage = (event) => {
+    const data = event.data;
+    if (typeof data === "string") {
+      try {
+        const frame = JSON.parse(data);
+        if (frame.t === "exit") {
+          if (status instanceof HTMLElement) status.textContent = `session ${id} exited`;
+        }
+      } catch {
+      }
+      return;
+    }
+    if (data instanceof ArrayBuffer && sessionTerminal) {
+      sessionTerminal.terminal.write(new TextDecoder().decode(data));
+    }
+  };
+  socket.onclose = () => {
+    if (status instanceof HTMLElement) status.textContent = `socket closed for ${id}`;
+  };
+  if (sessionTerminal) {
+    sessionTerminal.terminal.onData((value) => {
+      if (sessionSocket && sessionSocket.readyState === WebSocket.OPEN) {
+        sessionSocket.send(new TextEncoder().encode(value));
+      }
+    });
+    sessionTerminal.fitAddon.observeResize();
+  }
+}
+function wireSessions() {
+  const newBtn = document.getElementById("session-new");
+  if (newBtn instanceof HTMLButtonElement) {
+    newBtn.addEventListener("click", () => void createSession());
+  }
+  void refreshSessions();
+  try {
+    const source = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    source.addEventListener("message", () => void refreshSessions());
+    source.addEventListener("session-updated", () => void refreshSessions());
+  } catch {
+  }
+}
 function main() {
   token = locationToken();
   const list = document.getElementById("transport-probe");
@@ -3315,6 +3453,7 @@ function main() {
     }
   }
   wireGhostty();
+  wireSessions();
   const terminalContainer = document.getElementById("terminal");
   if (terminalContainer instanceof HTMLElement) {
     void mountTerminal(terminalContainer, {

@@ -260,6 +260,170 @@ function wireGhostty(): void {
   }
 }
 
+// Sessions (stage B3/B4)
+interface SessionInfo {
+  id: string;
+  kind: string;
+  title: string;
+  state: string;
+  pid: number | null;
+  exitCode: number | null;
+  startedAt: number;
+}
+
+let selectedSessionId: string | null = null;
+let sessionSocket: WebSocket | null = null;
+let sessionTerminal: Awaited<ReturnType<typeof mountTerminal>> | null = null;
+
+async function fetchSessions(): Promise<SessionInfo[]> {
+  const response = await fetch(`/api/sessions${tokenParam()}`);
+  if (!response.ok) return [];
+  const body = (await response.json()) as { sessions: SessionInfo[] };
+  return body.sessions ?? [];
+}
+
+function renderSessionList(sessions: SessionInfo[]): void {
+  const list = document.getElementById("session-list");
+  if (!(list instanceof HTMLElement)) return;
+  list.replaceChildren();
+  for (const session of sessions) {
+    const item = document.createElement("li");
+    item.style.padding = "0.25rem 0";
+    item.style.cursor = "pointer";
+    item.style.fontFamily = "monospace";
+    item.style.fontSize = "0.85rem";
+    item.textContent = `${session.id} · ${session.kind} · ${session.state} · pid ${session.pid ?? "-"}`;
+    if (session.id === selectedSessionId) {
+      item.style.fontWeight = "bold";
+    }
+    item.addEventListener("click", () => void selectSession(session.id));
+    const killBtn = document.createElement("button");
+    killBtn.textContent = "kill";
+    killBtn.style.marginLeft = "0.5rem";
+    killBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void killSession(session.id);
+    });
+    item.append(killBtn);
+    list.append(item);
+  }
+}
+
+async function createSession(): Promise<void> {
+  const response = await fetch(`/api/sessions${tokenParam()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "local" }),
+  });
+  if (!response.ok) return;
+  const body = (await response.json()) as { session: SessionInfo };
+  if (body.session) {
+    await selectSession(body.session.id);
+    await refreshSessions();
+  }
+}
+
+async function killSession(id: string): Promise<void> {
+  await fetch(`/api/sessions/${encodeURIComponent(id)}/kill${tokenParam()}`, { method: "POST" });
+  if (selectedSessionId === id) {
+    selectedSessionId = null;
+    if (sessionSocket) {
+      sessionSocket.close();
+      sessionSocket = null;
+    }
+    if (sessionTerminal) {
+      sessionTerminal.dispose();
+      sessionTerminal = null;
+    }
+  }
+  await refreshSessions();
+}
+
+async function refreshSessions(): Promise<void> {
+  const sessions = await fetchSessions();
+  renderSessionList(sessions);
+}
+
+async function selectSession(id: string): Promise<void> {
+  selectedSessionId = id;
+  const status = document.getElementById("session-status");
+  if (status instanceof HTMLElement) status.textContent = `selected ${id}`;
+  const container = document.getElementById("session-terminal");
+  if (!(container instanceof HTMLElement)) return;
+
+  // Tear down previous terminal/socket.
+  if (sessionSocket) {
+    sessionSocket.close();
+    sessionSocket = null;
+  }
+  if (sessionTerminal) {
+    sessionTerminal.dispose();
+    sessionTerminal = null;
+  }
+  container.replaceChildren();
+  sessionTerminal = await mountTerminal(container, {
+    fontSize: 13,
+    fontFamily: "monospace",
+    cursorBlink: true,
+    cursorStyle: "block",
+    theme: { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc" },
+    banner: "",
+  });
+
+  const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/term?token=${encodeURIComponent(token)}`;
+  const socket = new WebSocket(wsUrl);
+  socket.binaryType = "arraybuffer";
+  sessionSocket = socket;
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ t: "attach", sessionId: id }));
+  };
+  socket.onmessage = (event) => {
+    const data = event.data;
+    if (typeof data === "string") {
+      try {
+        const frame = JSON.parse(data) as { t?: string };
+        if (frame.t === "exit") {
+          if (status instanceof HTMLElement) status.textContent = `session ${id} exited`;
+        }
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    if (data instanceof ArrayBuffer && sessionTerminal) {
+      sessionTerminal.terminal.write(new TextDecoder().decode(data));
+    }
+  };
+  socket.onclose = () => {
+    if (status instanceof HTMLElement) status.textContent = `socket closed for ${id}`;
+  };
+  if (sessionTerminal) {
+    sessionTerminal.terminal.onData((value: string) => {
+      if (sessionSocket && sessionSocket.readyState === WebSocket.OPEN) {
+        sessionSocket.send(new TextEncoder().encode(value));
+      }
+    });
+    sessionTerminal.fitAddon.observeResize();
+  }
+}
+
+function wireSessions(): void {
+  const newBtn = document.getElementById("session-new");
+  if (newBtn instanceof HTMLButtonElement) {
+    newBtn.addEventListener("click", () => void createSession());
+  }
+  void refreshSessions();
+  // Keep the list fresh via SSE.
+  try {
+    const source = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    source.addEventListener("message", () => void refreshSessions());
+    // session-updated is sent as a named event
+    source.addEventListener("session-updated", () => void refreshSessions());
+  } catch {
+    // ignore
+  }
+}
+
 function main(): void {
   token = locationToken();
   const list = document.getElementById("transport-probe");
@@ -273,6 +437,7 @@ function main(): void {
     }
   }
   wireGhostty();
+  wireSessions();
 
   const terminalContainer = document.getElementById("terminal");
   if (terminalContainer instanceof HTMLElement) {

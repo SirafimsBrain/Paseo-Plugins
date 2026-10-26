@@ -54,7 +54,30 @@ Conditions of the decision:
 - `tests/http-server.test.ts`: adapted to `@types/node` 22.20.5 typing
   (`res.json()` now yields `unknown`) — no behavior change.
 
-## Terminal runtime (stage B2)
+## PTY and sessions (stages B3/B4)
+
+- `server/pty.ts`: `Pty` wraps `@lydell/node-pty` (linux-x64 prebuild, no
+  native compile needed), ring buffer (`RingBuffer`, default 64 KiB) with
+  `snapshot()` for attach replay, `write`/`resize`/`kill`, `onData`/`onExit`.
+- `server/sessions.ts`: `SessionRegistry` with unified `Session` shape
+  (local/ssh/rdp/vnc kinds, starting/running/exited/failed states), createLocal,
+  kill, reconnect (new PID, seeds the new pty's buffer from the old snapshot),
+  attach (replay + live data + exit notification), resize. Emits
+  `session-updated` events.
+- `server/transport.ts`: default connection handler is now `sessionBridge`
+  (attach by `sessionId`, binary↔PTY, resize, ping→pong, detach on close);
+  `echoConnection` remains exported for tests/spikes. `PtyHandle` interface
+  keeps transport decoupled from sessions.
+- `server/http-server.ts`: `/api/sessions` (GET list, POST create local),
+  `/api/sessions/:id/kill`, `/api/sessions/:id/reconnect`; SSE broadcasts
+  `session-updated`. `broadcastSse` added.
+- `console/src/main.ts`: Sessions section — New local session, list with
+  kill, selection attaches the terminal over WS (attach frame, input routing,
+  exit notification), SSE-driven refresh.
+- `index.server.ts`: wires `SessionRegistry` into the endpoint (resolveSession
+  + sessions + onServerStarted broadcast). Cleanup disposes the registry.
+- Tests: 42 total green (transport tests switched to `echoConnection` for
+  echo-mode assertions).
 
 - `console/src/terminal.ts`: wraps `ghostty-web` (`init`, `Terminal`, `FitAddon`):
   `mountTerminal(container, options)` inits the WASM runtime once, opens the

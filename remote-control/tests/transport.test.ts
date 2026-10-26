@@ -7,6 +7,7 @@ import {
   DEFAULT_TRANSPORT_PATH,
   SsePostTransport,
   WebSocketTransport,
+  echoConnection,
 } from "../server/transport";
 import type { TransportConnection, TransportControlFrame } from "../server/transport";
 
@@ -17,7 +18,7 @@ let server: ConsoleHttpServer;
 let base: string;
 
 beforeEach(async () => {
-  transport = new WebSocketTransport({ token: TOKEN });
+  transport = new WebSocketTransport({ token: TOKEN, onConnection: echoConnection });
   server = new ConsoleHttpServer({ token: TOKEN, port: 0, transport });
   await server.start();
   base = server.origin!;
@@ -307,7 +308,7 @@ describe("transport adapter variants", () => {
   });
 
   it("refuses to attach twice", async () => {
-    const second = new WebSocketTransport({ token: TOKEN });
+    const second = new WebSocketTransport({ token: TOKEN, onConnection: echoConnection });
     const plain = new ConsoleHttpServer({ token: TOKEN, port: 0, transport: second });
     await plain.start();
     try {

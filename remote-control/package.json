@@ -1,7 +1,7 @@
 {
   "name": "remote-control",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.7.0",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -38,6 +38,7 @@
     "esbuild@0.28.2": true
   },
   "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.18",
     "ghostty-web": "^0.4.0",
     "ws": "^8.22.0"
   }

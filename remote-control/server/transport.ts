@@ -29,6 +29,16 @@ import * as http from "node:http";
 import type { Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
 
+export interface PtyHandle {
+  readonly pid: number;
+  write(data: string | Uint8Array): void;
+  resize(cols: number, rows: number): void;
+  kill(): void;
+  onData(listener: (data: string) => void): () => void;
+  onExit(listener: (info: { exitCode: number; signal?: number }) => void): () => void;
+  snapshot(): Uint8Array;
+}
+
 export type TransportKind = "ws" | "sse-post";
 
 export const DEFAULT_TRANSPORT_PATH = "/term";
@@ -122,6 +132,7 @@ export class WebSocketTransport implements TransportBridge {
 
   private readonly token: string;
   private readonly path: string;
+  private readonly resolveSession: ((id: string) => PtyHandle | null) | null;
   private readonly onConnection: (connection: TransportConnection) => void;
   private readonly log: (message: string) => void;
   private wss: WebSocketServer | null = null;
@@ -133,6 +144,7 @@ export class WebSocketTransport implements TransportBridge {
   constructor(options: {
     token: string;
     path?: string;
+    resolveSession?: (id: string) => PtyHandle | null;
     onConnection?: (connection: TransportConnection) => void;
     log?: (message: string) => void;
   }) {
@@ -141,7 +153,10 @@ export class WebSocketTransport implements TransportBridge {
     }
     this.token = options.token;
     this.path = options.path ?? DEFAULT_TRANSPORT_PATH;
-    this.onConnection = options.onConnection ?? echoConnection;
+    this.resolveSession = options.resolveSession ?? null;
+    this.onConnection =
+      options.onConnection ??
+      ((connection) => sessionBridge(connection, this.resolveSession));
     this.log = options.log ?? (() => {});
   }
 
@@ -295,6 +310,84 @@ function wrapSocket(ws: WebSocket, remoteAddress: string | null): TransportConne
       ws.close();
     },
   };
+}
+
+/**
+ * Session-aware bridge: an `attach` control frame binds the socket to a PTY;
+ * binary frames go to the PTY's stdin, PTY output is forwarded as binary
+ * frames (with the ring buffer replayed on attach), `resize` resizes the PTY,
+ * and `ping` is answered with `pong`. Replaces the spike's echo mode in
+ * production; `echoConnection` is still exported for tests/spikes.
+ */
+export function sessionBridge(
+  connection: TransportConnection,
+  resolveSession: ((id: string) => PtyHandle | null) | null,
+): void {
+  interface Attachment {
+    pty: PtyHandle;
+    unsubs: Array<() => void>;
+  }
+  let attached: Attachment | null = null;
+
+  const detach = (): void => {
+    if (attached === null) return;
+    for (const unsubscribe of attached.unsubs) {
+      try {
+        unsubscribe();
+      } catch {
+        // ignore
+      }
+    }
+    attached = null;
+  };
+
+  connection.onBinary((data) => {
+    if (attached !== null) attached.pty.write(data);
+  });
+
+  connection.onControl((frame) => {
+    if (frame.t === "ping") {
+      connection.sendControl({ t: "pong" });
+      return;
+    }
+    if (frame.t === "attach") {
+      const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : null;
+      if (sessionId === null) {
+        connection.sendControl({ t: "error", code: "bad-attach" });
+        return;
+      }
+      const pty = resolveSession ? resolveSession(sessionId) : null;
+      if (pty === null) {
+        connection.sendControl({ t: "error", code: "unknown-session", sessionId });
+        return;
+      }
+      detach();
+      const snapshot = pty.snapshot();
+      if (snapshot.byteLength > 0) connection.sendBinary(snapshot);
+      const unsubs: Array<() => void> = [];
+      unsubs.push(pty.onData((data) => connection.sendBinary(new TextEncoder().encode(data))));
+      unsubs.push(pty.onExit((info) => connection.sendControl({ t: "exit", exitCode: info.exitCode, signal: info.signal })));
+      attached = { pty, unsubs };
+      connection.sendControl({ t: "attached", sessionId });
+      return;
+    }
+    if (frame.t === "resize") {
+      if (attached !== null) {
+        const cols = Number(frame.cols);
+        const rows = Number(frame.rows);
+        if (Number.isFinite(cols) && Number.isFinite(rows)) attached.pty.resize(cols, rows);
+      }
+      return;
+    }
+    if (frame.t === "detach") {
+      detach();
+      connection.sendControl({ t: "detached" });
+      return;
+    }
+    connection.sendControl({ t: "error", code: "unsupported-control", received: frame.t });
+  });
+
+  connection.onClose(() => detach());
 }
 
 /**

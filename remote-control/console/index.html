@@ -20,7 +20,13 @@
     <h2 style="font-size:1.1rem; margin:0 0 0.5rem;">Terminal (ghostty-web, stage B2)</h2>
     <div id="terminal" style="width:100%; height:240px; border:1px solid currentColor; border-radius:8px;"></div>
   </section>
-  <section id="ghostty-import" style="margin-top:2rem; border:1px solid currentColor; border-radius:8px; padding:0.5rem 1rem; max-width:40rem;">
+  <section id="sessions-section" style="margin-top:2rem; border:1px solid currentColor; border-radius:8px; padding:0.5rem 1rem; max-width:40rem;">
+    <h2 style="margin:0 0 0.5rem; font-size:1.1rem;">Sessions (stage B3/B4)</h2>
+    <button id="session-new">New local session</button>
+    <ul id="session-list" style="list-style:none; padding:0; margin:0.5rem 0;"></ul>
+    <div id="session-terminal" style="width:100%; height:240px; border:1px solid currentColor; border-radius:8px; margin-top:0.5rem;"></div>
+    <pre id="session-status" style="white-space:pre-wrap; font-size:0.85rem; margin-top:0.5rem;"></pre>
+  </section>
     <h2 style="margin:0 0 0.5rem; font-size:1.1rem;">Ghostty settings import (stage B1)</h2>
     <button id="ghostty-preview">Preview import</button>
     <button id="ghostty-apply" disabled>Apply</button>
