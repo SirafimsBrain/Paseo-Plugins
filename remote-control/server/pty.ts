@@ -1,8 +1,29 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+function provisionNativeBinary(): void {
+  try {
+    const source = path.join(__dirname, "prebuilds", "linux-x64", "pty.node");
+    if (!fs.existsSync(source)) return;
+    const targetDir = path.join(__dirname, "..", "node_modules", "node-pty", "prebuilds", "linux-x64");
+    const target = path.join(targetDir, "pty.node");
+    if (fs.existsSync(target)) return;
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.copyFileSync(source, target);
+  } catch {
+    // best effort
+  }
+}
+
+function loadNodePty(): any {
+  provisionNativeBinary();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("node-pty");
+}
+
 // PTY layer (stage B3). Spawns a shell via node-pty, keeps a ring
 // buffer of recent output for `attach` after a tab reload, and exposes
 // write/resize/kill plus data/exit events.
-
-import * as pty from "node-pty";
 
 export interface PtyOptions {
   cols?: number;
@@ -98,7 +119,7 @@ export class RingBuffer {
 
 export class Pty implements PtyHandle {
   readonly id: string;
-  private readonly ptyProcess: pty.IPty;
+  private readonly ptyProcess: any;
   private readonly buffer: RingBuffer;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(info: PtyExitInfo) => void>();
@@ -113,19 +134,19 @@ export class Pty implements PtyHandle {
       (process.platform === "win32" ? "powershell.exe" : "/bin/bash");
     const cols = options.cols ?? DEFAULT_COLS;
     const rows = options.rows ?? DEFAULT_ROWS;
-    this.ptyProcess = pty.spawn(shell, options.args ?? [], {
+    this.ptyProcess = loadNodePty().spawn(shell, options.args ?? [], {
       name: "xterm-256color",
       cols,
       rows,
       cwd: options.cwd ?? process.cwd(),
       env: options.env ?? (process.env as Record<string, string>),
     });
-    this.ptyProcess.onData((data) => {
+    this.ptyProcess.onData((data: string) => {
       const bytes = new TextEncoder().encode(data);
       this.buffer.append(bytes);
       for (const listener of this.dataListeners) listener(data);
     });
-    this.ptyProcess.onExit((event) => {
+    this.ptyProcess.onExit((event: { exitCode: number; signal?: number }) => {
       for (const listener of this.exitListeners) {
         listener({ exitCode: event.exitCode, signal: event.signal });
       }
