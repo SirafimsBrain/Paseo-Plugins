@@ -44,7 +44,7 @@ paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:remote-contr
 | [memory-flash](./memory-flash/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
 | [bunny-search](./bunny-search/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
 | [luck-planner](./luck-planner/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
-| [remote-control](./remote-control/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the console web app; `@lydell/node-pty` ships a prebuilt for linux-x64 |
+| [remote-control](./remote-control/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the console web app; PTY uses a shipped prebuilt for linux-x64 |
 
 The four plugins with a build step need npm-registry access on the host during install and update; the other two have no external dependency at all.
 
