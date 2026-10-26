@@ -10,6 +10,13 @@
       "ci"
     ],
     [
+      "npx",
+      "node-gyp",
+      "rebuild",
+      "--directory",
+      "node_modules/node-pty"
+    ],
+    [
       "npm",
       "run",
       "bundle"
