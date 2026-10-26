@@ -54,7 +54,17 @@ Conditions of the decision:
 - `tests/http-server.test.ts`: adapted to `@types/node` 22.20.5 typing
   (`res.json()` now yields `unknown`) — no behavior change.
 
-## Pass vault (stages C1–C3)
+## Connections and SSH (stages D1–D5)
+
+- `shared/connections.ts`: zod schemas for groups/connections (hierarchy, validation).
+- `shared/protocols.ts`: protocol registry (ssh/rdp/vnc) with default ports, payload schemas, secret fields, launchable flags.
+- `server/store.ts`: SQLite (WAL, busy_timeout, foreign_keys, schema_version 1) with groups/connections/settings/meta; CRUD + archive/delete; migrations.
+- `server/protocols/registry.ts`: launcher registry with buildLaunchFor.
+- `server/protocols/ssh.ts`: buildSshArgv, materializeIdentity (0600), createAskpassHelper (SSH_ASKPASS, secret never in argv/env), cleanupRunDir, prepareSshLaunch (vault-backed).
+- `server/sessions.ts`: createSsh (spawns ssh via PTY with run dir, cleanup on exit), reconnect.
+- REST: /api/groups, /api/connections[/:id], /api/sessions (connectionId → ssh).
+- Console: Connections section (new group/connection, launch for ssh).
+- Tests: tests/store.test.ts (15 tests).
 
 - `server/vault.ts`: `VaultService` over an isolated `GNUPGHOME` + `PASSWORD_STORE_DIR`
   (defaults `$PASEO_HOME/pass-gnupg` and `$PASEO_HOME/pass-store`), supporting

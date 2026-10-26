@@ -49,6 +49,8 @@ export interface ConsoleHttpServerOptions {
   transport?: TransportBridge;
   /** Session registry for /api/sessions routes and SSE broadcasts. */
   sessions?: SessionRegistry;
+  /** Store for connection lookups. */
+  store?: import("./store").Store;
   /** Vault service for /api/vault and /api/secrets routes. */
   vault?: import("./vault").VaultService;
 }
@@ -60,6 +62,7 @@ export class ConsoleHttpServer {
   private readonly consoleDir: string;
   private readonly transport: TransportBridge | null;
   private readonly sessions: SessionRegistry | null;
+  private readonly store: import("./store").Store | null;
   private readonly vault: import("./vault").VaultService | null;
   private readonly options: ConsoleHttpServerOptions;
   private server: http.Server | null = null;
@@ -86,6 +89,7 @@ export class ConsoleHttpServer {
     this.consoleDir = options.consoleDir ?? resolveConsoleDir();
     this.transport = options.transport ?? null;
     this.sessions = options.sessions ?? null;
+    this.store = options.store ?? null;
     this.vault = options.vault ?? null;
     if (this.sessions) {
       this.sessions.setOnEvent((event) => {
@@ -186,75 +190,20 @@ export class ConsoleHttpServer {
         this.sendJson(res, 401, { error: "unauthorized" });
         return;
       }
+
+      // /api/state
       if (url.pathname === "/api/state") {
-        if (req.method !== "GET") {
-          this.sendJson(res, 405, { error: "method not allowed" });
-          return;
-        }
+        if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
         this.sendJson(res, 200, { ok: true, listening: true });
         return;
       }
+      // /api/events (SSE)
       if (url.pathname === "/api/events") {
-        if (req.method !== "GET") {
-          this.sendJson(res, 405, { error: "method not allowed" });
-          return;
-        }
+        if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
         this.serveEvents(req, res);
         return;
       }
-      if (url.pathname === "/api/sessions") {
-        if (!this.sessions) {
-          this.sendJson(res, 503, { error: "sessions unavailable" });
-          return;
-        }
-        if (req.method === "GET") {
-          this.sendJson(res, 200, { sessions: this.sessions.list() });
-          return;
-        }
-        if (req.method === "POST") {
-          void this.readJsonBody(req)
-            .then((body) => {
-              const kind = (body && typeof body === "object" && "kind" in body)
-                ? String((body as { kind: unknown }).kind)
-                : "local";
-              if (kind !== "local") {
-                this.sendJson(res, 400, { error: `unsupported session kind: ${kind}` });
-                return;
-              }
-              const title = (body && typeof body === "object" && "title" in body)
-                ? String((body as { title: unknown }).title)
-                : undefined;
-              const session = this.sessions!.createLocal({ title });
-              this.sendJson(res, 201, { session });
-            })
-            .catch((cause) => {
-              this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-            });
-          return;
-        }
-        this.sendJson(res, 405, { error: "method not allowed" });
-        return;
-      }
-      const sessionMatch = /^\/api\/sessions\/([^/]+)\/(kill|reconnect)$/.exec(url.pathname);
-      if (sessionMatch && this.sessions) {
-        const sessionId = decodeURIComponent(sessionMatch[1]);
-        if (req.method !== "POST") {
-          this.sendJson(res, 405, { error: "method not allowed" });
-          return;
-        }
-        if (sessionMatch[2] === "kill") {
-          const ok = this.sessions.kill(sessionId);
-          this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
-          return;
-        }
-        const session = this.sessions.reconnect(sessionId);
-        if (!session) {
-          this.sendJson(res, 404, { error: "not found" });
-          return;
-        }
-        this.sendJson(res, 200, { session });
-        return;
-      }
+      // /api/vault/*
       if (url.pathname === "/api/vault/status") {
         if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
         if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
@@ -297,6 +246,7 @@ export class ConsoleHttpServer {
         this.sendJson(res, 200, { ok: true });
         return;
       }
+      // /api/secrets
       if (url.pathname === "/api/secrets") {
         if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
         if (req.method === "GET") {
@@ -336,7 +286,7 @@ export class ConsoleHttpServer {
         if (req.method === "PATCH") {
           void this.readJsonBody(req).then(async (body) => {
             const value = body && typeof body === "object" && "value" in body ? String((body as { value: unknown }).value) : "";
-            await this.vault!.set(name, value);
+            await vault.set(name, value);
             this.sendJson(res, 200, { ok: true });
           }).catch((cause) => {
             this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
@@ -344,7 +294,7 @@ export class ConsoleHttpServer {
           return;
         }
         if (req.method === "DELETE") {
-          void this.vault.delete(name).then((ok) => {
+          void vault.delete(name).then((ok) => {
             this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
           }).catch((cause) => {
             this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
@@ -354,35 +304,224 @@ export class ConsoleHttpServer {
         this.sendJson(res, 405, { error: "method not allowed" });
         return;
       }
+      // /api/sessions
+      if (url.pathname === "/api/sessions") {
+        if (!this.sessions) { this.sendJson(res, 503, { error: "sessions unavailable" }); return; }
+        if (req.method === "GET") {
+          this.sendJson(res, 200, { sessions: this.sessions.list() });
+          return;
+        }
+        if (req.method === "POST") {
+          void this.readJsonBody(req).then((body) => {
+            const connectionId = body && typeof body === "object" && "connectionId" in body
+              ? String((body as { connectionId: unknown }).connectionId)
+              : "";
+            if (connectionId) {
+              if (!this.store || !this.vault) {
+                this.sendJson(res, 503, { error: "store/vault unavailable" });
+                return;
+              }
+              const connection = this.store.getConnection(connectionId);
+              if (!connection) {
+                this.sendJson(res, 404, { error: "connection not found" });
+                return;
+              }
+              if (connection.protocol !== "ssh") {
+                this.sendJson(res, 400, { error: `protocol ${connection.protocol} not launchable yet` });
+                return;
+              }
+              const session = this.sessions!.createSsh(connection, this.vault);
+              this.sendJson(res, 201, { session });
+              return;
+            }
+            const kind = (body && typeof body === "object" && "kind" in body)
+              ? String((body as { kind: unknown }).kind)
+              : "local";
+            if (kind !== "local") {
+              this.sendJson(res, 400, { error: `unsupported session kind: ${kind}` });
+              return;
+            }
+            const title = (body && typeof body === "object" && "title" in body)
+              ? String((body as { title: unknown }).title)
+              : undefined;
+            const session = this.sessions!.createLocal({ title });
+            this.sendJson(res, 201, { session });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      const sessionMatch = /^\/api\/sessions\/(.+?)\/(kill|reconnect)$/.exec(url.pathname);
+      if (sessionMatch && this.sessions) {
+        const sessionId = decodeURIComponent(sessionMatch[1]);
+        if (req.method !== "POST") {
+          this.sendJson(res, 405, { error: "method not allowed" });
+          return;
+        }
+        if (sessionMatch[2] === "kill") {
+          const ok = this.sessions.kill(sessionId);
+          this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
+          return;
+        }
+        const session = this.sessions.reconnect(sessionId);
+        if (!session) {
+          this.sendJson(res, 404, { error: "not found" });
+          return;
+        }
+        this.sendJson(res, 200, { session });
+        return;
+      }
+      // /api/groups
+      if (url.pathname === "/api/groups") {
+        if (!this.store) { this.sendJson(res, 503, { error: "store unavailable" }); return; }
+        if (req.method === "GET") {
+          this.sendJson(res, 200, { groups: this.store.listGroups() });
+          return;
+        }
+        if (req.method === "POST") {
+          void this.readJsonBody(req).then((body) => {
+            const name = body && typeof body === "object" && "name" in body ? String((body as { name: unknown }).name) : "";
+            const parentId = body && typeof body === "object" && "parentId" in body
+              ? ((body as { parentId: unknown }).parentId === null ? null : String((body as { parentId: unknown }).parentId))
+              : null;
+            const id = `grp_${Math.random().toString(36).slice(2)}`;
+            const group = this.store!.createGroup({ id, parentId, name });
+            this.sendJson(res, 201, { group });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      const groupMatch = /^\/api\/groups\/(.+)$/.exec(url.pathname);
+      if (groupMatch && this.store) {
+        const id = decodeURIComponent(groupMatch[1]);
+        if (req.method === "PATCH") {
+          void this.readJsonBody(req).then((body) => {
+            const patch: { name?: string; parentId?: string | null } = {};
+            if (body && typeof body === "object" && "name" in body) patch.name = String((body as { name: unknown }).name);
+            if (body && typeof body === "object" && "parentId" in body) {
+              patch.parentId = (body as { parentId: unknown }).parentId === null ? null : String((body as { parentId: unknown }).parentId);
+            }
+            const group = this.store!.updateGroup(id, patch);
+            if (!group) { this.sendJson(res, 404, { error: "not found" }); return; }
+            this.sendJson(res, 200, { group });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        if (req.method === "DELETE") {
+          const ok = this.store.deleteGroup(id);
+          this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      // /api/connections
+      if (url.pathname === "/api/connections") {
+        if (!this.store) { this.sendJson(res, 503, { error: "store unavailable" }); return; }
+        if (req.method === "GET") {
+          const groupId = url.searchParams.has("groupId") ? url.searchParams.get("groupId") : undefined;
+          const resolved = groupId === null ? null : (groupId === undefined ? undefined : groupId);
+          this.sendJson(res, 200, { connections: this.store.listConnections(resolved as string | null | undefined) });
+          return;
+        }
+        if (req.method === "POST") {
+          void this.readJsonBody(req).then((body) => {
+            const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+            const name = b.name ? String(b.name) : "";
+            const host = b.host ? String(b.host) : "";
+            const protocol = b.protocol ? String(b.protocol) : "ssh";
+            const groupId = b.groupId === null ? null : (b.groupId ? String(b.groupId) : null);
+            const port = b.port === null || b.port === undefined ? null : Number(b.port);
+            const username = b.username ? String(b.username) : "";
+            const id = `conn_${Math.random().toString(36).slice(2)}`;
+            const conn = this.store!.createConnection({
+              id, groupId, name, protocol, host, port, username,
+              payload: (b.payload as Record<string, unknown>) ?? {},
+              secretRefs: (b.secretRefs as Record<string, string>) ?? {},
+            });
+            this.sendJson(res, 201, { connection: conn });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      const connectionMatch = /^\/api\/connections\/(.+)$/.exec(url.pathname);
+      if (connectionMatch && this.store) {
+        const id = decodeURIComponent(connectionMatch[1]);
+        if (req.method === "GET") {
+          const conn = this.store.getConnection(id);
+          if (!conn) { this.sendJson(res, 404, { error: "not found" }); return; }
+          this.sendJson(res, 200, { connection: conn });
+          return;
+        }
+        if (req.method === "PATCH") {
+          void this.readJsonBody(req).then((body) => {
+            const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+            const patch: { groupId?: string | null; name?: string; protocol?: string; host?: string; port?: number | null; username?: string; payload?: Record<string, unknown>; secretRefs?: Record<string, string> } = {};
+            if ("groupId" in b) patch.groupId = b.groupId === null ? null : String(b.groupId);
+            if ("name" in b) patch.name = String(b.name);
+            if ("protocol" in b) patch.protocol = String(b.protocol);
+            if ("host" in b) patch.host = String(b.host);
+            if ("port" in b) patch.port = b.port === null ? null : Number(b.port);
+            if ("username" in b) patch.username = String(b.username);
+            if ("payload" in b) patch.payload = b.payload as Record<string, unknown>;
+            if ("secretRefs" in b) patch.secretRefs = b.secretRefs as Record<string, string>;
+            const conn = this.store!.updateConnection(id, patch);
+            if (!conn) { this.sendJson(res, 404, { error: "not found" }); return; }
+            this.sendJson(res, 200, { connection: conn });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        if (req.method === "DELETE") {
+          const ok = this.store.deleteConnection(id);
+          this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      // /api/ghostty/import
       if (url.pathname === "/api/ghostty/import") {
         if (req.method === "GET") {
           this.sendJson(res, 200, previewGhosttyImport());
           return;
         }
         if (req.method === "POST") {
-          void this.readJsonBody(req)
-            .then((body) => {
-              const settings = (body && typeof body === "object" && "settings" in body)
-                ? (body as { settings: unknown }).settings
-                : body;
-              applyGhosttySettings(settings as never);
-              this.sendJson(res, 200, { ok: true, settings: loadGhosttySettings() });
-            })
-            .catch((cause) => {
-              this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-            });
+          void this.readJsonBody(req).then((body) => {
+            const settings = (body && typeof body === "object" && "settings" in body)
+              ? (body as { settings: unknown }).settings
+              : body;
+            applyGhosttySettings(settings as never);
+            this.sendJson(res, 200, { ok: true, settings: loadGhosttySettings() });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
           return;
         }
         this.sendJson(res, 405, { error: "method not allowed" });
         return;
       }
+
       this.sendJson(res, 404, { error: "not found" });
       return;
     }
 
     this.serveStatic(req, res, url);
   }
-
   /** Number of open SSE subscriptions. */
   get sseSubscribers(): number {
     return this.eventClients.size;

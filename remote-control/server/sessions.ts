@@ -1,9 +1,11 @@
-// Session registry (stage B3/B4). In-memory, lives as long as the daemon.
-// Tracks local (and later ssh/rdp/vnc) sessions with a unified shape and
-// emits `session-updated` events for the SSE feed.
+// Session registry (stages B3/B4/D3). In-memory, lives as long as the daemon.
+// Tracks local and ssh sessions with a unified shape and emits
+// `session-updated` events for the SSE feed.
 
+import * as path from "node:path";
 import { spawnPty, type Pty, type PtyExitInfo } from "./pty";
 import type { TransportConnection } from "./transport";
+import type { Connection } from "../shared/connections";
 
 export type SessionKind = "local" | "ssh" | "rdp" | "vnc";
 export type SessionState = "starting" | "running" | "exited" | "failed";
@@ -43,12 +45,12 @@ export class SessionRegistry {
     this.now = options.now ?? (() => Date.now());
   }
 
-  private emit(event: SessionEvent): void {
-    this.onEvent(event);
-  }
-
   setOnEvent(listener: (event: SessionEvent) => void): void {
     this.onEvent = listener;
+  }
+
+  private emit(event: SessionEvent): void {
+    this.onEvent(event);
   }
 
   list(): Session[] {
@@ -86,7 +88,7 @@ export class SessionRegistry {
       this.ptys.set(id, pty);
       session.pid = pty.pid;
       session.state = "running";
-      pty.onExit((info) => {
+      pty.onExit((info: PtyExitInfo) => {
         const current = this.sessions.get(id);
         if (!current) return;
         current.state = "exited";
@@ -102,6 +104,66 @@ export class SessionRegistry {
       session.endedAt = this.now();
       this.emit({ type: "session-updated", session: { ...session } });
     }
+    return { ...session };
+  }
+
+  createSsh(connection: Connection, vault: { get: (name: string) => Promise<string> }, options: { cols?: number; rows?: number } = {}): Session {
+    const id = cryptoRandomId();
+    const runDir = path.join(process.env.PASEO_HOME ?? path.join(process.env.HOME ?? "", ".paseo"), "run", id);
+    const session: Session = {
+      id,
+      kind: "ssh",
+      title: connection.name,
+      state: "starting",
+      pid: null,
+      exitCode: null,
+      signal: null,
+      startedAt: this.now(),
+      endedAt: null,
+      lastError: null,
+      connectionId: connection.id,
+    };
+    this.sessions.set(id, session);
+    this.emit({ type: "session-updated", session: { ...session } });
+
+    void (async () => {
+      try {
+        const { prepareSshLaunch, cleanupRunDir } = await import("./protocols/ssh");
+        const { spec } = await prepareSshLaunch({ connection, secrets: {}, runDir }, vault);
+        const pty = spawnPty(id, {
+          cols: options.cols,
+          rows: options.rows,
+          shell: spec.argv[0],
+          args: spec.argv.slice(1),
+          env: spec.env,
+          cwd: spec.cwd,
+        });
+        this.ptys.set(id, pty);
+        session.pid = pty.pid;
+        session.state = "running";
+        pty.onExit((info: PtyExitInfo) => {
+          const current = this.sessions.get(id);
+          if (!current) return;
+          current.state = "exited";
+          current.exitCode = info.exitCode;
+          current.signal = info.signal ?? null;
+          current.endedAt = this.now();
+          try {
+            cleanupRunDir(runDir);
+          } catch {
+            // ignore
+          }
+          this.emit({ type: "session-updated", session: { ...current } });
+        });
+        this.emit({ type: "session-updated", session: { ...session } });
+      } catch (cause) {
+        session.state = "failed";
+        session.lastError = cause instanceof Error ? cause.message : String(cause);
+        session.endedAt = this.now();
+        this.emit({ type: "session-updated", session: { ...session } });
+      }
+    })();
+
     return { ...session };
   }
 
@@ -124,8 +186,6 @@ export class SessionRegistry {
   reconnect(id: string): Session | null {
     const previous = this.sessions.get(id);
     if (!previous) return null;
-    // Tear down the old pty but keep the session id and seed the new buffer
-    // from the old snapshot so history survives.
     const oldPty = this.ptys.get(id);
     const snapshot = oldPty ? oldPty.snapshot() : new Uint8Array(0);
     if (oldPty) {
@@ -136,16 +196,13 @@ export class SessionRegistry {
     previous.endedAt = previous.endedAt ?? this.now();
     this.emit({ type: "session-updated", session: { ...previous } });
 
-    // New session with a fresh id, seeded title, new pty.
-    const next = this.createLocal({ title: previous.title });
+    const next = previous.kind === "ssh"
+      ? null // ssh reconnect requires connection+vault; handled by caller
+      : this.createLocal({ title: previous.title });
+
+    if (next === null) return null;
     const newPty = this.ptys.get(next.id);
-    // Seed the ring buffer by writing the snapshot back as input? Simpler:
-    // store the snapshot on the new session's pty is not possible post-spawn.
-    // Instead, expose the seeded bytes via a side channel used by attach().
     if (newPty && snapshot.byteLength > 0) {
-      // Replay happens at attach time from the new pty's own (empty) buffer;
-      // to preserve history we stash the seed on the session's pty via a
-      // marker property. The attach path checks `seededSnapshot`.
       (newPty as unknown as { seededSnapshot?: Uint8Array }).seededSnapshot = snapshot;
     }
     return this.sessions.get(next.id) ? { ...this.sessions.get(next.id)! } : null;
@@ -155,14 +212,12 @@ export class SessionRegistry {
     const pty = this.ptys.get(sessionId);
     const session = this.sessions.get(sessionId);
     if (!pty || !session) return false;
-    // Replay buffered output.
     const seed = (pty as unknown as { seededSnapshot?: Uint8Array }).seededSnapshot;
     const snapshot = seed ?? pty.snapshot();
     if (snapshot.byteLength > 0) {
       connection.sendBinary(snapshot);
       if (seed) delete (pty as unknown as { seededSnapshot?: Uint8Array }).seededSnapshot;
     }
-    // Wire live data.
     const unsubscribeData = pty.onData((data) => {
       connection.sendBinary(new TextEncoder().encode(data));
     });
@@ -181,7 +236,6 @@ export class SessionRegistry {
         if (s.size === 0) this.attachments.delete(sessionId);
       }
     });
-    // Route incoming binary from this connection to the pty.
     connection.onBinary((data) => {
       pty.write(data);
     });

@@ -3535,6 +3535,81 @@ function wireSecrets() {
   }
   void refreshSecrets();
 }
+async function fetchConnections() {
+  const r2 = await fetch(`/api/connections${tokenParam()}`);
+  if (!r2.ok) return [];
+  const b2 = await r2.json();
+  return b2.connections ?? [];
+}
+async function refreshConnections() {
+  const list = document.getElementById("conn-list");
+  const status = document.getElementById("conn-status");
+  if (!(list instanceof HTMLElement)) return;
+  const conns = await fetchConnections();
+  list.replaceChildren();
+  for (const c of conns) {
+    const item = document.createElement("li");
+    item.style.padding = "0.25rem 0";
+    item.style.fontFamily = "monospace";
+    item.style.fontSize = "0.85rem";
+    item.textContent = `${c.name} \xB7 ${c.protocol} \xB7 ${c.username ? c.username + "@" : ""}${c.host}${c.port ? ":" + c.port : ""}`;
+    if (c.protocol === "ssh") {
+      const launchBtn = document.createElement("button");
+      launchBtn.textContent = "launch";
+      launchBtn.style.marginLeft = "0.5rem";
+      launchBtn.addEventListener("click", async () => {
+        const res = await fetch(`/api/sessions${tokenParam()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionId: c.id })
+        });
+        if (res.ok) {
+          const b2 = await res.json();
+          if (b2.session) await selectSession(b2.session.id);
+        }
+        await refreshSessions();
+      });
+      item.append(launchBtn);
+    }
+    list.append(item);
+  }
+  if (status instanceof HTMLElement) status.textContent = `${conns.length} connection(s)`;
+}
+function wireConnections() {
+  const newGroupBtn = document.getElementById("conn-new-group");
+  if (newGroupBtn instanceof HTMLButtonElement) {
+    newGroupBtn.addEventListener("click", async () => {
+      const name = prompt("Group name");
+      if (!name) return;
+      await fetch(`/api/groups${tokenParam()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      await refreshConnections();
+    });
+  }
+  const newConnBtn = document.getElementById("conn-new");
+  if (newConnBtn instanceof HTMLButtonElement) {
+    newConnBtn.addEventListener("click", async () => {
+      const name = prompt("Connection name");
+      if (!name) return;
+      const host = prompt("Host");
+      if (!host) return;
+      const protocol = prompt("Protocol (ssh/rdp/vnc)", "ssh") ?? "ssh";
+      const username = prompt("Username", "") ?? "";
+      const portRaw = prompt("Port (empty = default)", "");
+      const port = portRaw && portRaw.trim().length > 0 ? Number(portRaw) : null;
+      await fetch(`/api/connections${tokenParam()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, host, protocol, username, port })
+      });
+      await refreshConnections();
+    });
+  }
+  void refreshConnections();
+}
 function main() {
   token = locationToken();
   const list = document.getElementById("transport-probe");
@@ -3550,6 +3625,7 @@ function main() {
   wireGhostty();
   wireSessions();
   wireSecrets();
+  wireConnections();
   const terminalContainer = document.getElementById("terminal");
   if (terminalContainer instanceof HTMLElement) {
     void mountTerminal(terminalContainer, {

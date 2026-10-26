@@ -3,17 +3,20 @@ import { ConsoleEndpoint } from "./server/http-lifecycle";
 import { consoleUrl, state, vaultSetup, vaultUnlock, vaultLock } from "./shared/rpc";
 import { resolvePluginVersion } from "./server/paths";
 import { SessionRegistry } from "./server/sessions";
+import { Store } from "./server/store";
 import { VaultService } from "./server/vault";
 
 export default function contribute(server: PluginServerContext): () => void {
   const registry = new SessionRegistry();
   const vault = new VaultService({ log: (m) => console.log(m) });
+  const store = new Store({ dbPath: `${process.env.PASEO_HOME ?? (process.env.HOME + "/.paseo")}/plugins/remote-control/remote-control.db` });
 
   const endpoint = new ConsoleEndpoint({
     log: (m) => console.log(m),
     logError: (m) => console.error(m),
     resolveSession: (id) => registry.getPty(id) ?? null,
     sessions: registry,
+    store,
     vault,
     onServerStarted: (httpServer) => {
       registry.setOnEvent((event) => {
@@ -55,6 +58,7 @@ export default function contribute(server: PluginServerContext): () => void {
   return async () => {
     vault.lock();
     registry.dispose();
+    store.close();
     await endpoint.dispose();
   };
 }
