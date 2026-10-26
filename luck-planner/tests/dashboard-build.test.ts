@@ -97,6 +97,12 @@ describe("dist/dashboard (the built SPA)", () => {
     expect(js).toContain("/api/events");
     expect(js).toContain("tree-changed");
     expect(js).toContain("lp-live");
+    // K2 modal: the portal, the dialog contract and the Escape close ship in
+    // the first chunk with the board that opens it.
+    expect(js).toContain("lp-modal-overlay");
+    expect(js).toContain('role: "dialog"');
+    expect(js).toContain("Escape");
+    expect(js).toContain("createPortal");
     // K1 plain board: the card view ships in the first chunk with its
     // zone/card classes and the default-view label.
     expect(js).toContain("lp-plain-zone");
@@ -236,6 +242,28 @@ describe("source contracts the bundler cannot tell us", () => {
     // The board renders through the same selection the diagrams use.
     expect(app).toContain("selectedEntityId={selectedId}");
     expect(app).toContain("plainReveal(plainBoard, hit.id)");
+  });
+
+  it("styles the K2 modal as a viewport-fixed portal and makes every card open it", () => {
+    // The modal portals onto `document.body`, *outside* the `.lp-app` grid:
+    // without its own fixed positioning the overlay falls below the legend
+    // and the modal's body-scroll lock traps the user at the bottom of the
+    // page (the 0.34.1 regression report from live acceptance).
+    const css = fs.readFileSync(APP_CSS, "utf8");
+    const overlay = css.indexOf(".lp-modal-overlay");
+    expect(overlay, "dashboard.css has .lp-modal-overlay").toBeGreaterThan(-1);
+    expect(css.slice(overlay, css.indexOf("}", overlay))).toContain("position: fixed");
+    expect(css).toContain(".lp-modal {");
+    expect(css).toContain(".lp-modal-body");
+
+    // K2 acceptance: *every* card kind opens the modal — goal and bug cards
+    // route through the same handler as leaf cards, not a static article.
+    const plain = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "PlainView.tsx"),
+      "utf8",
+    );
+    expect(plain).toContain("props.onSelectCard(card.kind, card.entityId)");
+    expect(plain).not.toContain("<article");
   });
 });
 

@@ -1470,3 +1470,61 @@ button.lp-plain-card:hover {
 .lp-plain-card-bees {
   font-size: 11px;
 }
+.lp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(0, 0, 0, 0.55);
+  overflow-y: auto;
+}
+.lp-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+  background: var(--lp-surface, #171a21);
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.lp-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--lp-border, #262b36);
+}
+.lp-modal-title {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.lp-modal-close {
+  margin-inline-start: auto;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lp-text-muted, #8b93a3);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lp-modal-close:hover {
+  border-color: var(--lp-border, #262b36);
+  color: var(--lp-text, #e6e9ef);
+}
+.lp-modal-body {
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}

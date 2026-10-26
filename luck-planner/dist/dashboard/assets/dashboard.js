@@ -11176,20 +11176,18 @@ function Card(props) {
     ] }),
     card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(LeafCardBody, { card }) : card.kind === "goal" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(GoalCardBody, { card }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BugCardBody, { card })
   ] });
-  if (card.kind === "leaf") {
-    return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
-      "button",
-      {
-        type: "button",
-        id: `lp-plain-card-${card.entityId}`,
-        className,
-        "aria-pressed": props.selected,
-        onClick: () => props.onSelectCard("leaf", card.entityId),
-        children: body
-      }
-    );
-  }
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("article", { id: `lp-plain-card-${card.entityId}`, className, "data-kind": card.kind, children: body });
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+    "button",
+    {
+      type: "button",
+      id: `lp-plain-card-${card.entityId}`,
+      className,
+      "data-kind": card.kind,
+      "aria-pressed": card.kind === "leaf" ? props.selected : void 0,
+      onClick: () => props.onSelectCard(card.kind, card.entityId),
+      children: body
+    }
+  );
 }
 function LeafCardBody(props) {
   const { card } = props;

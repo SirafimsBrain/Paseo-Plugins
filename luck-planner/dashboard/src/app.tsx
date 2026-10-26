@@ -396,9 +396,10 @@ export function App(): ReactElement {
   }, []);
 
   /**
-   * K1: a card click. Leaf cards select their node — the detail fetch this
-   * triggers is what the K2 modal will render. Goal and bug cards become
-   * clickable with that modal; in K1 they are informative.
+   * A card click (K1 + K2): every card opens the modal — a leaf card first
+   * selects its node (the detail fetch this triggers is what the modal
+   * renders), goal and bug cards render their content straight from the
+   * already-loaded `/api/tree` payload.
    */
   const onPlainCardSelect = useCallback(
     (kind: PlainCardKind, entityId: string): void => {

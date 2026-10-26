@@ -10,12 +10,12 @@
  * decided: zones, groups, sections, cards and every count come ready-made,
  * and the collapse state is a `Set` of section keys the app owns.
  *
- * Interaction in K1: a leaf card selects the node (the same `selectedId`
- * the 2D/3D views use — the detail fetch it triggers is what the K2 modal
- * will render); goal and bug cards are informative — the modal stage makes
- * every card open. Search scrolls its hit into view through
- * `scrollTargetEntityId`. Status is always colour **plus** text, the
- * project-wide accessibility rule.
+ * Interaction (K1 + K2): **every** card is a button that opens the detail
+ * modal — a leaf card also selects its node (the same `selectedId` the 2D/3D
+ * views use; the detail fetch it triggers is what the modal renders), goal
+ * and bug cards open their own payload-backed content. Search scrolls its
+ * hit into view through `scrollTargetEntityId`. Status is always colour
+ * **plus** text, the project-wide accessibility rule.
  */
 import { useEffect } from "react";
 import type { ReactElement } from "react";
@@ -60,7 +60,7 @@ export interface PlainViewProps {
   readonly onToggleSection: (key: string) => void;
   /** The selected node id — its card wears the selection highlight. */
   readonly selectedEntityId: string | null;
-  /** A card was clicked (K1: leaf cards select their node). */
+  /** A card was clicked (every kind opens the K2 modal; leaves also select). */
   readonly onSelectCard: (kind: PlainCardKind, entityId: string) => void;
   /** Entity id to scroll into view (the toolbar search, G4 semantics). */
   readonly scrollTargetEntityId: string | null;
@@ -238,7 +238,7 @@ function SectionNode(props: {
   );
 }
 
-/** One card. In K1 leaf cards select; goal/bug cards are informative. */
+/** One card — a button for every kind: the click opens the K2 modal. */
 function Card(props: {
   card: PlainCard;
   selected: boolean;
@@ -274,23 +274,17 @@ function Card(props: {
     </>
   );
 
-  if (card.kind === "leaf") {
-    return (
-      <button
-        type="button"
-        id={`lp-plain-card-${card.entityId}`}
-        className={className}
-        aria-pressed={props.selected}
-        onClick={() => props.onSelectCard("leaf", card.entityId)}
-      >
-        {body}
-      </button>
-    );
-  }
   return (
-    <article id={`lp-plain-card-${card.entityId}`} className={className} data-kind={card.kind}>
+    <button
+      type="button"
+      id={`lp-plain-card-${card.entityId}`}
+      className={className}
+      data-kind={card.kind}
+      aria-pressed={card.kind === "leaf" ? props.selected : undefined}
+      onClick={() => props.onSelectCard(card.kind, card.entityId)}
+    >
       {body}
-    </article>
+    </button>
   );
 }
 
