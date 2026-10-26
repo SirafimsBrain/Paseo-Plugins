@@ -17,6 +17,7 @@
 
 import { openWebSocketTransport, TransportError } from "./transport";
 import type { TransportSocket } from "./transport";
+import { mountTerminal } from "./terminal";
 
 const PROBE_TIMEOUT_MS = 5000;
 
@@ -272,6 +273,20 @@ function main(): void {
     }
   }
   wireGhostty();
+
+  const terminalContainer = document.getElementById("terminal");
+  if (terminalContainer instanceof HTMLElement) {
+    void mountTerminal(terminalContainer, {
+      fontSize: 14,
+      fontFamily: "monospace",
+      cursorBlink: true,
+      cursorStyle: "block",
+      theme: { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc" },
+      banner: "remote-control console (ghostty-web) — stage B2\r\n",
+    }).catch((error) => {
+      terminalContainer.textContent = `terminal failed to mount: ${error instanceof Error ? error.message : String(error)}`;
+    });
+  }
 }
 
 main();

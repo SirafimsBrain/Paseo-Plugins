@@ -16,7 +16,10 @@
   <h1>remote-control console</h1>
   <p>Transport probe (stage A3): the WebSocket bridge is the terminal
      transport candidate; SSE is measured as the fallback path.</p>
-  <ul id="transport-probe"></ul>
+  <section id="terminal-section" style="margin-top:2rem;">
+    <h2 style="font-size:1.1rem; margin:0 0 0.5rem;">Terminal (ghostty-web, stage B2)</h2>
+    <div id="terminal" style="width:100%; height:240px; border:1px solid currentColor; border-radius:8px;"></div>
+  </section>
   <section id="ghostty-import" style="margin-top:2rem; border:1px solid currentColor; border-radius:8px; padding:0.5rem 1rem; max-width:40rem;">
     <h2 style="margin:0 0 0.5rem; font-size:1.1rem;">Ghostty settings import (stage B1)</h2>
     <button id="ghostty-preview">Preview import</button>

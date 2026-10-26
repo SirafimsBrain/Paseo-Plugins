@@ -54,7 +54,23 @@ Conditions of the decision:
 - `tests/http-server.test.ts`: adapted to `@types/node` 22.20.5 typing
   (`res.json()` now yields `unknown`) — no behavior change.
 
-## Ghostty config import (stage B1)
+## Terminal runtime (stage B2)
+
+- `console/src/terminal.ts`: wraps `ghostty-web` (`init`, `Terminal`, `FitAddon`):
+  `mountTerminal(container, options)` inits the WASM runtime once, opens the
+  terminal into the container, fits + observes resize via `FitAddon`. Renders
+  an optional banner. Disposes both addon and terminal.
+- `shared/terminal-options.ts`: pure `ghosttySettingsToTerminalOptions` mapping
+  imported Ghostty settings (font, size, scrollback, cursor style/blink/colour,
+  theme + 16-colour palette entries `N=color`) onto terminal runtime options.
+  Unit-tested in `tests/terminal-options.test.ts`.
+- `console/index.html` gained a `#terminal` container; `console/src/main.ts`
+  mounts the terminal with a banner on load.
+- `ghostty-web`'s WASM ships as an embedded base64 data URL, so esbuild
+  carries it inside `dist/console/main.js` — no separate asset required
+  (verified: bundle contains `ghostty-web`).
+- The PTY bridge (stage B3) will feed bytes via `terminal.write` and read
+  input via `terminal.onData`; this stage only proves the renderer.
 
 - `server/ghostty-config.ts`: `discoverGhosttyConfigPaths` / `findGhosttyConfigPath`
   (XDG_CONFIG_HOME → `~/.config/ghostty/config` → macOS Application Support →

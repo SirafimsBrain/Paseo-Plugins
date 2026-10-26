@@ -1,7 +1,7 @@
 {
   "name": "remote-control",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.5.1",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -38,6 +38,7 @@
     "esbuild@0.28.2": true
   },
   "dependencies": {
+    "ghostty-web": "^0.4.0",
     "ws": "^8.22.0"
   }
 }
