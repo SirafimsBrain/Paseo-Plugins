@@ -1,8 +1,8 @@
-// PTY layer (stage B3). Spawns a shell via @lydell/node-pty, keeps a ring
+// PTY layer (stage B3). Spawns a shell via node-pty, keeps a ring
 // buffer of recent output for `attach` after a tab reload, and exposes
 // write/resize/kill plus data/exit events.
 
-import * as pty from "@lydell/node-pty";
+import * as pty from "node-pty";
 
 export interface PtyOptions {
   cols?: number;

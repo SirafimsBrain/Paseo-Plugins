@@ -56,11 +56,12 @@ Conditions of the decision:
 
 ## Install (note)
 
-`@lydell/node-pty` declares its platform binary as an *optional* dependency,
-which Paseo's `npm ci` step was omitting, causing the plugin to fail to load
-on linux-x64 with "could not find @lydell/node-pty-linux-x64". The platform
-package is now also listed as a direct dependency (npm skips it on platforms
-where its `os`/`cpu` constraints do not match, so this stays portable).
+`@lydell/node-pty` declared its platform binary as an *optional* dependency,
+which Paseo's `npm ci` step omitted, causing the plugin to fail to load on
+linux-x64. Switched back to the original `node-pty`, which compiles via
+`node-gyp rebuild` during `npm ci` (node-gyp is now a devDependency; build
+tools gcc/make/python are required on the host). This is the path validated
+by risk R2.
 
 - `shared/connections.ts`: zod schemas for groups/connections (hierarchy, validation).
 - `shared/protocols.ts`: protocol registry (ssh/rdp/vnc) with default ports, payload schemas, secret fields, launchable flags.

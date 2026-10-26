@@ -1,7 +1,7 @@
 {
   "name": "remote-control",
   "private": true,
-  "version": "0.15.1",
+  "version": "0.15.2",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -31,16 +31,17 @@
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "node-gyp": "^11.0.0"
   },
   "allowScripts": {
     "esbuild@0.25.12": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "node-pty@1.1.0": true
   },
   "dependencies": {
-    "@lydell/node-pty": "1.2.0-beta.18",
-    "@lydell/node-pty-linux-x64": "1.2.0-beta.18",
     "ghostty-web": "^0.4.0",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "node-pty": "1.1.0"
   }
 }
