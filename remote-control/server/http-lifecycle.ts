@@ -1,6 +1,5 @@
 import * as crypto from "node:crypto";
 import { ConsoleHttpServer, DEFAULT_CONSOLE_HOST } from "./http-server";
-import { WebSocketTransport } from "./transport";
 
 export interface ConsoleEndpointConfig {
   enabled: boolean;
@@ -18,8 +17,6 @@ export interface ConsoleEndpointStatus {
   token: string | null;
   error: string | null;
   portFallback: boolean;
-  transport: "ws" | "sse-post" | null;
-  transportConnections: number;
   sseSubscribers: number;
 }
 
@@ -29,8 +26,7 @@ export interface ConsoleEndpointOptions {
   consoleDir?: string;
   log?: (message: string) => void;
   logError?: (message: string) => void;
-  resolveSession?: (id: string) => import("./pty").PtyHandle | null;
-  sessions?: import("./sessions").SessionRegistry;
+  terminals?: import("./terminals").TerminalService;
   store?: import("./store").Store;
   vault?: import("./vault").VaultService;
   onServerStarted?: (server: ConsoleHttpServer) => void;
@@ -86,8 +82,6 @@ export class ConsoleEndpoint {
       token: listening ? this.token : null,
       error: this.error,
       portFallback: listening && this.portFallback,
-      transport: listening ? "ws" : null,
-      transportConnections: listening ? server?.transportConnections ?? 0 : 0,
       sseSubscribers: listening ? server?.sseSubscribers ?? 0 : 0,
     };
   }
@@ -144,30 +138,19 @@ export class ConsoleEndpoint {
     this.server = null;
     this.portFallback = false;
     const attempt = async (targetPort: number): Promise<ConsoleHttpServer> => {
-      const transport = new WebSocketTransport({
+      const server = new ConsoleHttpServer({
+        host: this.options.host,
+        port: targetPort,
         token: this.token,
-        log: this.options.log,
-        resolveSession: this.options.resolveSession,
+        version: this.options.version,
+        consoleDir: this.options.consoleDir,
+        terminals: this.options.terminals,
+        store: this.options.store,
+        vault: this.options.vault,
       });
-      try {
-        const server = new ConsoleHttpServer({
-          host: this.options.host,
-          port: targetPort,
-          token: this.token,
-          version: this.options.version,
-          consoleDir: this.options.consoleDir,
-          transport,
-          sessions: this.options.sessions,
-          store: this.options.store,
-          vault: this.options.vault,
-        });
-        await server.start();
-        this.options.onServerStarted?.(server);
-        return server;
-      } catch (cause) {
-        transport.dispose();
-        throw cause;
-      }
+      await server.start();
+      this.options.onServerStarted?.(server);
+      return server;
     };
     try {
       this.server = await attempt(port);

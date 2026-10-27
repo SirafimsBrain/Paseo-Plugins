@@ -3,8 +3,7 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { resolveConsoleDir, resolvePluginVersion } from "./paths";
-import type { TransportBridge } from "./transport";
-import type { SessionRegistry } from "./sessions";
+import type { TerminalService } from "./terminals";
 import {
   applyGhosttySettings,
   loadGhosttySettings,
@@ -45,10 +44,8 @@ export interface ConsoleHttpServerOptions {
   host?: string;
   version?: string;
   consoleDir?: string;
-  /** WebSocket bridge for the terminal transport (A3); disposed on stop(). */
-  transport?: TransportBridge;
-  /** Session registry for /api/sessions routes and SSE broadcasts. */
-  sessions?: SessionRegistry;
+  /** Workspace terminals: create/list/kill through the Paseo SDK. */
+  terminals?: TerminalService;
   /** Store for connection lookups. */
   store?: import("./store").Store;
   /** Vault service for /api/vault and /api/secrets routes. */
@@ -60,8 +57,7 @@ export class ConsoleHttpServer {
   private readonly host: string;
   private readonly version: string;
   private readonly consoleDir: string;
-  private readonly transport: TransportBridge | null;
-  private readonly sessions: SessionRegistry | null;
+  private readonly terminals: TerminalService | null;
   private readonly store: import("./store").Store | null;
   private readonly vault: import("./vault").VaultService | null;
   private readonly options: ConsoleHttpServerOptions;
@@ -87,20 +83,9 @@ export class ConsoleHttpServer {
     this.host = options.host ?? DEFAULT_CONSOLE_HOST;
     this.version = options.version ?? resolvePluginVersion();
     this.consoleDir = options.consoleDir ?? resolveConsoleDir();
-    this.transport = options.transport ?? null;
-    this.sessions = options.sessions ?? null;
+    this.terminals = options.terminals ?? null;
     this.store = options.store ?? null;
     this.vault = options.vault ?? null;
-    if (this.sessions) {
-      this.sessions.setOnEvent((event) => {
-        this.broadcastSse(event.type, event);
-      });
-    }
-  }
-
-  /** Number of live transport connections (WebSocket bridge). */
-  get transportConnections(): number {
-    return this.transport?.activeConnections ?? 0;
   }
 
   get listening(): boolean {
@@ -139,7 +124,6 @@ export class ConsoleHttpServer {
         socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
       });
       this.server = server;
-      if (this.transport) this.transport.attachHttpServer(server);
       server.listen(this.options.port, this.host, () => {
         const address = server.address();
         if (address && typeof address === "object") {
@@ -155,16 +139,11 @@ export class ConsoleHttpServer {
     return new Promise((resolve) => {
       const server = this.server;
       this.server = null;
-      const transport = this.transport;
       this.eventClients.clear();
       if (this.eventTicker !== null) {
         clearInterval(this.eventTicker);
         this.eventTicker = null;
       }
-      // Dispose the bridge first: Node does not track upgraded WebSocket
-      // sockets in closeAllConnections(), so a live terminal connection
-      // would otherwise keep server.close() hanging for the socket lifetime.
-      transport?.dispose();
       if (!server || !server.listening) {
         return resolve();
       }
@@ -304,48 +283,29 @@ export class ConsoleHttpServer {
         this.sendJson(res, 405, { error: "method not allowed" });
         return;
       }
-      // /api/sessions
-      if (url.pathname === "/api/sessions") {
-        if (!this.sessions) { this.sendJson(res, 503, { error: "sessions unavailable" }); return; }
+      // /api/terminals — Paseo workspace terminals. Creating one makes the
+      // Paseo app open it as a workspace tab; the console never renders it.
+      if (url.pathname === "/api/terminals") {
+        if (!this.terminals) { this.sendJson(res, 503, { error: "terminals unavailable" }); return; }
         if (req.method === "GET") {
-          this.sendJson(res, 200, { sessions: this.sessions.list() });
+          const workspaceId = url.searchParams.get("workspaceId");
+          void this.terminals.list(workspaceId).then((terminals) => {
+            this.sendJson(res, 200, { terminals });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
           return;
         }
         if (req.method === "POST") {
-          void this.readJsonBody(req).then((body) => {
-            const connectionId = body && typeof body === "object" && "connectionId" in body
-              ? String((body as { connectionId: unknown }).connectionId)
-              : "";
-            if (connectionId) {
-              if (!this.store || !this.vault) {
-                this.sendJson(res, 503, { error: "store/vault unavailable" });
-                return;
-              }
-              const connection = this.store.getConnection(connectionId);
-              if (!connection) {
-                this.sendJson(res, 404, { error: "connection not found" });
-                return;
-              }
-              if (connection.protocol !== "ssh") {
-                this.sendJson(res, 400, { error: `protocol ${connection.protocol} not launchable yet` });
-                return;
-              }
-              const session = this.sessions!.createSsh(connection, this.vault);
-              this.sendJson(res, 201, { session });
-              return;
-            }
-            const kind = (body && typeof body === "object" && "kind" in body)
-              ? String((body as { kind: unknown }).kind)
-              : "local";
-            if (kind !== "local") {
-              this.sendJson(res, 400, { error: `unsupported session kind: ${kind}` });
-              return;
-            }
-            const title = (body && typeof body === "object" && "title" in body)
-              ? String((body as { title: unknown }).title)
-              : undefined;
-            const session = this.sessions!.createLocal({ title });
-            this.sendJson(res, 201, { session });
+          void this.readJsonBody(req).then(async (body) => {
+            const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+            const terminal = await this.terminals!.open({
+              workspaceId: b.workspaceId ? String(b.workspaceId) : null,
+              connectionId: b.connectionId ? String(b.connectionId) : null,
+              cwd: b.cwd ? String(b.cwd) : null,
+              name: b.name ? String(b.name) : null,
+            });
+            this.sendJson(res, 201, { terminal });
           }).catch((cause) => {
             this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
           });
@@ -354,24 +314,18 @@ export class ConsoleHttpServer {
         this.sendJson(res, 405, { error: "method not allowed" });
         return;
       }
-      const sessionMatch = /^\/api\/sessions\/(.+?)\/(kill|reconnect)$/.exec(url.pathname);
-      if (sessionMatch && this.sessions) {
-        const sessionId = decodeURIComponent(sessionMatch[1]);
+      const terminalKillMatch = /^\/api\/terminals\/(.+)\/kill$/.exec(url.pathname);
+      if (terminalKillMatch && this.terminals) {
         if (req.method !== "POST") {
           this.sendJson(res, 405, { error: "method not allowed" });
           return;
         }
-        if (sessionMatch[2] === "kill") {
-          const ok = this.sessions.kill(sessionId);
+        const terminalId = decodeURIComponent(terminalKillMatch[1]);
+        void this.terminals.kill(terminalId).then((ok) => {
           this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
-          return;
-        }
-        const session = this.sessions.reconnect(sessionId);
-        if (!session) {
-          this.sendJson(res, 404, { error: "not found" });
-          return;
-        }
-        this.sendJson(res, 200, { session });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
         return;
       }
       // /api/groups

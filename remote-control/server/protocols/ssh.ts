@@ -59,7 +59,7 @@ export function createAskpassHelper(runDir: string, password: string): string {
   return filePath;
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 

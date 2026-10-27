@@ -2,7 +2,58 @@
 
 See `PLAN.md` for the full atomic plan, decisions (ADR-1..ADR-13) and risks. This file accumulates technical details as stages land.
 
-## Transport (stage A3, 2026-10-25)
+## Terminals are Paseo workspace tabs (stage 0.17.9, 2026-10-27)
+
+**Decision: remote-control runs no PTY and renders no terminal.** The browser
+terminal (ghostty-web + node-pty + the `/term` WebSocket bridge) was removed
+from the plugin; every terminal is now a **Paseo workspace terminal**, which
+the app opens as a terminal tab — the same model Orca uses for its terminal
+tabs (host-owned PTY, terminal view owned by the tab).
+
+Mechanism, verified against the Paseo 0.13.x sources:
+
+- `paseo.terminals.create({ workspaceId, cwd?, name?, command?, args? })`
+  (`@getpaseo/client` → daemon `create_terminal_request`, which carries
+  `command`/`args` and **no** `env`) creates a daemon-side PTY.
+- The app reconciles workspace tabs from the terminal list:
+  `addMissingEntityTabs()` in `packages/app/src/stores/workspace-layout-actions.ts`
+  opens a tab for every *standalone* terminal that has none. A terminal a
+  plugin creates therefore appears as a terminal tab of that workspace with
+  no app-side wiring, which makes `workspaceId` the only thing the plugin has
+  to get right. Tabs are inserted with `focus: false`, and Paseo exposes no
+  plugin API to focus a terminal tab, so the tab appears and the user switches
+  to it.
+- Plugin code reaches the SDK only through the RPC handler context
+  (`context.paseo`), so every handler in `index.server.ts` captures it. The
+  console is always opened right after a `console-url` RPC, and until the API
+  is captured `/api/terminals` answers 503 with an explicit message instead
+  of a broken launch.
+- The console carries the opener's workspace as `?workspaceId=` (added by
+  `client/open-console.ts`); without it the service resolves the workspace
+  only when exactly one exists, otherwise it refuses.
+
+SSH (`server/terminals.ts` + `server/protocols/ssh.ts`): the launch runs as
+`sh -c '<wrapper>'` because the create-terminal request has no `env` field.
+The wrapper exports `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE`/`DISPLAY` (only the
+values the launch changed), runs the shell-quoted argv, removes the run
+directory (identity file + askpass helper) and exits with ssh's status.
+`buildSshCommand()` and the service are covered by `tests/terminals.test.ts`.
+Terminal list/kill in the console polls every 3 s: the daemon owns terminals
+now, so the plugin has no state of its own to broadcast over SSE.
+
+Removed with the browser terminal: `server/pty.ts`, `server/sessions.ts`,
+`server/transport.ts`, `server/prebuilds/`, `console/src/terminal.ts`,
+`console/src/transport.ts`, `shared/terminal-options.ts`, the A3 spike scripts,
+`tests/transport.test.ts`, `tests/terminal-options.test.ts`, and the
+`ghostty-web`, `ws`, `node-pty`, `@types/ws` and `node-gyp` dependencies.
+Ghostty settings import (B1) stays: it reads and stores the system config but
+no longer feeds a renderer.
+
+## Transport (stage A3, 2026-10-25) — historical, the WebSocket bridge is gone
+
+> Superseded by 0.17.9: the terminal transport was removed together with the
+> browser terminal. Kept as the record of the A3 spike; nothing in the plugin
+> uses it anymore.
 
 **Decision: WebSocket is the terminal transport.** The SSE+POST variant
 stays an explicitly unimplemented stub (`SsePostTransport` in

@@ -1,6 +1,6 @@
 {
   "id": "remote-control",
-  "description": "Local-only remote control console: groups and connections for SSH/RDP/VNC, a pass-backed secret vault, ghostty-based terminals and session management.",
+  "description": "Local-only remote control console: groups and connections for SSH/RDP/VNC, a pass-backed secret vault, and terminals that open as Paseo workspace tabs.",
   "requirements": {
     "paseo": ">=0.11.0"
   },

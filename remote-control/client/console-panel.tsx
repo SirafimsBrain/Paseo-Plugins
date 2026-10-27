@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc, useWorkspace } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { openExternalUrl } from "@getpaseo/plugin/client";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { openConsoleUrl } from "./open-console";
 import { consoleUrl, state } from "../shared/rpc";
 
@@ -11,6 +11,7 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
   const projectRootPath = useWorkspace(workspaceId, (workspace) => workspace.projectRootPath);
   const stateRpc = useRpc(state);
   const consoleUrlRpc = useRpc(consoleUrl);
+  const paseo = usePaseo();
 
   const [listening, setListening] = useState(false);
   const [vault, setVault] = useState<{ initialized: boolean; unlocked: boolean; entries: number } | null>(null);
@@ -48,6 +49,15 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
     }
   }, [consoleUrlRpc, props.navigation, workspaceId]);
 
+  const openTerminal = useCallback(async () => {
+    setError(null);
+    try {
+      await paseo.terminals.create({ workspaceId });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [paseo, workspaceId]);
+
   const fg = theme.colors.foreground;
   const muted = theme.colors.foregroundMuted;
   const accent = theme.colors.accent;
@@ -61,6 +71,9 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
       </Text>
       <Text style={{ color: muted, fontSize: 12 }}>Project: {projectRootPath ?? "(none)"}</Text>
       {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
+      <Pressable onPress={openTerminal} style={[styles.button, { borderColor: accent }]}>
+        <Text style={{ color: accent, fontSize: 12 }}>Open terminal</Text>
+      </Pressable>
       <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>
         <Text style={{ color: accent, fontSize: 12 }}>Open console</Text>
       </Pressable>

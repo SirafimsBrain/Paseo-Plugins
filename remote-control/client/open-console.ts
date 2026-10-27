@@ -18,6 +18,21 @@ export function isOpenableConsoleUrl(url: string): boolean {
   }
 }
 
+/**
+ * The console creates workspace terminals, so it needs to know which
+ * workspace it belongs to: that workspace is where the terminals become tabs.
+ */
+export function withWorkspaceParam(url: string, workspaceId: string): string {
+  if (workspaceId.length === 0) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set("workspaceId", workspaceId);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export async function openConsoleUrl(
   url: string,
   openers: ConsoleOpeners,
@@ -32,7 +47,7 @@ export async function openConsoleUrl(
     const workspaceId = await resolveWorkspaceId(openers, preferredWorkspaceId);
     if (workspaceId !== null) {
       try {
-        openBrowser({ url, workspaceId });
+        openBrowser({ url: withWorkspaceParam(url, workspaceId), workspaceId });
         return { via: "browser", workspaceId };
       } catch {
         // fall through

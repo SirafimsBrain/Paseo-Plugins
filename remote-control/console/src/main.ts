@@ -1,10 +1,8 @@
-import { mountTerminal } from "./terminal";
-
-let token = new URLSearchParams(window.location.search).get("token") ?? "";
-
-function tokenParam(): string {
-  return `?token=${encodeURIComponent(token)}`;
-}
+const params = new URLSearchParams(window.location.search);
+let token = params.get("token") ?? "";
+// The opener (Paseo panel/screen) passes the workspace it opened the console
+// from; terminals created here become tabs of that workspace.
+const workspaceId = params.get("workspaceId") ?? "";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(`${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`, init);
@@ -56,21 +54,18 @@ function input(value = "", type = "text", placeholder = ""): HTMLInputElement {
 
 // ---------- state ----------
 const state = {
-  view: "sessions" as string,
-  sessions: [] as any[],
+  view: "terminals" as string,
+  terminals: [] as any[],
   connections: [] as any[],
   groups: [] as any[],
-  selectedSession: null as string | null,
-  terminal: null as Awaited<ReturnType<typeof mountTerminal>> | null,
-  terminalSocket: null as WebSocket | null,
+  notice: null as string | null,
 };
 
 // ---------- nav ----------
 const NAV = [
-  { id: "sessions", label: "Sessions" },
+  { id: "terminals", label: "Terminals" },
   { id: "connections", label: "Connections" },
   { id: "secrets", label: "Secrets" },
-  { id: "terminal", label: "Terminal" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -100,64 +95,80 @@ function render(): void {
   if (view) view(main);
 }
 
-// ---------- sessions view ----------
-async function refreshSessions(): Promise<void> {
+// ---------- terminals view ----------
+async function refreshTerminals(): Promise<void> {
   try {
-    const body = await api("/api/sessions");
-    state.sessions = body.sessions ?? [];
-    if (state.view === "sessions") render();
+    const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
+    const body = await api(`/api/terminals${query}`);
+    state.terminals = body.terminals ?? [];
+    if (state.view === "terminals") render();
   } catch (e) {
     console.error(e);
   }
 }
 
-function sessionsView(main: HTMLElement): void {
+function terminalsView(main: HTMLElement): void {
   const row = document.createElement("div");
   row.className = "row";
   const newBtn = document.createElement("button");
   newBtn.className = "primary";
-  newBtn.textContent = "New local session";
+  newBtn.textContent = "New terminal";
   newBtn.addEventListener("click", async () => {
-    await api("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "local" }) });
-    await refreshSessions();
+    try {
+      const res = await api("/api/terminals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspaceId || null }),
+      });
+      state.notice = `Terminal ${res.terminal.id} opened as a workspace tab in Paseo.`;
+    } catch (e) {
+      state.notice = String(e);
+    }
+    render();
+    await refreshTerminals();
   });
-  row.append(newBtn);
+  const hint = document.createElement("span");
+  hint.className = "muted";
+  hint.textContent = workspaceId
+    ? `Workspace ${workspaceId} — new terminals open as tabs in Paseo.`
+    : "New terminals open as tabs in Paseo.";
+  row.append(newBtn, hint);
   main.append(row);
+
+  if (state.notice) {
+    const notice = document.createElement("p");
+    notice.className = "muted";
+    notice.textContent = state.notice;
+    main.append(notice);
+  }
 
   const table = document.createElement("table");
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>ID</th><th>Kind</th><th>Title</th><th>State</th><th>PID</th><th>Started</th><th>Exit</th><th>Actions</th></tr>";
+  thead.innerHTML = "<tr><th>ID</th><th>Name</th><th>Kind</th><th>CWD</th><th>Started</th><th>Actions</th></tr>";
   table.append(thead);
   const tbody = document.createElement("tbody");
-  for (const s of state.sessions) {
+  for (const t of state.terminals) {
     const tr = document.createElement("tr");
-    const started = new Date(s.startedAt).toLocaleTimeString();
-    tr.innerHTML = `<td class="mono">${s.id}</td><td>${s.kind}</td><td>${s.title}</td><td>${s.state}</td><td>${s.pid ?? "-"}</td><td>${started}</td><td>${s.exitCode ?? "-"}</td>`;
+    const started = t.startedAt ? new Date(t.startedAt).toLocaleTimeString() : "-";
+    tr.innerHTML = `<td class="mono">${t.id}</td><td>${t.name}</td><td>${t.kind}</td><td class="mono">${t.cwd || "-"}</td><td>${started}</td>`;
     const actions = document.createElement("td");
     const killBtn = document.createElement("button");
     killBtn.className = "danger";
     killBtn.textContent = "kill";
     killBtn.addEventListener("click", async () => {
-      await api(`/api/sessions/${encodeURIComponent(s.id)}/kill`, { method: "POST" });
-      await refreshSessions();
+      await api(`/api/terminals/${encodeURIComponent(t.id)}/kill`, { method: "POST" });
+      await refreshTerminals();
     });
-    const openBtn = document.createElement("button");
-    openBtn.textContent = "open";
-    openBtn.addEventListener("click", async () => {
-      state.selectedSession = s.id;
-      state.view = "terminal";
-      render();
-    });
-    actions.append(openBtn, killBtn);
+    actions.append(killBtn);
     tr.append(actions);
     tbody.append(tr);
   }
   table.append(tbody);
   main.append(table);
-  if (state.sessions.length === 0) {
+  if (state.terminals.length === 0) {
     const p = document.createElement("p");
     p.className = "muted";
-    p.textContent = "No sessions yet.";
+    p.textContent = "No terminals yet.";
     main.append(p);
   }
 }
@@ -296,13 +307,19 @@ function connectionsView(main: HTMLElement): void {
       launchBtn.className = "primary";
       launchBtn.textContent = "Launch";
       launchBtn.addEventListener("click", async () => {
-        const res = await api("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connectionId: c.id }) });
-        if (res.session) {
-          state.selectedSession = res.session.id;
-          state.view = "terminal";
-          await refreshSessions();
-          render();
+        try {
+          const res = await api("/api/terminals", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ connectionId: c.id, workspaceId: workspaceId || null }),
+          });
+          state.notice = `SSH session opened as terminal tab ${res.terminal.id} in Paseo.`;
+        } catch (e) {
+          state.notice = String(e);
         }
+        state.view = "terminals";
+        await refreshTerminals();
+        render();
       });
       actions.append(launchBtn);
     }
@@ -436,41 +453,6 @@ function secretsView(main: HTMLElement): void {
   })();
 }
 
-// ---------- terminal view ----------
-function terminalView(main: HTMLElement): void {
-  const info = document.createElement("p");
-  info.className = "muted";
-  info.textContent = "Select a session from the Sessions view and click 'open', or create one. The terminal attaches over WebSocket.";
-  main.append(info);
-  const container = document.createElement("div");
-  container.id = "terminal";
-  main.append(container);
-  if (state.selectedSession) {
-    void (async () => {
-      const mt = await mountTerminal(container, { fontSize: 14, fontFamily: "monospace", cursorBlink: true, cursorStyle: "block", theme: { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc" }, banner: "" });
-      state.terminal = mt;
-      const ws = new WebSocket(`ws://${window.location.host}/term?token=${encodeURIComponent(token)}`);
-      ws.binaryType = "arraybuffer";
-      state.terminalSocket = ws;
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ t: "attach", sessionId: state.selectedSession }));
-      };
-      ws.onmessage = (ev) => {
-        if (typeof ev.data === "string") return;
-        if (ev.data instanceof ArrayBuffer) {
-          mt.terminal.write(new TextDecoder().decode(ev.data));
-        }
-      };
-      mt.terminal.onData((v: string) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(v));
-      });
-      mt.fitAddon.observeResize();
-    })();
-  } else {
-    container.textContent = "No session selected. Go to Sessions and click 'open'.";
-  }
-}
-
 // ---------- settings view ----------
 function settingsView(main: HTMLElement): void {
   const card = document.createElement("div");
@@ -483,8 +465,7 @@ function settingsView(main: HTMLElement): void {
   void (async () => {
     try {
       const vs = await api("/api/vault/status");
-      const sess = await api("/api/sessions");
-      status.textContent = JSON.stringify({ vault: vs, sessions: sess.sessions?.length ?? 0 }, null, 2);
+      status.textContent = JSON.stringify({ vault: vs, terminals: state.terminals.length }, null, 2);
     } catch (e) {
       status.textContent = String(e);
     }
@@ -518,27 +499,27 @@ function settingsView(main: HTMLElement): void {
 }
 
 const VIEWS: Record<string, (m: HTMLElement) => void> = {
-  sessions: sessionsView,
+  terminals: terminalsView,
   connections: connectionsView,
   secrets: secretsView,
-  terminal: terminalView,
   settings: settingsView,
 };
 
-// ---------- SSE ----------
-function startSse(): void {
+// ---------- SSE + polling ----------
+function startLiveUpdates(): void {
   try {
-    const source = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
-    source.addEventListener("session-updated", () => {
-      if (state.view === "sessions") refreshSessions();
-    });
+    new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
   } catch {
     // ignore
   }
+  // Terminal state lives in the Paseo daemon, so this view polls it.
+  setInterval(() => {
+    if (state.view === "terminals") void refreshTerminals();
+  }, 3000);
 }
 
 // ---------- init ----------
 render();
-void refreshSessions();
+void refreshTerminals();
 void refreshConnections();
-startSse();
+startLiveUpdates();

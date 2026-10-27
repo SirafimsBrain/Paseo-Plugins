@@ -23,8 +23,6 @@ export function RemoteControlScreen(props: PluginScreenProps) {
   const paseo = usePaseo();
 
   const [listening, setListening] = useState(false);
-  const [transport, setTransport] = useState<"ws" | "sse-post" | null>(null);
-  const [transportConnections, setTransportConnections] = useState(0);
   const [url, setUrl] = useState<string | null>(null);
   const [vault, setVault] = useState<{ initialized: boolean; unlocked: boolean; entries: number } | null>(null);
   const [password, setPassword] = useState("");
@@ -35,8 +33,6 @@ export function RemoteControlScreen(props: PluginScreenProps) {
     try {
       const result = await stateRpc({});
       setListening(result.listening);
-      setTransport(result.transport);
-      setTransportConnections(result.transportConnections);
       setUrl(result.consoleUrl);
       setVault(result.vault);
     } catch (cause) {
@@ -130,7 +126,6 @@ export function RemoteControlScreen(props: PluginScreenProps) {
       <Text style={{ color: fg, fontSize: 16, fontWeight: "600" }}>Remote Control</Text>
       <Text style={{ color: muted, fontSize: 13 }}>
         Console: {listening ? "listening" : "stopped"}
-        {listening && transport ? ` (transport ${transport}, ${transportConnections} live)` : ""}
       </Text>
       {url ? <Text style={{ color: muted, fontSize: 12 }}>{url}</Text> : null}
       <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>

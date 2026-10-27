@@ -14,8 +14,6 @@ export const state = defineRpc({
     consoleUrl: z.string().nullable(),
     listening: z.boolean(),
     version: z.string(),
-    transport: z.enum(["ws", "sse-post"]).nullable(),
-    transportConnections: z.number().int().nonnegative(),
     vault: z.object({
       initialized: z.boolean(),
       unlocked: z.boolean(),

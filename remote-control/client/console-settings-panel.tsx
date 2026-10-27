@@ -21,8 +21,6 @@ export function RemoteControlSettingsPanel(props: PluginWorkspacePanelProps) {
   const paseo = usePaseo();
 
   const [listening, setListening] = useState(false);
-  const [transport, setTransport] = useState<"ws" | "sse-post" | null>(null);
-  const [transportConnections, setTransportConnections] = useState(0);
   const [url, setUrl] = useState<string | null>(null);
   const [vault, setVault] = useState<{ initialized: boolean; unlocked: boolean; entries: number } | null>(null);
   const [password, setPassword] = useState("");
@@ -33,8 +31,6 @@ export function RemoteControlSettingsPanel(props: PluginWorkspacePanelProps) {
     try {
       const result = await stateRpc({});
       setListening(result.listening);
-      setTransport(result.transport);
-      setTransportConnections(result.transportConnections);
       setUrl(result.consoleUrl);
       setVault(result.vault);
     } catch (cause) {
@@ -93,6 +89,18 @@ export function RemoteControlSettingsPanel(props: PluginWorkspacePanelProps) {
     }
   }, [refresh, vaultLockRpc]);
 
+  // Opens a Paseo workspace terminal; the app shows it as a workspace tab.
+  const openTerminal = useCallback(async () => {
+    setError(null);
+    setMessage(null);
+    try {
+      const terminal = await paseo.terminals.create({ workspaceId });
+      setMessage(`Terminal ${terminal.id} opened as a workspace tab.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [paseo, workspaceId]);
+
   const fg = theme.colors.foreground;
   const muted = theme.colors.foregroundMuted;
   const accent = theme.colors.accent;
@@ -103,11 +111,13 @@ export function RemoteControlSettingsPanel(props: PluginWorkspacePanelProps) {
       <Text style={{ color: muted, fontSize: 12 }}>Project: {projectRootPath ?? "(none)"}</Text>
       <Text style={{ color: muted, fontSize: 13 }}>
         Console: {listening ? "listening" : "stopped"}
-        {listening && transport ? ` (transport ${transport}, ${transportConnections} live)` : ""}
       </Text>
       {url ? <Text style={{ color: muted, fontSize: 12 }}>{url}</Text> : null}
       <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>
         <Text style={{ color: accent, fontSize: 13 }}>Open console</Text>
+      </Pressable>
+      <Pressable onPress={openTerminal} style={[styles.button, { borderColor: accent }]}>
+        <Text style={{ color: accent, fontSize: 13 }}>Open terminal</Text>
       </Pressable>
 
       <Text style={{ color: fg, fontSize: 14, fontWeight: "600", marginTop: 12 }}>Vault</Text>

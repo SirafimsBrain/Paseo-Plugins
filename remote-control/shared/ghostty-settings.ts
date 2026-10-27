@@ -1,9 +1,10 @@
 // Imported Ghostty settings (stage B1, orca PR #1001 scheme).
 //
-// These are the subset of Ghostty keys the plugin understands and applies to
-// the `ghostty-web` terminal runtime (stage B2). Every other key found in the
-// user's system config is reported as `ignored` by the mapper rather than
-// dropped silently — see server/ghostty-config.ts.
+// These are the subset of Ghostty keys the plugin understands. They are
+// imported from the system config and stored (B1); since 0.17.9 no terminal
+// runtime lives in the plugin, so nothing renders them yet. Every other key
+// found in the user's system config is reported as `ignored` by the mapper
+// rather than dropped silently — see server/ghostty-config.ts.
 
 import { z } from "zod";
 

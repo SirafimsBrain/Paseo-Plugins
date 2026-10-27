@@ -34,10 +34,23 @@ export default function contribute(client: PluginClientContext): () => void {
     id: "remote-control-open-console",
     title: "Open remote-control console",
     icon: "Globe",
-    keywords: ["remote", "control", "console", "terminal", "ssh", "rdp", "vnc"],
+    keywords: ["remote", "control", "console", "ssh", "rdp", "vnc"],
     context: "global",
     async onSelect({ openScreen }) {
       openScreen({ screenId: SCREEN_ID });
+    },
+  });
+
+  // A terminal created here is a Paseo workspace terminal, so the app opens
+  // it as a terminal tab of that workspace.
+  client.addCommandCenterItem({
+    id: "remote-control-open-terminal",
+    title: "Open terminal",
+    icon: "Terminal",
+    keywords: ["terminal", "shell", "console", "pty", "ssh"],
+    context: "workspace",
+    async onSelect({ paseo, workspace }) {
+      await paseo.terminals.create({ workspaceId: workspace.id });
     },
   });
 

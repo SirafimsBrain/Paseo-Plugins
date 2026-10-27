@@ -21,6 +21,11 @@ describe("open-console", () => {
     expect(outcome.via).toBe("browser");
     expect(browserCalls).toHaveLength(1);
     expect(externalCalls).toHaveLength(0);
+    // The console needs the workspace it belongs to: terminals created there
+    // become tabs of that workspace.
+    expect(browserCalls[0].workspaceId).toBe("ws-1");
+    expect(browserCalls[0].url).toContain("workspaceId=ws-1");
+    expect(browserCalls[0].url).toContain("token=x");
   });
   it("falls back when browser throws", async () => {
     const externalCalls: string[] = [];
