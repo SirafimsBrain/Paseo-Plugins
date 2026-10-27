@@ -1,13 +1,17 @@
 # remote-control — план разработки (атомарные этапы)
 
-> **Статус: 0.18.10 — креды и запуск из правой панели: пароль подключения
-> пишется в vault при создании/редактировании в консоли
-> (`connections/<id>/password`, в БД и ответах только имя), правая панель
-> перечисляет подключения и запускает ssh во вкладке Paseo, rdp/vnc —
-> внешним окном (FreeRDP со stdin, TigerVNC с файлом `vncpasswd -f`);
-> кнопки создания «голого» терминала убраны. Блоки E/F начаты как лаунчеры
-> (без discovery и опций), терминалы — во вкладках Paseo (0.17.9+).**
-> (см. §2 ADR-5/ADR-6, §6, Блок B и `__doc.md`).
+> **Статус: 0.19.10 — хранилище как основа:** первичная инициализация
+> (создание мастер-пароля) и разблокировка — только в правой панели, группы
+> с подключениями отображаются только после открытия хранилища; ручное
+> управление секретами убрано (ни Secrets-вьюхи, ни `/api/secrets`, ни
+> HTTP-маршрутов vault setup/unlock/lock) — секретами управляют только формы
+> создания/изменения подключения; мастер-пароль в формах подключения больше
+> не вводится (закрытое/не созданное хранилище → явная ошибка с указанием на
+> панель, до создания записи). Пароль подключения живёт в vault
+> (`connections/<id>/password`); запуск ssh — во вкладке Paseo, rdp/vnc —
+> внешним окном (0.18.10); кнопки создания «голого» терминала убраны;
+> блоки E/F начаты как лаунчеры (без discovery и опций).**
+> (см. §2 ADR-5/ADR-6/ADR-14, §6, Блоки B/C/E/F/G и `__doc.md`).
 > План собран по результатам исследования исходных материалов (см. §1),
 > решений заказчика, зафиксированных до начала планирования (см. §2),
 > и правил `AGENTS.md` (версия + анонсированный тег на каждый этап).
@@ -19,9 +23,12 @@
 агенту без потери контекста: `PLAN.md` (этот файл) + `__doc.md` (техническая
 правда) + `README.md` (английский, лицо плагина).
 
-**Порядок работ заказан заказчиком и не нарушается:** сначала терминал ghostty
-и импорт его настроек (блок B), затем секреты (блок C), затем вызов ssh
-в терминале плагина (блок D), всё остальное — блоки E–G.
+**Порядок работ заказан заказчиком; соблюдён, с одной ревизией по ходу:**
+сначала блок B (терминал ghostty + импорт его настроек), затем секреты
+(блок C), затем вызов ssh в терминале плагина (блок D), всё остальное —
+блоки E–G. Ревизия: рантайм браузерного терминала (B2–B4) отменён в 0.17.9
+(ADR-5/ADR-6) — «терминал в вкладке» теперь даёт сам Paseo; из блока B
+остался только B1 (импорт настроек системного ghostty, без рантайма).
 
 ---
 
@@ -140,7 +147,10 @@ import»: `src/main/ghostty/{discovery,parser,mapper,index}.ts` (+ тесты) �
   `luck-planner/client/open-dashboard.ts`).
 - Host-SDK даёт `spawnProcess`, `execCommand`, `terminateProcess` из
   `@getpaseo/plugin/server` — управление процессами делаем ими, не голым
-  `child_process`, где это возможно.
+  `child_process`, где это возможно. **Факт 0.18.10:** внешние окна rdp/vnc
+  и вызовы `gpg` идут через `node:child_process` напрямую — нужны detached-процесс
+  GUI-окна и stdin-канал для пароля; возврат к `spawnProcess` имеет смысл, только
+  если он поддержит оба режима (вопрос для этапов E/F).
 - **Из памяти агентов (memory-flash, `remote-control` в базе отсутствует —
   тема новая):**
   - живой install ловит три ловушки (#10): серверный код транспилируется в
@@ -164,21 +174,48 @@ import»: `src/main/ghostty/{discovery,parser,mapper,index}.ts` (+ тесты) �
 |---|---------|-------------|
 | **ADR-1** | **Две поверхности.** (1) Веб-консоль — отдельное веб-приложение (React+TS) на HTTP-сервере плагина, `127.0.0.1`, открывается в workspace browser Paseo (`navigation.openBrowser` → `openExternalUrl`). (2) Тонкая нативная RN-панель «Remote Control»: статус хранилища, список подключений с запуском (ssh → вкладка, rdp/vnc → внешнее окно), кнопка «Open console», плюс ⌘K-пункт. | Терминал живёт во вкладке Paseo (ADR-5), потому что клиентский код плагина — React Native без DOM/canvas (§1.5), а консоль остаётся веб-страницей; требование заказчика «вкладка консоль» реализуется веб-вкладкой; модальные окна в веб-консоли разрешены, главный интерфейс остаётся лаконичным (левое меню + контент, детали — в модалках). |
 | **ADR-2** | **Loopback только, с токеном.** Бинд строго `127.0.0.1`, пер-инсталляционный токен доступа (в query для страниц и REST, в `Authorization` для REST), обязательная проверка `Origin`/`Host` на WS и мутациях отменена вместе с WS-мостом (0.17.9), `GET /health` без токена. Никакого `0.0.0.0` и никакого удалённого доступа. | Прямое требование заказчика («только локальный хост») + прецедент ADR-9 luck-planner (пер-инстанс токен, precedence API-ключей memory-flash). Консоль умеет запускать процессы и читать секреты — токен обязателен на каждом вызове. |
-| **ADR-3** | **Хранилище разделено на три части:** подключения и группы → SQLite `$PASEO_HOME/plugins/remote-control/remote-control.db` (`node:sqlite`, WAL, `busy_timeout`, `meta.schema_version`); секреты → `pass`-стор в `$PASEO_HOME/pass-store` (переопределение через `PASSWORD_STORE_DIR`, как в примере заказчика); сессии → **в памяти демона** (живут ровно столько, сколько живёт плагин). | Формат passwordstore.org обязателен; SQLite — прецедент luck-planner/memory-flash (один файл, миграции, FTS не нужен); сессии — процессное состояние, на диск его не выгружаем. Секретов в SQLite нет ни в каком виде. |
+| **ADR-3** | **Хранилище разделено на три части:** подключения и группы → SQLite `$PASEO_HOME/plugins/remote-control/remote-control.db` (`node:sqlite`, WAL, `busy_timeout`, `meta.schema_version`); секреты → `pass`-стор в `$PASEO_HOME/pass-store` (переопределение через `PASSWORD_STORE_DIR`, как в примере заказчика); сессии → **в памяти демона** (живут ровно столько, сколько живёт плагин). | Формат passwordstore.org обязателен; SQLite — прецедент luck-planner/memory-flash (один файл, миграции, FTS не нужен); сессии — процессное состояние, на диск его не выгружаем. Секретов в SQLite нет ни в каком виде. **Часть «сессии» отменена в 0.17.9:** реестра сессий в памяти плагина больше нет — терминалы владеет даэмон Paseo, внешние окна rdp/vnc (0.18.10) плагин не трекает. |
 | **ADR-4** | **Хранилище открывается один раз.** Сервис `vault` в daemon-процессе: `unlock(masterPassword)` проверяет пароль пробной дешифровкой и кэширует passphrase в памяти; дальше все чтения/записи идут через `--pinentry-mode loopback --passphrase-fd` **без повторных запросов**; `lock()` обнуляет буфер и убивает gpg-agent хранилища; авто-`lock()` в cleanup входной точки плагина (останов демона / disable / update) + досрочно по кнопке Lock в консоли. | Требование заказчика: «открывается один раз мастер паролем… закрывается при остановке демона или принудительно». Асимметрия passwordstore.org сохраняется: изолированный `GNUPGHOME=$PASEO_HOME/pass-gnupg` + ключ, создаваемый плагином при первой настройке; в настройках — опция указать свой существующий ключ (решение заказчика). Passphrase в памяти — осознанный компромисс: альтернатива (pinentry на каждый вызов) нарушает главное требование; обнуление при lock + отсутствие логов — обязательны. |
 | **ADR-5** | **Терминал = терминал Paseo во вкладке рабочей области (0.17.9).** Плагин вызывает `paseo.terminals.create({ workspaceId, cwd?, name?, command?, args? })`: даэмон поднимает PTY, а приложение само открывает для него вкладку (`addMissingEntityTabs` в `workspace-layout-actions.ts` открывает вкладку для каждого «сиротского» терминала без вкладки). Своего PTY, рендерера и моста ввода/вывода в плагине больше нет. | Это и есть требуемый заказчиком «терминал в вкладке как в Orca»: host-owned PTY + терминальная view во вкладке. Рендерить терминал в консоли нельзя (клиентский код — React Native без DOM/canvas, §1.5), а ghostty как приложение не встраивается в чужую вкладку; Paseo уже владеет и PTY, и вкладкой. |
 | **ADR-6** | **Транспорт терминала — отменён (0.17.9).** Мост `/term` (WS, спайк A3) и адаптеры `server/transport.ts` / `console/src/transport.ts` удалены вместе с браузерным терминалом: ввод/вывод PTY идёт между даэмоном Paseo и его же приложением, плагин в этот поток не встраивается. | Спайк A3 доказал, что WS в workspace browser работает (см. `__doc.md` § Transport, история), но сам терминал теперь живёт во вкладке Paseo, а не в веб-странице консоли — транспорт стал ненужным. |
 | **ADR-7** | **SSH: `ssh` запускается внутри терминала Paseo**, argv собирается из профиля подключения (`server/protocols/ssh.ts`). Ключевые данные: identity-файл из хранилища материализуется в `$PASEO_HOME/run/<session>/id` (0600), пароль — через `SSH_ASKPASS`-хелпер (секрет не попадает ни в argv, ни в переменные окружения процесса-вызывающего). Так как запрос на создание терминала не умеет передавать `env`, запуск идёт как `sh -c '<обёртка>'`: обёртка экспортирует `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE`/`DISPLAY`, выполняет экранированный argv, удаляет каталог сессии и выходит с кодом ssh. | Требование «вызов ssh клиента в терминале». argv/env — то, что видит `ps`/`/proc`; askpass-канал устраняет обе утечки и переиспользует уже готовый vault; обёртка закрывает отсутствие `env` в API создания терминала. |
-| **ADR-8** | **RDP — точный перенос rdp-pilot, FreeRDP 3 только.** Свои discovery (`xfreerdp3`/`wlfreerdp3` + override `REMOTE_CONTROL_RDP_BIN`), конструктор argv (таблицы опций §1.1) и секреты из vault; **v2-fallback, конвертеры опций и Flatpak-обвязка не переносятся**. Сессия = дочерний процесс с нативным окном FreeRDP, трекается в реестре сессий (kill/reconnect/exit-code), а не рисуется в консоли. | Решение заказчика: точный перенос протестированной базы. Заявленный «перенос из Python» = перенос семантики argv/validation/discovery (и его pytest-набора), а не изобретение framebuffer-конвейера. |
-| **ADR-9** | **VNC — точный перенос vnc-pilot.** Discovery viewer'ов с фингерпринтом версии и кэшем, argv-билдеры per viewer, форматирование цели (`host:display` / `host::port` / `vnc://` / IPv6), пароль через `vncpasswd -f` → 0600-временный файл в `$PASEO_HOME/run/` с обязательной уборкой, в argv пароль не попадает. Сессия = процесс viewer'а, трекается как RDP. | Как ADR-8; особенно важен жизненный цикл временных файлов (в оригинале чистятся на deactivate/exit — у нас это cleanup плагина + окончание сессии). |
-| **ADR-10** | **Реестр протоколов.** `shared/protocols.ts` — zod-схема полей протокола + `defaultPort` + capabilities; `server/protocols/registry.ts` — `buildLaunch(ctx)`/`discover()`. SSH реализует интерфейс первым (блок D), RDP (E) и VNC (F) подключаются без изменения ядра консоли: модалка подключения рисует поля из схемы протокола. | Прямое требование «в перспективе будет расширение протоколов удалённого доступа» — новый протокол = один модуль + запись в реестре, без правок консоли. |
-| **ADR-11** | **Реестр сессий — единый для всех типов:** `{id, kind: local\|ssh\|rdp\|vnc, connectionId?, title, state: starting\|running\|exited\|failed, pid?, exitCode?, signal?, startedAt, endedAt?, lastError?}` + события `session-updated` в SSE. Действия: kill (`terminateProcess`), reconnect (повторный launch с тем же профилем), open (для ssh/local — вкладка терминала в консоли). | Единственное место, где консоль видит «какие сессии и где запущены» и управляет ими — прямое требование заказчика; различия ssh/rdp/vnc/local инкапсулированы в launcher'ах, а не в консоли. |
-| **ADR-12** | **Живые обновления:** web-консоль подписывается на `GET /api/events` (SSE); нативная панель поллингом дергает RPC `remote-control.state` (push в RN недоступен). Смена настроек/статуса хранилища/сессий шлёт событие всем подписчикам. | Рабочий прецедент memory #5: change-feed luck-planner. Здесь источник событий один (daemon), поэтому достаточно in-process event emitter'а, без таблицы-шины. |
-| **ADR-13** | **Настройки плагина** живут в SQLite (`settings`) и правятся веб-консолью (экран «Settings»); нативный `addSettingsScreen` содержит только «Open console» + краткий статус, чтобы не дублировать UI. Порт сервера, путь стора, авто-блокировка, override-бинарии FreeRDP/viewer — там же. | Требование «управление всеми параметрами и состоянием плагина во вкладке консоль». |
+| **ADR-8** | **RDP — точный перенос rdp-pilot, FreeRDP 3 только.** Свои discovery (`xfreerdp3`/`wlfreerdp3` + override `REMOTE_CONTROL_RDP_BIN`), конструктор argv (таблицы опций §1.1) и секреты из vault; **v2-fallback, конвертеры опций и Flatpak-обвязка не переносятся**. Сессия = дочерний процесс с нативным окном FreeRDP, трекается в реестре сессий (kill/reconnect/exit-code), а не рисуется в консоли. | Решение заказчика: точный перенос протестированной базы. Заявленный «перенос из Python» = перенос семантики argv/validation/discovery (и его pytest-набора), а не изобретение framebuffer-конвейера. **Статус 0.18.10 — минимальный лаунчер:** `server/protocols/external.ts` ищет по PATH только `xfreerdp3`/`xfreerdp`, пароль идёт через `/from-stdin:force` (никакого `/p:`, argv чист), `/cert:ignore` с переопределением через `payload.cert`, запуск — detached-окном из RPC панели, stderr-хвост попадает в `paseo plugin logs`. **Не сделано (остаётся E1/E3):** discovery с override и `wlfreerdp*`, таблица опций §1.1, поля RDP в модалке, трекинг окна в реестре (реестр отменён ADR-11), gateway-пароль. |
+| **ADR-9** | **VNC — точный перенос vnc-pilot.** Discovery viewer'ов с фингерпринтом версии и кэшем, argv-билдеры per viewer, форматирование цели (`host:display` / `host::port` / `vnc://` / IPv6), пароль через `vncpasswd -f` → 0600-временный файл в `$PASEO_HOME/run/` с обязательной уборкой, в argv пароль не попадает. Сессия = процесс viewer'а, трекается как RDP. | Как ADR-8; особенно важен жизненный цикл временных файлов (в оригинале чистятся на deactivate/exit — у нас это cleanup плагина + окончание сессии). **Статус 0.18.10 — минимальный лаунчер:** `vncpasswd -f` → 0600-файл с уборкой по выходу окна, env-фолбэк `VNC_PASSWORD`/`VNC_USERNAME` без `vncpasswd`, последний фолбэк — интерактивный диалог viewer'а. **Не сделано (остаётся F1/F3):** discovery с фингерпринтом, билдеры per viewer, трекинг сессий; на целевой машине VNC-клиент не установлен — живого запуска ещё не было. |
+| **ADR-10** | **Реестр протоколов.** `shared/protocols.ts` — zod-схема полей протокола + `defaultPort` + capabilities; `server/protocols/registry.ts` — `buildLaunch(ctx)`/`discover()`. SSH реализует интерфейс первым (блок D), RDP (E) и VNC (F) подключаются без изменения ядра консоли: модалка подключения рисует поля из схемы протокола. | Прямое требование «в перспективе будет расширение протоколов удалённого доступа» — новый протокол = один модуль + запись в реестре, без правок консоли. **Факт 0.18.10:** внешний запуск rdp/vnc идёт мимо `buildLaunch` — RPC `connections.launch` направляет не-ssh в `protocols/external.ts`; `launchable: false` для rdp/vnc сохранён, поскольку флаг означает «запуск во вкладке-терминале». |
+| **ADR-11** | ~~Реестр сессий~~ **Отменён в 0.17.9.** Единый реестр сессий (`server/sessions.ts`) и события `session-updated` в SSE удалены вместе с PTY-слоем: у плагина больше нет своих сессий — терминалами владеет даэмон Paseo (список/kill — вид «Terminals»), внешние окна rdp/vnc (0.18.10) живут как detached-процессы без реестра. | Отмена следует из ADR-5: если PTY и вкладка — сторонние, реестр сессий плагину не нужен; kill/reconnect для ssh — это kill терминала Paseo. |
+| **ADR-12** | **Живые обновления:** web-консоль подписывается на `GET /api/events` (SSE); нативная панель поллингом дергает RPC `remote-control.state` (push в RN недоступен). Смена настроек/статуса хранилища/сессий шлёт событие всем подписчикам. | Рабочий прецедент memory #5: change-feed luck-planner. Здесь источник событий один (daemon), поэтому достаточно in-process event emitter'а, без таблицы-шины. **Факт 0.18.10:** SSE-поток (`/api/events`) жив, но шлёт только heartbeat — самих событий ещё нет; консоль и панель обновляются поллингом каждые 3 с (change-feed — отдельный этап). |
+| **ADR-13** | **Настройки плагина** живут в SQLite (`settings`) и правятся веб-консолью (экран «Settings»); нативная вкладка настроек (`addWorkspacePanel`, locations `["workspace"]`) содержит статус, «Open console» и кнопки vault setup/unlock/lock, чтобы не дублировать UI. Факт 0.18.10: в UI вынесены только статус хранилища и импорт ghostty (экран Settings); кнопки vault живут во вкладке Secrets и в нативных панелях/экране; порт (сервер всегда на ephemeral-порту), путь стора и override-бинарии в UI не вынесены. | Требование «управление всеми параметрами и состоянием плагина во вкладке консоль». |
+| **ADR-14** | **Креды и запуск из панели (0.18.10).** Пароль подключения вводится при создании/редактировании и живёт в vault под `connections/<id>/password` (в БД и ответах API — только имя секрета); master-password запрашивается только при закрытом/не созданном хранилище, ошибка — до создания записи. Запуск — из правой панели: ssh → вкладка Paseo (отказ при закрытом vault), rdp/vnc → внешнее окно detached-процессом: FreeRDP читает пароль со stdin (`/from-stdin:force`), TigerVNC — из 0600-файла `vncpasswd -f` (фолбэк — env `VNC_PASSWORD`/`VNC_USERNAME`). Кнопки создания «голого» терминала (консоль, обе панели, ⌘K) удалены. **Ревизия 0.19.10:** мастер-пароль в формах подключения больше не вводится — инициализация и разблокирование происходят один раз в правой панели (группы видны только после открытия хранилища), HTTP-маршруты `vault/setup|unlock|lock` и `/api/secrets*` удалены (404 с подсказкой), ручное создание секретов запрещено; закрытое хранилище → сохранение пароля подключения отклоняется с ошибкой, указывающей на панель. | Требования заказчика 2026-10-27: хранилище = логин+пароль для протоколов; «открыть терминал» = открыть ssh-сессию во вкладке; rdp/vnc — внешними окнами из правой панели; креды не должны засвечиваться в `ps`. |
 
 ---
 
-## 3. Целевая структура каталогов
+## 3. Структура каталогов
+
+> **Сверено с фактом 2026-10-27 (0.18.10).** Дерево ниже — исходный
+> **целевой** план; текущий код от него отличается:
+>
+> - **удалены** (0.17.9, ADR-5/ADR-6): `server/transport.ts`,
+>   `server/sessions.ts`, `server/pty.ts`, `server/prebuilds/`,
+>   `shared/sessions.ts`, `console/src/terminal.ts`, `console/src/transport.ts`;
+>   `server/askpass.ts` не создавался (askpass-хелпер — внутри
+>   `server/protocols/ssh.ts`); React-структура консоли
+>   (`console/src/app.tsx`, `views/`, `modals/`, `terminal/`) не создавалась —
+>   консоль это `console/index.html` + один vanilla-модуль `console/src/main.ts`;
+> - **не созданы** (остаются этапами E/F): `server/protocols/freerdp.ts`,
+>   `vnc.ts`, `discovery.ts` — минимальный лаунчер rdp/vnc сейчас в одном
+>   `server/protocols/external.ts`;
+> - **есть фактически, но в целевом дереве не указаны:** `server/module-dir.ts`,
+>   `server/terminals.ts` (TerminalService, ADR-5), `client/console-screen.tsx`,
+>   `client/console-settings-panel.tsx` (это и есть «settings-screen»),
+>   `client/web.ts`, `shared/vault.ts` (zod-статус),
+>   тесты `tests/{terminals,connections-password,external-launch,http-server,ghostty-config,open-console,store,vault}.test.ts`;
+> - **сирота:** `client/console-sidebar-item.tsx` нигде не импортируется
+>   (`addSidebarItem` не вызывается) — удалить или подключить отдельным этапом;
+> - `index.client.tsx` фактически: две панели + screen + один ⌘K-пункт
+>   («Open remote-control console») + heartbeat RPC; slash-команд нет;
+> - `shared/rpc.ts` = state, vault.*, console-url, connections.list,
+>   connections.launch; RPC вида `sessions.*` не существует;
+> - `client/settings-screen.tsx` → фактическое имя `console-settings-panel.tsx`.
 
 ```text
 remote-control/
@@ -261,7 +298,7 @@ CREATE TABLE connections (
   port INTEGER,                       -- NULL → defaultPort протокола (22/3389/5900)
   username TEXT NOT NULL DEFAULT '',
   payload TEXT NOT NULL DEFAULT '{}', -- zod-валидируется схемой протокола
-  secret_refs TEXT NOT NULL DEFAULT '{}', -- {"password":"remote-control/<id>/password", ...} — только имена записей pass
+  secret_refs TEXT NOT NULL DEFAULT '{}', -- {"passwordSecret":"connections/<id>/password", ...} — только имена записей pass
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
   archived_at INTEGER
@@ -279,12 +316,12 @@ CREATE TABLE meta     (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 $PASEO_HOME/pass-store/
 ├── .gpg-id                              # recipient = ключ плагина (или указанный пользователем)
 └── remote-control/
-    └── <connection-id>/
-        ├── password.gpg                 # ssh/rdp/vnc password
-        ├── identity.gpg                 # ssh private key (опционально)
-        └── gateway-password.gpg         # rdp gateway (опционально)
+    ├── connections/<id>/password.gpg    # пароль подключения (0.18.10, создаётся формой)
+    ├── <имя>/identity.gpg               # ssh private key (опционально)
+    └── <произвольные имена>.gpg          # записи, заведённые руками во вкладке Secrets
 $PASEO_HOME/pass-gnupg/                  # изолированный GNUPGHOME плагина
-$PASEO_HOME/run/<session-id>/            # 0600-материал: id-файлы, vncpasswd-файлы
+$PASEO_HOME/run/term_<uuid>/             # id-файл 0600 + askpass-хелпер ssh (удаляются обёрткой при выходе ssh)
+$PASEO_HOME/run/ext_<uuid>/              # vncpasswd-файл внешнего окна (удаляется при выходе окна)
 ```
 
 ---
@@ -294,38 +331,53 @@ $PASEO_HOME/run/<session-id>/            # 0600-материал: id-файлы,
 ### 5.1 RPC (нативная панель / ⌘K)
 
 ```text
-remote-control.state            → { vault: {unlocked, entries}, sessions: Session[],
-                                    groups, connections, consoleUrl, version }
-remote-control.vault.setup      → { generated: boolean }   // создаёт ключ при первом запуске
-remote-control.vault.unlock     → { ok }                    // { password }
-remote-control.vault.lock       → { ok }
-remote-control.console-url      → { url }                   // с токеном, для openBrowser
+remote-control.state             → { consoleUrl, listening, version,
+                                     vault: {initialized, unlocked, entries} }
+remote-control.vault.setup       → { generated: boolean }   // создаёт ключ при первом запуске
+remote-control.vault.unlock      → { ok }                    // { password }
+remote-control.vault.lock        → { ok }
+remote-control.console-url       → { url }                   // с токеном, для openBrowser
+remote-control.connections.list  → { connections: [{id, name, protocol, host,
+                                     port, username, hasPassword}] }   // 0.18.10, панель
+remote-control.connections.launch→ ({connectionId, workspaceId}) →
+                                     {kind:"terminal", terminalId, name}   // ssh → вкладка
+                                   | {kind:"external", pid, binary}        // rdp/vnc → окно
+// Факт: sessions/groups в state нет (лишнее) — они идут своими RPC/маршрутами.
 ```
 
 ### 5.2 REST консоли (все маршруты, кроме `/health`, требуют токен)
 
 ```text
-GET  /health
-GET  /                        SPA + /assets/*
-GET  /api/state               { vault, groups, connections, sessions, settings }
-GET  /api/events              SSE: state-changed | session-updated | vault-status | settings-changed
+GET  /health                    { ok, server, version }   (без токена)
+GET  /                        SPA + статика dist/console (fallback — HTML-заглушка)
+GET  /api/state               { ok, listening }          (факт: vault/groups нет — они в RPC state и по своим маршрутам)
+GET  /api/events              SSE: только heartbeat ": …" (события — отдельный этап, ADR-12)
 
-POST /api/vault/setup | /api/vault/unlock | /api/vault/lock
-GET  /api/secrets?prefix=…    только имена записей (без содержимого)
-POST /api/secrets             { name, value }   PATCH /api/secrets/:name   DELETE /api/secrets/:name
+GET  /api/vault/status        статус для экрана Settings (единственный vault-маршрут)
+# /api/vault/setup|unlock|lock и /api/secrets* — удалены в 0.19.10:
+# инициализация/разблокировка только в панели (RPC vault.*),
+# секреты — только через подключения
 
 GET|POST /api/groups          PATCH|DELETE /api/groups/:id
 GET|POST /api/connections     PATCH|DELETE /api/connections/:id
+                              POST/PATCH принимают {password} (0.19.10: masterPassword убран):
+                              непустой password — сохранить/заменить, "" — удалить секрет,
+                              отсутствие поля — не трогать; хранилище закрыто или не создано
+                              → 400 с указанием на панель, до создания записи
 
-POST /api/sessions            { connectionId } | { kind:"local" }
-POST /api/sessions/:id/kill   POST /api/sessions/:id/reconnect
-GET  /api/ghostty/import      preview импорта настроек   POST /api/ghostty/import/apply
+GET  /api/terminals?workspaceId=…      POST /api/terminals    POST /api/terminals/:id/kill
+GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
+
+# /api/sessions* — отменены в 0.17.9 вместе с реестром сессий (ADR-11)
+# Открытый дефект (найден при сверке 0.18.10): кнопка Apply в Settings шлёт
+# POST /api/ghostty/import/apply, а сервер принимает только POST /api/ghostty/import → 404
 ```
 
 ### 5.3 Открытие терминала
 
 ```text
-Клиент (панели, ⌘K): paseo.terminals.create({ workspaceId, cwd?, name? })
+Панель (0.18.10): RPC remote-control.connections.launch → terminals.open() на сервере → вкладка;
+  прямой paseo.terminals.create остался только в серверном коде; ⌘K «Open terminal» удалён (0.18.10)
 Консоль (REST, требует токен):
   GET  /api/terminals?workspaceId=…        → { terminals: [{id, workspaceId, cwd, name, kind, connectionId, startedAt}] }
   POST /api/terminals                      { workspaceId?, connectionId?, cwd?, name? } → 201 { terminal }
@@ -337,10 +389,22 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
 
 ## 6. Атомарные этапы
 
-Каждый этап: `npm run typecheck` + `vitest run` зелёные, minor-бамп
-(`0.N.0`), анонсированный тег `remote-control@<версия>` в origin по
-`AGENTS.md`. Этапы блоков A–C можно делегировать разным агентам: границы —
-файлы.
+Каждый этап: `npm run typecheck` + `vitest run` зелёные, бамп версии по
+`AGENTS.md` (новая функциональность — +1 вторая цифра с сохранением третьей,
+0.17.10 → 0.18.10; багфикс/правки — +1 третья), анонсированный тег
+`remote-control@<версия>` в origin. Этапы блоков A–C можно делегировать
+разным агентам: границы — файлы.
+
+**Сверено с фактом 2026-10-27. Фактическая линейка тегов** (плановые версии
+ниже исторически заняты и для новых этапов не действительны):
+`0.1.0` A1, `0.2.0` A2, `0.3.0`+`0.3.1` A3, `0.4.1` B1, `0.5.1` B2, `0.7.0` B3+B4 одним тегом, `0.10.0` C1–C3 одним тегом, `0.15.0` D1–D5 одним
+тегом, `0.15.1`–`0.15.6` патчи установки, `0.15.7`/`0.15.8`/`0.15.9`/`0.16.9` —
+работы над панелью и консолью (этапов в плане нет; E1-в-0.16.0 не случился),
+`0.17.9` — ADR-5 rewrite, терминал-вкладка (тега `0.17.0` не существует),
+`0.17.10` — heartbeat RPC в клиенте, `0.18.10` — ADR-14,
+`0.19.10` — ревизия ADR-14 (хранилище-основа, без ручных секретов).
+**Следующий этап — с `0.20.0`; версии E1…G3 в заголовках этапов ниже —
+исторические.**
 
 ### Блок A — Фундамент и снятие рисков
 
@@ -377,7 +441,7 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
 
 ### Блок B — Терминал ghostty (первый по порядку заказчика)
 
-> **Статус 0.17.9:** этапы B2–B4 (0.5.0–0.7.0) заменены: браузерный
+> **Статус 0.17.9:** этапы B2–B4 (вышли 0.5.1 и 0.7.0) заменены: браузерный
 > рантайм терминала (`ghostty-web` + Canvas2D), PTY-слой `node-pty` и
 > WS-мост `/term` вычищены, терминал открывается вкладкой Paseo (ADR-5,
 > ADR-6). B1 (импорт настроек системного ghostty) остаётся без рантайма.
@@ -454,6 +518,9 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
 - Приёмка: «открыть один раз» видно вживую — после unlock любые операции над
   секретами идут без диалога пароля; lock мгновенно блокирует следующее
   чтение во всех видах.
+- **Статус (факт 0.19.10):** вид «Secrets» и ручное управление секретами
+  **отменены** — секретами управляют только формы подключения; кнопки
+  setup/unlock/lock остались в нативной панели/экране (RPC `vault.*`).
 
 **C3. Отказоустойчивость и границы хранилища** → `0.10.0`
 - Сценарии: сбой `gpg`/отсутствие `pass` в PATH (понятная ошибка в консоли,
@@ -506,6 +573,12 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
 - Приёмка: секрет не виден в `ps`/`/proc/<pid>/cmdline` (тест на аргументы
   spawn), файл ключа исчезает после сессии, разблокированное хранилище не
   запрашивает пароль повторно, заблокированное → понятная ошибка в терминале.
+- **Пересмотрено (факт):** `server/askpass.ts` не создавался — askpass-хелпер
+  это статический скрипт 0700 в каталоге сессии (`createAskpassHelper` в
+  `protocols/ssh.ts`), печатающий секрет напрямую; loopback-HTTP между ssh и
+  плагином не нужен. Поведение при закрытом vault уточнено в 0.18.10: при
+  наличии сохранённого пароля запуск **отказывается** с явной ошибкой (а не
+  «ошибка в терминале»); без сохранённого пароля — интерактивный ввод в вкладке.
 
 **D5. Reconnect и статусы SSH-сессий** → `0.15.0`
 - Reconnect (повторный launch того же профиля с новым PID, старый
@@ -513,8 +586,20 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
   `lastError` и exit-кода в консоли.
 - Приёмка: kill → reconnect → новый PID; упавший по сети ssh помечается
   `exited` с кодом; нативная панель отражает изменения через поллинг.
+- **Статус (факт):** выполнено в `0.15.0` и **частично отменено в 0.17.9**
+  вместе с реестром сессий (ADR-11): reconnect/lastError/фильтры исходных
+  сессий удалены; kill теперь — это kill терминала Paseo из вида «Terminals».
 
 ### Блок E — RDP (перенос rdp-pilot, только FreeRDP 3)
+
+> **Статус 0.18.10 — частично:** лаунчер готов в минимальном виде
+> (`server/protocols/external.ts`): PATH-поиск `xfreerdp3`/`xfreerdp`, пароль
+> через `/from-stdin:force` (argv чист, `/cert:ignore` с переопределением через
+> `payload.cert`), detached-окно из RPC панели, stderr-хвост в
+> `paseo plugin logs`. **Остаётся E1–E3:** discovery с override и `wlfreerdp*`,
+> полная таблица опций §1.1, поля RDP в модалке, gateway-пароль, трекинг окна
+> (реестр отменён ADR-11 — kill только вручную), живое подключение к xrdp.
+> Версии заголовков этапов (0.16.0/0.17.0/0.18.0) заняты — переназначаются с 0.19.0.
 
 **E1. Discovery FreeRDP 3 + конструктор argv** → `0.16.0`
 - `server/protocols/discovery.ts` (PATH + override `REMOTE_CONTROL_RDP_BIN`,
@@ -549,6 +634,15 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
 
 ### Блок F — VNC (перенос vnc-pilot)
 
+> **Статус 0.18.10 — частично:** запуск внешнего окна готов (`external.ts`):
+> `vncviewer`/`xtigervncviewer` по PATH, пароль через `vncpasswd -f` →
+> 0600-файл с уборкой по выходу окна, env-фолбэк `VNC_PASSWORD`/`VNC_USERNAME`
+> (без `vncpasswd`), последний фолбэк — интерактивный диалог viewer'а.
+> **Остаётся F1–F3:** discovery с фингерпринтом, билдеры per viewer, усечение
+> пароля до 8 символов (сейчас не делается), поля VNC в модалке, трекинг
+> сессий. На целевой машине VNC-клиент не установлен — живого запуска ещё не
+> было. Версии заголовков (0.19.0–0.21.0) переназначаются с 0.19.0 вверх.
+
 **F1. Discovery viewer'ов + argv-билдеры** → `0.19.0`
 - `discovery.ts`: TigerVNC/TurboVNC/TightVNC/RealVNC/Remmina/KRDC/Vinagre/
   `gvncviewer`/Custom, фингерпринт версии (общий `vncviewer` без фингерпринта
@@ -581,6 +675,10 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
   ssh/local и «focus window»-подсказка для rdp/vnc.
 - Приёмка: одновременно local+ssh+rdp+vnc сессии; kill/reconnect каждого типа;
   обновления приходят без перезагрузки вкладки.
+- **Статус (факт):** вид «Sessions» заменён видом «Terminals» (терминалы Paseo:
+  список + kill, поллинг 3 с); единый реестр всех kind отменён (ADR-11).
+  Фильтры/группировка/массовые действия и «focus window»-подсказки не
+  делались, rdp/vnc окна не отслеживаются — пересмотреть после E/F.
 
 **G2. Настройки плагина** → `0.23.0`
 - Экран Settings в консоли: порт/статус сервера, авто-блокировка хранилища,
@@ -590,6 +688,11 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
 - Приёмка: изменение порта перезапускает сервер (debounce, как
   `http-lifecycle` luck-planner), смена стора применяется без рестарта
   демона, все изменения видны в `GET /api/state`.
+- **Статус (факт 0.18.10):** частично — экран Settings консоли: JSON-статус
+  хранилища + импорт ghostty; кнопки vault — во вкладке Secrets и нативных
+  панелях/экране. Не вынесено в UI: порт (сервер всегда на ephemeral-порту),
+  путь стора, override-бинарии, размер буфера PTY (PTY в плагине больше нет);
+  перезапуск по смене порта не применим, пока порт не редактируется.
 
 **G3. Документация и команды** → `0.24.0`
 - `README.md` плагина (English: что это, установка, экраны, безопасность,
@@ -600,17 +703,30 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
   «New connection», «Lock vault».
 - Приёмка: ссылки из корневого README ведут на существующие файлы; оба
   документа самодостаточны для следующего агента; typecheck/tests зелёные.
+- **Статус (факт 0.18.10):** README/__doc.md/строка корневого README
+  актуальны. **Не сделано:** slash-команда `/remote`, ⌘K-пункты «New
+  connection» и «Lock vault» (⌘K есть только «Open remote-control console»;
+  ⌘K «Open terminal» удалён намеренно в 0.18.10). **Открытый дефект:** кнопка
+  Apply импорта шлёт POST /api/ghostty/import/apply, сервер принимает только
+  POST /api/ghostty/import → 404 (чинится патчем 0.18.x).
 
 **G4. Приёмочная проверка на живом даэмоне** → без бампа
 - Установка из git-источника (`paseo plugin add …:remote-control`), статус
   `running`, `Plugin ready` в логах; чистый `paseo plugin reload`; обе
   entry собираются реальным хост-компилятором; вкладка консоли открывается в
-  workspace browser, токен обязателен, чужой Origin на WS отклоняется;
-  секреты: setup → unlock → повторные чтения без запроса → lock (в т.ч.
-  после остановки демона); ssh-сессия внутри ghostty-терминала; RDP/VNC
-  поднимаются и убиваются из консоли; импорт настроек ghostty на системе с
-  установленным ghostty и без него.
-- Найденные дефекты чинятся патч-этапами `0.24.x` (без новых функций).
+  workspace browser, токен обязателен (WS-мост удалён в 0.17.9 — Origin-guard
+  больше неприменим); секреты: setup → unlock → повторные чтения без запроса →
+  lock (в т.ч. после остановки демона); ssh-сессия открывается во вкладке Paseo
+  с автологином из vault; rdp/vnc поднимаются внешним окном из правой панели;
+  импорт настроек ghostty на системе с установленным ghostty и без него.
+- Найденные дефекты чинятся патч-этапами с бампом третьей цифры (сейчас это
+  `0.18.x`; без новых функций).
+- **Статус (факт 0.18.10):** пройдено частично — живые update/reload на даэмоне,
+  `running` + `Plugin ready`, `/health` c версией, 401 без токена, ошибочные
+  пути хранилища (400 с текстом), CRUD подключений, открытие ssh-вкладки
+  (0.17.9–0.18.10). **Не пройдено:** живой ssh-автологин из vault, живые
+  RDP/VNC-окна (нет VNC-клиента; окно FreeRDP не поднималось), импорт ghostty
+  на системе с/без ghostty, кнопка Apply (см. открытый дефект в G3).
 
 ---
 
@@ -622,18 +738,20 @@ GET  /api/ghostty/import      preview импорта настроек   POST /ap
 | **R2** | `node-pty` — нативный модуль: на установке нужен prebuild или toolchain (`install: prebuild.js \|\| node-gyp rebuild`) | Снят в 0.17.9: `node-pty` и `server/prebuilds/` удалены, PTY поднимает даэмон Paseo |
 | **R3** | WASM `ghostty-web` и esbuild | Снят в 0.17.9: `ghostty-web` удалён; esbuild собирает только консоль (`npm run bundle`) |
 | **R4** | `pass` может не прокидывать loopback-опции gpg → пинтент на каждый вызов | Спайк **внутри C1**; доказанный фолбэк — прямые операции `gpg` над файлами стора (формат идентичен, `pass` совместим) |
-| **R5** | Пароль FreeRDP в argv (`/p:`) | Спайк `/from-stdin` в **E2**; до подтверждения — опция «передавать пароль в argv» выключена по умолчанию и задокументирована |
+| **R5** | Пароль FreeRDP в argv (`/p:`) | **Снят в 0.18.10:** пароль идёт через `/from-stdin:force` → stdin, опции `/p:` в коде нет вовсе; unit-тест держит пароль вне argv. Остаточный риск — регрессии stdin в отдельных версиях FreeRDP (ожидается ≥ 3; upstream #11922/#12048) |
 | **R6** | Пути к ассетам и публикация entry на живом install (память #10) | `server/paths.ts` с тремя стратегиями резолва — **A2**, проверяется на живой установке в **G4** |
-| **R7** | Нативные окна FreeRDP/viewer наследуют окружение демона (`DISPLAY`/`WAYLAND_DISPLAY`) | Проверка на живой сессии в **E2/F2** (accepted в G4); если окружения нет — ясная ошибка в консоли вместо «тихого» падения |
+| **R7** | Нативные окна FreeRDP/viewer наследуют окружение демона (`DISPLAY`/`WAYLAND_DISPLAY`) | Остаётся открытым: живого запуска окна ещё не было (проверяется в живой приёмке E2/F2); отсутствующий бинарь уже даёт явную ошибку, stderr-хвост падения виден в `paseo plugin logs` |
 | **R8** | Повторные запросы мастер-пароля (нарушение главного требования) | Целевой тест **C1**: N подряд идущих операций без запроса + авто-lock в cleanup |
-| **R9** | Секреты в логах/`ps` | Правило этапов D4/E2/F2: spawn только argv-массивом, секреты — через vault/askpass/0600-файлы; grep-тесты на логи |
+| **R9** | Секреты в логах/`ps` | Частично закрыто в 0.18.10: ssh — askpass-скрипт 0700, rdp — stdin, vnc — 0600-файл/env; unit-тесты держат пароли вне argv (`tests/external-launch.test.ts`, `tests/terminals.test.ts`). Остаётся grep-тест логов на живом прогоне |
 
 ---
 
 ## 8. Версионирование и правила ведения плана
 
-- Каждый функциональный этап — minor-бамп (`0.1.0` → `0.2.0` …), патчи —
-  `0.24.x`; релиз по слову «release» — major с обнулением (правила `AGENTS.md`).
+- Новая функциональность — +1 вторая цифра с сохранением третьей
+  (`0.17.10` → `0.18.10`), багфикс/правки — +1 третья (`0.18.10` → `0.18.11`),
+  релиз по слову «release» — major с обнулением (правила `AGENTS.md`).
+  Патч-этапы — третья цифра текущего minor (сейчас `0.18.x`).
 - На коммите с бампом — анонсированный тег `remote-control@<версия>` в origin;
   теги не пересоздавать (память #6: `git fetch --tags --force` + обычный push).
 - Закрытый этап отмечается в этом файле (галочка + версия + ссылка на раздел

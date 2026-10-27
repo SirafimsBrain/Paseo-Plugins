@@ -78,8 +78,14 @@ export default function contribute(server: PluginServerContext): () => void {
   server.handle(connectionsList, (input, context) => {
     capture(context);
     return {
+      groups: store.listGroups().map((group) => ({
+        id: group.id,
+        name: group.name,
+        parentId: group.parentId,
+      })),
       connections: store.listConnections().map((connection) => ({
         id: connection.id,
+        groupId: connection.groupId,
         name: connection.name,
         protocol: connection.protocol,
         host: connection.host,

@@ -54,7 +54,6 @@ var state = {
 var NAV = [
   { id: "terminals", label: "Terminals" },
   { id: "connections", label: "Connections" },
-  { id: "secrets", label: "Secrets" },
   { id: "settings", label: "Settings" }
 ];
 function renderNav() {
@@ -144,9 +143,8 @@ function openConnectionForm(initial) {
   const passI = input(
     "",
     "password",
-    isNew ? "password (stored in the vault)" : "new password (empty = keep current)"
+    isNew ? "password (stored in the secret storage)" : "new password (empty = keep current)"
   );
-  const masterI = input("", "password", "master password (if the vault is locked)");
   const protoI = document.createElement("select");
   for (const p of ["ssh", "rdp", "vnc"]) {
     const o = document.createElement("option");
@@ -182,7 +180,6 @@ function openConnectionForm(initial) {
       field("Port", portI),
       field("Username", userI),
       field(isNew ? "Password" : "New password", passI),
-      field("Master password", masterI),
       err
     );
     const actions = document.createElement("div");
@@ -206,7 +203,6 @@ function openConnectionForm(initial) {
         };
         if (passI.value !== "") {
           body.password = passI.value;
-          body.masterPassword = masterI.value;
         }
         if (isNew) {
           await api("/api/connections", {
@@ -343,103 +339,6 @@ function connectionsView(main) {
     main.append(p);
   }
 }
-function secretsView(main) {
-  const statusRow = document.createElement("div");
-  statusRow.className = "row";
-  const statusBtn = document.createElement("button");
-  statusBtn.textContent = "Refresh status";
-  const lockBtn = document.createElement("button");
-  lockBtn.textContent = "Lock";
-  lockBtn.addEventListener("click", async () => {
-    await api("/api/vault/lock", { method: "POST" });
-    render();
-  });
-  statusRow.append(statusBtn, lockBtn);
-  main.append(statusRow);
-  const result = document.createElement("pre");
-  result.id = "secret-result";
-  main.append(result);
-  void (async () => {
-    try {
-      const vs = await api("/api/vault/status");
-      result.textContent = JSON.stringify(vs, null, 2);
-    } catch (e) {
-      result.textContent = String(e);
-    }
-  })();
-  const newBtn = document.createElement("button");
-  newBtn.className = "primary";
-  newBtn.textContent = "New secret";
-  newBtn.addEventListener("click", () => {
-    const nameI = input("", "text", "secret name");
-    const valueI = input("", "text", "secret value");
-    const pwI = input("", "password", "master password (if locked)");
-    openModal((close) => {
-      const m = document.createElement("div");
-      m.innerHTML = "<h3>New secret</h3>";
-      m.append(field("Name", nameI), field("Value", valueI), field("Master password (setup/unlock if needed)", pwI));
-      const actions = document.createElement("div");
-      actions.className = "actions";
-      const cancel = document.createElement("button");
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", close);
-      const ok = document.createElement("button");
-      ok.className = "primary";
-      ok.textContent = "Save";
-      ok.addEventListener("click", async () => {
-        let vs = await api("/api/vault/status");
-        if (!vs.initialized) {
-          await api("/api/vault/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pwI.value }) });
-          await api("/api/vault/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pwI.value }) });
-        } else if (!vs.unlocked) {
-          await api("/api/vault/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pwI.value }) });
-        }
-        await api("/api/secrets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nameI.value, value: valueI.value }) });
-        close();
-        render();
-      });
-      actions.append(cancel, ok);
-      m.append(actions);
-      return m;
-    });
-  });
-  main.append(newBtn);
-  void (async () => {
-    try {
-      const vs = await api("/api/vault/status");
-      if (!vs.unlocked) return;
-      const body = await api("/api/secrets");
-      const list = document.createElement("ul");
-      list.style.listStyle = "none";
-      list.style.padding = "0";
-      for (const name of body.names ?? []) {
-        const li = document.createElement("li");
-        li.className = "row";
-        const span = document.createElement("span");
-        span.className = "mono";
-        span.textContent = name;
-        const viewBtn = document.createElement("button");
-        viewBtn.textContent = "view";
-        viewBtn.addEventListener("click", async () => {
-          const r = await api(`/api/secrets/${encodeURIComponent(name)}`);
-          result.textContent = `${name} = ${r.value}`;
-        });
-        const delBtn = document.createElement("button");
-        delBtn.className = "danger";
-        delBtn.textContent = "delete";
-        delBtn.addEventListener("click", async () => {
-          await api(`/api/secrets/${encodeURIComponent(name)}`, { method: "DELETE" });
-          render();
-        });
-        li.append(span, viewBtn, delBtn);
-        list.append(li);
-      }
-      main.append(list);
-    } catch (e) {
-      console.error(e);
-    }
-  })();
-}
 function settingsView(main) {
   const card = document.createElement("div");
   card.className = "card";
@@ -482,7 +381,6 @@ function settingsView(main) {
 var VIEWS = {
   terminals: terminalsView,
   connections: connectionsView,
-  secrets: secretsView,
   settings: settingsView
 };
 function startLiveUpdates() {

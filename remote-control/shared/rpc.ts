@@ -40,15 +40,24 @@ export const vaultLock = defineRpc({
   output: z.object({ ok: z.boolean() }),
 });
 
-// Connections as the sidebar panel shows them: flat rows plus whether a
-// password is stored in the vault for the connection.
+// Connections as the sidebar panel shows them: the group tree plus flat
+// connection rows (with the group they hang under and whether a password is
+// stored in the vault for them).
 export const connectionsList = defineRpc({
   name: "remote-control.connections.list",
   input: z.object({}),
   output: z.object({
+    groups: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        parentId: z.string().nullable(),
+      }),
+    ),
     connections: z.array(
       z.object({
         id: z.string(),
+        groupId: z.string().nullable(),
         name: z.string(),
         protocol: z.enum(["ssh", "rdp", "vnc"]),
         host: z.string(),

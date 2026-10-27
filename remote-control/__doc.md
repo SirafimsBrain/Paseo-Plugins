@@ -1,6 +1,63 @@
 # remote-control — technical notes
 
-See `PLAN.md` for the full atomic plan, decisions (ADR-1..ADR-13) and risks. This file accumulates technical details as stages land.
+See `PLAN.md` for the full atomic plan, decisions (ADR-1..ADR-14) and risks. This file accumulates technical details as stages land.
+
+## The storage is the foundation; first run lives in the panel (stage 0.19.10, 2026-10-27)
+
+Product rule (restated by the customer after 0.18.10): the secret storage —
+login + password per connection — is the basis of the plugin. Typing a master
+password into a connection form was the wrong place for it, and manual secret
+management must not exist at all.
+
+### First run and unlock — only in the sidebar panel
+
+`client/console-panel.tsx` gates everything behind the storage:
+
+- **Not initialized (first run):** the panel shows *First run — create the
+  master password* (one field) and calls the existing `vault.setup` +
+  `vault.unlock` RPCs.
+- **Locked:** a single unlock field (`vault.unlock` RPC).
+- **Unlocked:** the group tree with connections (`connections.list`, which
+  now returns `groups` too — tree order with nesting depth, computed
+  client-side; connections hang under their group, root connections first,
+  empty groups still visible).
+
+While the storage is open nothing asks for anything (auto-lock is off by
+default). A launch that fails on a meanwhile-locked storage flips the panel
+back to the unlock form immediately (the 3 s poll keeps the status honest).
+
+### Connection passwords: no master-password parameter anymore
+
+- The console's *New connection* / *Edit connection* dialogs keep only the
+  `password` field; the *Master password* field is gone.
+- `POST /api/connections` and `PATCH /api/connections` accept `{ password }`
+  only. Before anything is written, `requireOpenVault()` checks the storage:
+  - not initialized → 400 `secret storage is not initialized: open the
+    Remote Control panel and create the master password first` (no row is
+    created);
+  - locked → 400 `vault is locked: unlock it with the master password in the
+    Remote Control panel`;
+  - open → the value goes to `connections/<id>/password`, the row keeps only
+    the secret name. `password: ""` clears, an absent field keeps — as in
+    0.18.10.
+
+### Manual secret management removed
+
+- The console's **Secrets view is deleted** (nav entry, renderer, list/create/
+  view/delete); nav is Terminals / Connections / Settings.
+- The HTTP routes `POST|PATCH|DELETE /api/secrets*` and
+  `POST /api/vault/{setup,unlock,lock}` are **gone**: they answer 404 with
+  `removed: set up and unlock the storage in the Remote Control panel;
+  secrets are managed only through connections`. `GET /api/vault/status`
+  stays for the Settings screen.
+- Setup/unlock/lock exist only as RPCs (`vault.setup/unlock/lock`), used by
+  the panel and the native screen/settings panel.
+
+Covered by the rewritten `tests/connections-password.test.ts` (7 tests):
+store/update/keep/clear while open, first-run and locked rejections with
+panel guidance (and no half-created row), a connection without a password
+saving while locked, and the removed routes answering 404 while status
+answers 200.
 
 ## Connection passwords and sidebar launches (stage 0.18.10, 2026-10-27)
 

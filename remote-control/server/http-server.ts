@@ -48,7 +48,7 @@ export interface ConsoleHttpServerOptions {
   terminals?: TerminalService;
   /** Store for connection lookups. */
   store?: import("./store").Store;
-  /** Vault service for /api/vault and /api/secrets routes. */
+  /** Vault service: status route + connection-password storage. */
   vault?: import("./vault").VaultService;
 }
 
@@ -189,98 +189,19 @@ export class ConsoleHttpServer {
         this.sendJson(res, 200, this.vault.status());
         return;
       }
-      if (url.pathname === "/api/vault/setup") {
-        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
-        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
-        void this.readJsonBody(req).then(async (body) => {
-          const password = body && typeof body === "object" && "password" in body ? String((body as { password: unknown }).password) : "";
-          const keyId = body && typeof body === "object" && "keyId" in body ? String((body as { keyId: unknown }).keyId) : undefined;
-          try {
-            const result = await this.vault!.setup(password, keyId);
-            this.sendJson(res, 200, result);
-          } catch (cause) {
-            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-          }
-        }).catch((cause) => {
-          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+      // Vault setup/unlock/lock and the raw /api/secrets routes are gone by
+      // design (0.19.10): initialization and unlock happen once, in the
+      // Remote Control panel, and secrets exist only inside connections.
+      // Only GET /api/vault/status remains, for the Settings screen.
+      if (
+        url.pathname === "/api/vault/setup" ||
+        url.pathname === "/api/vault/unlock" ||
+        url.pathname === "/api/vault/lock" ||
+        url.pathname.startsWith("/api/secrets")
+      ) {
+        this.sendJson(res, 404, {
+          error: "removed: set up and unlock the storage in the Remote Control panel; secrets are managed only through connections",
         });
-        return;
-      }
-      if (url.pathname === "/api/vault/unlock") {
-        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
-        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
-        void this.readJsonBody(req).then(async (body) => {
-          const password = body && typeof body === "object" && "password" in body ? String((body as { password: unknown }).password) : "";
-          const result = await this.vault!.unlock(password);
-          this.sendJson(res, 200, result);
-        }).catch((cause) => {
-          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-        });
-        return;
-      }
-      if (url.pathname === "/api/vault/lock") {
-        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
-        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
-        this.vault.lock();
-        this.sendJson(res, 200, { ok: true });
-        return;
-      }
-      // /api/secrets
-      if (url.pathname === "/api/secrets") {
-        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
-        if (req.method === "GET") {
-          const prefix = url.searchParams.get("prefix") ?? undefined;
-          this.sendJson(res, 200, { names: this.vault.listEntries(prefix) });
-          return;
-        }
-        if (req.method === "POST") {
-          void this.readJsonBody(req).then(async (body) => {
-            const name = body && typeof body === "object" && "name" in body ? String((body as { name: unknown }).name) : "";
-            const value = body && typeof body === "object" && "value" in body ? String((body as { value: unknown }).value) : "";
-            await this.vault!.set(name, value);
-            this.sendJson(res, 201, { ok: true });
-          }).catch((cause) => {
-            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-          });
-          return;
-        }
-        this.sendJson(res, 405, { error: "method not allowed" });
-        return;
-      }
-      const secretMatch = /^\/api\/secrets\/(.+)$/.exec(url.pathname);
-      if (secretMatch && this.vault) {
-        const vault = this.vault;
-        const name = decodeURIComponent(secretMatch[1]);
-        if (req.method === "GET") {
-          void (async () => {
-            try {
-              const value = await vault.get(name);
-              this.sendJson(res, 200, { value });
-            } catch (cause) {
-              this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-            }
-          })();
-          return;
-        }
-        if (req.method === "PATCH") {
-          void this.readJsonBody(req).then(async (body) => {
-            const value = body && typeof body === "object" && "value" in body ? String((body as { value: unknown }).value) : "";
-            await vault.set(name, value);
-            this.sendJson(res, 200, { ok: true });
-          }).catch((cause) => {
-            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-          });
-          return;
-        }
-        if (req.method === "DELETE") {
-          void vault.delete(name).then((ok) => {
-            this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
-          }).catch((cause) => {
-            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
-          });
-          return;
-        }
-        this.sendJson(res, 405, { error: "method not allowed" });
         return;
       }
       // /api/terminals — Paseo workspace terminals. Creating one makes the
@@ -402,7 +323,7 @@ export class ConsoleHttpServer {
             // into the pass store and the database only gets the secret name.
             const password = typeof b.password === "string" ? b.password : "";
             if (password.length > 0) {
-              await this.ensureVaultReady(typeof b.masterPassword === "string" ? b.masterPassword : "");
+              this.requireOpenVault();
               const secretName = `connections/${id}/password`;
               await this.vault!.set(secretName, password);
               secretRefs = { ...secretRefs, passwordSecret: secretName };
@@ -450,7 +371,7 @@ export class ConsoleHttpServer {
               const refs = existing.secretRefs ?? {};
               const value = b.password === null || b.password === undefined ? "" : String(b.password);
               if (value.length > 0) {
-                await this.ensureVaultReady(typeof b.masterPassword === "string" ? b.masterPassword : "");
+                this.requireOpenVault();
                 const secretName = refs.passwordSecret ?? refs.password ?? `connections/${id}/password`;
                 await this.vault!.set(secretName, value);
                 const next: Record<string, string> = {};
@@ -560,25 +481,22 @@ export class ConsoleHttpServer {
   }
 
   /**
-   * Makes sure the vault can accept a connection password: sets it up or
-   * unlocks it with the master password sent alongside the request. Throws a
-   * user-readable message when that is impossible (no master password, wrong
-   * master password, no vault at all).
+   * Connection passwords can only be stored in an open storage (0.19.10):
+   * setup and unlock happen once, in the Remote Control panel, so by the time
+   * a password arrives here the vault must already be unlocked. Throws a
+   * user-readable message pointing at the panel when it is not.
    */
-  private async ensureVaultReady(masterPassword: string): Promise<void> {
+  private requireOpenVault(): void {
     if (!this.vault) throw new Error("vault unavailable");
     const status = this.vault.status();
-    if (status.unlocked) return;
-    if (masterPassword.length === 0) {
+    if (!status.initialized) {
       throw new Error(
-        status.initialized
-          ? "vault is locked: send the master password (masterPassword) to store the connection password"
-          : "vault is not initialized: send the master password (masterPassword) to set it up first",
+        "secret storage is not initialized: open the Remote Control panel and create the master password first",
       );
     }
-    if (!status.initialized) await this.vault.setup(masterPassword);
-    const result = await this.vault.unlock(masterPassword);
-    if (!result.ok) throw new Error("wrong master password");
+    if (!status.unlocked) {
+      throw new Error("vault is locked: unlock it with the master password in the Remote Control panel");
+    }
   }
 
   private readJsonBody(req: http.IncomingMessage): Promise<unknown> {

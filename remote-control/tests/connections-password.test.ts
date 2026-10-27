@@ -1,5 +1,8 @@
-// Connection passwords over HTTP: the value goes into the pass vault, the
-// database only ever holds the secret name (stage D-vault wiring).
+// Connection passwords over HTTP under the 0.19.10 contract: the value goes
+// into the secret storage, the database only ever holds the secret name, and
+// the storage must already be open (first run / unlock live in the panel) —
+// the connection API itself has no master-password parameter and no
+// manually managed secrets.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +26,12 @@ const gpgAvailable = (() => {
 const describeIf = gpgAvailable ? describe : describe.skip;
 const TOKEN = "test-token";
 
-async function post(base: string, route: string, body: unknown): Promise<{ status: number; body: any }> {
+interface Reply {
+  status: number;
+  body: any;
+}
+
+async function post(base: string, route: string, body: unknown): Promise<Reply> {
   const res = await fetch(`${base}${route}?token=${TOKEN}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -32,7 +40,7 @@ async function post(base: string, route: string, body: unknown): Promise<{ statu
   return { status: res.status, body: await res.json() };
 }
 
-async function patch(base: string, route: string, body: unknown): Promise<{ status: number; body: any }> {
+async function patch(base: string, route: string, body: unknown): Promise<Reply> {
   const res = await fetch(`${base}${route}?token=${TOKEN}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -41,18 +49,18 @@ async function patch(base: string, route: string, body: unknown): Promise<{ stat
   return { status: res.status, body: await res.json() };
 }
 
-async function get(base: string, route: string): Promise<{ status: number; body: any }> {
+async function get(base: string, route: string): Promise<Reply> {
   const res = await fetch(`${base}${route}?token=${TOKEN}`);
   return { status: res.status, body: await res.json() };
 }
 
-describeIf("connection passwords via the vault (gpg available)", () => {
+describeIf("connection passwords via the secret storage (gpg available)", () => {
   let dir: string;
   let store: Store;
   let vault: VaultService;
   let server: ConsoleHttpServer;
   let base: string;
-  /** Server whose vault was never set up, for the rejection paths. */
+  /** Server whose storage was never set up: the first-run state. */
   let freshServer: ConsoleHttpServer;
   let freshBase: string;
 
@@ -60,6 +68,7 @@ describeIf("connection passwords via the vault (gpg available)", () => {
     dir = mkdtempSync(path.join(tmpdir(), "remote-control-connpass-"));
     store = new Store({ dbPath: path.join(dir, "rc.db") });
     vault = new VaultService({ paseoHome: path.join(dir, "home"), autoLockMs: 0, log: () => {} });
+    // First run happened in the panel: setup + unlock with the master password.
     await vault.setup("master-pass");
     await vault.unlock("master-pass");
     server = new ConsoleHttpServer({ token: TOKEN, port: 0, store, vault });
@@ -88,19 +97,18 @@ describeIf("connection passwords via the vault (gpg available)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function createWithPassword(base: string, password = "s3cret") {
-    return post(base, "/api/connections", {
+  async function createWithPassword(targetBase: string, password = "s3cret") {
+    return post(targetBase, "/api/connections", {
       name: "web",
       protocol: "ssh",
       host: "example.com",
       username: "alice",
       port: 2222,
       password,
-      masterPassword: "master-pass",
     });
   }
 
-  it("stores a password given with a new connection", async () => {
+  it("stores a password given with a new connection while the storage is open", async () => {
     const created = await createWithPassword(base);
     expect(created.status).toBe(201);
     const connection = created.body.connection;
@@ -109,12 +117,10 @@ describeIf("connection passwords via the vault (gpg available)", () => {
     // The API response (and the database row behind it) never carries the value.
     expect(JSON.stringify(created.body)).not.toContain("s3cret");
 
-    const stored = await get(base, `/api/secrets/${encodeURIComponent(secretName)}`);
-    expect(stored.status).toBe(200);
-    expect(stored.body.value).toBe("s3cret");
+    expect(await vault.get(secretName)).toBe("s3cret");
   });
 
-  it("rejects a password when an uninitialized vault gets no master password", async () => {
+  it("rejects a password on a first-run (not initialized) storage with panel guidance", async () => {
     const created = await post(freshBase, "/api/connections", {
       name: "db",
       protocol: "rdp",
@@ -122,25 +128,34 @@ describeIf("connection passwords via the vault (gpg available)", () => {
       password: "nope",
     });
     expect(created.status).toBe(400);
-    expect(String(created.body.error)).toMatch(/not initialized/);
+    expect(String(created.body.error)).toMatch(/not initialized.*Remote Control panel/);
     // The failed write must not leave a half-created connection behind.
     const list = await get(freshBase, "/api/connections");
     expect(list.body.connections).toHaveLength(0);
   });
 
-  it("rejects a wrong master password and keeps the vault locked", async () => {
+  it("rejects a password while the storage is locked and accepts one without it", async () => {
     vault.lock();
-    const created = await post(base, "/api/connections", {
-      name: "x",
-      protocol: "ssh",
-      host: "h",
-      password: "p",
-      masterPassword: "wrong",
-    });
-    expect(created.status).toBe(400);
-    expect(String(created.body.error)).toMatch(/wrong master password/);
-    expect(vault.isUnlocked()).toBe(false);
-    await vault.unlock("master-pass");
+    try {
+      const refused = await createWithPassword(base, "locked-pass");
+      expect(refused.status).toBe(400);
+      expect(String(refused.body.error)).toMatch(/vault is locked.*Remote Control panel/);
+
+      // A connection without a password needs no storage at all.
+      const plain = await post(base, "/api/connections", {
+        name: "no-secret",
+        protocol: "ssh",
+        host: "plain.example.com",
+      });
+      expect(plain.status).toBe(201);
+      expect(plain.body.connection.secretRefs).toEqual({});
+      const del = await fetch(`${base}/api/connections/${plain.body.connection.id}?token=${TOKEN}`, {
+        method: "DELETE",
+      });
+      expect(del.status).toBe(200);
+    } finally {
+      await vault.unlock("master-pass");
+    }
     expect(vault.isUnlocked()).toBe(true);
   });
 
@@ -151,15 +166,13 @@ describeIf("connection passwords via the vault (gpg available)", () => {
     const updated = await patch(base, `/api/connections/${id}`, {
       username: "bob",
       password: "new-pass",
-      masterPassword: "master-pass",
     });
     expect(updated.status).toBe(200);
     expect(updated.body.connection.username).toBe("bob");
     expect(updated.body.connection.secretRefs.passwordSecret).toBe(`connections/${id}/password`);
     expect(JSON.stringify(updated.body)).not.toContain("new-pass");
 
-    const stored = await get(base, `/api/secrets/${encodeURIComponent(`connections/${id}/password`)}`);
-    expect(stored.body.value).toBe("new-pass");
+    expect(await vault.get(`connections/${id}/password`)).toBe("new-pass");
   });
 
   it("keeps the stored password when PATCH does not mention it", async () => {
@@ -171,8 +184,7 @@ describeIf("connection passwords via the vault (gpg available)", () => {
     expect(updated.body.connection.name).toBe("renamed");
     expect(updated.body.connection.secretRefs.passwordSecret).toBeTruthy();
 
-    const stored = await get(base, `/api/secrets/${encodeURIComponent(`connections/${id}/password`)}`);
-    expect(stored.body.value).toBe("keep-me");
+    expect(await vault.get(`connections/${id}/password`)).toBe("keep-me");
   });
 
   it("clears the stored password when PATCHed with an empty password", async () => {
@@ -183,8 +195,21 @@ describeIf("connection passwords via the vault (gpg available)", () => {
     expect(updated.status).toBe(200);
     expect(updated.body.connection.secretRefs.passwordSecret).toBeUndefined();
 
-    const stored = await get(base, `/api/secrets/${encodeURIComponent(`connections/${id}/password`)}`);
-    expect(stored.status).toBe(400);
-    expect(String(stored.body.error)).toMatch(/not found/);
+    await expect(vault.get(`connections/${id}/password`)).rejects.toThrow(/not found/);
+  });
+
+  it("keeps manual secret management out of the API", async () => {
+    const list = await get(base, "/api/secrets");
+    expect(list.status).toBe(404);
+    const setup = await post(base, "/api/vault/setup", { password: "x" });
+    expect(setup.status).toBe(404);
+    const unlock = await post(base, "/api/vault/unlock", { password: "x" });
+    expect(unlock.status).toBe(404);
+    const lock = await post(base, "/api/vault/lock", {});
+    expect(lock.status).toBe(404);
+    // Status stays: the Settings screen reads it.
+    const status = await get(base, "/api/vault/status");
+    expect(status.status).toBe(200);
+    expect(status.body.unlocked).toBe(true);
   });
 });
