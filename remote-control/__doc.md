@@ -27,7 +27,10 @@ Mechanism, verified against the Paseo 0.13.x sources:
   (`context.paseo`), so every handler in `index.server.ts` captures it. The
   console is always opened right after a `console-url` RPC, and until the API
   is captured `/api/terminals` answers 503 with an explicit message instead
-  of a broken launch.
+  of a broken launch. Because that capture alone leaves a console opened right
+  after a plugin reload without an API (verified live in 0.17.9), the client
+  entry pings the `remote-control.state` RPC immediately and every 10 s, so
+  the server holds a fresh API whatever the UI is doing (0.17.10).
 - The console carries the opener's workspace as `?workspaceId=` (added by
   `client/open-console.ts`); without it the service resolves the workspace
   only when exactly one exists, otherwise it refuses.
