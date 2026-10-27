@@ -2,6 +2,72 @@
 
 See `PLAN.md` for the full atomic plan, decisions (ADR-1..ADR-13) and risks. This file accumulates technical details as stages land.
 
+## Connection passwords and sidebar launches (stage 0.18.10, 2026-10-27)
+
+Product rules this stage implements: the vault exists to store the login
+**and password** of every connection; "open a terminal" means opening an SSH
+session in a tab; sessions launch from the right sidebar panel — ssh in a
+tab, rdp/vnc as external windows; the password is entered when the
+connection is created and changed when it is edited.
+
+### Credentials
+
+- The console's *New connection* / *Edit connection* dialogs carry a
+  `password` field (plus `masterPassword`) and are the only place a
+  connection password is ever typed.
+- `POST /api/connections`: a non-empty `password` makes the server run
+  `ensureVaultReady(masterPassword)` — setup + unlock of the vault on the
+  spot when needed — write the value to `connections/<id>/password` and put
+  only that **name** into `secretRefs.passwordSecret`. The SQLite row and
+  the API response never contain the value. A missing or wrong master
+  password is a 400 *before* the row is created, so a failed save leaves
+  nothing behind.
+- `PATCH /api/connections`: `password` non-empty → store/replace (the
+  master password is needed only while the vault is locked);
+  `password: ""` → delete the secret and drop the ref; field absent →
+  untouched — that is what the edit dialog sends when the field is left
+  empty ("empty = keep"). A legacy `password` key inside `secretRefs` is
+  migrated to `passwordSecret` on the next write.
+- Logins (`username`) edit like any other column; the stored password is
+  never echoed back — the edit dialog shows an empty password field.
+
+### Launch from the right sidebar panel
+
+`client/console-panel.tsx` lists every connection (RPC
+`remote-control.connections.list`) and launches it (RPC
+`remote-control.connections.launch`, handled in `index.server.ts`):
+
+- **ssh** → `TerminalService.open({ connectionId, workspaceId })` → a Paseo
+  terminal tab (see the 0.17.9 section). If the connection has a stored
+  password and the vault is locked, the launch refuses with an explicit
+  message instead of silently falling back to an interactive prompt.
+- **rdp / vnc** → `launchExternalWindow()` (`server/protocols/external.ts`)
+  spawns the desktop client detached; its window appears on the user's
+  display like any other application window. Credentials stay out of argv:
+  - FreeRDP (`xfreerdp3`, then `xfreerdp`): `/from-stdin:force` with the
+    password written to stdin; `/v:host:port`, `/u:`, `/cert:ignore` — a
+    detached launch has nobody to answer the interactive certificate
+    prompt; payload `cert`/`extraArgs` override. FreeRDP ≥ 3 expected:
+    stdin credential reading regressed in some versions
+    (FreeRDP#11922, #12048).
+  - TigerVNC (`vncviewer`, `xtigervncviewer`): `-passwd <file>` with a 0600
+    file written by `vncpasswd -f`; when `vncpasswd` is missing the password
+    goes to the child as `VNC_PASSWORD`/`VNC_USERNAME` (current TigerVNC),
+    and with nothing available the viewer shows its own auth dialog. The
+    run directory is removed when the window exits.
+  - The client's stderr is captured (8 KiB cap) and a non-zero exit logs
+    the tail through `paseo plugin logs`; a missing binary is an explicit
+    error naming the candidates.
+- The bare-terminal entry points are gone: no *New terminal* in the
+  console's Terminals view (list + kill stay), no *Open terminal* buttons
+  in the sidebar/settings panels, no ⌘K *Open terminal* item.
+
+Covered by `tests/connections-password.test.ts` (6, gpg-gated),
+`tests/external-launch.test.ts` (13: arg building, PATH resolution, a fake
+`xfreerdp3` asserting the password arrives on stdin and not in argv, a fake
+`vncpasswd`/`vncviewer` pair for the passwd file and its cleanup) and the
+locked-vault case in `tests/terminals.test.ts`.
+
 ## Terminals are Paseo workspace tabs (stage 0.17.9, 2026-10-27)
 
 **Decision: remote-control runs no PTY and renders no terminal.** The browser

@@ -89,18 +89,6 @@ export function RemoteControlSettingsPanel(props: PluginWorkspacePanelProps) {
     }
   }, [refresh, vaultLockRpc]);
 
-  // Opens a Paseo workspace terminal; the app shows it as a workspace tab.
-  const openTerminal = useCallback(async () => {
-    setError(null);
-    setMessage(null);
-    try {
-      const terminal = await paseo.terminals.create({ workspaceId });
-      setMessage(`Terminal ${terminal.id} opened as a workspace tab.`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, [paseo, workspaceId]);
-
   const fg = theme.colors.foreground;
   const muted = theme.colors.foregroundMuted;
   const accent = theme.colors.accent;
@@ -115,9 +103,6 @@ export function RemoteControlSettingsPanel(props: PluginWorkspacePanelProps) {
       {url ? <Text style={{ color: muted, fontSize: 12 }}>{url}</Text> : null}
       <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>
         <Text style={{ color: accent, fontSize: 13 }}>Open console</Text>
-      </Pressable>
-      <Pressable onPress={openTerminal} style={[styles.button, { borderColor: accent }]}>
-        <Text style={{ color: accent, fontSize: 13 }}>Open terminal</Text>
       </Pressable>
 
       <Text style={{ color: fg, fontSize: 14, fontWeight: "600", marginTop: 12 }}>Vault</Text>

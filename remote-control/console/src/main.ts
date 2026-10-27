@@ -110,29 +110,12 @@ async function refreshTerminals(): Promise<void> {
 function terminalsView(main: HTMLElement): void {
   const row = document.createElement("div");
   row.className = "row";
-  const newBtn = document.createElement("button");
-  newBtn.className = "primary";
-  newBtn.textContent = "New terminal";
-  newBtn.addEventListener("click", async () => {
-    try {
-      const res = await api("/api/terminals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId: workspaceId || null }),
-      });
-      state.notice = `Terminal ${res.terminal.id} opened as a workspace tab in Paseo.`;
-    } catch (e) {
-      state.notice = String(e);
-    }
-    render();
-    await refreshTerminals();
-  });
   const hint = document.createElement("span");
   hint.className = "muted";
   hint.textContent = workspaceId
-    ? `Workspace ${workspaceId} — new terminals open as tabs in Paseo.`
-    : "New terminals open as tabs in Paseo.";
-  row.append(newBtn, hint);
+    ? `Workspace ${workspaceId} — terminals are Paseo workspace tabs; open an SSH session from Connections.`
+    : "Terminals are Paseo workspace tabs; open an SSH session from Connections.";
+  row.append(hint);
   main.append(row);
 
   if (state.notice) {
@@ -174,6 +157,111 @@ function terminalsView(main: HTMLElement): void {
 }
 
 // ---------- connections view ----------
+/**
+ * Create (initial = null) or edit a connection. The password field feeds the
+ * vault: a non-empty value is stored there (the master password unlocks or
+ * sets the vault up on the spot), an empty one in edit mode keeps the stored
+ * password as it is.
+ */
+function openConnectionForm(initial: any | null): void {
+  const isNew = initial === null;
+  const nameI = input(initial?.name ?? "", "text", "name");
+  const hostI = input(initial?.host ?? "", "text", "host");
+  const portI = input(initial?.port ? String(initial.port) : "", "text", "port (empty=default)");
+  const userI = input(initial?.username ?? "", "text", "username");
+  const passI = input(
+    "",
+    "password",
+    isNew ? "password (stored in the vault)" : "new password (empty = keep current)",
+  );
+  const masterI = input("", "password", "master password (if the vault is locked)");
+  const protoI = document.createElement("select");
+  for (const p of ["ssh", "rdp", "vnc"]) {
+    const o = document.createElement("option");
+    o.value = p;
+    o.textContent = p.toUpperCase();
+    if (initial && initial.protocol === p) o.selected = true;
+    protoI.append(o);
+  }
+  const groupI = document.createElement("select");
+  const noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.textContent = "(root)";
+  groupI.append(noneOpt);
+  for (const g of state.groups) {
+    const o = document.createElement("option");
+    o.value = g.id;
+    o.textContent = g.name;
+    if (initial && initial.groupId === g.id) o.selected = true;
+    groupI.append(o);
+  }
+  openModal((close) => {
+    const m = document.createElement("div");
+    m.innerHTML = `<h3>${isNew ? "New connection" : "Edit connection"}</h3>`;
+    const err = document.createElement("p");
+    err.style.color = "#ef4444";
+    err.style.fontSize = "0.85rem";
+    err.style.display = "none";
+    m.append(
+      field("Group", groupI),
+      field("Name", nameI),
+      field("Protocol", protoI),
+      field("Host", hostI),
+      field("Port", portI),
+      field("Username", userI),
+      field(isNew ? "Password" : "New password", passI),
+      field("Master password", masterI),
+      err,
+    );
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", close);
+    const ok = document.createElement("button");
+    ok.className = "primary";
+    ok.textContent = isNew ? "Create" : "Save";
+    ok.addEventListener("click", async () => {
+      try {
+        const port = portI.value.trim() === "" ? null : Number(portI.value);
+        const body: Record<string, unknown> = {
+          groupId: groupI.value || null,
+          name: nameI.value,
+          protocol: protoI.value,
+          host: hostI.value,
+          port,
+          username: userI.value,
+        };
+        if (passI.value !== "") {
+          body.password = passI.value;
+          body.masterPassword = masterI.value;
+        }
+        if (isNew) {
+          await api("/api/connections", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } else {
+          await api(`/api/connections/${encodeURIComponent(initial.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        }
+        close();
+        await refreshConnections();
+      } catch (e) {
+        err.textContent = String(e);
+        err.style.display = "";
+      }
+    });
+    actions.append(cancel, ok);
+    m.append(actions);
+    return m;
+  });
+}
+
 async function refreshConnections(): Promise<void> {
   try {
     const groups = await api("/api/groups");
@@ -216,67 +304,7 @@ function connectionsView(main: HTMLElement): void {
   const newConnBtn = document.createElement("button");
   newConnBtn.className = "primary";
   newConnBtn.textContent = "New connection";
-  newConnBtn.addEventListener("click", () => {
-    const nameI = input("", "text", "name");
-    const hostI = input("", "text", "host");
-    const portI = input("", "text", "port (empty=default)");
-    const userI = input("", "text", "username");
-    const protoI = document.createElement("select");
-    for (const p of ["ssh", "rdp", "vnc"]) {
-      const o = document.createElement("option");
-      o.value = p; o.textContent = p.toUpperCase();
-      protoI.append(o);
-    }
-    const groupI = document.createElement("select");
-    const noneOpt = document.createElement("option");
-    noneOpt.value = ""; noneOpt.textContent = "(root)";
-    groupI.append(noneOpt);
-    for (const g of state.groups) {
-      const o = document.createElement("option");
-      o.value = g.id; o.textContent = g.name;
-      groupI.append(o);
-    }
-    openModal((close) => {
-      const m = document.createElement("div");
-      m.innerHTML = "<h3>New connection</h3>";
-      m.append(
-        field("Group", groupI),
-        field("Name", nameI),
-        field("Protocol", protoI),
-        field("Host", hostI),
-        field("Port", portI),
-        field("Username", userI),
-      );
-      const actions = document.createElement("div");
-      actions.className = "actions";
-      const cancel = document.createElement("button");
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", close);
-      const ok = document.createElement("button");
-      ok.className = "primary";
-      ok.textContent = "Create";
-      ok.addEventListener("click", async () => {
-        const port = portI.value.trim() === "" ? null : Number(portI.value);
-        await api("/api/connections", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            groupId: groupI.value || null,
-            name: nameI.value,
-            protocol: protoI.value,
-            host: hostI.value,
-            port,
-            username: userI.value,
-          }),
-        });
-        close();
-        await refreshConnections();
-      });
-      actions.append(cancel, ok);
-      m.append(actions);
-      return m;
-    });
-  });
+  newConnBtn.addEventListener("click", () => openConnectionForm(null));
   row.append(newGroupBtn, newConnBtn);
   main.append(row);
 
@@ -323,6 +351,10 @@ function connectionsView(main: HTMLElement): void {
       });
       actions.append(launchBtn);
     }
+    const editBtn = document.createElement("button");
+    editBtn.textContent = "edit";
+    editBtn.addEventListener("click", () => openConnectionForm(c));
+    actions.append(editBtn);
     const delBtn = document.createElement("button");
     delBtn.className = "danger";
     delBtn.textContent = "delete";

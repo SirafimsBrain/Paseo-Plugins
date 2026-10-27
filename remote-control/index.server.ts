@@ -1,8 +1,17 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { PaseoApi } from "@getpaseo/client";
 import { ConsoleEndpoint } from "./server/http-lifecycle";
-import { consoleUrl, state, vaultSetup, vaultUnlock, vaultLock } from "./shared/rpc";
+import {
+  consoleUrl,
+  connectionLaunch,
+  connectionsList,
+  state,
+  vaultSetup,
+  vaultUnlock,
+  vaultLock,
+} from "./shared/rpc";
 import { resolvePluginVersion } from "./server/paths";
+import { launchExternalWindow } from "./server/protocols/external";
 import { Store } from "./server/store";
 import { TerminalService } from "./server/terminals";
 import { VaultService } from "./server/vault";
@@ -65,6 +74,37 @@ export default function contribute(server: PluginServerContext): () => void {
     capture(context);
     vault.lock();
     return { ok: true };
+  });
+  server.handle(connectionsList, (input, context) => {
+    capture(context);
+    return {
+      connections: store.listConnections().map((connection) => ({
+        id: connection.id,
+        name: connection.name,
+        protocol: connection.protocol,
+        host: connection.host,
+        port: connection.port,
+        username: connection.username,
+        hasPassword: Boolean(connection.secretRefs?.passwordSecret ?? connection.secretRefs?.password),
+      })),
+    };
+  });
+  server.handle(connectionLaunch, async (input, context) => {
+    capture(context);
+    const connection = store.getConnection(input.connectionId);
+    if (!connection) throw new Error(`Connection not found: ${input.connectionId}`);
+    if (connection.protocol === "ssh") {
+      const terminal = await terminals.open({
+        workspaceId: input.workspaceId,
+        connectionId: connection.id,
+      });
+      return { kind: "terminal" as const, terminalId: terminal.id, name: terminal.name };
+    }
+    const launched = await launchExternalWindow(connection, {
+      vault,
+      log: (message) => console.log(message),
+    });
+    return { kind: "external" as const, pid: launched.pid, binary: launched.binary };
   });
 
   console.log(`[remote-control] plugin ready (version ${resolvePluginVersion()})`);

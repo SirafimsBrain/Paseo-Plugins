@@ -5,7 +5,8 @@ import { RemoteControlScreen, SCREEN_ID } from "./client/console-screen";
 import { state } from "./shared/rpc";
 
 export default function contribute(client: PluginClientContext): () => void {
-  // Right sidebar (explorer location): live params + open console.
+  // Right sidebar (explorer location): connection list with launch actions
+  // (ssh → terminal tab, rdp/vnc → external window) + console access.
   client.addWorkspacePanel({
     id: "remote-control",
     title: "Remote Control",
@@ -41,18 +42,8 @@ export default function contribute(client: PluginClientContext): () => void {
     },
   });
 
-  // A terminal created here is a Paseo workspace terminal, so the app opens
-  // it as a terminal tab of that workspace.
-  client.addCommandCenterItem({
-    id: "remote-control-open-terminal",
-    title: "Open terminal",
-    icon: "Terminal",
-    keywords: ["terminal", "shell", "console", "pty", "ssh"],
-    context: "workspace",
-    async onSelect({ paseo, workspace }) {
-      await paseo.terminals.create({ workspaceId: workspace.id });
-    },
-  });
+  // Opening sessions lives in the sidebar panel, which lists the
+  // connections: ssh opens a terminal tab, rdp/vnc an external window.
 
   // The daemon-side Paseo API (needed by the console to open terminals) only
   // reaches plugin code with an RPC handler context, so refresh it from the

@@ -144,10 +144,15 @@ describe("TerminalService", () => {
     });
   }
 
-  function sshHarness() {
-    const conn = connection({ secretRefs: { identitySecret: "remote-control/conn_1/identity" } });
+  function sshHarness(extra: { passwordSecret?: string; unlocked?: boolean } = {}) {
+    const secretRefs: Record<string, string> = { identitySecret: "remote-control/conn_1/identity" };
+    if (extra.passwordSecret) secretRefs.passwordSecret = extra.passwordSecret;
+    const conn = connection({ secretRefs });
     const store = { getConnection: (id: string) => (id === conn.id ? conn : null) } as unknown as Store;
-    const vault = { get: async () => "-----BEGIN PRIVATE KEY-----\nkey material\n" } as unknown as VaultService;
+    const vault = {
+      get: async () => "-----BEGIN PRIVATE KEY-----\nkey material\n",
+      isUnlocked: () => extra.unlocked ?? true,
+    } as unknown as VaultService;
     return { conn, store, vault };
   }
 
@@ -205,6 +210,19 @@ describe("TerminalService", () => {
 
     await expect(svc.kill(info.id)).resolves.toBe(true);
     expect(existsSync(path.dirname(identityFile))).toBe(false);
+  });
+
+  it("refuses an ssh launch with a stored password while the vault is locked", async () => {
+    const { api } = fakePaseo({ workspaces: ["ws_a"] });
+    const { conn, store, vault } = sshHarness({
+      passwordSecret: "connections/conn_1/password",
+      unlocked: false,
+    });
+    const svc = service(api, { store, vault });
+
+    await expect(
+      svc.open({ workspaceId: "ws_a", connectionId: conn.id }),
+    ).rejects.toThrow(/Vault is locked/);
   });
 
   it("rejects connections whose protocol cannot be launched", async () => {

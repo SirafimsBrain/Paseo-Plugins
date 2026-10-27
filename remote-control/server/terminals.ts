@@ -151,6 +151,12 @@ export class TerminalService {
       throw new Error(`Protocol ${connection.protocol} is not launchable yet.`);
     }
     if (!this.vault) throw new Error("Vault unavailable: cannot resolve ssh credentials.");
+    const passwordRef = connection.secretRefs?.passwordSecret ?? connection.secretRefs?.password;
+    if (passwordRef && !this.vault.isUnlocked()) {
+      throw new Error(
+        "Vault is locked: unlock it (Remote Control settings or console) to use the stored password of this connection.",
+      );
+    }
 
     const runDir = path.join(this.runDirBase, `term_${randomUUID()}`);
     let command: { command: string; args: string[] };

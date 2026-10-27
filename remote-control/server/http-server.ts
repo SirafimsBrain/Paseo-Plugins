@@ -388,7 +388,7 @@ export class ConsoleHttpServer {
           return;
         }
         if (req.method === "POST") {
-          void this.readJsonBody(req).then((body) => {
+          void this.readJsonBody(req).then(async (body) => {
             const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
             const name = b.name ? String(b.name) : "";
             const host = b.host ? String(b.host) : "";
@@ -397,10 +397,20 @@ export class ConsoleHttpServer {
             const port = b.port === null || b.port === undefined ? null : Number(b.port);
             const username = b.username ? String(b.username) : "";
             const id = `conn_${Math.random().toString(36).slice(2)}`;
+            let secretRefs = (b.secretRefs as Record<string, string>) ?? {};
+            // Storing the password IS the point of the vault: the value goes
+            // into the pass store and the database only gets the secret name.
+            const password = typeof b.password === "string" ? b.password : "";
+            if (password.length > 0) {
+              await this.ensureVaultReady(typeof b.masterPassword === "string" ? b.masterPassword : "");
+              const secretName = `connections/${id}/password`;
+              await this.vault!.set(secretName, password);
+              secretRefs = { ...secretRefs, passwordSecret: secretName };
+            }
             const conn = this.store!.createConnection({
               id, groupId, name, protocol, host, port, username,
               payload: (b.payload as Record<string, unknown>) ?? {},
-              secretRefs: (b.secretRefs as Record<string, string>) ?? {},
+              secretRefs,
             });
             this.sendJson(res, 201, { connection: conn });
           }).catch((cause) => {
@@ -421,7 +431,7 @@ export class ConsoleHttpServer {
           return;
         }
         if (req.method === "PATCH") {
-          void this.readJsonBody(req).then((body) => {
+          void this.readJsonBody(req).then(async (body) => {
             const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
             const patch: { groupId?: string | null; name?: string; protocol?: string; host?: string; port?: number | null; username?: string; payload?: Record<string, unknown>; secretRefs?: Record<string, string> } = {};
             if ("groupId" in b) patch.groupId = b.groupId === null ? null : String(b.groupId);
@@ -432,6 +442,35 @@ export class ConsoleHttpServer {
             if ("username" in b) patch.username = String(b.username);
             if ("payload" in b) patch.payload = b.payload as Record<string, unknown>;
             if ("secretRefs" in b) patch.secretRefs = b.secretRefs as Record<string, string>;
+            // Password edits: a non-empty value stores/updates the secret, an
+            // empty one clears it, an absent field leaves it untouched.
+            if ("password" in b) {
+              const existing = this.store!.getConnection(id);
+              if (!existing) { this.sendJson(res, 404, { error: "not found" }); return; }
+              const refs = existing.secretRefs ?? {};
+              const value = b.password === null || b.password === undefined ? "" : String(b.password);
+              if (value.length > 0) {
+                await this.ensureVaultReady(typeof b.masterPassword === "string" ? b.masterPassword : "");
+                const secretName = refs.passwordSecret ?? refs.password ?? `connections/${id}/password`;
+                await this.vault!.set(secretName, value);
+                const next: Record<string, string> = {};
+                for (const [key, entryValue] of Object.entries(refs)) {
+                  if (key !== "password") next[key] = entryValue;
+                }
+                next.passwordSecret = secretName;
+                patch.secretRefs = next;
+              } else {
+                const secretName = refs.passwordSecret ?? refs.password;
+                if (secretName && this.vault) {
+                  try { await this.vault.delete(secretName); } catch { /* already gone */ }
+                }
+                const next: Record<string, string> = {};
+                for (const [key, entryValue] of Object.entries(refs)) {
+                  if (key !== "password" && key !== "passwordSecret") next[key] = entryValue;
+                }
+                patch.secretRefs = next;
+              }
+            }
             const conn = this.store!.updateConnection(id, patch);
             if (!conn) { this.sendJson(res, 404, { error: "not found" }); return; }
             this.sendJson(res, 200, { connection: conn });
@@ -518,6 +557,28 @@ export class ConsoleHttpServer {
         this.eventTicker = null;
       }
     });
+  }
+
+  /**
+   * Makes sure the vault can accept a connection password: sets it up or
+   * unlocks it with the master password sent alongside the request. Throws a
+   * user-readable message when that is impossible (no master password, wrong
+   * master password, no vault at all).
+   */
+  private async ensureVaultReady(masterPassword: string): Promise<void> {
+    if (!this.vault) throw new Error("vault unavailable");
+    const status = this.vault.status();
+    if (status.unlocked) return;
+    if (masterPassword.length === 0) {
+      throw new Error(
+        status.initialized
+          ? "vault is locked: send the master password (masterPassword) to store the connection password"
+          : "vault is not initialized: send the master password (masterPassword) to set it up first",
+      );
+    }
+    if (!status.initialized) await this.vault.setup(masterPassword);
+    const result = await this.vault.unlock(masterPassword);
+    if (!result.ok) throw new Error("wrong master password");
   }
 
   private readJsonBody(req: http.IncomingMessage): Promise<unknown> {

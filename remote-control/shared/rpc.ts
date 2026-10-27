@@ -39,3 +39,37 @@ export const vaultLock = defineRpc({
   input: z.object({}),
   output: z.object({ ok: z.boolean() }),
 });
+
+// Connections as the sidebar panel shows them: flat rows plus whether a
+// password is stored in the vault for the connection.
+export const connectionsList = defineRpc({
+  name: "remote-control.connections.list",
+  input: z.object({}),
+  output: z.object({
+    connections: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        protocol: z.enum(["ssh", "rdp", "vnc"]),
+        host: z.string(),
+        port: z.number().int().nullable(),
+        username: z.string(),
+        hasPassword: z.boolean(),
+      }),
+    ),
+  }),
+});
+
+// Launch from the sidebar panel: ssh opens a Paseo terminal tab, rdp/vnc
+// open their own desktop window on the daemon machine.
+export const connectionLaunch = defineRpc({
+  name: "remote-control.connections.launch",
+  input: z.object({
+    connectionId: z.string().min(1),
+    workspaceId: z.string().min(1),
+  }),
+  output: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("terminal"), terminalId: z.string(), name: z.string() }),
+    z.object({ kind: z.literal("external"), pid: z.number().int(), binary: z.string() }),
+  ]),
+});
