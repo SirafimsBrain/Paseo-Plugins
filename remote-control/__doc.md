@@ -9,6 +9,16 @@ login + password per connection — is the basis of the plugin. Typing a master
 password into a connection form was the wrong place for it, and manual secret
 management must not exist at all.
 
+### Live acceptance: baseline confirmed (2026-10-27)
+
+The customer ran the whole route in the app on 0.19.10 and confirmed it as
+the baseline for further development: first-run master password created in
+the sidebar panel → groups with connections shown → connection created with
+its password → clicking it opened the SSH session in a terminal tab with no
+login/password prompts. Later stages build on this route and must not change
+its contract (panel gates the storage; secrets only via connections; SSH in
+a tab; RDP/VNC as external windows).
+
 ### First run and unlock — only in the sidebar panel
 
 `client/console-panel.tsx` gates everything behind the storage:
