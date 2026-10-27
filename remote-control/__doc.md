@@ -2,6 +2,47 @@
 
 See `PLAN.md` for the full atomic plan, decisions (ADR-1..ADR-14) and risks. This file accumulates technical details as stages land.
 
+## Architecture invariants (checked and confirmed 2026-10-27)
+
+Three properties the customer asked to verify and keep as a standing
+contract; later stages must not change them.
+
+1. **One plugin instance for every workspace.** The server entry
+   (`index.server.ts`) runs once per plugin load and owns the only
+   `VaultService`, `Store` (single DB path
+   `$PASEO_HOME/plugins/remote-control/remote-control.db`, no workspace
+   component in it), `TerminalService` and console endpoint. Workspace panels
+   mount per workspace but all instances talk to that one server over the
+   same RPCs; groups, connections and the storage state are shared. Only
+   cosmetic fields (`projectRootPath`) are workspace-specific.
+2. **An SSH session tab opens in the workspace active at click time, never
+   in another one, and lives until the user closes it or the console kills
+   it.** Every launch path derives `workspaceId` from the UI element that was
+   clicked, and that element belongs to the active workspace: an Explorer
+   panel is interactive only when its own workspace is focused
+   (`pane-context.tsx`: interactivity = workspace-focused ∧ pane-focused),
+   and a console tab lives in the browser tab of the workspace that opened
+   it (`?workspaceId=` opener). The plugin never re-targets or closes an
+   existing terminal; tabs are inserted by Paseo's `addMissingEntityTabs`
+   with `focus: false` and stay there. Destruction paths: the user closes
+   the tab (Paseo confirms and stops the process — discussion #6389), or the
+   console's Terminals view kills it; plugin reload (`dispose()`) removes run
+   directories but never kills terminals. An externally opened console has
+   no `workspaceId`: with several workspaces a launch refuses explicitly
+   instead of picking a workspace, so a session can never "jump".
+3. **No limit on concurrent sessions.** Every "Open in tab" press is its own
+   `remote-control.connections.launch` RPC → a fresh `paseo.terminals.create`
+   with a new per-terminal run directory; there is no pool, reuse or cap in
+   the plugin (the only guard is the per-row `busyId` disabling the button
+   while its own request is in flight). N presses → N independent terminal
+   tabs, each killed independently.
+
+Evidence gaps to keep in mind: the exact Paseo close-X → `killTerminal`
+call site and the full `addMissingEntityTabs()` body were not read directly
+in v0.13.0 sources (verified via the terminal-close discussion and the
+`reconcileWorkspaceTabs` input path); the multi-session claim was verified
+code-wise, not by spawning live sessions.
+
 ## The storage is the foundation; first run lives in the panel (stage 0.19.10, 2026-10-27)
 
 Product rule (restated by the customer after 0.18.10): the secret storage —
