@@ -1,7 +1,7 @@
 {
   "name": "remote-control",
   "private": true,
-  "version": "0.20.10",
+  "version": "0.21.10",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",

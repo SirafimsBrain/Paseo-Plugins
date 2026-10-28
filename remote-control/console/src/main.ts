@@ -1,3 +1,5 @@
+import { nextCopyName } from "../../shared/naming";
+
 const params = new URLSearchParams(window.location.search);
 let token = params.get("token") ?? "";
 // The opener (Paseo panel/screen) passes the workspace it opened the console
@@ -162,16 +164,27 @@ function terminalsView(main: HTMLElement): void {
  * be open — first run and unlock live in the Remote Control panel), an empty
  * one in edit mode keeps the stored password as it is.
  */
-function openConnectionForm(initial: any | null): void {
-  const isNew = initial === null;
-  const nameI = input(initial?.name ?? "", "text", "name");
+function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } = {}): void {
+  const duplicateOf = opts.duplicateOf;
+  const isNew = initial === null || duplicateOf !== undefined;
+  const nameI = input(
+    duplicateOf
+      ? nextCopyName(String(initial?.name ?? ""), state.connections.map((c) => String(c.name)))
+      : (initial?.name ?? ""),
+    "text",
+    "name",
+  );
   const hostI = input(initial?.host ?? "", "text", "host");
   const portI = input(initial?.port ? String(initial.port) : "", "text", "port (empty=default)");
   const userI = input(initial?.username ?? "", "text", "username");
   const passI = input(
     "",
     "password",
-    isNew ? "password (stored in the secret storage)" : "new password (empty = keep current)",
+    duplicateOf
+      ? "password (empty = copy the stored password of the source)"
+      : isNew
+        ? "password (stored in the secret storage)"
+        : "new password (empty = keep current)",
   );
   const protoI = document.createElement("select");
   for (const p of ["ssh", "rdp", "vnc"]) {
@@ -195,7 +208,7 @@ function openConnectionForm(initial: any | null): void {
   }
   openModal((close) => {
     const m = document.createElement("div");
-    m.innerHTML = `<h3>${isNew ? "New connection" : "Edit connection"}</h3>`;
+    m.innerHTML = `<h3>${duplicateOf ? "Duplicate connection" : isNew ? "New connection" : "Edit connection"}</h3>`;
     const err = document.createElement("p");
     err.style.color = "#ef4444";
     err.style.fontSize = "0.85rem";
@@ -217,7 +230,7 @@ function openConnectionForm(initial: any | null): void {
     cancel.addEventListener("click", close);
     const ok = document.createElement("button");
     ok.className = "primary";
-    ok.textContent = isNew ? "Create" : "Save";
+    ok.textContent = duplicateOf ? "Create copy" : isNew ? "Create" : "Save";
     ok.addEventListener("click", async () => {
       try {
         const port = portI.value.trim() === "" ? null : Number(portI.value);
@@ -231,6 +244,9 @@ function openConnectionForm(initial: any | null): void {
         };
         if (passI.value !== "") {
           body.password = passI.value;
+        }
+        if (duplicateOf) {
+          body.duplicateOf = duplicateOf;
         }
         if (isNew) {
           await api("/api/connections", {
@@ -311,72 +327,130 @@ function connectionsView(main: HTMLElement): void {
   row.append(openExportButton(), openImportButton());
   main.append(row);
 
-  // Groups
-  if (state.groups.length > 0) {
-    const glist = document.createElement("ul");
-    glist.style.listStyle = "none";
-    glist.style.padding = "0";
-    for (const g of state.groups) {
-      const li = document.createElement("li");
-      li.className = "mono";
-      li.textContent = `${g.name} (${g.id})`;
-      glist.append(li);
+  // 0.21.10: rows are split into per-group sections so it is visible which
+  // group a connection was created in; empty groups stay on screen too.
+  const sections = connectionSections();
+  for (const section of sections) {
+    const h = document.createElement("h2");
+    h.textContent = section.label;
+    h.style.marginLeft = `${section.depth * 1.25}rem`;
+    main.append(h);
+    if (section.connections.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "no connections";
+      main.append(empty);
+      continue;
     }
-    main.append(glist);
-  }
-
-  // Connections table
-  const table = document.createElement("table");
-  table.innerHTML = "<thead><tr><th>Name</th><th>Protocol</th><th>Target</th><th>Actions</th></tr></thead>";
-  const tbody = document.createElement("tbody");
-  for (const c of state.connections) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${c.name}</td><td>${c.protocol}</td><td class="mono">${c.username ? c.username + "@" : ""}${c.host}${c.port ? ":" + c.port : ""}</td>`;
-    const actions = document.createElement("td");
-    if (c.protocol === "ssh") {
-      const launchBtn = document.createElement("button");
-      launchBtn.className = "primary";
-      launchBtn.textContent = "Launch";
-      launchBtn.addEventListener("click", async () => {
-        try {
-          const res = await api("/api/terminals", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ connectionId: c.id, workspaceId: workspaceId || null }),
-          });
-          state.notice = `SSH session opened as terminal tab ${res.terminal.id} in Paseo.`;
-        } catch (e) {
-          state.notice = String(e);
-        }
-        state.view = "terminals";
-        await refreshTerminals();
-        render();
-      });
-      actions.append(launchBtn);
+    const table = document.createElement("table");
+    table.innerHTML = "<thead><tr><th>Name</th><th>Protocol</th><th>Target</th><th>Auth</th><th>Actions</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    for (const c of section.connections) {
+      tbody.append(connectionRow(c));
     }
-    const editBtn = document.createElement("button");
-    editBtn.textContent = "edit";
-    editBtn.addEventListener("click", () => openConnectionForm(c));
-    actions.append(editBtn);
-    const delBtn = document.createElement("button");
-    delBtn.className = "danger";
-    delBtn.textContent = "delete";
-    delBtn.addEventListener("click", async () => {
-      await api(`/api/connections/${encodeURIComponent(c.id)}`, { method: "DELETE" });
-      await refreshConnections();
-    });
-    actions.append(delBtn);
-    tr.append(actions);
-    tbody.append(tr);
+    table.append(tbody);
+    main.append(table);
   }
-  table.append(tbody);
-  main.append(table);
-  if (state.connections.length === 0) {
+  if (sections.length === 0) {
     const p = document.createElement("p");
     p.className = "muted";
     p.textContent = "No connections yet.";
     main.append(p);
   }
+}
+
+/** Root-level connections first, then every group in tree order (0.21.10). */
+function connectionSections(): { label: string; depth: number; connections: any[] }[] {
+  const sections: { label: string; depth: number; connections: any[] }[] = [];
+  const root = state.connections.filter((c) => !c.groupId);
+  if (root.length > 0) {
+    sections.push({ label: "(no group)", depth: 0, connections: root });
+  }
+  const walk = (parentId: string | null, depth: number): void => {
+    for (const g of state.groups.filter((x) => (x.parentId ?? null) === parentId)) {
+      sections.push({
+        label: g.name,
+        depth,
+        connections: state.connections.filter((c) => c.groupId === g.id),
+      });
+      walk(g.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return sections;
+}
+
+/**
+ * One connection row: target, the auth flag the last successful test left
+ * (`unknown` when never proven) and the service actions — Launch, test the
+ * connection, duplicate, edit, delete.
+ */
+function connectionRow(c: any): HTMLTableRowElement {
+  const tr = document.createElement("tr");
+  const auth =
+    c.payload?.auth === "key" || c.payload?.auth === "password" ? c.payload.auth : "unknown";
+  tr.innerHTML = `<td>${c.name}</td><td>${c.protocol}</td><td class="mono">${c.username ? c.username + "@" : ""}${c.host}${c.port ? ":" + c.port : ""}</td><td class="mono${auth === "unknown" ? " muted" : ""}">${auth}</td>`;
+  const actions = document.createElement("td");
+  if (c.protocol === "ssh") {
+    const launchBtn = document.createElement("button");
+    launchBtn.className = "primary";
+    launchBtn.textContent = "Launch";
+    launchBtn.addEventListener("click", async () => {
+      try {
+        const res = await api("/api/terminals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionId: c.id, workspaceId: workspaceId || null }),
+        });
+        state.notice = `SSH session opened as terminal tab ${res.terminal.id} in Paseo.`;
+      } catch (e) {
+        state.notice = String(e);
+      }
+      state.view = "terminals";
+      await refreshTerminals();
+      render();
+    });
+    actions.append(launchBtn);
+
+    // Probe the host: public key first, then the stored password; the result
+    // lands in payload.auth and the row refreshes with its new status.
+    const testBtn = document.createElement("button");
+    testBtn.textContent = "test";
+    testBtn.addEventListener("click", async () => {
+      testBtn.disabled = true;
+      testBtn.textContent = "\u2026";
+      try {
+        const r = await api(`/api/connections/${encodeURIComponent(c.id)}/test`, {
+          method: "POST",
+        });
+        state.notice = r.ok
+          ? `${c.name}: test passed — authenticated by ${r.auth === "key" ? "public key" : "stored password"} (${r.message}).`
+          : `${c.name}: test failed — ${r.message}`;
+      } catch (e) {
+        state.notice = `${c.name}: ${String(e)}`;
+      }
+      await refreshConnections();
+    });
+    actions.append(testBtn);
+  }
+  const dupBtn = document.createElement("button");
+  dupBtn.textContent = "duplicate";
+  dupBtn.addEventListener("click", () => openConnectionForm(c, { duplicateOf: c.id }));
+  actions.append(dupBtn);
+  const editBtn = document.createElement("button");
+  editBtn.textContent = "edit";
+  editBtn.addEventListener("click", () => openConnectionForm(c));
+  actions.append(editBtn);
+  const delBtn = document.createElement("button");
+  delBtn.className = "danger";
+  delBtn.textContent = "delete";
+  delBtn.addEventListener("click", async () => {
+    await api(`/api/connections/${encodeURIComponent(c.id)}`, { method: "DELETE" });
+    await refreshConnections();
+  });
+  actions.append(delBtn);
+  tr.append(actions);
+  return tr;
 }
 
 // ---------- export / import ----------

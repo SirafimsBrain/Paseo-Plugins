@@ -43,6 +43,59 @@ in v0.13.0 sources (verified via the terminal-close discussion and the
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## Service layer: grouped duplicates and the connection test (stage 0.21.10, 2026-10-28)
+
+Three service functions the customer ordered before the key-copy stage: the
+Connections view split by groups, a duplicate action, and a connection test
+that learns **how** a host actually accepts logins.
+
+### Grouped view
+
+Sections per group in tree order (nested groups indent), root-level
+connections under "(no group)", empty groups remain on screen. Every row
+carries an **Auth** column with the flag described below.
+
+### Duplicate
+
+- **UI:** the `duplicate` button opens the create dialog prefilled with the
+  source's fields and the next free copy name; **Cancel creates nothing** —
+  the copy only comes into existence on Save, which POSTs with
+  `duplicateOf`. The modal shows the name the server would compute anyway.
+- **Names** (`shared/naming.ts`, `nextCopyName`, used by console and
+  server): strip a trailing `_copy(\d*)`, then
+  `name` → `name_copy` → `name_copy1` → `name_copy2` … — uniqueness comes
+  from incrementing, so the user never meets a "name already exists" error.
+- **Server:** `POST /api/connections { duplicateOf }` — fields omitted from
+  the body fall back to the source (group, protocol, host, port, login,
+  payload including the auth flag); **every stored secret of the source is
+  re-encrypted under `connections/<newId>/…`**, which requires an open
+  storage (otherwise 400 with panel guidance, as with password writes); a
+  password present in the body replaces the copied one. Unknown source → 404.
+
+### Connection test and the auth flag
+
+- `POST /api/connections/:id/test` (ssh only, else 400). Attempt 1: **public
+  key only** — `BatchMode=yes`, no askpass variables in the env, so exit 0
+  can only mean key auth. Attempt 2 (only when a password is stored): the
+  stored password through the askpass helper, `NumberOfPasswordPrompts=1`.
+  Both attempts use `ConnectTimeout=6` with a hard kill after ~12s.
+- `StrictHostKeyChecking=accept-new` is added unless the payload pins its own
+  value: a first contact must not fail the probe outright (same
+  trust-on-first-use a human would accept interactively).
+- **Flag:** `payload.auth` = `key` | `password`; the default is *unknown*
+  (absent). Priority is encoded in the value — `key` is the preferred method,
+  `password` the fallback. A **failed** probe never clears a known flag: a
+  network blip must not erase a proven method. The future key-copy stage
+  flips the flag to `key` on success.
+- Editing host/port/protocol/login resets the flag to `unknown` (different
+  target, old fact no longer applies); renames keep it; a duplicate copies it.
+- The probe is injectable (`sshProbe` option on `ConsoleHttpServer`), so the
+  route contract is tested without a live host; the real probe gets a
+  closed-port run in the test suite.
+
+Acceptance: `npm run typecheck` + 94/94 vitest (13 new in
+`tests/connections-service.test.ts`).
+
 ## Export / import of connections with secrets (stage 0.20.10, 2026-10-28)
 
 One JSON file carries the complete set — group tree, every connection

@@ -10,6 +10,9 @@ import {
   previewGhosttyImport,
 } from "./ghostty-config";
 import { bundleHasSecrets, buildExportBundle, importBundle, openBundle } from "./transfer";
+import { testSshConnection } from "./probe";
+import type { SshProbe } from "./probe";
+import { nextCopyName } from "../shared/naming";
 
 export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 
@@ -51,6 +54,8 @@ export interface ConsoleHttpServerOptions {
   store?: import("./store").Store;
   /** Vault service: status route + connection-password storage. */
   vault?: import("./vault").VaultService;
+  /** Connection test (0.21.10): key-first probe, injectable in tests. */
+  sshProbe?: SshProbe;
 }
 
 export class ConsoleHttpServer {
@@ -61,6 +66,7 @@ export class ConsoleHttpServer {
   private readonly terminals: TerminalService | null;
   private readonly store: import("./store").Store | null;
   private readonly vault: import("./vault").VaultService | null;
+  private readonly sshProbe: SshProbe;
   private readonly options: ConsoleHttpServerOptions;
   private server: http.Server | null = null;
   private boundPort: number | null = null;
@@ -87,6 +93,8 @@ export class ConsoleHttpServer {
     this.terminals = options.terminals ?? null;
     this.store = options.store ?? null;
     this.vault = options.vault ?? null;
+    this.sshProbe =
+      options.sshProbe ?? ((connection, vault) => testSshConnection(connection, { vault }));
   }
 
   get listening(): boolean {
@@ -312,17 +320,73 @@ export class ConsoleHttpServer {
         if (req.method === "POST") {
           void this.readJsonBody(req).then(async (body) => {
             const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
-            const name = b.name ? String(b.name) : "";
-            const host = b.host ? String(b.host) : "";
-            const protocol = b.protocol ? String(b.protocol) : "ssh";
-            const groupId = b.groupId === null ? null : (b.groupId ? String(b.groupId) : null);
-            const port = b.port === null || b.port === undefined ? null : Number(b.port);
-            const username = b.username ? String(b.username) : "";
+            // `duplicateOf` (0.21.10) copies a connection: fields absent from
+            // the body fall back to the source, the stored secrets are
+            // re-encrypted under the new id, and an unnamed copy gets the next
+            // free `…_copy<n>` name (the console computes it too, so the modal
+            // shows it before the user confirms).
+            const duplicateOf =
+              typeof b.duplicateOf === "string" && b.duplicateOf.length > 0 ? b.duplicateOf : null;
+            const source = duplicateOf ? this.store!.getConnection(duplicateOf) : null;
+            if (duplicateOf && !source) {
+              this.sendJson(res, 404, { error: `source connection not found: ${duplicateOf}` });
+              return;
+            }
+            const name =
+              b.name && String(b.name).length > 0
+                ? String(b.name)
+                : source
+                  ? nextCopyName(source.name, this.store!.listConnections().map((c) => c.name))
+                  : "";
+            const host = b.host ? String(b.host) : (source?.host ?? "");
+            const protocol = b.protocol ? String(b.protocol) : (source?.protocol ?? "ssh");
+            const groupId = b.groupId
+              ? String(b.groupId)
+              : b.groupId === null
+                ? null
+                : (source ? source.groupId : null);
+            const port =
+              b.port === undefined
+                ? (source ? source.port : null)
+                : b.port === null
+                  ? null
+                  : Number(b.port);
+            const username = b.username ? String(b.username) : (source?.username ?? "");
             const id = `conn_${Math.random().toString(36).slice(2)}`;
-            let secretRefs = (b.secretRefs as Record<string, string>) ?? {};
+            let secretRefs: Record<string, string> = {
+              ...((source?.secretRefs ?? {}) as Record<string, string>),
+              ...((b.secretRefs as Record<string, string>) ?? {}),
+            };
+            const password = typeof b.password === "string" ? b.password : "";
+            // Duplicate: copy every stored secret under the new id (a password
+            // given in the body replaces the copied one instead).
+            if (source && Object.keys(source.secretRefs ?? {}).length > 0) {
+              this.requireOpenVault();
+              for (const [key, oldName] of Object.entries(source.secretRefs ?? {})) {
+                const isPassword = key === "passwordSecret" || key === "password";
+                if (isPassword && password.length > 0) {
+                  delete secretRefs[key];
+                  continue;
+                }
+                let value: string;
+                try {
+                  value = await this.vault!.get(oldName);
+                } catch (cause) {
+                  throw new Error(
+                    `cannot copy the ${key} of the source connection: ${cause instanceof Error ? cause.message : String(cause)}`,
+                  );
+                }
+                const prefix = `connections/${source.id}/`;
+                const suffix = oldName.startsWith(prefix)
+                  ? oldName.slice(prefix.length)
+                  : (oldName.split("/").pop() ?? oldName);
+                const secretName = `connections/${id}/${suffix}`;
+                await this.vault!.set(secretName, value);
+                secretRefs[key] = secretName;
+              }
+            }
             // Storing the password IS the point of the vault: the value goes
             // into the pass store and the database only gets the secret name.
-            const password = typeof b.password === "string" ? b.password : "";
             if (password.length > 0) {
               this.requireOpenVault();
               const secretName = `connections/${id}/password`;
@@ -331,7 +395,9 @@ export class ConsoleHttpServer {
             }
             const conn = this.store!.createConnection({
               id, groupId, name, protocol, host, port, username,
-              payload: (b.payload as Record<string, unknown>) ?? {},
+              payload:
+                (b.payload as Record<string, unknown>) ??
+                (source ? { ...source.payload } : {}),
               secretRefs,
             });
             this.sendJson(res, 201, { connection: conn });
@@ -341,6 +407,37 @@ export class ConsoleHttpServer {
           return;
         }
         this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      // /api/connections/:id/test — probe the host (0.21.10): public key
+      // first (BatchMode), then the stored password; success records
+      // payload.auth ("key"/"password"), a failure leaves the flag as it is.
+      const connectionTestMatch = /^\/api\/connections\/(.+)\/test$/.exec(url.pathname);
+      if (connectionTestMatch && this.store) {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        const testId = decodeURIComponent(connectionTestMatch[1]);
+        const testConn = this.store.getConnection(testId);
+        if (!testConn) { this.sendJson(res, 404, { error: "not found" }); return; }
+        if (testConn.protocol !== "ssh") {
+          this.sendJson(res, 400, { error: "the connection test supports ssh only" });
+          return;
+        }
+        void this.sshProbe(testConn, this.vault ?? null).then((result) => {
+          let connection = testConn;
+          if (result.ok && (result.auth === "key" || result.auth === "password")) {
+            const payload = { ...(testConn.payload ?? {}) };
+            payload.auth = result.auth;
+            connection = this.store!.updateConnection(testId, { payload }) ?? testConn;
+          }
+          this.sendJson(res, 200, {
+            ok: result.ok,
+            auth: result.auth,
+            message: result.message,
+            connection,
+          });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
         return;
       }
       const connectionMatch = /^\/api\/connections\/(.+)$/.exec(url.pathname);
@@ -355,6 +452,8 @@ export class ConsoleHttpServer {
         if (req.method === "PATCH") {
           void this.readJsonBody(req).then(async (body) => {
             const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+            const existing = this.store!.getConnection(id);
+            if (!existing) { this.sendJson(res, 404, { error: "not found" }); return; }
             const patch: { groupId?: string | null; name?: string; protocol?: string; host?: string; port?: number | null; username?: string; payload?: Record<string, unknown>; secretRefs?: Record<string, string> } = {};
             if ("groupId" in b) patch.groupId = b.groupId === null ? null : String(b.groupId);
             if ("name" in b) patch.name = String(b.name);
@@ -364,11 +463,24 @@ export class ConsoleHttpServer {
             if ("username" in b) patch.username = String(b.username);
             if ("payload" in b) patch.payload = b.payload as Record<string, unknown>;
             if ("secretRefs" in b) patch.secretRefs = b.secretRefs as Record<string, string>;
+            // A changed target invalidates the recorded auth method (0.21.10):
+            // back to "unknown" until the next successful test. An explicit
+            // payload in the patch wins.
+            if (!("payload" in b)) {
+              const targetChanged =
+                ("host" in b && String(b.host) !== existing.host) ||
+                ("port" in b && (b.port === null || b.port === undefined ? null : Number(b.port)) !== existing.port) ||
+                ("username" in b && String(b.username ?? "") !== existing.username) ||
+                ("protocol" in b && String(b.protocol) !== existing.protocol);
+              if (targetChanged && existing.payload && existing.payload.auth !== undefined) {
+                const payload = { ...existing.payload };
+                delete payload.auth;
+                patch.payload = payload;
+              }
+            }
             // Password edits: a non-empty value stores/updates the secret, an
             // empty one clears it, an absent field leaves it untouched.
             if ("password" in b) {
-              const existing = this.store!.getConnection(id);
-              if (!existing) { this.sendJson(res, 404, { error: "not found" }); return; }
               const refs = existing.secretRefs ?? {};
               const value = b.password === null || b.password === undefined ? "" : String(b.password);
               if (value.length > 0) {
