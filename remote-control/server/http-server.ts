@@ -9,6 +9,7 @@ import {
   loadGhosttySettings,
   previewGhosttyImport,
 } from "./ghostty-config";
+import { bundleHasSecrets, buildExportBundle, importBundle, openBundle } from "./transfer";
 
 export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 
@@ -406,6 +407,47 @@ export class ConsoleHttpServer {
           return;
         }
         this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      // /api/export — full copy of groups + connections + their secrets
+      // (0.20.10): one JSON file, optionally sealed with a passphrase,
+      // importable on another machine (sshpilot-style backup).
+      if (url.pathname === "/api/export") {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.store) { this.sendJson(res, 503, { error: "store unavailable" }); return; }
+        void this.readJsonBody(req).then(async (body) => {
+          const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+          const result = await buildExportBundle(this.store!, this.vault, {
+            passphrase: typeof b.passphrase === "string" ? b.passphrase : "",
+            pluginVersion: this.version,
+          });
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${result.filename}"`,
+            "Cache-Control": "no-store",
+          });
+          res.end(result.content);
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
+        return;
+      }
+      // /api/import — restore a bundle; mode "merge" (default) keeps what is
+      // there and updates matching connections, "replace" wipes first.
+      if (url.pathname === "/api/import") {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.store) { this.sendJson(res, 503, { error: "store unavailable" }); return; }
+        void this.readJsonBody(req).then(async (body) => {
+          const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+          const file = typeof b.file === "string" ? b.file : "";
+          const mode = b.mode === "replace" ? ("replace" as const) : ("merge" as const);
+          const bundle = openBundle(file, typeof b.passphrase === "string" ? b.passphrase : undefined);
+          if (bundleHasSecrets(bundle)) this.requireOpenVault();
+          const report = await importBundle(this.store!, this.vault, bundle, { mode });
+          this.sendJson(res, 200, { ok: true, ...report });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
         return;
       }
       // /api/ghostty/import

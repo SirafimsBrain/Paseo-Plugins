@@ -43,6 +43,117 @@ in v0.13.0 sources (verified via the terminal-close discussion and the
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## Export / import of connections with secrets (stage 0.20.10, 2026-10-28)
+
+One JSON file carries the complete set — group tree, every connection
+parameter (protocol, host, port, login, payload) **and the stored
+passwords/keys** — so it can be moved to another machine and imported there
+with working connections, without re-entering credentials (the customer's
+reference is sshpilot's backup archive). Implementation:
+`server/transfer.ts`, routes `POST /api/export` and `POST /api/import`,
+console *Export* / *Import* buttons in the Connections view.
+
+### Bundle format
+
+```jsonc
+{
+  "format": "remote-control-export",
+  "version": 1,
+  "exportedAt": "2026-10-28T…",
+  "pluginVersion": "0.20.10",
+  "groups": [{ "id", "parentId", "name", "sortOrder" }],
+  "connections": [{
+    "id", "groupId", "name", "protocol", "host", "port", "username",
+    "payload": { /* protocol fields, secret-ref keys stripped */ },
+    "sortOrder",
+    "secrets": { "password": "…", "identity": "…" }  // plaintext values
+  }]
+}
+```
+
+- **Secrets in the file are values, not vault paths.** Export resolves
+  `secretRefs.passwordSecret` / `identitySecret` (and legacy `password` /
+  `identity`) through the vault and writes semantic keys; vault-internal
+  names like `connections/<id>/password` are never written to the file, and
+  secret-ref keys are stripped from the exported payload — they are local
+  paths, meaningless elsewhere. A dangling reference (entry deleted by hand)
+  is skipped rather than failing the export.
+- **Encryption is optional but symmetric.** With a passphrase the plaintext
+  bundle is sealed: AES-256-GCM, key = `scrypt(passphrase, salt, N=16384,
+  r=8, p=1)`, fresh 16-byte salt + 12-byte IV per export, auth tag kept.
+  The envelope (`{ encrypted: true, encryption, data, tag }`) opens only
+  with the same passphrase (`wrong passphrase for this export file`), and
+  `openBundle` auto-detects envelope vs plain JSON. Without a passphrase the
+  file is plain JSON — the download itself never round-trips a page field.
+- **A closed storage gates export only when there is something to resolve.**
+  Connections with secrets → the same panel-pointing errors as saving a
+  connection ("not initialized…" / "vault is locked… to export passwords");
+  a store without secrets exports fine while locked.
+- **Format version is checked before anything else** — a future `version: 2`
+  file fails with "this export file uses format version 2; this plugin
+  understands 1", not a schema dump.
+
+### Import semantics- **`mode: "merge"` (default):** groups are resolved parents-first and a
+  group with the same name under the same resolved parent is reused; a
+  connection matches on protocol+host+port+username+name — a match is updated
+  in place (id kept), anything else is created with a fresh `conn_*` id.
+  Re-importing the same file is therefore idempotent, not duplicating.
+- **`mode: "replace"`:** every stored secret under `connections/` is
+  deleted, then `store.purge()` wipes all groups and connections, then the
+  bundle is applied as a pure create (result equals the file).
+- **Secrets are re-written under the target ids:** each value goes to
+  `connections/<new id>/<semantic>` in the *target* machine's vault and the
+  row gets the matching `secretRefs` — the import needs the target storage
+  open (`requireOpenVault`), never its master password. A previous secret at
+  the same ref field is deleted to avoid orphans.
+- **Safety rails:** a cyclic group hierarchy in a hand-edited file throws
+  ("cyclic group hierarchy") instead of recursing; non-JSON, foreign format
+  and malformed envelopes are rejected with readable errors; import runs
+  group-by-group, and connection payloads are plain data (secret-ref keys
+  stripped again on import).
+
+### Contract
+
+```text
+POST /api/export          { passphrase? } → 200, Content-Disposition:
+                           attachment; filename="remote-control-export-<date>.json",
+                           body = bundle file (plain or sealed JSON)
+POST /api/import          { file, mode?: "merge"|"replace", passphrase? }
+                           → 200 { ok, mode,
+                             groups: {created, reused},
+                             connections: {created, updated}, passwords }
+```
+
+Both routes require the console token; both are refused (400) with the
+panel-pointing message when secrets are involved and the storage is closed.
+
+### Next stage preview: `~/.ssh/config` management and public-key copy
+
+The customer announced the following stage: manage `~/.ssh/config` and copy
+an SSH public key to a remote host, both modeled on sshpilot. Research facts
+(pinned to sshpilot `c947f207`):
+
+- **ssh config is the source of truth** in sshpilot: the daemon parses the
+  root config following `Include`s and watches for external changes;
+  `src/sshpilot/core/connections/ssh_config_loader.py` maps `host`,
+  `hostname`, `port`, `user`, `identityfile`, `proxycommand`, `proxyjump`,
+  forwarding rules; wildcard/negated `Host` tokens and `Match` blocks are
+  rules, not connectable entries. Writes go through
+  `ssh_config_store.py::SshConfigStore.replace_text()` — atomic replacement
+  (same-dir temp file, backup, mode preservation, symlink refusal, revision
+  check). Unknown directives are preserved in `extra_ssh_config`, so
+  hand-written entries survive edits.
+- **"Copy Key to Server"** deploys an existing or freshly generated key
+  into the remote `authorized_keys` (wiki: Key Management); it may prompt
+  for the server password during deployment. The exact transport (binary
+  `ssh-copy-id` vs piping over `ssh`) was **not verified** in the sources —
+  decide at stage time, `ssh-copy-id` semantics over the plugin's own ssh
+  launch path is the natural fit here.
+
+Design consequence for the stage: parse-and-preserve (never regenerate) the
+user's config, atomic writes with backup, and key deployment reusing the
+existing vault credentials — details go into the PLAN stage when it starts.
+
 ## The storage is the foundation; first run lives in the panel (stage 0.19.10, 2026-10-27)
 
 Product rule (restated by the customer after 0.18.10): the secret storage —

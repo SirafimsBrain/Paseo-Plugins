@@ -225,6 +225,11 @@ export class Store {
     return result.changes > 0;
   }
 
+  /** Remove every group and connection (settings stay). Used by import --replace. */
+  purge(): void {
+    this.db.exec("DELETE FROM connections; DELETE FROM groups;");
+  }
+
   // ---------- settings ----------
 
   getSetting(key: string): string | null {

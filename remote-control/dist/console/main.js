@@ -243,6 +243,12 @@ async function refreshConnections() {
 function connectionsView(main) {
   const row = document.createElement("div");
   row.className = "row";
+  if (state.notice) {
+    const notice = document.createElement("p");
+    notice.className = "muted";
+    notice.textContent = state.notice;
+    main.append(notice);
+  }
   const newGroupBtn = document.createElement("button");
   newGroupBtn.textContent = "New group";
   newGroupBtn.addEventListener("click", () => {
@@ -274,6 +280,7 @@ function connectionsView(main) {
   newConnBtn.textContent = "New connection";
   newConnBtn.addEventListener("click", () => openConnectionForm(null));
   row.append(newGroupBtn, newConnBtn);
+  row.append(openExportButton(), openImportButton());
   main.append(row);
   if (state.groups.length > 0) {
     const glist = document.createElement("ul");
@@ -338,6 +345,130 @@ function connectionsView(main) {
     p.textContent = "No connections yet.";
     main.append(p);
   }
+}
+function openExportButton() {
+  const btn = document.createElement("button");
+  btn.textContent = "Export";
+  btn.addEventListener("click", () => {
+    const passI = input("", "password", "passphrase to seal the file (optional)");
+    openModal((close) => {
+      const m = document.createElement("div");
+      m.innerHTML = "<h3>Export connections</h3>";
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = "Downloads every group, connection and stored password. With a passphrase the file is encrypted; without one the passwords are readable by anyone holding the file.";
+      const err = document.createElement("p");
+      err.style.color = "#ef4444";
+      err.style.fontSize = "0.85rem";
+      err.style.display = "none";
+      m.append(note, field("Passphrase", passI), err);
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", close);
+      const ok = document.createElement("button");
+      ok.className = "primary";
+      ok.textContent = "Download";
+      ok.addEventListener("click", async () => {
+        try {
+          const res = await fetch(`/api/export?token=${encodeURIComponent(token)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ passphrase: passI.value })
+          });
+          if (!res.ok) throw new Error(`${res.status} ${await res.text()}`.trim());
+          const disposition = res.headers.get("content-disposition") ?? "";
+          const match = /filename="([^"]+)"/.exec(disposition);
+          const filename = match?.[1] ?? "remote-control-export.json";
+          const text = await res.text();
+          const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(url);
+          close();
+        } catch (e) {
+          err.textContent = String(e);
+          err.style.display = "";
+        }
+      });
+      actions.append(cancel, ok);
+      m.append(actions);
+      return m;
+    });
+  });
+  return btn;
+}
+function openImportButton() {
+  const btn = document.createElement("button");
+  btn.textContent = "Import";
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = ".json,application/json";
+  picker.style.display = "none";
+  picker.addEventListener("change", () => {
+    const file = picker.files?.[0];
+    picker.value = "";
+    if (!file) return;
+    void file.text().then((text) => importModal(file.name, text));
+  });
+  btn.addEventListener("click", () => picker.click());
+  btn.after(picker);
+  return btn;
+}
+function importModal(filename, fileText) {
+  const modeI = document.createElement("select");
+  for (const [value, label] of [
+    ["merge", "Merge \u2014 keep existing, update matches"],
+    ["replace", "Replace \u2014 wipe connections and groups first"]
+  ]) {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    modeI.append(o);
+  }
+  const passI = input("", "password", "passphrase (only if the file is sealed)");
+  openModal((close) => {
+    const m = document.createElement("div");
+    m.innerHTML = "<h3>Import connections</h3>";
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.textContent = `File: ${filename}. Stored passwords come back with the connections; the secret storage must be open.`;
+    const err = document.createElement("p");
+    err.style.color = "#ef4444";
+    err.style.fontSize = "0.85rem";
+    err.style.display = "none";
+    m.append(note, field("Mode", modeI), field("Passphrase", passI), err);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", close);
+    const ok = document.createElement("button");
+    ok.className = "primary";
+    ok.textContent = "Import";
+    ok.addEventListener("click", async () => {
+      try {
+        const body = JSON.stringify({ file: fileText, mode: modeI.value, passphrase: passI.value });
+        const report = await api("/api/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body
+        });
+        state.notice = `Import (${report.mode}): ${report.connections.created} created, ${report.connections.updated} updated, ${report.groups.created} groups created, ${report.groups.reused} reused, ${report.passwords} passwords restored.`;
+        close();
+        await refreshConnections();
+      } catch (e) {
+        err.textContent = String(e);
+        err.style.display = "";
+      }
+    });
+    actions.append(cancel, ok);
+    m.append(actions);
+    return m;
+  });
 }
 function settingsView(main) {
   const card = document.createElement("div");
