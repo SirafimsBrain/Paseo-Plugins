@@ -98,6 +98,8 @@ The plugin ships its own `SKILL.md` — `memory-flash-remote` — installed into
 
 **What it says.** The protocol mirrors [memory-flash/__doc.md §5](../memory-flash/__doc.md) — 2–4 differently worded searches before a non-trivial task, `memory_get` instead of trusting a snippet, widen before concluding nothing is known, every bugfix / positive result / user correction written back, search-before-save to avoid duplicates, mandatory project+topic tagging, always a handoff — with three adaptations that only make sense across the network:
 
+**Strengthened in 0.2.2 (§17.4):** the frontmatter `description` now opens with "treat it as **mandatory, not optional**" and requires the agent to name any skipped step in its final answer, and the body gained a `## The non-negotiable baseline` checklist (search before the first edit / save the bugfix the moment it is fixed / save decisions and corrections when they happen / leave a handoff before stopping) with explicit anti-shortcut rules.
+
 | Remote fact | Consequence in the skill |
 | ----------- | ------------------------ |
 | The database belongs to the memory host and is shared with other machines | Write for an agent that has no access to this machine's files; the handoff must be self-contained. |
@@ -195,13 +197,14 @@ The residual risk is inherent to the design and accepted: a client that stores a
 
 ## 12. Compatibility
 
-Current: **verified on 2026-10-24 against Paseo `0.13.0`** with
-`@getpaseo/plugin@0.13.0` (installed with `--no-save`, so the manifest pin
-stays `0.12.0`) — no code change needed and no deprecated API left in the
-plugin; static evidence only, because the plugin is not installed on the
-machine the pass ran on — see §16.
+Current: **verified on 2026-10-29 against Paseo `0.14.0`** with
+`@getpaseo/plugin@0.14.0` (installed with `--no-save`, so the manifest pin
+stays `0.12.0`) — no code change needed and no deprecated API in the plugin;
+static evidence only, because the plugin is not installed on the machine the
+pass ran on (it is present but `disabled`) — see §17. Shipped as `0.2.2` for
+the strengthened agent skill (§17.4), not for a 0.14.0 finding.
 
-Earlier, on 2026-10-21 against Paseo `0.12.0` with
+Earlier, on 2026-10-24 against Paseo `0.13.0` with
 `@getpaseo/plugin@0.12.0`, manifest requirement raised to `>=0.11.0`, client
 registrations migrated to the screen/sidebar API and the `client/web.ts`
 DOM-global audit fixed — see §15.
@@ -406,3 +409,88 @@ oracle the other four also passed.
 | 0.13.0 manifest schema | `readPluginManifest` accepts the manifest (`{ id, requirements }`). |
 | Live on a 0.13.0 daemon | **Not available** — the plugin is not installed on this machine (the daemon there runs session-manager, command-center, memory-flash, bunny-search and luck-planner). The §15.4 0.12.0 live evidence stands; a 0.13.0 live check happens the first time the plugin is installed or updated on a 0.13.0 host. |
 | Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |
+
+## 17. Paseo 0.14.0 — compatibility pass (2026-10-29)
+
+Audited against the stable `0.14.0` release (2026-10-29).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.14.0>.
+The repository-wide inventory of what 0.14.0 adds and deprecates is in the
+root [README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29);
+this section records what is specific to memory-flash-client.
+
+**Result: compatible, no code change was required for 0.14.0 and no
+deprecated API exists in the plugin.** The version still moved — `0.2.1 →
+0.2.2` — because this same commit strengthens the agent skill (§17.4).
+
+**Evidence caveat, stated plainly:** the plugin is **not installed on the
+machine the pass ran on** (it is present but `disabled`), so there is no live
+0.14.0 daemon evidence. The result rests on the SDK diff, typecheck, the full
+test suite, the real 0.14.0 host compiler and the real 0.14.0 manifest parser.
+
+### 17.1 What 0.14.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` — none deprecated; the entire `dist/client/` tree of `@getpaseo/plugin` is **byte-identical** `0.13.0 → 0.14.0`, so none of them can have moved. |
+| `@deprecated` list | **Byte-identical to 0.13.0**; 0.14.0 adds no new deprecation, and the plugin avoids every existing one (it never used `client/react-native`). |
+| Hooks used | `server.before("agent.create")` (MCP injection) and `registerSettings` — unchanged and not deprecated. |
+| New hook `agent.session_open` | **Additive**, with editable `tools` and `mcpServers` maps per plugin per open (`create`/`resume`/`refresh`/`import`). The plugin does not use it yet — see §17.2. |
+| `server.addHook("agent.open.before")` | **Documented but absent in 0.14.0** — neither the published SDK nor the installed host contains `addHook`; the working surface today is `before("agent.session_open")`. Details: [memory-flash/__doc.md §18.1](../memory-flash/__doc.md). |
+| `agent.turn_ended` `timeline`, `SettingsGroup`, panel `context`/`agentId`, `CreateAgentRequestOptions.git`/`worktreeName` | None used. |
+| Client audit (DOM globals outside `client/web.ts`) | Still clean. |
+| Manifest | Passes the real 0.14.0 `readPluginManifest`; `requirements.paseo` stays `>=0.11.0`. |
+| Install-time build | Still **none** — every import is on the host-supplied list, so the plugin installs with no npm-registry access. |
+| Remote-host side | The plugin's HTTP probe talks to a **memory-flash** host, not to Paseo's SDK; 0.14.0's speech models, chat-display settings and idle-runtime release do not overlap with the connections registry (§3). The idle release *does* matter indirectly: a resumed session is a `session_open`, the position recommendation 1 targets. |
+
+### 17.2 New 0.14.0 surface — recommendations (not implemented)
+
+1. **Inject the remote HTTP servers in `before("agent.session_open")` instead
+   of (not in addition to) `before("agent.create")`.** The hook re-runs on
+   create *and* resume/refresh/import and re-derives its `mcpServers` map on
+   every open, so a remote server that left the agent's saved config (OpenCode's
+   per-directory eviction) is restored on the next prompt, and **already
+   created** agents get it without being recreated. Trap: a name colliding
+   with a saved server **fails the session open**, so this must be a migration
+   of the existing write, and `purpose: "history"` opens ignore these servers.
+   This is the same recommendation as memory-flash §18.2.1 — implement once,
+   in both plugins, as `0.3.0` here and `0.9.0` there.
+2. **A "repair memory tools" action** built on the new
+   `agents.ref(id).reload()`, which reopens the session with current config and
+   reruns the session-open hooks. It answers the most common support case
+   (tools missing after an idle restart) with one button instead of
+   "recreate the agent".
+3. **Not recommended here: `defineAgentTool`.** The tools belong to the remote
+   host; attaching local ones would create a second, differently capable memory
+   surface on the client machine and confuse which base an agent is writing to.
+
+### 17.3 Verification (2026-10-29, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.14.0 @getpaseo/client@0.14.0 @getpaseo/protocol@0.14.0` — **`package.json`/`package-lock.json` untouched**; the pin stays `0.12.0` on purpose. |
+| `npm run typecheck` against 0.14.0 | **exit 0** (before and after the §17.4 skill change). |
+| `npm test` | **6 suites / 53 tests pass** — the HTTP probe against a stub memory-flash server, MCP-injection, settings-schema round-trip and the agent-skill suite. |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | **Manifest accepted; both entries compile, no boundary errors**; **zero** deprecated calls in the bundles. Re-run after the §17.4 edits: same result. |
+| Live on a 0.14.0 daemon | **Not available** — the plugin is not installed (status `disabled`) on this 0.14.0 machine. The §15/§16 evidence stands; a live check happens the first time it is installed or updated on a 0.14.0 host. |
+| Post-check cleanup | SDKs restored to `0.12.0`, `git status` shows only this pass's intended files. |
+
+### 17.4 `0.2.2` — the agent recommendation strengthened
+
+Availability is not usage (§5), so the wording is the plugin's main lever.
+Two surfaces an agent reads were strengthened:
+
+1. **Skill frontmatter `description`** — now opens with "treat it as
+   **mandatory, not optional**: a non-trivial task starts with a search and
+   ends with a handoff", keeps the 2-4-query requirement, states that a bugfix
+   is written back *the moment it is fixed, never at the end of the session*,
+   and requires the agent to name a skipped step in its final answer instead
+   of staying silent.
+2. **New `## The non-negotiable baseline` section** before §1 — the four steps
+   as a numbered checklist declared part of the definition of a *finished*
+   task, plus anti-shortcut rules (one empty query is not a search; a
+   transport error does not cancel the handoff — retry, then report what was
+   skipped).
+
+The existing skill tests assert frontmatter shape, the presence of every tool
+name and the key phrases (`2-4`, `Every bugfix is recorded`, …); all of them
+stay green, so no test change was needed.

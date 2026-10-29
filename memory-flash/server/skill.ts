@@ -31,19 +31,29 @@ name: memory-flash
 
 description: >
 
-  Shared persistent memory for all coding agents. Use it before starting any
+  Shared persistent memory for all coding agents. Treat it as **mandatory,
 
-  task (search for prior decisions, known bugs, procedures and handoffs from
+  not optional**: a non-trivial task starts with a search and ends with a
 
-  other agents), while working (record decisions, every positive result that
+  handoff. Search it before starting any task — 2-4 differently worded
 
-  worked, and — always — every bugfix), and whenever functionality changes
+  queries for prior decisions, known bugs, procedures and handoffs from other
 
-  (update the existing memories so the base stays current). Search several
+  agents; one query that finds nothing is not a search. Keep it while you
 
-  ways before concluding that nothing is known, and read the full memory, not
+  work: record every positive result that worked, every user correction, every
 
-  the snippet. Write all memory content in English. Tools: ${TOOL_NAMES.join(", ")}.
+  decision — and, always, every bugfix the moment it is fixed, never at the
+
+  end of the session. Whenever functionality changes, update the existing
+
+  memories so the base stays current. Read the full memory with memory_get,
+
+  not the snippet, and if you skipped one of these steps, name it in your
+
+  final answer to the user instead of staying silent. Write all memory content
+
+  in English. Tools: ${TOOL_NAMES.join(", ")}.
 
 ---
 
@@ -59,6 +69,27 @@ creates two conflicting answers. The rules below exist to avoid both.
 **Language rule:** write every memory in **English** — title, content and
 tags. The base is shared by agents and humans working in different languages;
 one language keeps search reliable and the knowledge unified.
+
+---
+
+## The non-negotiable baseline
+
+These four steps are part of the definition of a **finished** task, not an
+optimization to drop when the task gets busy:
+
+1. **Search before your first edit** — at least two differently worded
+   \`memory_search\` calls, before you touch any code.
+2. **Save every bugfix the moment it is fixed** — before moving on to the
+   next piece of work, never at the end of the session.
+3. **Save decisions, user corrections and working solutions when they
+   happen.**
+4. **Leave a handoff before you stop** — on success, on failure, and when the
+   task was short.
+
+No shortcut counts as a step: one empty query is not step 1, and a tool that
+failed once does not cancel step 4 — retry, then tell the user which
+operations were skipped. Skipping a step must be stated in your final answer,
+never left silent. The sections below say how to do each step well.
 
 ---
 

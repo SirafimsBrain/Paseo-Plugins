@@ -205,6 +205,7 @@ The body is written as a **protocol** rather than a description. Memory only pay
 
 | Section | Rule |
 | ------- | ---- |
+| Non-negotiable baseline (0.8.4) | The four checkable steps — search before the first edit, save every bugfix the moment it is fixed, save decisions/corrections when they happen, leave a handoff before stopping — declared part of a *finished* task, with the anti-shortcut rules (one empty query is not a search; a failed tool call does not cancel the handoff; a skipped step must be named in the final answer). Reinforced in 0.8.4 in the frontmatter `description` and in the `memory_save`/`memory_search`/`memory_handoff` tool descriptions (§18.4). |
 | 1. Read before you work | Never start a non-trivial task with a single search — 2–4 queries with deliberately different vocabulary (user's words, symbol names, literal error text, plain concept) and varied filters. Search before a bugfix, before an unfamiliar area, before touching a file not opened this session, before choosing an approach. |
 | 1. Do not trust a snippet | A hit that looks relevant must be opened with `memory_get` first; the caveat is usually in the truncated part. |
 | 1. Widen before concluding | An empty result is a statement about the query, not the base: re-search with synonyms, drop the `kind`/`tag` filters (they hide rows silently), `memory_list_by_tag` by project, then `memory_stats` to learn the base's real project names, kinds and top tags. If the area really is undocumented, say so in the handoff. |
@@ -906,3 +907,115 @@ stays `0.8.3` — no bump and no tag, because this pass changed no code.
 | 0.13.0 manifest schema | `readPluginManifest` accepts `{ id, build, mcp, requirements }` (`mcp` stripped, §17.1). |
 | Live on a 0.13.0 daemon | **PASS** — installed from the git checkout at `373fa7b1` on this machine's `daemonVersion "0.13.0"` daemon: status `running`, `[memory-flash] MCP entry: … (exists)` + `[paseo] Plugin ready` in the log, no plugin or contribution errors in `~/.paseo/daemon.log` or the app's `main.log`. The MCP server processes for it are running from `~/.paseo/plugins/memory-flash/mcp-server.js`. |
 | Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |
+
+## 18. Paseo 0.14.0 — compatibility pass (2026-10-29)
+
+Audited against the stable `0.14.0` release (2026-10-29).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.14.0>.
+The repository-wide inventory of what 0.14.0 adds and deprecates is in the
+root [README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29);
+this section records what is specific to memory-flash.
+
+**Result: compatible, no code change was required for 0.14.0 and no
+deprecated API exists in the plugin.** The version still moved — `0.8.3 →
+0.8.4` — because this same commit strengthens the agent skill (§18.4), which
+is a change to shipped plugin behaviour and therefore a `PATCH` bump under the
+versioning rule, not a 0.14.0 finding.
+
+### 18.1 What 0.14.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| Client SDK surface | `@getpaseo/plugin`'s **entire `dist/client/` tree is byte-identical** `0.13.0 → 0.14.0` (`diff -rq` reports changes only under `dist/server/` plus `package.json`). Every registration this plugin makes (`addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` ×2) is therefore unchanged. |
+| `@deprecated` list | **Byte-identical to 0.13.0** — 0.14.0 adds no new deprecation. The plugin already avoids every one of them (it never used `client/react-native`, `addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, panel `context`/`agentId`). |
+| Hooks used | `server.before("agent.create")` only. `PluginLifecycleRegistration.on`/`before` — the API this plugin uses — is unchanged and not deprecated in 0.14.0. |
+| New hook `agent.session_open` | **Additive.** `PluginBeforeRequests["agent.session_open"]` now carries `title`/`labels` (read-only), plus **editable** `tools: AgentToolDefinition[]` and `mcpServers` maps, per plugin and per open (`create`/`resume`/`refresh`/`import`, `purpose` `interactive`/`history`). The installed 0.14.0 daemon dispatches it from `runtime.js` exactly this way. This plugin does not use it yet — see §18.2.1. |
+| `server.addHook("agent.open.before")` | **Documented but absent in 0.14.0.** The deployed hooks page says `addHook` "is available from Paseo 0.14", yet neither `@getpaseo/plugin@0.14.0` nor the extracted 0.14.0 host (`grep -r addHook` over the installed `app.asar`'s `@getpaseo/**`) contains it; the host keys hooks through `loaded.hooks.before` with the name `agent.session_open`. Use `before("agent.session_open")` today, `addHook` only once the SDK actually ships it. |
+| `agent.turn_ended` `timeline` (always empty) | Not applicable — the plugin registers no turn hooks. |
+| `SettingsGroup`, panel `context`/`agentId`, `CreateAgentRequestOptions.git`/`worktreeName` | None used; the plugin creates no agent and contributes no panel. |
+| Client audit (DOM globals outside `client/web.ts`) | Still clean — §16.3's fix holds. |
+| Manifest | Passes the real 0.14.0 `readPluginManifest` (`mcp` stripped, as in §17.1). |
+| `requirements.paseo` | Stays `>=0.11.0`: 0.14.0 adds no API this plugin uses, and the floor is the API promise, not the newest host tested (§16). |
+| Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]`. |
+| Host behaviour worth knowing | 0.14.0 **releases an idle agent runtime after one hour and resumes the saved session on the next prompt** — a *session reopen*, i.e. exactly the position where §18.2.1's hook would re-inject the MCP server. It is also the same class of reopen behind the documented tool-loss symptom in §13. |
+
+### 18.2 Recommendations (new 0.14.0 surface, not implemented)
+
+1. **Move MCP injection to `before("agent.session_open")` — the fix for §13.**
+   Today the plugin injects `config.mcpServers["memory-flash"]` only in
+   `before("agent.create")`, i.e. into the agent's **saved** config. A server
+   that leaves that saved config (OpenCode's per-directory eviction, §6/§13)
+   never comes back while the agent lives, which is the documented failure
+   `No tool named "memory-flash_memory_save" is currently available`.
+   `agent.session_open` re-runs on `create` **and** `resume`/`refresh`/
+   `import`, and its `mcpServers` map is re-derived on every open — so an
+   injection there survives eviction and reaches **already created** agents
+   (0.14.0 marks open sessions stale when a plugin starts declaring the hook,
+   and reopens them before the next prompt).
+   **The one trap:** that map must not contain a name that collides with a
+   *saved* server — a collision **fails the session open**. So this is a
+   migration (drop the saved-config write, keep the same server name), not an
+   addition alongside §4's hook, and `purpose: "history"` opens ignore these
+   servers. Recommended as `0.9.0`. Applies to memory-flash-client identically.
+2. **A one-click "repair memory tools" action via `agents.ref(id).reload()`.**
+   The new SDK method reopens the provider session with current configuration,
+   rerunning session-open hooks, and returns the refreshed snapshot. It turns
+   §13's "restart/recreate the agent" advice into a button on the Memory
+   Screen next to the existing diagnostics — the cheapest possible answer to
+   the most common support case in this plugin's docs.
+3. **`defineAgentTool` for targeted, MCP-free memory tools.**
+   `defineAgentTool({ name, description, input: zodSchema, execute })` from
+   `@getpaseo/plugin/server`, attached in `agent.session_open` via
+   `request.tools`, delivers a tool to one selected agent (by `agentId`,
+   `provider`, `workspaceId` or `labels`) through Paseo's own tool transport.
+   Two concrete uses: a **read-only `memory_recall`** (search + get) for
+   harnesses where stdio MCP is unreliable — Cline still never spawns the
+   session server (§6) — and a tool backing the existing *delegate memory
+   maintenance* action. New functionality ⇒ `0.9.0`.
+4. **Optional: MCP `instructions` in `initialize`.** Both transports answer
+   `initialize` with `protocolVersion`/`capabilities`/`serverInfo` and no
+   `instructions`. Two sentences ("search before you start, write while you
+   work, always hand off") would reach the clients that surface server
+   instructions. Low priority — harness support varies — and deliberately not
+   added in this pass.
+
+### 18.3 Verification (2026-10-29, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.14.0 @getpaseo/client@0.14.0 @getpaseo/protocol@0.14.0` — **`package.json`/`package-lock.json` untouched**; the pin stays `0.12.0` on purpose (the host supplies the runtime SDK, no code needed a 0.14.0 API, and a pin bump would be a code change with its own version bump). |
+| `npm run typecheck` (`tsc --noEmit`) against 0.14.0 | **exit 0** (before and after the §18.4 skill change). |
+| `npm test` (with `pretest` rebuilding `dist/mcp-server.js`) | **15 suites / 166 tests pass** against 0.14.0, including the real-process stdio MCP e2e, the handshake-survives-an-update suite and the live HTTP endpoint suite. |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` taken from the installed `/opt/Paseo/resources/app.asar`) | **Manifest accepted; both entries compile, no boundary errors**; string scan of both bundles finds **zero** deprecated calls. Re-run after the §18.4 edits: same result. |
+| Live on a 0.14.0 daemon | **PASS** — this machine's daemon reports `daemonVersion "0.14.0"` and the plugin is `running` from its git source with `[memory-flash] MCP entry: … (exists)` and `[paseo] Plugin ready` in `~/.paseo/daemon.log`, no plugin or contribution errors. |
+| Post-check cleanup | SDKs restored to `0.12.0`; `git status` shows only this pass's intended files. |
+
+### 18.4 `0.8.4` — the agent recommendation strengthened
+
+The compatibility finding required no code, but this release ships one
+deliberate change: the plugin tells agents **more forcefully** to use it.
+Three surfaces were strengthened, all of them text an agent reads:
+
+1. **Skill frontmatter `description`** (the line an agent sees when it decides
+   whether the skill applies): now opens with "treat it as **mandatory, not
+   optional**: a non-trivial task starts with a search and ends with a
+   handoff", keeps the 2-4-query requirement, states that a bugfix is saved
+   *the moment it is fixed, never at the end of the session*, and adds
+   "if you skipped one of these steps, name it in your final answer to the
+   user instead of staying silent".
+2. **New `## The non-negotiable baseline` section**, placed before §1: the four
+   steps (search before first edit / save the bugfix immediately / save
+   decisions and corrections when they happen / leave a handoff before
+   stopping) as a numbered checklist declared part of the definition of a
+   *finished* task, plus explicit anti-shortcut rules — one empty query is not
+   a search, a failed tool call does not cancel the handoff, a skipped step
+   must be named in the final answer.
+3. **MCP tool descriptions** (`memory_save`, `memory_search`, `memory_handoff`)
+   — the text an agent reads in its tool list on every turn — now say
+   *mandatory first step*, *call it the moment the fix exists*, and *required
+   before you stop, on success as well as on failure*.
+
+The body stays a protocol, as §5 requires: nothing was softened, the additions
+only make the previously implicit bar explicit and checkable. Tests assert
+presence of tool names and key phrases, not exact wording, so the rewrite was
+covered by the existing 166 tests rather than needing new ones.

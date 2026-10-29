@@ -86,6 +86,49 @@ $PASEO_HOME/plugins/memory-flash-client/
 
 Requires Paseo ≥ 0.11.0 (uses the plugin SDK screen/sidebar API, settings, lifecycle hooks and `McpHttpServerConfig`).
 
+## Paseo 0.14.0 compatibility
+
+Verified against the **stable Paseo 0.14.0** release (2026-10-29).
+Full evidence: [__doc.md](./__doc.md) §17. **No code change was needed for
+0.14.0 and no deprecated API exists in this plugin**; the release ships as
+`0.2.2` because the same commit strengthens the agent skill (§17.4).
+`requirements.paseo` stays `>=0.11.0`, and the plugin still installs with
+**no build step**.
+
+**Nothing deprecated reaches it.** The `@deprecated` list in
+`@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0, and the whole
+`dist/client/` tree of the SDK did not change between 0.13.0 and 0.14.0, so
+`addScreen`, `addSidebarHeaderItem`, `addSettingsScreen` and
+`addCommandCenterItem` are exactly what they were. The plugin's hook,
+`before("agent.create")`, is unchanged and not deprecated.
+
+**New in 0.14.0 — recommendations, deliberately not implemented here**
+(details in [__doc.md](./__doc.md) §17.2):
+
+1. **Inject the remote HTTP servers in `before("agent.session_open")`** instead
+   of (not beside) `before("agent.create")` — it re-runs on create *and*
+   resume/refresh/import, re-derives `mcpServers` on every open, survives
+   OpenCode's directory eviction and reaches already created agents. A name
+   colliding with a saved server fails the session open, so it must replace
+   the existing write rather than sit next to it.
+2. **A "repair memory tools" action** on the new `agents.ref(id).reload()`.
+3. **`defineAgentTool` is deliberately *not* recommended here** — the tools
+   belong to the remote host, and local ones would blur which base an agent is
+   writing to.
+
+**Verification:** typecheck clean against SDK 0.14.0, vitest **6 suites / 53
+tests** pass, both entries build with the **real 0.14.0 host compiler** with no
+boundary errors and zero deprecated calls, and the manifest passes the real
+0.14.0 parser. No live 0.14.0 daemon evidence: the plugin is not installed on
+this machine (it is present but `disabled`). The SDK was installed with
+`--no-save`, so `package.json` still pins `@getpaseo/plugin@0.12.0`.
+
+**The agent recommendation was strengthened in 0.2.2** on two surfaces an
+agent reads: the skill frontmatter `description` ("mandatory, not optional";
+a non-trivial task starts with a search and ends with a handoff; a skipped
+step must be named in the final answer) and a new `## The non-negotiable
+baseline` checklist section. Details: [__doc.md](./__doc.md) §17.4.
+
 ## Paseo 0.13.0 compatibility
 
 Verified against the **stable Paseo 0.13.0** release (2026-10-24).

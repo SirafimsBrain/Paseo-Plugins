@@ -101,6 +101,56 @@ $PASEO_HOME/plugins/memory-flash/
 
 Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
 
+## Paseo 0.14.0 compatibility
+
+Verified against the **stable Paseo 0.14.0** release (2026-10-29).
+Full evidence: [__doc.md](./__doc.md) §18. **No code change was needed for
+0.14.0 and no deprecated API exists in this plugin**; the release ships as
+`0.8.4` because the same commit strengthens the agent skill (§18.4).
+`requirements.paseo` stays `>=0.11.0`.
+
+**Nothing deprecated reaches it.** The `@deprecated` list in
+`@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0, and the plugin's whole
+client surface — `dist/client/` — did not change at all between 0.13.0 and
+0.14.0, so `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen` and
+`addCommandCenterItem` are exactly what they were. The plugin's one hook,
+`before("agent.create")`, is unchanged and not deprecated.
+
+**New in 0.14.0 — recommendations, deliberately not implemented here**
+(details and traps in [__doc.md](./__doc.md) §18.2):
+
+1. **Move MCP injection to `before("agent.session_open")`** — the hook re-runs
+   on create *and* resume/refresh/import, re-derives its `mcpServers` map on
+   every open, survives OpenCode's per-directory eviction and reaches already
+   created agents; it is the direct fix for the documented
+   `No tool named "memory-flash_memory_save"` case (§13). It must **replace**
+   the saved-config write, not sit beside it — a name colliding with a saved
+   server fails the session open.
+2. **A "repair memory tools" button** built on the new
+   `agents.ref(id).reload()`, which reopens the session and reruns those hooks.
+3. **`defineAgentTool`** for targeted, MCP-free tools (read-only
+   `memory_recall` for harnesses that never spawn the stdio server).
+4. **MCP `instructions` in `initialize`** — optional, low priority.
+
+Worth knowing from the 0.14.0 notes: idle agent runtimes are released after
+an hour and resumed on the next prompt — a session reopen, i.e. exactly the
+position where recommendation 1 would re-inject the server.
+
+**Verification:** typecheck clean against SDK 0.14.0, vitest **15 suites /
+166 tests** pass, both entries build with the **real 0.14.0 host compiler**
+(`compileDirectoryPlugin` from the installed `app.asar`) with no boundary
+errors and zero deprecated calls, the manifest passes the real 0.14.0 parser,
+and the plugin is `running` on this machine's 0.14.0 daemon with
+`[paseo] Plugin ready`. The SDK was installed with `--no-save`, so
+`package.json` still pins `@getpaseo/plugin@0.12.0`.
+
+**The agent recommendation was strengthened in 0.8.4** on three surfaces an
+agent reads: the skill frontmatter `description` ("mandatory, not optional";
+a non-trivial task starts with a search and ends with a handoff; a skipped
+step must be named in the final answer), a new `## The non-negotiable
+baseline` checklist section, and the `memory_save`/`memory_search`/
+`memory_handoff` tool descriptions. Details: [__doc.md](./__doc.md) §18.4.
+
 ## Paseo 0.13.0 compatibility
 
 Verified against the **stable Paseo 0.13.0** release (2026-10-24).

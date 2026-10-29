@@ -43,23 +43,33 @@ name: memory-flash-remote
 
 description: >
 
-  Shared team memory served from a remote Memory Flash host over HTTP. This
+  Shared team memory served from a remote Memory Flash host over HTTP. Treat
 
-  machine's agents are part of the same knowledge base as the agents on the
+  it as **mandatory, not optional**: a non-trivial task starts with a search
 
-  memory host and on every other client. Search it before starting any
+  and ends with a handoff. This machine's agents are part of the same
 
-  non-trivial task (2-4 differently worded searches, not one), read the full
+  knowledge base as the agents on the memory host and on every other client.
 
-  memory with memory_get instead of trusting a snippet, and write back while
+  Search it before starting any task — 2-4 differently worded searches, not
 
-  you work: every bugfix, every positive result, every user correction and
+  one, since an empty result says something about your query rather than
 
-  every decision with its alternatives. Update an existing memory instead of
+  about the base. Read the full memory with memory_get instead of trusting a
 
-  creating a conflicting duplicate, tag everything with the project name, and
+  snippet, and write back while you work: every bugfix the moment it is fixed
 
-  always leave a handoff. Write all memory content in English. Tools: ${REMOTE_TOOL_NAMES.join(", ")}.
+  (never at the end of the session), every positive result, every user
+
+  correction and every decision with its alternatives. Update an existing
+
+  memory instead of creating a conflicting duplicate, tag everything with the
+
+  project name, always leave a handoff — on success as well as on failure —
+
+  and if you skipped one of these steps, name it in your final answer to the
+
+  user instead of staying silent. Write all memory content in English. Tools: ${REMOTE_TOOL_NAMES.join(", ")}.
 
 ---
 
@@ -79,6 +89,27 @@ of the task, not as an optional extra.
 **Language rule:** write every memory in **English** — title, content and
 tags. The base is shared across machines and languages; one language keeps
 search reliable and the knowledge unified.
+
+---
+
+## The non-negotiable baseline
+
+These four steps are part of the definition of a **finished** task, not an
+optimization to drop when the task gets busy:
+
+1. **Search before your first edit** — at least two differently worded
+   \`memory_search\` calls, before you touch any code.
+2. **Save every bugfix the moment it is fixed** — before moving on to the
+   next piece of work, never at the end of the session.
+3. **Save decisions, user corrections and working solutions when they
+   happen.**
+4. **Leave a handoff before you stop** — on success, on failure, and when the
+   task was short.
+
+No shortcut counts as a step: one empty query is not step 1, and a transport
+error does not cancel step 4 — retry, then tell the user which operations
+were skipped. Skipping a step must be stated in your final answer, never left
+silent. The sections below say how to do each step well.
 
 ---
 

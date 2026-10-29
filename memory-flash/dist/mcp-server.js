@@ -21316,7 +21316,7 @@ var MCP_TOOLS = [
   {
     name: "memory_save",
     title: "Save a memory",
-    description: "Save a durable note into the shared team memory: a decision, procedure, handoff note for the next agent, bugfix explanation, a pattern that worked, a pitfall that did not, or a reference to a file/URL. Tags make the memory findable by other agents \u2014 always tag with the project name and at least one topic.",
+    description: "Save a durable note into the shared team memory: a decision, procedure, handoff note for the next agent, bugfix explanation, a pattern that worked, a pitfall that did not, or a reference to a file/URL. Mandatory step: call it the moment a bugfix, a decision or a working solution exists \u2014 not at the end of the session, where it is written from memory and loses the detail. Tags make the memory findable by other agents \u2014 always tag with the project name and at least one topic.",
     inputSchema: {
       type: "object",
       properties: {
@@ -21333,7 +21333,7 @@ var MCP_TOOLS = [
   {
     name: "memory_search",
     title: "Search shared memory",
-    description: "Full-text search over the shared memory of ALL agents. Use before starting work to recall prior decisions, known bugs and procedures. Natural-language queries are fine (terms are ranked by relevance); key=value pairs in the query (project=, kind=, tag=, agent=) act as filters. Filters compose: query AND tags AND kind AND project.",
+    description: "Full-text search over the shared memory of ALL agents. Mandatory first step of every non-trivial task: run it 2-4 times with different wording to recall prior decisions, known bugs, procedures and handoffs \u2014 one query that finds nothing is not a search. Natural-language queries are fine (terms are ranked by relevance); key=value pairs in the query (project=, kind=, tag=, agent=) act as filters. Filters compose: query AND tags AND kind AND project.",
     inputSchema: {
       type: "object",
       properties: {
@@ -21416,7 +21416,7 @@ var MCP_TOOLS = [
   {
     name: "memory_handoff",
     title: "Write a handoff note",
-    description: "Write a handoff for the next agent working on this project: what was done, what was tried and failed, current state, and the next steps. Equivalent to memory_save with kind='handoff' plus a 'handoff' tag.",
+    description: "Write a handoff for the next agent working on this project: what was done, what was tried and failed, current state, and the next steps. Required before you stop \u2014 on success as well as on failure, and even when the task was short. Equivalent to memory_save with kind='handoff' plus a 'handoff' tag.",
     inputSchema: {
       type: "object",
       properties: {
