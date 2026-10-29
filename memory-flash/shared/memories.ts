@@ -634,3 +634,24 @@ export const httpStatus = defineRpc({
   input: z.object({}),
   output: httpStatusSchema,
 });
+
+/**
+ * "Repair memory tools" (0.9.4): reopen the agent's provider session with its
+ * current configuration, which reruns `before("agent.session_open")` and
+ * re-registers the MCP server with Paseo.
+ *
+ * This is the supported answer to the transient tool loss of §13 in `__doc.md`:
+ * OpenCode evicts an idle location and drops the runtime-registered server, and
+ * Paseo only re-registers servers while a session is being opened. Reloading the
+ * agent forces that re-registration instead of asking the user to recreate the
+ * agent.
+ */
+export const agentReload = defineRpc({
+  name: "memory-flash.agent-reload",
+  input: z.object({ agentId: z.string().trim().min(1) }),
+  output: z.object({
+    ok: z.boolean(),
+    /** Set when the reload was refused (unknown agent, busy session, …). */
+    error: z.string().nullable(),
+  }),
+});

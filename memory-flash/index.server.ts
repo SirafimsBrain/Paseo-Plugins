@@ -22,6 +22,7 @@ import {
   saveRemoteHost,
   searchMemories,
   searchDiagnoseSchema,
+  agentReload,
   skillStatus,
   skillPreview,
   uninstallSkill,
@@ -74,6 +75,9 @@ import {
   agentConfigCoversProvider,
 } from "./server/opencode-mcp";
 import { withLiveSpawn } from "./server/mcp-probe";
+import { readSavedMcpServers } from "./server/agent-record";
+import { decideSessionOpen } from "./server/session-open";
+import { createMemoryRecallTool } from "./server/agent-tools";
 import { skillStatuses, skillMarkdown, installSkill as installSkillOnDisk, uninstallSkill as uninstallSkillOnDisk } from "./server/skill";
 import {
   listRemoteHosts as loadHosts,
@@ -203,6 +207,101 @@ export default function contribute(server: PluginServerContext) {
     );
     return request;
   });
+
+  // -------------------------------------------------------------------------
+  // Session-open contribution (Paseo 0.14, 0.9.4)
+  //
+  // `agent.create` writes the agent's *saved* configuration once, at creation.
+  // This hook runs on every open — create, resume after the daemon restart or
+  // the 0.14.0 idle-hour release, refresh, import — and is the only place that
+  // can reach an agent created before memory-flash was installed, or one whose
+  // saved entry is gone (the documented "No tool named memory-flash_memory_save"
+  // case, §13 of __doc.md).
+  //
+  // Two host rules make the decision matrix in server/session-open.ts necessary:
+  // * a launch-only name that already exists in the agent's *saved*
+  //   configuration aborts the open (`MCP server '…' collides with agent saved
+  //   configuration`, host agent-manager.js), and neither the hook nor the SDK
+  //   can see the saved set — so it is read from the daemon's agent record
+  //   (server/agent-record.ts) and the contribution is skipped whenever it is
+  //   present, unreadable or unknown;
+  // * a provider without MCP support aborts the open as well, hence the
+  //   `supportsMcpServers` capability check before contributing anything.
+  //
+  // What survives every failure mode is the attached read-only tool: it is
+  // re-derived on each open, never persisted, and cannot collide with an MCP
+  // server, so an agent that gets no server still gets memory.
+  // -------------------------------------------------------------------------
+
+  const memoryRecallTool = createMemoryRecallTool(store);
+
+  const removeSessionOpenHook = server.before(
+    "agent.session_open",
+    async ({ request }, { paseo }) => {
+      const state = await settings.read().catch(() => null);
+      const values = state?.status === "ready" ? state.values : null;
+      const injectIntoAgents = values?.injectIntoAgents ?? false;
+      const serverName = (values?.mcpServerName ?? "").trim() || "memory-flash";
+
+      const cover =
+        injectIntoAgents && request.purpose !== "history"
+          ? agentConfigCoversProvider(request.provider)
+          : { covered: false, path: null };
+      const lookup = readSavedMcpServers(request.agentId);
+
+      // Capability is only needed when an MCP contribution is still possible;
+      // every other branch is decided without touching the daemon.
+      let supportsMcpServers: boolean | null = null;
+      const needsCapability =
+        injectIntoAgents &&
+        request.purpose !== "history" &&
+        request.reason !== "create" &&
+        !cover.covered;
+      if (needsCapability) {
+        const snapshot = await paseo.agents
+          .ref(request.agentId)
+          .refresh()
+          .catch(() => null);
+        supportsMcpServers = snapshot?.agent.capabilities.supportsMcpServers ?? null;
+      }
+
+      const decision = decideSessionOpen({
+        reason: request.reason,
+        purpose: request.purpose,
+        provider: request.provider,
+        injectIntoAgents,
+        serverName,
+        configCovered: cover.covered,
+        lookup,
+        supportsMcpServers,
+      });
+      console.log(
+        `[memory-flash] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
+      );
+
+      if (!decision.injectMcp && !decision.attachTool) return request;
+
+      const tools = decision.attachTool ? [...request.tools, memoryRecallTool] : request.tools;
+      let mcpServers = request.mcpServers;
+      if (decision.injectMcp) {
+        const { command, args } = mcpServerCommand();
+        const config = {
+          type: "stdio",
+          command,
+          args,
+          alwaysLoad: true,
+        } as const;
+        mcpServers = { ...request.mcpServers, [serverName]: config };
+        const entry = args[0] ?? "";
+        console.log(
+          `[memory-flash] session_open MCP injected: ${command} ${args.join(" ")} ` +
+            `(${isExecutableFile(entry) ? "entry exists" : "entry MISSING"})`,
+        );
+      }
+
+      return { ...request, tools, mcpServers };
+    },
+  );
 
   // -------------------------------------------------------------------------
   // RPC surface
@@ -452,11 +551,31 @@ export default function contribute(server: PluginServerContext) {
     keyCount: store.activeKeyCount(),
   }));
 
+  // --- Repair: reopen the agent's session so the hooks above run again ------
+  // The supported answer to §13 (tools gone after an idle location eviction):
+  // `reload()` reopens the provider session with its current configuration and
+  // reruns `agent.session_open`, which re-registers the MCP server with Paseo.
+  server.handle(agentReload, async (input, { paseo }) => {
+    try {
+      const result = await paseo.agents.ref(input.agentId).reload();
+      if (result === null) {
+        return { ok: false, error: `Agent ${input.agentId} not found or not reloadable.` };
+      }
+      console.log(`[memory-flash] reloaded agent ${input.agentId} (memory tools re-registered)`);
+      return { ok: true, error: null };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[memory-flash] agent reload failed: ${message}`);
+      return { ok: false, error: message };
+    }
+  });
+
   // ---------------------------------------------------------------------------
 
   return () => {
     disposed = true;
     removeCreateHook();
+    removeSessionOpenHook();
     unsubscribeSettings();
     void httpEndpoint.dispose();
     store.close();

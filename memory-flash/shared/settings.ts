@@ -11,9 +11,12 @@ export const memoryFlashSettings = defineSettings({
   version: 1,
   schema: z.object({
     /**
-     * Inject the memory-flash MCP server into every agent created through
-     * Paseo (via the `agent.create` before-hook). Agents created outside
-     * Paseo use the MCP config in their own tool.
+     * Inject the memory-flash MCP server into every agent Paseo opens.
+     * `agent.create` writes it into the agent's saved configuration once;
+     * `agent.session_open` (0.9.4) re-contributes it on every open — create,
+     * resume, refresh, import — whenever the saved configuration does not
+     * already carry the name. Agents created outside Paseo use the MCP config
+     * in their own tool.
      */
     injectIntoAgents: z.boolean().default(true),
     /** Server name reported in the MCP `initialize` result. */

@@ -19714,6 +19714,9 @@ var PluginAttachmentSearchPayloadSchema = external_exports.object({
   items: external_exports.array(PluginAttachmentItemSchema)
 });
 
+// node_modules/@getpaseo/plugin/dist/icons.js
+var PLUGIN_SVG_ICON_MAX_BYTES = 64 * 1024;
+
 // shared/memories.ts
 var memoryKindSchema = external_exports.enum([
   "decision",
@@ -20170,6 +20173,15 @@ var httpStatus = defineRpc({
   name: "memory-flash.http-status",
   input: external_exports.object({}),
   output: httpStatusSchema
+});
+var agentReload = defineRpc({
+  name: "memory-flash.agent-reload",
+  input: external_exports.object({ agentId: external_exports.string().trim().min(1) }),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    /** Set when the reload was refused (unknown agent, busy session, …). */
+    error: external_exports.string().nullable()
+  })
 });
 
 // server/rrf.ts
@@ -21611,6 +21623,7 @@ function dispatchMcpTool(name, args, context) {
 // server/mcp-jsonrpc.ts
 var PROTOCOL_VERSION = "2024-11-05";
 var SERVER_VERSION = "0.1.1";
+var MCP_INSTRUCTIONS = "Shared team memory for all coding agents: treat it as mandatory, not optional. Start a non-trivial task with 2-4 differently worded memory_search calls \u2014 one empty query is not a search \u2014 save every bugfix, decision and working solution with memory_save the moment it exists rather than at the end of the session, and always leave a memory_handoff before you stop, on success as well as on failure. Read a hit in full with memory_get instead of trusting the snippet, update an existing memory instead of writing a conflicting duplicate, tag every memory with the project name and a topic, and write titles, content and tags in English.";
 function handleJsonRpcRequest(request, context, serverInfo, log = () => {
 }) {
   const id = request.id ?? null;
@@ -21622,7 +21635,8 @@ function handleJsonRpcRequest(request, context, serverInfo, log = () => {
         result: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo
+          serverInfo,
+          instructions: MCP_INSTRUCTIONS
         }
       };
     }

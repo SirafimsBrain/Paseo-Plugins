@@ -707,7 +707,7 @@ Limitations:
 - **Attribution is cooperative.** `agent_id`/`changed_by` are set from the MCP caller (or the default setting); MCP does not authenticate callers, so attribution is a convention, not an enforcement boundary.
 - **Skill installation is filesystem-level.** It copies `SKILL.md` into well-known directories; agents that keep skills elsewhere need a manual path (visible in the settings screen status list).
 - **An agent created before 0.7.1 keeps its old entry path** until it is recreated (see §12). The host does not re-resolve an existing agent's MCP config, so the plugin cannot repair it from inside.
-- **Session-injected MCP servers in OpenCode are ephemeral.** A server Paseo adds at runtime disappears when OpenCode evicts the idle directory, and the plugin cannot re-add it (it has no handle on Paseo's OpenCode session). Registering in the config file (§6) is the workaround, and it must be done per agent family.
+- **Session-injected MCP servers in OpenCode are ephemeral.** A server Paseo adds at runtime disappears when OpenCode evicts the idle directory; since 0.9.4 the session-open hook re-contributes it at every reopen and the *Repair memory tools* action (§18.5) forces that reopen, so the gap is now one click wide instead of lasting until the agent is recreated. Between an eviction and the next reopen the tools can still be absent (§13); the config-file registration (§6) remains the only path that survives eviction with no reopen at all.
 
 Roadmap:
 
@@ -918,9 +918,16 @@ this section records what is specific to memory-flash.
 
 **Result: compatible, no code change was required for 0.14.0 and no
 deprecated API exists in the plugin.** The version still moved — `0.8.3 →
-0.8.4` — because this same commit strengthens the agent skill (§18.4), which
+0.8.4` — because that same commit strengthened the agent skill (§18.4), which
 is a change to shipped plugin behaviour and therefore a `PATCH` bump under the
 versioning rule, not a 0.14.0 finding.
+
+A second release, **`0.9.4`**, then implemented every recommendation from
+§18.2 on the new 0.14.0 surface: the `agent.session_open` injection, the
+"repair memory tools" action, the attached read-only `memory_flash_recall`
+tool and the MCP `instructions` field. That is new functionality, so the
+minor digit moved (`0.8.4 → 0.9.4`). Design, decision matrix and evidence:
+§18.5.
 
 ### 18.1 What 0.14.0 changed for this plugin
 
@@ -929,7 +936,7 @@ versioning rule, not a 0.14.0 finding.
 | Client SDK surface | `@getpaseo/plugin`'s **entire `dist/client/` tree is byte-identical** `0.13.0 → 0.14.0` (`diff -rq` reports changes only under `dist/server/` plus `package.json`). Every registration this plugin makes (`addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` ×2) is therefore unchanged. |
 | `@deprecated` list | **Byte-identical to 0.13.0** — 0.14.0 adds no new deprecation. The plugin already avoids every one of them (it never used `client/react-native`, `addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, panel `context`/`agentId`). |
 | Hooks used | `server.before("agent.create")` only. `PluginLifecycleRegistration.on`/`before` — the API this plugin uses — is unchanged and not deprecated in 0.14.0. |
-| New hook `agent.session_open` | **Additive.** `PluginBeforeRequests["agent.session_open"]` now carries `title`/`labels` (read-only), plus **editable** `tools: AgentToolDefinition[]` and `mcpServers` maps, per plugin and per open (`create`/`resume`/`refresh`/`import`, `purpose` `interactive`/`history`). The installed 0.14.0 daemon dispatches it from `runtime.js` exactly this way. This plugin does not use it yet — see §18.2.1. |
+| New hook `agent.session_open` | **Additive.** `PluginBeforeRequests["agent.session_open"]` now carries `title`/`labels` (read-only), plus **editable** `tools: AgentToolDefinition[]` and `mcpServers` maps, per plugin and per open (`create`/`resume`/`refresh`/`import`, `purpose` `interactive`/`history`). The installed 0.14.0 daemon dispatches it from `runtime.js` exactly this way. **Used since 0.9.4** — both maps are written by the hook (§18.2, §18.5). |
 | `server.addHook("agent.open.before")` | **Documented but absent in 0.14.0.** The deployed hooks page says `addHook` "is available from Paseo 0.14", yet neither `@getpaseo/plugin@0.14.0` nor the extracted 0.14.0 host (`grep -r addHook` over the installed `app.asar`'s `@getpaseo/**`) contains it; the host keys hooks through `loaded.hooks.before` with the name `agent.session_open`. Use `before("agent.session_open")` today, `addHook` only once the SDK actually ships it. |
 | `agent.turn_ended` `timeline` (always empty) | Not applicable — the plugin registers no turn hooks. |
 | `SettingsGroup`, panel `context`/`agentId`, `CreateAgentRequestOptions.git`/`worktreeName` | None used; the plugin creates no agent and contributes no panel. |
@@ -939,10 +946,13 @@ versioning rule, not a 0.14.0 finding.
 | Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]`. |
 | Host behaviour worth knowing | 0.14.0 **releases an idle agent runtime after one hour and resumes the saved session on the next prompt** — a *session reopen*, i.e. exactly the position where §18.2.1's hook would re-inject the MCP server. It is also the same class of reopen behind the documented tool-loss symptom in §13. |
 
-### 18.2 Recommendations (new 0.14.0 surface, not implemented)
+### 18.2 The 0.14.0 surface — recommendations, all implemented in 0.9.4
+
+What follows is the reasoning recorded during the 0.14.0 compatibility pass,
+kept because it explains the shape of the code that now implements it (§18.5).
 
 1. **Move MCP injection to `before("agent.session_open")` — the fix for §13.**
-   Today the plugin injects `config.mcpServers["memory-flash"]` only in
+   The original plugin injected `config.mcpServers["memory-flash"]` only in
    `before("agent.create")`, i.e. into the agent's **saved** config. A server
    that leaves that saved config (OpenCode's per-directory eviction, §6/§13)
    never comes back while the agent lives, which is the documented failure
@@ -953,16 +963,27 @@ versioning rule, not a 0.14.0 finding.
    (0.14.0 marks open sessions stale when a plugin starts declaring the hook,
    and reopens them before the next prompt).
    **The one trap:** that map must not contain a name that collides with a
-   *saved* server — a collision **fails the session open**. So this is a
-   migration (drop the saved-config write, keep the same server name), not an
-   addition alongside §4's hook, and `purpose: "history"` opens ignore these
-   servers. Recommended as `0.9.0`. Applies to memory-flash-client identically.
+   *saved* server — a collision **fails the session open** — and `purpose:
+   "history"` opens ignore these servers.
+   **As implemented (0.9.4):** not a migration but a two-layer scheme —
+   §4's `agent.create` hook keeps writing the saved config (it is what makes a
+   *fresh* location boot with the server), while the session-open hook
+   contributes the same server **only when the saved configuration does not
+   already carry that name** (`server/session-open.ts`). The saved set is
+   read from the daemon's own agent record (`server/agent-record.ts`),
+   because neither the hook nor the SDK can see it; every unreadable or
+   unknown state resolves to "do not inject", so the hook can never break an
+   open. Applies to memory-flash-client identically (its §17.2).
 2. **A one-click "repair memory tools" action via `agents.ref(id).reload()`.**
    The new SDK method reopens the provider session with current configuration,
    rerunning session-open hooks, and returns the refreshed snapshot. It turns
    §13's "restart/recreate the agent" advice into a button on the Memory
    Screen next to the existing diagnostics — the cheapest possible answer to
    the most common support case in this plugin's docs.
+   **As implemented (0.9.4):** the `memory-flash.agent-reload` RPC plus the
+   Command Center item *"Repair memory tools (reopen this agent's session)"*
+   (`context: "agent"`), which throws the host-visible error when the reload
+   is refused, so a failed repair is never silent.
 3. **`defineAgentTool` for targeted, MCP-free memory tools.**
    `defineAgentTool({ name, description, input: zodSchema, execute })` from
    `@getpaseo/plugin/server`, attached in `agent.session_open` via
@@ -971,13 +992,23 @@ versioning rule, not a 0.14.0 finding.
    Two concrete uses: a **read-only `memory_recall`** (search + get) for
    harnesses where stdio MCP is unreliable — Cline still never spawns the
    session server (§6) — and a tool backing the existing *delegate memory
-   maintenance* action. New functionality ⇒ `0.9.0`.
-4. **Optional: MCP `instructions` in `initialize`.** Both transports answer
+   maintenance* action.
+   **As implemented (0.9.4):** only the first one, as the attached
+   `memory_flash_recall` tool (`server/agent-tools.ts`) — deliberately
+   read-only, so an agent can never write through two transports with two
+   different authorisation models. The maintenance-delegate tool stays a
+   documented idea: it needs a write path with MCP-equivalent attribution,
+   which a read-only attachment cannot give.
+4. **MCP `instructions` in `initialize`.** Both transports answer
    `initialize` with `protocolVersion`/`capabilities`/`serverInfo` and no
    `instructions`. Two sentences ("search before you start, write while you
-   work, always hand off") would reach the clients that surface server
-   instructions. Low priority — harness support varies — and deliberately not
-   added in this pass.
+   work, always hand off") reach the clients that surface server
+   instructions.
+   **As implemented (0.9.4):** the stdio JSON-RPC handler and the HTTP
+   endpoint now return `instructions` (`server/mcp-jsonrpc.ts`) carrying the
+   same mandatory-tone protocol the skill and tool descriptions use. Harness
+   support still varies, which is why it is an addition rather than a
+   replacement for the skill.
 
 ### 18.3 Verification (2026-10-29, this machine)
 
@@ -1019,3 +1050,65 @@ The body stays a protocol, as §5 requires: nothing was softened, the additions
 only make the previously implicit bar explicit and checkable. Tests assert
 presence of tool names and key phrases, not exact wording, so the rewrite was
 covered by the existing 166 tests rather than needing new ones.
+
+### 18.5 `0.9.4` — the 0.14.0 features implemented
+
+New functionality on the surface §18.2 described, so the minor digit moved
+(`0.8.4 → 0.9.4`). Four additions, all of them re-deriving their contribution
+on every session open rather than persisting anything:
+
+**1. `agent.session_open` injection (`index.server.ts`, `server/session-open.ts`,
+`server/agent-record.ts`).** The hook contributes two things per open:
+
+- the **stdio MCP server** (`mcpServers[serverName]`, `alwaysLoad: true`) —
+  only when *all* of the following hold, so that a contribution can never
+  abort the open:
+  - `injectIntoAgents` is on and `purpose !== "history"`;
+  - `reason !== "create"` — creation belongs to the `agent.create` hook,
+    whose write the record has not caught up with yet;
+  - the provider does **not** already get the server from its config file
+    (`agentConfigCoversProvider`, §13.1 — the config entry wins and a
+    session-level one would shadow it);
+  - the agent's saved configuration **does not contain that name** — the
+    collision rule from §18.2.1, checked against the record the daemon
+    persists at `$PASEO_HOME/agents/<workspace>/<agentId>.json`;
+  - the provider reports `capabilities.supportsMcpServers === true`, since a
+    provider without MCP support aborts the open as well.
+  Every failure mode — record missing/unrecorded, snapshot unavailable,
+  capabilities unknown — resolves to *skip*, never to *throw*: the worst case
+  is the plugin doing nothing, exactly its pre-0.9.4 behaviour.
+- the **attached read-only `memory_flash_recall` tool** (`request.tools`) —
+  unconditional whenever `injectIntoAgents` is on and `purpose !== "history"`.
+  It is re-derived each open, never persisted, and cannot collide with an
+  MCP server, so an agent that receives no server still gets memory. That
+  asymmetry is deliberate: it is what makes the hook safe for providers
+  whose saved config is unreadable.
+
+The decision matrix is a pure function (`decideSessionOpen`) so all of the
+above is unit-tested without a daemon; the hook body only gathers facts.
+
+**2. "Repair memory tools" (`memory-flash.agent-reload` + Command Center
+item).** `agents.ref(id).reload()` reopens the provider session with its
+current configuration, which reruns `agent.session_open` and re-registers
+everything above. The Command Center item runs in `context: "agent"`, so the
+selected agent id is the host's, not a guess; a refused reload (`null` from
+`reload()`, or a throw) surfaces as an error toast instead of silence.
+
+**3. MCP `instructions` in `initialize` (`server/mcp-jsonrpc.ts`).** The
+stdio and HTTP transports both answer `initialize` with an `instructions`
+string — the same mandatory-tone protocol as the skill ("search before the
+first edit, save the bugfix the moment it exists, hand off before you
+stop"). Returned to clients that surface it; ignored by the rest.
+
+**4. Not done on purpose:** no write-capable attached tool (two write
+transports with different attribution models would be a footgun), and no
+change to the config-file registration button of §6 — it is still the only
+eviction-proof path.
+
+Verification (2026-10-29, this machine):
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | **exit 0** |
+| `npm test` (pretest rebuilds `dist/mcp-server.js`) | **16 suites / 192 tests pass** — the new `tests/agent-hooks.test.ts` covers the decision matrix, the record reader, the attached tool, the reload RPC and the `initialize` instructions |
+| `@getpaseo/plugin` | `0.14.0` (the pin moved from `0.12.0` in this release: `agent.session_open`, `defineAgentTool` and `reload()` are 0.14.0 API, and `requirements.paseo` now states `>=0.14.0` accordingly) |

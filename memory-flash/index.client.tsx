@@ -5,6 +5,7 @@ import type {
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { MemorySurface } from "./client/memory-surface";
 import { MemoryFlashSettingsScreen } from "./client/settings-screen";
+import { agentReload } from "./shared/memories";
 
 const SCREEN_ID = "memory-flash";
 
@@ -67,6 +68,26 @@ export default function contribute(client: PluginClientContext) {
     title: "Memory Flash",
     icon: "Database",
     Component: MemoryFlashSettingsScreen,
+  });
+
+  // Repair action (0.9.4): reopen the selected agent's provider session, which
+  // reruns `before("agent.session_open")` and re-registers the MCP server. This is
+  // the one-click answer to the documented transient case where an agent lost its
+  // `memory-flash_*` tools after an idle location eviction — instead of the old
+  // advice to recreate the agent. A throw is surfaced by the host as an error
+  // toast, so a refused reload is never silent.
+  client.addCommandCenterItem({
+    id: "repair-memory-tools",
+    title: "Repair memory tools (reopen this agent's session)",
+    icon: "Wrench",
+    keywords: ["memory", "flash", "mcp", "tools", "missing", "repair", "reload", "reopen"],
+    context: "agent",
+    async onSelect({ agent, rpc }) {
+      const result = await rpc(agentReload, { agentId: agent.id });
+      if (!result.ok) {
+        throw new Error(result.error ?? "Could not reopen the agent session.");
+      }
+    },
   });
 
   return () => {};

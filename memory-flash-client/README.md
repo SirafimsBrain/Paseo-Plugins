@@ -84,44 +84,50 @@ $PASEO_HOME/plugins/memory-flash-client/
 └── connections.json   # remote memory hosts and their API keys (mode 0600)
 ```
 
-Requires Paseo ≥ 0.11.0 (uses the plugin SDK screen/sidebar API, settings, lifecycle hooks and `McpHttpServerConfig`).
+Requires Paseo ≥ 0.14.0 (the `agent.session_open` hook and `agents.ref().reload()` used since 0.3.2 are 0.14.0 API; uses the plugin SDK screen/sidebar API, settings, lifecycle hooks and `McpHttpServerConfig`).
 
 ## Paseo 0.14.0 compatibility
 
 Verified against the **stable Paseo 0.14.0** release (2026-10-29).
-Full evidence: [__doc.md](./__doc.md) §17. **No code change was needed for
-0.14.0 and no deprecated API exists in this plugin**; the release ships as
-`0.2.2` because the same commit strengthens the agent skill (§17.4).
-`requirements.paseo` stays `>=0.11.0`, and the plugin still installs with
-**no build step**.
+Full evidence: [__doc.md](./__doc.md) §17. **No deprecated API exists in this
+plugin**, and the release's new surface is used, not just tolerated:
+**`0.3.2` implements the recommendations from §17.2**.
+`requirements.paseo` is therefore `>=0.14.0`, the SDK pin is `^0.14.0`, and
+the plugin still installs with **no build step**.
 
 **Nothing deprecated reaches it.** The `@deprecated` list in
 `@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0, and the whole
 `dist/client/` tree of the SDK did not change between 0.13.0 and 0.14.0, so
 `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen` and
-`addCommandCenterItem` are exactly what they were. The plugin's hook,
-`before("agent.create")`, is unchanged and not deprecated.
+`addCommandCenterItem` are exactly what they were.
 
-**New in 0.14.0 — recommendations, deliberately not implemented here**
-(details in [__doc.md](./__doc.md) §17.2):
+**New in 0.3.2 — the 0.14.0 features, implemented** (details in
+[__doc.md](./__doc.md) §17.2 and §17.5):
 
-1. **Inject the remote HTTP servers in `before("agent.session_open")`** instead
-   of (not beside) `before("agent.create")` — it re-runs on create *and*
-   resume/refresh/import, re-derives `mcpServers` on every open, survives
-   OpenCode's directory eviction and reaches already created agents. A name
-   colliding with a saved server fails the session open, so it must replace
-   the existing write rather than sit next to it.
-2. **A "repair memory tools" action** on the new `agents.ref(id).reload()`.
-3. **`defineAgentTool` is deliberately *not* recommended here** — the tools
-   belong to the remote host, and local ones would blur which base an agent is
-   writing to.
+1. **Remote HTTP servers are also contributed in
+   `before("agent.session_open")`** — re-runs on create *and* resume/
+   refresh/import, re-derives `mcpServers` on every open, survives OpenCode's
+   directory eviction and reaches already created agents. Collision-safe by
+   construction: a name already present in the agent's **saved** config is
+   skipped (a collision fails the session open), the saved set is read from
+   the daemon's agent record, and every unreadable/unknown state resolves to
+   *skip*. The `agent.create` hook still writes the saved config.
+2. **A "repair remote memory tools" Command Center action** on the new
+   `agents.ref(id).reload()`: it reopens the session, reruns the hook above
+   and re-contributes the remote servers; a refused reload is surfaced as an
+   error, never swallowed.
+3. **`defineAgentTool` stays deliberately unused here** — the tools belong to
+   the remote host, and local ones would blur which base an agent is writing
+   to. No attached tool is contributed on session open.
 
-**Verification:** typecheck clean against SDK 0.14.0, vitest **6 suites / 53
-tests** pass, both entries build with the **real 0.14.0 host compiler** with no
-boundary errors and zero deprecated calls, and the manifest passes the real
-0.14.0 parser. No live 0.14.0 daemon evidence: the plugin is not installed on
-this machine (it is present but `disabled`). The SDK was installed with
-`--no-save`, so `package.json` still pins `@getpaseo/plugin@0.12.0`.
+**Verification:** typecheck clean against SDK 0.14.0, vitest **6 suites / 61
+tests** pass (the session-open decision matrix and the reload RPC are new),
+both entries build with the **real 0.14.0 host compiler** with no boundary
+errors and zero deprecated calls, and the manifest passes the real 0.14.0
+parser. Live evidence is limited: the plugin is installed on this machine but
+**disabled** (`paseo plugin ls`), so the §15/§16 and §17 evidence rests on the
+SDK diff, typecheck, tests, the real host compiler and the real manifest
+parser. The SDK is a normal dev dependency pinned `^0.14.0`.
 
 **The agent recommendation was strengthened in 0.2.2** on two surfaces an
 agent reads: the skill frontmatter `description` ("mandatory, not optional";

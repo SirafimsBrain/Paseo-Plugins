@@ -244,3 +244,22 @@ export const skillStatus = defineRpc({
   input: z.object({}),
   output: z.object({ targets: z.array(skillStatusTargetSchema) }),
 });
+
+/**
+ * "Repair memory tools" (0.3.2): reopen the agent's provider session with its
+ * current configuration, which reruns `before("agent.session_open")` and
+ * re-contributes the remote HTTP MCP servers.
+ *
+ * This is the supported answer to a remote server that stopped reaching an
+ * agent (the host only re-registers plugin servers while a session is being
+ * opened): reload instead of recreating the agent.
+ */
+export const agentReload = defineRpc({
+  name: "memory-flash-client.agent-reload",
+  input: z.object({ agentId: z.string().trim().min(1) }),
+  output: z.object({
+    ok: z.boolean(),
+    /** Set when the reload was refused (unknown agent, busy session, …). */
+    error: z.string().nullable(),
+  }),
+});

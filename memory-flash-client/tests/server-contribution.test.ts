@@ -23,23 +23,49 @@ import { saveConnection as persistConnection } from "../server/connections";
 
 interface FakeServer extends PluginServerContext {
   /** Calls an RPC handler registered through `server.handle`. */
-  call<T>(name: string, input: unknown): Promise<T>;
+  call<T>(name: string, input: unknown, context?: unknown): Promise<T>;
   /** Runs the `agent.create` before-hook over a fresh request. */
   runCreateHook(config: { mcpServers?: Record<string, unknown> }): Promise<{
     config: { mcpServers?: Record<string, unknown> };
   }>;
+  /** Runs the `agent.session_open` before-hook over a fresh request. */
+  runSessionOpenHook(
+    request: Record<string, unknown>,
+    context?: unknown,
+  ): Promise<Record<string, unknown>>;
   setSettings(values: Record<string, unknown>): void;
   handlers: Map<string, (input: never, context: never) => unknown>;
 }
 
+/**
+ * `paseo` stub for hook/RPC contexts: the session-open hook asks for the
+ * agent's MCP capability, and the repair RPC calls `reload()`.
+ */
+function fakeContext(supportsMcpServers: boolean | null = true) {
+  return {
+    paseo: {
+      agents: {
+        ref: (agentId: string) => ({
+          refresh: async () =>
+            supportsMcpServers === null
+              ? null
+              : { agent: { id: agentId, capabilities: { supportsMcpServers } } },
+          reload: async () => (supportsMcpServers === null ? null : { agent: { id: agentId } }),
+        }),
+      },
+    },
+    signal: new AbortController().signal,
+  };
+}
+
 function createFakeServer(initial: Record<string, unknown>): FakeServer {
   const handlers = new Map<string, (input: never, context: never) => unknown>();
+  const hooks = new Map<string, (input: never, context: never) => unknown>();
   let settingsState: { status: "ready"; revision: string; values: Record<string, unknown> } = {
     status: "ready",
     revision: "1",
     values: initial,
   };
-  let createHook: ((input: { request: { config: { mcpServers?: Record<string, unknown> } } }) => unknown) | null = null;
 
   const server = {
     registerSettings() {
@@ -55,26 +81,36 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
     handle(contract: { name: string }, handler: (input: never, context: never) => unknown) {
       handlers.set(contract.name, handler);
     },
-    before(name: string, handler: typeof createHook) {
-      if (name === "agent.create") createHook = handler;
+    before(name: string, handler: (input: never, context: never) => unknown) {
+      hooks.set(name, handler);
       return () => {
-        createHook = null;
+        hooks.delete(name);
       };
     },
     on() {
       return () => {};
     },
     registerProvider() {},
-    async call<T>(name: string, input: unknown): Promise<T> {
+    async call<T>(name: string, input: unknown, context?: unknown): Promise<T> {
       const handler = handlers.get(name);
       if (!handler) throw new Error(`No handler registered for ${name}`);
-      return (await handler(input as never, undefined as never)) as T;
+      return (await handler(input as never, (context ?? fakeContext()) as never)) as T;
     },
     async runCreateHook(config: { mcpServers?: Record<string, unknown> }) {
-      if (!createHook) throw new Error("agent.create hook not registered");
+      const hook = hooks.get("agent.create");
+      if (!hook) throw new Error("agent.create hook not registered");
       const request = { config: { ...config } };
-      const result = await createHook({ request });
+      const result = await hook({ request } as never, fakeContext() as never);
       return (result ?? request) as { config: { mcpServers?: Record<string, unknown> } };
+    },
+    async runSessionOpenHook(
+      request: Record<string, unknown>,
+      context?: unknown,
+    ): Promise<Record<string, unknown>> {
+      const hook = hooks.get("agent.session_open");
+      if (!hook) throw new Error("agent.session_open hook not registered");
+      const result = await hook({ request } as never, (context ?? fakeContext()) as never);
+      return (result ?? request) as Record<string, unknown>;
     },
     setSettings(values: Record<string, unknown>) {
       settingsState = { status: "ready", revision: "2", values };
@@ -315,6 +351,184 @@ describe("RPC surface", () => {
       (after.config.mcpServers?.["memory-flash"] ?? {}) as { headers: Record<string, string> }
     ).headers["X-Memory-Flash-Client-Id"];
     expect(idAfter).toBe(regenerated.clientId);
+    cleanup();
+  });
+});
+
+/** Writes the agent record where the daemon keeps it: `$PASEO_HOME/agents/<ws>/<id>.json`. */
+function writeAgentRecord(agentId: string, mcpServers: Record<string, unknown> | null): void {
+  const dir = path.join(tempHome, "agents", "workspace-one");
+  fs.mkdirSync(dir, { recursive: true });
+  const body: Record<string, unknown> = mcpServers === null ? {} : { config: { mcpServers } };
+  fs.writeFileSync(path.join(dir, `${agentId}.json`), JSON.stringify(body));
+}
+
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+describe("agent.session_open injection (0.3.2)", () => {
+  it("contributes the remote server on open when the saved config lacks it", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    writeAgentRecord("agent-1", {});
+    const server = createFakeServer({ ...defaults(), hostname: "studio-laptop" });
+    const cleanup = contribute(server);
+
+    const out = await server.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    const servers = out.mcpServers as Record<string, Record<string, unknown>>;
+    expect(Object.keys(servers)).toEqual(["memory-flash"]);
+    expect(servers["memory-flash"]).toMatchObject({
+      type: "http",
+      url: "https://office.example/mcp",
+      alwaysLoad: true,
+      headers: {
+        Authorization: "Bearer mf_live_aaa",
+        "X-Memory-Flash-Host": "studio-laptop",
+      },
+    });
+    const injectedHeaders = servers["memory-flash"].headers as Record<string, string>;
+    expect(injectedHeaders["X-Memory-Flash-Client-Id"]).toMatch(uuid);
+    cleanup();
+  });
+
+  it("suffixes names with the connection id when several connections are enabled", async () => {
+    const idA = addConnection({ label: "office-a", url: "https://a.example/mcp", secret: "sk-a" });
+    const idB = addConnection({ label: "office-b", url: "https://b.example/mcp", secret: "sk-b" });
+    writeAgentRecord("agent-1", {});
+    const server = createFakeServer({ ...defaults(), sendIdentityHeaders: false });
+    const cleanup = contribute(server);
+
+    const out = await server.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    const servers = out.mcpServers as Record<string, Record<string, unknown>>;
+    // Set equality: the ids carry random suffixes, so their order is not fixed.
+    expect(Object.keys(servers).sort()).toEqual(
+      [`memory-flash-${idA}`, `memory-flash-${idB}`].sort(),
+    );
+    expect(servers[`memory-flash-${idB}`].headers).toEqual({ Authorization: "Bearer sk-b" });
+    cleanup();
+  });
+
+  it("leaves a name the saved configuration already owns alone (collision is a hard open failure)", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    writeAgentRecord("agent-1", {
+      "memory-flash": { type: "http", url: "https://old.example/mcp" },
+    });
+    const server = createFakeServer({ ...defaults(), sendIdentityHeaders: false });
+    const cleanup = contribute(server);
+
+    // The saved entry is launched by the host itself; re-contributing the same
+    // name would abort the open with `collides with agent saved configuration`.
+    const out = await server.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    expect(out.mcpServers).toEqual({});
+    cleanup();
+  });
+
+  it("hands creation to the agent.create hook (reason=create is skipped)", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    writeAgentRecord("agent-1", {});
+    const server = createFakeServer({ ...defaults(), sendIdentityHeaders: false });
+    const cleanup = contribute(server);
+
+    const out = await server.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "create",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    expect(out.mcpServers).toEqual({});
+    cleanup();
+  });
+
+  it("fails safe when the record is missing/unusable or capabilities are unknown", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    const server = createFakeServer({ ...defaults(), sendIdentityHeaders: false });
+    const cleanup = contribute(server);
+    const open = (context?: unknown, request: Record<string, unknown> = {}) =>
+      server.runSessionOpenHook(
+        { agentId: "agent-1", reason: "resume", purpose: "interactive", mcpServers: {}, ...request },
+        context,
+      );
+
+    // No agents root at all: the saved set is unknown, so nothing is contributed.
+    expect((await open()).mcpServers).toEqual({});
+    // Record exists but carries no `config` object: same fail-safe.
+    writeAgentRecord("agent-2", null);
+    expect((await open(undefined, { agentId: "agent-2" })).mcpServers).toEqual({});
+    // Snapshot unavailable (capabilities unknown): same fail-safe.
+    writeAgentRecord("agent-1", {});
+    expect((await open(fakeContext(null))).mcpServers).toEqual({});
+    cleanup();
+  });
+
+  it("stays out of the way when injection is off or there is nothing to inject", async () => {
+    const connId = addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    writeAgentRecord("agent-1", {});
+    const server = createFakeServer({ ...defaults(), injectIntoAgents: false });
+    const cleanup = contribute(server);
+    const untouched = await server.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: { other: { type: "stdio", command: "x" } },
+    });
+    expect(Object.keys(untouched.mcpServers as object)).toEqual(["other"]);
+    cleanup();
+
+    // Injection on, but no enabled connection left: nothing is added.
+    writeAgentRecord("agent-none", {});
+    const empty = createFakeServer({ ...defaults(), sendIdentityHeaders: false });
+    const cleanupEmpty = contribute(empty);
+    await empty.call("memory-flash-client.connections-delete", { id: connId });
+    const none = await empty.runSessionOpenHook({
+      agentId: "agent-none",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    expect(Object.keys(none.mcpServers as object)).toEqual([]);
+    cleanupEmpty();
+  });
+});
+
+describe("memory-flash-client.agent-reload", () => {
+  it("reopens the agent session so session_open re-contributes the servers", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    const server = createFakeServer({ ...defaults(), sendIdentityHeaders: false });
+    const cleanup = contribute(server);
+
+    const result = await server.call<{ ok: boolean; error: string | null }>(
+      "memory-flash-client.agent-reload",
+      { agentId: "agent-1" },
+    );
+    expect(result).toEqual({ ok: true, error: null });
+    cleanup();
+  });
+
+  it("surfaces a refused reload instead of failing silently", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    const server = createFakeServer({ ...defaults(), sendIdentityHeaders: false });
+    const cleanup = contribute(server);
+
+    const result = await server.call<{ ok: boolean; error: string | null }>(
+      "memory-flash-client.agent-reload",
+      { agentId: "agent-1" },
+      fakeContext(null), // reload() → null: agent not found / not reloadable
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("agent-1");
     cleanup();
   });
 });

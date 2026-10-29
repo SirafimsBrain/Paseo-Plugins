@@ -5,6 +5,7 @@ import {
   checkConnectionDraft,
   clientStatus,
   conflictCheck,
+  agentReload,
   deleteConnection,
   installSkill,
   listConnections,
@@ -37,6 +38,8 @@ import {
   resolveIdentityHost,
   type RequestIdentity,
 } from "./server/identity";
+import { readSavedMcpServers } from "./server/agent-record";
+import { decideClientSessionOpen } from "./server/session-open";
 
 /**
  * Plugin server for Memory Flash Client.
@@ -114,16 +117,31 @@ export default function contribute(server: PluginServerContext) {
   const buildServerName = (connectionId: string, total: number, prefix: string): string =>
     total <= 1 ? prefix : `${prefix}-${connectionId}`;
 
-  const removeCreateHook = server.before("agent.create", async ({ request }) => {
-    const values = await readSettings();
-    if (!values?.injectIntoAgents) return request;
-
+  /**
+   * Server entries for the current connection set, shared by both hooks so the
+   * create-time (saved) and session-open (launch-only) registrations cannot
+   * drift apart in name, URL or identity headers.
+   *
+   * The literal annotation keeps the `type: "http"` narrowing without importing
+   * the MCP config types from `@getpaseo/protocol`, which Paseo does not supply
+   * to plugins and which would make the bundle need `node_modules` at install
+   * time (§12 of __doc.md).
+   */
+  const buildServerEntries = (
+    values: MemoryFlashClientSettings,
+    identity: RequestIdentity,
+  ): Array<{
+    name: string;
+    url: string;
+    config: {
+      type: "http";
+      url: string;
+      headers: Record<string, string>;
+      alwaysLoad: true;
+    };
+  }> => {
     const connections = loadConnections().filter((entry) => entry.enabled);
-    if (connections.length === 0) return request;
-
-    const identity = resolveIdentity(values);
-    const mcpServers = { ...(request.config.mcpServers ?? {}) };
-    for (const connection of connections) {
+    return connections.map((connection) => {
       const name = buildServerName(
         connection.id,
         connections.length,
@@ -136,26 +154,99 @@ export default function contribute(server: PluginServerContext) {
         headers["X-Memory-Flash-Client-Id"] = identity.clientId;
         headers["X-Memory-Flash-Host"] = identity.host;
       }
-      // `as const` instead of a named `McpHttpServerConfig` annotation: the MCP
-      // config types live in @getpaseo/protocol, which is not a host-supplied
-      // specifier, so importing them would make this bundle need node_modules
-      // at install time. Storing into `mcpServers` below checks the literal
-      // against the host's own type, which is a stronger guarantee.
-      const config = {
-        type: "http",
+      return {
+        name,
         url: connection.url,
-        headers,
-        alwaysLoad: true,
-      } as const;
-      mcpServers[name] = config;
+        config: { type: "http", url: connection.url, headers, alwaysLoad: true },
+      };
+    });
+  };
+
+  const removeCreateHook = server.before("agent.create", async ({ request }) => {
+    const values = await readSettings();
+    if (!values?.injectIntoAgents) return request;
+
+    const identity = resolveIdentity(values);
+    const entries = buildServerEntries(values, identity);
+    if (entries.length === 0) return request;
+
+    const mcpServers = { ...(request.config.mcpServers ?? {}) };
+    for (const entry of entries) {
+      mcpServers[entry.name] = entry.config;
       // Diagnostic: the endpoint and name are safe to log, the key is not.
       console.log(
-        `[memory-flash-client] MCP injected: ${name} → ${connection.url} (client ${identity.host})`,
+        `[memory-flash-client] MCP injected: ${entry.name} → ${entry.url} (client ${identity.host})`,
       );
     }
     request.config.mcpServers = mcpServers;
     return request;
   });
+
+  // -------------------------------------------------------------------------
+  // Session-open contribution (Paseo 0.14, 0.3.2)
+  //
+  // The create hook writes the agent's *saved* configuration once. This hook
+  // runs on every open (create, resume after the 0.14.0 idle-hour release,
+  // refresh, import) and is the only place that can reach an agent created
+  // before this plugin was installed — or one whose saved entry is gone, which
+  // is the case where its tools are missing.
+  //
+  // It is deliberately conservative: a launch-only name that already exists in
+  // the saved configuration aborts the open (`collides with agent saved
+  // configuration`, host agent-manager.js), and nothing in the SDK can see the
+  // saved set. So the record is read from disk (server/agent-record.ts) and
+  // every unverifiable state — record missing/unreadable, provider capabilities
+  // unknown, reason `create` — resolves to "do not inject". See
+  // server/session-open.ts for the full matrix.
+  // -------------------------------------------------------------------------
+
+  const removeSessionOpenHook = server.before(
+    "agent.session_open",
+    async ({ request }, { paseo }) => {
+      const values = await readSettings();
+      const injectIntoAgents = values?.injectIntoAgents ?? false;
+
+      let supportsMcpServers: boolean | null = null;
+      const needsCapability =
+        injectIntoAgents &&
+        request.purpose !== "history" &&
+        request.reason !== "create";
+      if (needsCapability) {
+        const snapshot = await paseo.agents
+          .ref(request.agentId)
+          .refresh()
+          .catch(() => null);
+        supportsMcpServers = snapshot?.agent.capabilities.supportsMcpServers ?? null;
+      }
+
+      const entries =
+        values === null ? [] : buildServerEntries(values, resolveIdentity(values));
+      const decision = decideClientSessionOpen({
+        reason: request.reason,
+        purpose: request.purpose,
+        injectIntoAgents,
+        serverNames: entries.map((entry) => entry.name),
+        lookup: readSavedMcpServers(request.agentId),
+        supportsMcpServers,
+      });
+      console.log(
+        `[memory-flash-client] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
+      );
+
+      if (decision.injectNames.length === 0) return request;
+
+      const allowed = new Set(decision.injectNames);
+      let mcpServers = request.mcpServers;
+      for (const entry of entries) {
+        if (!allowed.has(entry.name)) continue;
+        mcpServers = { ...mcpServers, [entry.name]: entry.config };
+        console.log(
+          `[memory-flash-client] session_open MCP injected: ${entry.name} → ${entry.url}`,
+        );
+      }
+      return { ...request, mcpServers };
+    },
+  );
 
   // -------------------------------------------------------------------------
   // RPC surface
@@ -214,6 +305,27 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(conflictCheck, () => checkConflict());
 
+  // --- Repair: reopen the agent's session so the hooks above run again ------
+  // The supported answer to a remote server that stopped reaching an agent:
+  // `reload()` reopens the provider session with its current configuration and
+  // reruns `agent.session_open`, which re-contributes the remote HTTP servers.
+  server.handle(agentReload, async (input, { paseo }) => {
+    try {
+      const result = await paseo.agents.ref(input.agentId).reload();
+      if (result === null) {
+        return { ok: false, error: `Agent ${input.agentId} not found or not reloadable.` };
+      }
+      console.log(
+        `[memory-flash-client] reloaded agent ${input.agentId} (remote servers re-registered)`,
+      );
+      return { ok: true, error: null };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[memory-flash-client] agent reload failed: ${message}`);
+      return { ok: false, error: message };
+    }
+  });
+
   server.handle(regenerateClientId, () => {
     const next = generateClientId();
     fallbackClientId = next;
@@ -234,6 +346,7 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     removeCreateHook();
+    removeSessionOpenHook();
     unsubscribeSettings();
     fallbackClientId = null;
   };

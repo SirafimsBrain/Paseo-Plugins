@@ -63,9 +63,9 @@ The secret is never written to git, agent prompts or agent logs, and it is never
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:memory-flash
 ```
 
-Requires Paseo ≥ 0.11.0 (verified against the stable 0.13.0 release, 2026-10-24; uses the plugin SDK screen/sidebar API, settings screens and lifecycle hooks — 0.13.0 adds nothing this plugin needs). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
+Requires Paseo ≥ 0.14.0 (the `agent.session_open` hook, `defineAgentTool` and `agents.ref().reload()` used since 0.9.4 are 0.14.0 API; first verified against the stable 0.14.0 release, 2026-10-29). Node ≥ 24 runs on the daemon host (built-in `node:sqlite` with FTS5).
 
-After install: open **Settings → Plugins → Memory Flash** and press **Install into all agents** to place the skill where your agents look for it. The MCP server is injected into new agents automatically. Also press **Register for all local agent configs**: Cline, Cursor and Codex CLI do not pick up stdio MCP servers from the agent session, and OpenCode/Kilo lose a session-injected server as soon as OpenCode evicts an idle directory — a config entry is what keeps the memory tools alive there. The Cline row also shows a live spawn check of the registered command.
+After install: open **Settings → Plugins → Memory Flash** and press **Install into all agents** to place the skill where your agents look for it. The MCP server is injected into new agents automatically and re-contributed on **every** session open (create, resume after the idle-hour release, refresh, import), so an already created agent gets its memory tools back without being recreated; if they are ever missing, run the Command Center action **Repair memory tools**. Also press **Register for all local agent configs**: Cline, Cursor and Codex CLI do not pick up stdio MCP servers from the agent session, and a config entry is what keeps the memory tools alive through OpenCode's directory eviction without waiting for a reopen. The Cline row also shows a live spawn check of the registered command.
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/memory-flash/<revision>/checkout/memory-flash`. The manifest `build` step (`paseo-plugin.json`, an argv array: `[["npm", "ci"], ["npm", "run", "bundle"]]`) is executed by the daemon in that directory on every install and every update: `npm ci` installs the dependencies, then `dist/mcp-server.js` is regenerated, so MCP-server changes reach agents without a manual rebundle. Both commands need registry access on the host. Updates: `paseo plugin update memory-flash`.
 
@@ -104,45 +104,54 @@ Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
 ## Paseo 0.14.0 compatibility
 
 Verified against the **stable Paseo 0.14.0** release (2026-10-29).
-Full evidence: [__doc.md](./__doc.md) §18. **No code change was needed for
-0.14.0 and no deprecated API exists in this plugin**; the release ships as
-`0.8.4` because the same commit strengthens the agent skill (§18.4).
-`requirements.paseo` stays `>=0.11.0`.
+Full evidence: [__doc.md](./__doc.md) §18. **No deprecated API exists in this
+plugin**, and the release's new surface is not just compatible with it — it is
+*used*: **`0.9.4` implements all four recommendations from §18.2**.
+`requirements.paseo` is therefore `>=0.14.0` and the SDK pin is `^0.14.0`
+(`agent.session_open`, `defineAgentTool` and `reload()` are 0.14.0 API).
 
 **Nothing deprecated reaches it.** The `@deprecated` list in
 `@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0, and the plugin's whole
 client surface — `dist/client/` — did not change at all between 0.13.0 and
 0.14.0, so `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen` and
-`addCommandCenterItem` are exactly what they were. The plugin's one hook,
-`before("agent.create")`, is unchanged and not deprecated.
+`addCommandCenterItem` are exactly what they were.
 
-**New in 0.14.0 — recommendations, deliberately not implemented here**
-(details and traps in [__doc.md](./__doc.md) §18.2):
+**New in 0.9.4 — the 0.14.0 features, implemented** (design and decision
+matrix in [__doc.md](./__doc.md) §18.5):
 
-1. **Move MCP injection to `before("agent.session_open")`** — the hook re-runs
-   on create *and* resume/refresh/import, re-derives its `mcpServers` map on
-   every open, survives OpenCode's per-directory eviction and reaches already
-   created agents; it is the direct fix for the documented
-   `No tool named "memory-flash_memory_save"` case (§13). It must **replace**
-   the saved-config write, not sit beside it — a name colliding with a saved
-   server fails the session open.
-2. **A "repair memory tools" button** built on the new
-   `agents.ref(id).reload()`, which reopens the session and reruns those hooks.
-3. **`defineAgentTool`** for targeted, MCP-free tools (read-only
-   `memory_recall` for harnesses that never spawn the stdio server).
-4. **MCP `instructions` in `initialize`** — optional, low priority.
+1. **MCP injection in `before("agent.session_open")`** alongside the existing
+   `agent.create` write — the hook re-runs on create *and* resume/
+   refresh/import, re-derives its `mcpServers` map on every open, survives
+   OpenCode's per-directory eviction and reaches **already created** agents:
+   the direct fix for the documented
+   `No tool named "memory-flash_memory_save"` case (§13). It contributes the
+   server **only when the agent's saved configuration does not already carry
+   that name** (a collision fails the session open), only when the provider
+   supports MCP, and never on `purpose: "history"`; the saved set is read from
+   the daemon's agent record, and every unreadable/unknown state resolves to
+   *skip*, so the hook can never break an open.
+2. **A read-only `memory_flash_recall` tool** attached on every open via the
+   new `defineAgentTool` — MCP-free, re-derived per open, never persisted, so
+   an agent that receives no MCP server still gets search. Read-only on
+   purpose: writes stay on the MCP transport with its attribution model.
+3. **A "repair memory tools" Command Center action** built on the new
+   `agents.ref(id).reload()`: it reopens the session, reruns the hook above
+   and re-registers the server — one click instead of recreating the agent.
+4. **MCP `instructions` in `initialize`** — the mandatory-tone protocol
+   (search before the first edit, save the bugfix immediately, hand off
+   before stopping) returned to clients that surface server instructions.
 
 Worth knowing from the 0.14.0 notes: idle agent runtimes are released after
 an hour and resumed on the next prompt — a session reopen, i.e. exactly the
-position where recommendation 1 would re-inject the server.
+position where the new hook re-injects the server.
 
-**Verification:** typecheck clean against SDK 0.14.0, vitest **15 suites /
-166 tests** pass, both entries build with the **real 0.14.0 host compiler**
-(`compileDirectoryPlugin` from the installed `app.asar`) with no boundary
-errors and zero deprecated calls, the manifest passes the real 0.14.0 parser,
-and the plugin is `running` on this machine's 0.14.0 daemon with
-`[paseo] Plugin ready`. The SDK was installed with `--no-save`, so
-`package.json` still pins `@getpaseo/plugin@0.12.0`.
+**Verification:** typecheck clean against SDK 0.14.0, vitest **16 suites /
+192 tests** pass (including the new session-open decision matrix, record
+reader, attached tool, reload RPC and `initialize` instructions suites), both
+entries build with the **real 0.14.0 host compiler** (`compileDirectoryPlugin`
+from the installed `app.asar`) with no boundary errors and zero deprecated
+calls, the manifest passes the real 0.14.0 parser, and the plugin is `running`
+on this machine's 0.14.0 daemon with `[paseo] Plugin ready`.
 
 **The agent recommendation was strengthened in 0.8.4** on three surfaces an
 agent reads: the skill frontmatter `description` ("mandatory, not optional";

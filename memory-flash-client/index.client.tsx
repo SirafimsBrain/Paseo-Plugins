@@ -5,6 +5,7 @@ import type {
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { ConnectionsSurface } from "./client/connections-surface";
 import { ConnectionsSettingsScreen } from "./client/settings-screen";
+import { agentReload } from "./shared/contracts";
 
 const SCREEN_ID = "memory-flash-client";
 
@@ -67,6 +68,25 @@ export default function contribute(client: PluginClientContext) {
     title: "Memory Flash Client",
     icon: "Database",
     Component: ConnectionsSettingsScreen,
+  });
+
+  // Repair action (0.3.2): reopen the selected agent's provider session, which
+  // reruns `before("agent.session_open")` and re-contributes the remote HTTP
+  // servers — one click instead of recreating the agent when its memory tools
+  // stopped reaching it. A throw is surfaced by the host as an error toast, so
+  // a refused reload is never silent.
+  client.addCommandCenterItem({
+    id: "repair-memory-tools",
+    title: "Repair remote memory tools (reopen this agent's session)",
+    icon: "Wrench",
+    keywords: ["memory", "remote", "mcp", "tools", "missing", "repair", "reload", "reopen"],
+    context: "agent",
+    async onSelect({ agent, rpc }) {
+      const result = await rpc(agentReload, { agentId: agent.id });
+      if (!result.ok) {
+        throw new Error(result.error ?? "Could not reopen the agent session.");
+      }
+    },
   });
 
   return () => {};
