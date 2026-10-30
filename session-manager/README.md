@@ -67,15 +67,21 @@ installation. Updates: `paseo plugin update session-manager`.
 
 ## Requirements
 
-- Paseo `>=0.8.0` (declared in `paseo-plugin.json`). **Deliberately not
-  raised:** this plugin contributes a workspace panel, a settings screen and
-  Command Center items — none of the 0.11+ screen/sidebar API — so the floor
-  stays where the APIs actually reach. Only the SDK pin moved to 0.12.0.
-- Verified against Paseo `0.13.0` (2026-10-24, SDK `@getpaseo/plugin@0.13.0`
-  installed with `--no-save`, so the declared pin stays `0.12.0`):
-  `npm run typecheck` and `npm test` (70 tests, 8 suites) pass; see
-  Compatibility in [`__doc.md`](./__doc.md) §17. Earlier: Paseo `0.12.0` /
-  SDK 0.12.0 (2026-10-21), Paseo `0.10.3` / SDK 0.10.1.
+- Paseo `>=0.13.0` (declared in `paseo-plugin.json`). **Raised from `>=0.8.0`
+  in 0.2.3**, because the panel now imports `ScrollView` and `useToast` from
+  `@getpaseo/plugin/client/ui`, and that entry has carried them only since
+  **0.13.0** — before that they lived in the `client/react-native` entry the
+  SDK now deprecates. The floor is an API promise, not a record of the newest
+  host tested: the real 0.14.0 host enforces it (the same manifest is rejected
+  for a 0.12.0 daemon with `requires Paseo >=0.13.0`).
+- Verified against Paseo `0.14.0` (2026-10-30, SDK `@getpaseo/plugin@^0.14.0`,
+  installed with `npm install` so the lockfile carries it): `npm run typecheck`
+  and `npm test` (70 tests, 8 suites) pass, both entries build with the real
+  0.14.0 host compiler with zero deprecated calls, and the plugin is `running`
+  in an isolated 0.14.0 daemon — see Compatibility in
+  [`__doc.md`](./__doc.md) §18. Earlier: Paseo `0.13.0` / SDK 0.13.0
+  (2026-10-24), Paseo `0.12.0` / SDK 0.12.0 (2026-10-21), Paseo `0.10.3` /
+  SDK 0.10.1.
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
   `cline`, `opencode`, `kilo`. Qwen Code and `acpx` are read and written as files
   and need no CLI.
@@ -83,11 +89,61 @@ installation. Updates: `paseo plugin update session-manager`.
   the tests build throwaway stores under the OS temp directory and never touch
   the real home stores.
 
+## Paseo 0.14.0 compatibility
+
+Verified against the **stable Paseo 0.14.0** release (2026-10-30).
+Full evidence: [`__doc.md`](./__doc.md) §18. **Shipped as `0.2.3`** — the two
+deprecated APIs this plugin still used in 0.13.0 are now migrated, and the
+SDK pin moved to `@getpaseo/plugin@^0.14.0`.
+
+**Deprecated in 0.13.0 and used here until now — both migrated:**
+
+| Deprecated | Migration in 0.2.3 |
+| ---------- | ------------------ |
+| the `@getpaseo/plugin/client/react-native` entry point — the panel imported `ScrollView` and `useToast` from it (host exempt list `COMPAT(pluginReactNativeEntrypoint)`, **removal 2027-04-20**, together with `useRevealedText`) | one import line: both now come from `@getpaseo/plugin/client/ui`, which has exported them since 0.13.0. The compiled client bundle contains **zero** `client/react-native` references — and the same compiler run against a copy with the old import restored finds the specifier, so the scan is real. |
+| `addWorkspacePanel`'s `context: "workspace"` field (`@deprecated`, "Omit context", optional since 0.13.0) | the field is **omitted**. Runtime-checked in the shipped 0.14.0 renderer: `addWorkspacePanel(e)` throws only when `context` is defined and not `"workspace"`, and normalises `undefined` to `"workspace"` — behaviour is identical. The `context: "workspace"` fields on the four `addCommandCenterItem` registrations **stay**: that contribution is a required discriminant, not a deprecated field. |
+
+**Nothing else deprecated reaches it.** 0.14.0 adds no new `@deprecated`
+marks (byte-identical to 0.13.0) and `dist/client/` did not move at all; the
+plugin still registers only `addWorkspacePanel` / `addSettingsScreen` /
+`addCommandCenterItem`, keeps its `localStorage` reads inside `client/web.ts`,
+and registers no lifecycle hooks, so the always-empty `agent.turn_ended`
+`timeline` cannot touch it.
+
+**One documentation discrepancy, recorded:** the deployed hooks page says
+`server.addHook("agent.open.before")` "is available from Paseo 0.14", but
+neither the SDK nor the installed 0.14.0 host contains `addHook` — irrelevant
+here (the plugin registers no hooks) but it is why nothing in this repository
+migrates to `addHook`. See the root
+[README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29).
+
+**Recommendations for improvement — written down, deliberately not
+implemented:** [`__doc.md`](./__doc.md) §18.3. The two worth having: react to
+0.14.0's new **idle-runtime release** (a session reopen fires `agent.closed`
+and re-runs `agent.session_open`, so the listing cache should be invalidated
+on that event instead of only expiring after 30 seconds), and a lighter
+**"stop runtime, keep the session"** action built on the new
+`session.can_stop_runtime` provider capability — a middle ground between
+"leave it running" and deleting the transcript. Adding agents' own tools via
+`defineAgentTool` is explicitly *not* recommended for this plugin: it offers
+destructive operations to agent processes.
+
+**Verification:** typecheck clean and vitest **8 suites / 70 tests** green
+against `@getpaseo/plugin@0.14.0`; both entries build with the **real 0.14.0
+host compiler** (`compileDirectoryPlugin` from the installed `app.asar`) with
+no boundary errors and **zero deprecated calls**; the manifest passes the real
+0.14.0 parser with the new `>=0.13.0` floor (rejected for a 0.12.0 host,
+accepted for 0.13.0 and 0.14.0). Live: `running` in an **isolated 0.14.0
+daemon** (scratch home, production config untouched) installed from the
+working tree — `[paseo] Plugin ready`, seven RPC methods registered, no plugin
+or contribution errors in the daemon log.
+
 ## Paseo 0.13.0 compatibility
 
 Verified against the **stable Paseo 0.13.0** release (2026-10-24).
 Full evidence: [`__doc.md`](./__doc.md) §17. **No code change was needed**,
-so the plugin is still `0.2.2` and `requirements.paseo` still `>=0.8.0`.
+so at that point the plugin was still `0.2.2` and `requirements.paseo` still
+`>=0.8.0`. Both changed in `0.2.3` — see the 0.14.0 section above.
 
 **Deprecated in 0.13.0 and still used here (works today, deliberately not
 migrated):**

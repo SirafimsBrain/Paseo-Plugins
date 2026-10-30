@@ -132,11 +132,11 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.13.0 (2026-10-24, §14); requirement `>=0.11.0` — the plugin uses the 0.11+ screen/sidebar API (§13). Earlier: verified against 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
-| SDK | `@getpaseo/plugin@0.13.0` (installed with `--no-save` for the 2026-10-24 pass; the declared pin stays `0.12.0` and the host supplies the runtime instance) |
+| Paseo | verified against 0.14.0 (2026-10-30, §15); requirement `>=0.11.0` — the plugin uses the 0.11+ screen/sidebar API (§13). Earlier: 0.13.0 (2026-10-24, §14), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
+| SDK | `@getpaseo/plugin@0.14.0` (installed with `--no-save --package-lock=false` for the 2026-10-30 pass; the declared pin stays `0.12.0` and the host supplies the runtime instance) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`) against SDK 0.13.0; vitest 9 hermetic suites / 95 tests (providers with stubbed fetch + mocked DuckDuckJS engines, scripted ddgs subprocess, interpreter discovery with fake executables, settings-file layering, settings-mirror round-trip, interface-URL derivation, spawn probe, tool dispatch, stdio e2e against a local fake SearXNG); both entries built by the real 0.13.0 host compiler with no boundary errors and zero deprecated calls (§14.3); 0.12.0 client audit still clean (§13.3); stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0) |
+| Verification | typecheck clean (three-project `tsc -b`) and vitest **9 hermetic suites / 95 tests** green against SDK 0.14.0, with 2 live-search tests skipped by default (`BUNNY_LIVE=1`); both entries built by the real 0.14.0 host compiler with no boundary errors, 0 warnings and zero deprecated calls (§15.3); manifest accepted by the real 0.14.0 parser with its `>=0.11.0` floor enforced (rejected at 0.10.0); `running` in an isolated 0.14.0 daemon from the working tree (§15.3); 0.12.0 client audit still clean (§13.3); stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0). Older passes: SDK 0.13.0 (§14.3), 0.12.0 (§13.4) |
 
 ## 8. Alternatives considered
 
@@ -597,3 +597,92 @@ Carrying the §10.2 / §13.5 list forward, plus what 0.13.0 added:
 | 0.13.0 manifest schema | `readPluginManifest` accepts the manifest (`{ id, build, requirements }`). |
 | Live on a 0.13.0 daemon | **PASS** — installed from the git checkout at `373fa7b1` on this machine's `daemonVersion "0.13.0"` daemon: status `running`, `[paseo] Plugin ready`, and the server-side effect observed in the log: `[bunny-search] settings mirrored: ~/.paseo/plugins/bunny-search/settings.json`. No plugin or contribution errors in `~/.paseo/daemon.log` or the app's `main.log`. |
 | Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |
+
+## 15. Paseo 0.14.0 — compatibility pass (2026-10-30)
+
+Audited against the stable `0.14.0` release (2026-10-29).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.14.0>.
+The repository-wide inventory of what 0.14.0 adds and deprecates is in the
+root [README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29);
+this section records what is specific to bunny-search.
+
+**Result: compatible, no code change and no deprecated API in it.** Version
+stays `0.4.2` — no bump and no tag, because this pass changed no code (only
+documentation).
+
+### 15.1 What 0.14.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` — none deprecated. `dist/client/` of `@getpaseo/plugin` is **byte-identical** between 0.13.0 and 0.14.0, so every client registration this plugin makes is untouched by construction. |
+| UI imports | Everything comes from `@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`; the deprecated `client/react-native` entry (removal 2027-04-20) is still unused. The compiled client bundle contains **zero** deprecated items. |
+| The plugin's only hook | `server.before("agent.create")` — **not deprecated in 0.14.0**. `PluginLifecycleRegistration` still exposes exactly `on` and `before`, with no `@deprecated` marks. |
+| SDK diff `@getpaseo/plugin@0.13.0 → 0.14.0` | **Additive, server-side only**: `defineAgentTool` + `AgentToolDefinition` / `AgentToolContext` / `AgentToolResult`, and `before("agent.session_open")`'s request gained `title`, `labels`, `tools`, `mcpServers`. Nothing was removed and the client half did not move. |
+| `agent.turn_ended` `timeline` (always empty) | Not applicable — no lifecycle hooks of any kind are registered. |
+| `SettingsGroup`, panel `context` / `agentId`, `addSurface` / `addSidebarItem` / `openSurface`, `CreateAgentRequestOptions.git` / `worktreeName` | None used; the plugin creates no agents and contributes no panel. |
+| Client audit (DOM globals outside `client/web.ts`) | Still clean — §13.3's fix holds; 0.14.0 changes neither the rule nor the files involved. |
+| Manifest | Passes the real 0.14.0 `readPluginManifest` (strict `requirements` schema); `requirements.paseo` stays `>=0.11.0`, still the honest floor. Enforced by the real host: the same manifest is **rejected for `version: 0.10.0`** (`requires Paseo >=0.11.0`) and accepted for `0.11.0` and `0.14.0`. |
+| Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]`. The `0.14.0 → 0.12.0` pin in `package.json` is deliberate — no code needs a 0.14.0 API, and the host supplies the runtime SDK. |
+| MCP server side | The bundled stdio `dist/mcp-server.js` is a standalone Node bundle that speaks no Paseo SDK API; nothing in 0.14.0 reaches it. |
+| New host behaviour that touches injection | **Idle agent runtimes are released after one hour** (`agents.idleRuntimeCleanup`, default on) and the saved session resumes on the next prompt — a *session reopen*. `agent.create` injection is written into the saved config, so it survives; but see §15.2 item 1 for the gap it exposes. |
+| `server.addHook` / `agent.open.before` | **Documented but absent.** The deployed hooks page claims `addHook` "is available from Paseo 0.14", yet `grep -r addHook` over `@getpaseo/plugin@0.14.0` **and** over the extracted 0.14.0 host's `@getpaseo/**` returns nothing. The type-safe 0.14.0 spelling stays `server.before("agent.session_open")`. |
+
+### 15.2 Recommendations for improvement (documented, not implemented)
+
+Each item below is **new functionality**, so adopting any of them means a
+second-digit bump (`0.4.2 → 0.5.0`) and its own test pass. They are recorded
+here rather than built because this task asked for a compatibility check.
+
+1. **Also contribute the MCP server in `before("agent.session_open")`**
+   (`mcpServers` on that request is new in 0.14.0). The hook re-runs on
+   `create` / `resume` / `refresh` / `import` and re-derives the map on every
+   open, which is the only way to reach agents that **already exist** when the
+   user turns `injectIntoAgents` on — today they keep searching without a
+   server until they are recreated. It also survives OpenCode's per-directory
+   eviction and the new idle-hour runtime release. Constraints to respect,
+   all learned by memory-flash 0.9.4 in this same repository: a name that
+   collides with a *saved* server, the internal `paseo` server or another
+   plugin **fails the session open**, so read the agent's saved `mcpServers`
+   from the daemon record and skip on any unreadable state; never contribute
+   on `purpose: "history"`; and check the provider supports MCP (0.14.0 fails
+   such an open with `does not support MCP servers`).
+2. **Expose `web_search` as a native agent tool with `defineAgentTool`** and
+   attach it from the same session-open hook. It needs no MCP config at all,
+   which makes it the fallback for providers without MCP support and for
+   agents the user does not want a spawned process for. Zod-validated input,
+   a 10-minute call ceiling, and `{ text, structuredContent, isError }` out —
+   the handler would wrap the same `searchWeb()` the RPC already uses. Keep
+   the MCP server as well: it is what agents without the tool see.
+3. **A "repair search tools" Command Center action on the new
+   `agents.ref(id).reload()`** — it reopens the session, reruns the hooks and
+   re-registers the server for an already-running agent, instead of asking the
+   user to recreate it. Memory-flash ships exactly this in 0.9.4.
+4. **Gate injection with `request.labels`** (also new on the session-open
+   request): inject only into agents labelled e.g. `web-search: "on"`, or skip
+   agents of a provider the user never wants to pay search latency for. Today
+   the choice is host-wide, one switch for every agent.
+5. **Return `instructions` from the MCP `initialize` response** — one
+   paragraph telling agents when to search (before answering questions about
+   the outside world, after a failing build with an unfamiliar error, before
+   proposing an API that may not exist) and that results must be opened with
+   the returned URLs. Clients that surface server instructions show it; those
+   that do not are unaffected. This is the same trick memory-flash used in
+   0.9.4 for its mandatory-tone protocol.
+
+Explicitly **not** recommended: moving the injection off `agent.create`.
+That hook is what persists the server into the agent's saved configuration,
+and persistence across restarts is the property the plugin depends on; the
+session-open contribution above is additive, not a replacement.
+
+### 15.3 Verification (2026-10-30, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.14.0` — **`package.json` / `package-lock.json` untouched**, the pin stays `0.12.0` on purpose (the host supplies the runtime SDK and no code needed a 0.14.0 API). |
+| `npm run typecheck` (`tsc -b tsconfig.json`, three projects) against 0.14.0 | **exit 0** |
+| `npm test` (with `pretest` rebuilding `dist/mcp-server.js`) | **9 suites / 95 tests pass**, 1 suite with the 2 `BUNNY_LIVE=1` tests skipped by default |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` extracted from the installed `app.asar`) | **Both entries compile, no boundary errors, 0 warnings**; a scan of the compiled bundles finds **zero** `addSurface` / `addSidebarItem` / `openSurface` / `SettingsGroup` / `useRevealedText` / `client/react-native` occurrences. Client bundle 37 044 chars, server bundle 3 388 603 chars. |
+| 0.14.0 manifest schema + floor | Accepted with `requirements.paseo >=0.11.0`; the same real host code rejects it for a 0.10.0 daemon and accepts 0.11.0 / 0.14.0. |
+| Live on an isolated 0.14.0 daemon | **PASS** — a scratch home (`/tmp/paseo-scratch`, `daemonVersion "0.14.0"`, loopback on its own port, production home untouched) with `pluginsEnabled: true` and the plugin installed **from the working tree**: status `running`, `[paseo] Plugin ready`, the six RPC methods registered (`bunny-search.connection-test`, `.search`, `.status`, `settings.bunny-search.*`) and the server-side effect visible — `[bunny-search] settings mirrored: …/plugins/bunny-search/settings.json`. No plugin or client-contribution errors in the daemon log; the only stderr lines are Node's own `DEP0176` / `DEP0129` runtime warnings, not Paseo plugin-API deprecations. |
+| Negative control | The same compiler run against a copy of session-manager with the old `client/react-native` import restored finds `client/react-native` in the bundle (1 hit), proving the scan would catch a regression. |
+| Post-check cleanup | SDKs restored to the pinned `0.12.0`, `git status` clean apart from the documentation this pass added, typecheck exit 0 on the restored state. |

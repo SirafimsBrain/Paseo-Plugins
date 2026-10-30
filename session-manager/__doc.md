@@ -24,13 +24,18 @@ usage in the panel styles; when unset, no `fontFamily` is forced so the host's
 
 ## Compatibility
 
-Current: **verified against Paseo `0.13.0` (2026-10-24, SDK
-`@getpaseo/plugin@0.13.0`)** — no code change was needed; two 0.13.0
-deprecations reach this plugin (the `client/react-native` UI entry and the
-`addWorkspacePanel` `context` field) and are recorded rather than migrated,
-because neither breaks (§17). The manifest range stays `>=0.8.0` on purpose:
-this plugin adopts none of the 0.11+ or 0.13+ API, so raising the floor would
-be dishonest.
+Current: **verified against Paseo `0.14.0` (2026-10-30, SDK
+`@getpaseo/plugin@^0.14.0`)** — compatible, and the two 0.13.0 deprecations
+this plugin carried are now **migrated** (the `client/react-native` UI entry
+and the `addWorkspacePanel` `context` field), shipped as `0.2.3`; the manifest
+range moved `>=0.8.0` → `>=0.13.0` because the replacement import needs
+`client/ui`'s `ScrollView` / `useToast`, which exist only from 0.13.0 (§18).
+
+Earlier, verified against Paseo `0.13.0` (2026-10-24, SDK
+`@getpaseo/plugin@0.13.0`) — no code change was needed; the same two
+deprecations were recorded rather than migrated, because neither broke
+(§17). The manifest range stayed `>=0.8.0` on purpose: at that point the
+plugin adopted none of the 0.11+ or 0.13+ API.
 
 Earlier, verified against Paseo `0.12.0` (2026-10-21, SDK
 `@getpaseo/plugin@0.12.0`) — no API migration was needed; the one change is
@@ -294,11 +299,11 @@ automation — the reminder only highlights and pre-selects, the user confirms.
   `client/intent.ts`: sessions older than 30 days and archived-agent sessions
   (both pre-select the matching rows), plus the settings screen.
 - All colors come from `theme.colors`; padding follows `layout.compact`;
-  scrolling uses the host `ScrollView` from `@getpaseo/plugin/client/react-native`.
+  scrolling uses the host `ScrollView` from `@getpaseo/plugin/client/ui`.
 - The confirm block lists the risks and switches the action label to
   "Yes, delete anyway" when force is required.
 - All colors come from `theme.colors`; padding follows `layout.compact`;
-  scrolling uses the host `ScrollView` from `@getpaseo/plugin/client/react-native`.
+  scrolling uses the host `ScrollView` from `@getpaseo/plugin/client/ui`.
 
 ## Extending to a new coding agent
 
@@ -550,6 +555,92 @@ second digit if ever adopted:
 | 0.13.0 manifest schema | `readPluginManifest` accepts the manifest (`{ id, requirements }`). |
 | Live on a 0.13.0 daemon | **PASS** — this machine's own daemon was upgraded to `0.13.0` (`daemonVersion "0.13.0"`, started 2026-10-24T16:21Z) and runs the plugin from the git checkout at `373fa7b1` (the 0.12.0 conformance commit — every commit after it touches luck-planner only, so the code is the working tree's): status `running`, `[paseo] Plugin ready` in the plugin log, no client-contribution or plugin errors in `~/.paseo/daemon.log` or the app's `main.log`. No scratch home was needed this time — a live 0.13.0 host with the plugin installed already existed. |
 | Post-check cleanup | SDKs restored to `0.12.0` in `node_modules`, `git status` clean, `npm run typecheck` still exit 0 on the restored state. |
+
+## 18. Paseo 0.14.0 — compatibility pass (2026-10-30)
+
+Audited against the stable `0.14.0` release (2026-10-29).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.14.0>.
+The repository-wide inventory of what 0.14.0 adds and deprecates is in the
+root [README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29);
+this section records what is specific to session-manager.
+
+**Result: compatible, two deprecated APIs migrated, shipped as `0.2.3`**
+(patch bump — a migration creates no new functionality), with the annotated
+tag `session-manager@0.2.3`.
+
+### 18.1 What 0.14.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| New deprecations in 0.14.0 | **None.** The `@deprecated` set in `@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0/0.13.2, and `diff -rq` over the SDK shows `dist/client/` unchanged — only `dist/server/` moved (`defineAgentTool`, and `before("agent.session_open")`'s request gaining `title` / `labels` / `tools` / `mcpServers`). |
+| Deprecated UI entry point | **Used → migrated.** `client/session-manager-panel.tsx` imported `ScrollView` and `useToast` from `@getpaseo/plugin/client/react-native` (exempt list `COMPAT(pluginReactNativeEntrypoint)`, **removal 2027-04-20**, with `useRevealedText`). Now imported from `@getpaseo/plugin/client/ui`, which has exported both since **0.13.0** — which is why `requirements.paseo` had to move to `>=0.13.0` at the same time. |
+| Deprecated panel `context` | **Used → migrated.** `index.client.tsx` no longer passes `context: "workspace"` to `addWorkspacePanel` (the field's `@deprecated` text is literally *Omit context*). Runtime-verified in the shipped renderer: `addWorkspacePanel(e){ if("agent"===e.context) …; if(void 0!==e.context&&"workspace"!==e.context) throw …; return K({...e,context:"workspace"}) }` — `undefined` is accepted and normalised, so behaviour is identical. |
+| The four `addCommandCenterItem` `context: "workspace"` fields | **Kept deliberately.** They are not deprecated: in `PluginCommandCenterItemContribution` the field is a required union discriminant (`global` / `workspace` / `agent`), and the renderer rejects a missing or unknown value. |
+| Registrations used | `client.addWorkspacePanel`, `client.addSettingsScreen`, `client.addCommandCenterItem` (×4) — none deprecated. |
+| Server side | Only `server.registerSettings` + four `server.handle` calls. No `server.on` / `server.before`, so the always-empty `agent.turn_ended` `timeline` and the `addHook` documentation gap are both moot here. |
+| `SettingsGroup` → `SettingsSection`, panel `params.agentId` / `addAgentPanel`, `CreateAgentRequestOptions.git` / `worktreeName` | None used; the plugin creates no agent and contributes no panel of those kinds. |
+| Client audit (DOM globals outside `client/web.ts`) | Still clean — §16.3's fix holds; 0.14.0 changes neither the rule nor these files. |
+| Manifest | Passes the real 0.14.0 `readPluginManifest` with the new `requirements.paseo >=0.13.0`; the same real host code **rejects it for `version: 0.12.0`** (`Plugin "session-manager" requires Paseo >=0.13.0. Your daemon is 0.12.0.`) and accepts 0.13.0 and 0.14.0. |
+| SDK pin | `package.json` / `package-lock.json` moved `@getpaseo/plugin` `0.12.0` → `^0.14.0`, because the migration now needs an API (`client/ui`'s `ScrollView` / `useToast`) that the 0.12.0 typings do not have — a pin bump is unavoidable whenever code changes, so it rides along with 0.2.3. |
+| Install-time build step | Still none; every import remains on the host-supplied list (`@getpaseo/plugin`, `/client`, `/client/ui`, `/server`, `zod`, `react`, `react-native`, `@tanstack/react-query`, `@types/node`, Node built-ins) — verified against the 0.14.0 `plugin-sdk-specifiers.js`. |
+| New host behaviour relevant to this plugin | **Idle agent runtimes are released after one hour** (`agents.idleRuntimeCleanup`, default on) and the saved session resumes on the next prompt — a session reopen that fires `agent.closed` and re-runs `agent.session_open`. See §18.3. |
+
+### 18.2 Why the floor moved `>=0.8.0` → `>=0.13.0`
+
+§16.2's argument was that the floor must follow the APIs actually used, and
+that this plugin used none above 0.8. That stops being true with this
+migration: `ScrollView` and `useToast` are exported from
+`@getpaseo/plugin/client/ui` **only from 0.13.0 onward** (in 0.12.0 the `ui`
+entry has neither; they lived in `client/react-native`), so a 0.12.0 host would
+compile a bundle whose `ui` module cannot satisfy the import. Declaring
+`>=0.13.0` states the truth, and the real host enforces it — see §18.1. The
+floor is *not* raised to `>=0.14.0`: the plugin adopts no 0.14.0 API, and a
+floor is an API promise rather than a record of the newest host tested.
+
+### 18.3 Recommendations for improvement (documented, not implemented)
+
+Each item is **new functionality** → second digit if adopted (`0.2.3 →
+0.3.0`). They are recorded here rather than built because this task asked for
+a compatibility check and the migration of deprecated API.
+
+1. **Invalidate the listing cache on `server.on("agent.closed")`.** The
+   30-second listing cache and the "due for cleanup" hint currently only
+   age out (see *Safety guards and the listing cache* above). With 0.14.0
+   releasing idle runtimes after an hour and resuming on the next prompt,
+   agents now close and reopen far more often, so the event is both cheaper
+   to observe and more valuable to observe. The hook is not deprecated; this
+   plugin simply does not register one yet — this is item 2 of the README's
+   open list.
+2. **A "stop runtime, keep the session" action on the new
+   `session.can_stop_runtime` capability.** 0.14.0 adds the provider-protocol
+   request/response that reports whether a live session runtime can be
+   stopped. It gives the panel a middle ground — release the provider process
+   and its context window pressure without deleting the transcript — which is
+   exactly the trade-off this plugin's users are making today with the binary
+   choice "delete".
+3. **A "refresh session list" Command Center action on the new
+   `agents.ref(id).reload()`.** Memory-flash ships this pattern in 0.9.4; here
+   it would reopen a session and re-run `agent.session_open`, which is the
+   step that invalidates stale runtime state before a list/delete.
+4. **`useTabState` for the panel's filters** (0.13.0, still unadopted from
+   §17.2 item 3) — survives panel reloads instead of resetting.
+5. **Explicitly not recommended: `defineAgentTool`.** Exposing listing,
+   export or **deletion** of on-disk transcripts as a tool callable by the
+   agent itself inverts the trust model of this plugin — it exists so a human
+   can reclaim disk. Skip it even though it is the headline 0.14.0 feature.
+
+### 18.4 Verification (2026-10-30, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install` with the new pin — `package.json` and `package-lock.json` now record `@getpaseo/plugin@^0.14.0` / `0.14.0`, intentionally (§18.1). |
+| `npm run typecheck` (`tsc --noEmit`) against 0.14.0 | **exit 0** |
+| `npm test` | **8 suites / 70 tests pass** |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | **Both entries compile, no boundary errors, 0 warnings**; scan finds **zero** `addSurface` / `addSidebarItem` / `openSurface` / `SettingsGroup` / `useRevealedText` / `client/react-native`. Client bundle 48 456 chars, server bundle 45 628 chars. |
+| Negative control | A copy of this plugin with the old `client/react-native` import restored compiles to a bundle containing `client/react-native` (1 hit) — the scan detects the deprecated specifier rather than reporting nothing by construction. |
+| 0.14.0 manifest schema + floor | Accepted with `>=0.13.0`; rejected for a 0.12.0 daemon with the host's own message; accepted for 0.13.0 and 0.14.0. |
+| Live on an isolated 0.14.0 daemon | **PASS** — scratch home (`/tmp/paseo-scratch`, `daemonVersion "0.14.0"`, own loopback port, production home untouched) with `pluginsEnabled: true`, plugin installed **from the working tree**: status `running`, `[paseo] Plugin ready`, all seven RPC methods registered (`session-manager.delete`, `.delete-batch`, `.export`, `.list`, `settings.session-manager.read` / `.reset` / `.write`), no plugin or client-contribution errors in the daemon log. The only stderr lines are Node's own `DEP0176` runtime warning, not a Paseo plugin-API deprecation. |
+| Post-check cleanup | Scratch daemon stopped and its home removed; the production home was never touched. `git status` contains only the changes this pass made. |
 
 **Not re-verified here (unchanged from §16.4):** the scratch-home install and
 `paseo plugin reload` flow — the 0.13.0 daemon had already loaded the plugin,

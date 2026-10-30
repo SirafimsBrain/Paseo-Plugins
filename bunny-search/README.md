@@ -92,6 +92,49 @@ $PASEO_HOME/plugins/bunny-search/
 
 The host keeps the authoritative settings in its own store (exposed to the plugin via the `settings.bunny-search.read` RPC and change subscription); the JSON file above is a mirror for the MCP server process, which is spawned by agent providers outside the plugin host and therefore cannot use the plugin API.
 
+## Paseo 0.14.0 compatibility
+
+Verified against the **stable Paseo 0.14.0** release (2026-10-30).
+Full evidence: [__doc.md](./__doc.md) §15. **No code change was needed and no
+deprecated API exists in this plugin** — it stays `0.4.2` (no bump, no tag:
+this pass changed no code) and `requirements.paseo` stays `>=0.11.0`.
+
+**Nothing deprecated reaches it.** The `@deprecated` set in
+`@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0, and `dist/client/` did
+not change at all between 0.13.0 and 0.14.0, so `addScreen` /
+`addSidebarHeaderItem` / `addSettingsScreen` / `addCommandCenterItem` and the
+`client/ui` imports are exactly what they were. `server.before("agent.create")`
+— the plugin's only hook — is still the supported spelling in 0.14.0.
+
+**One documentation discrepancy, recorded:** the deployed hooks page says
+`server.addHook("agent.open.before")` "is available from Paseo 0.14", but
+neither `@getpaseo/plugin@0.14.0` nor the installed 0.14.0 host contains
+`addHook` anywhere. Keep `server.before(...)` / `server.on(...)` until the SDK
+ships it — see the root
+[README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29).
+
+**Recommendations for improvement — written down, deliberately not
+implemented:** [__doc.md](./__doc.md) §15.2. The important one is to contribute
+the search server in `before("agent.session_open")` as well as in
+`agent.create`, so injection reaches agents created before `injectIntoAgents`
+was switched on and survives 0.14.0's new idle-runtime release; then a native
+`web_search` tool through the new `defineAgentTool`, and a "repair search
+tools" action on the new `agents.ref(id).reload()`.
+
+**Verification:** typecheck clean and vitest **9 suites / 95 tests** green
+(2 live-search tests skipped without `BUNNY_LIVE=1`) against
+`@getpaseo/plugin@0.14.0`, installed with
+`--no-save --package-lock=false` — so `package.json` / `package-lock.json`
+still pin `0.12.0` on purpose. Both entries build with the **real 0.14.0 host
+compiler** (`compileDirectoryPlugin` extracted from the installed `app.asar`)
+with no boundary errors and **zero deprecated calls**, and the manifest passes
+the real 0.14.0 parser with its `>=0.11.0` floor (rejected for a 0.10.0 host,
+accepted for 0.11.0 and 0.14.0). Live: `running` in an **isolated 0.14.0
+daemon** (scratch home, production config untouched) installed from the
+working tree — `[paseo] Plugin ready`, six RPC methods registered and
+`[bunny-search] settings mirrored: …` in the plugin log, with no plugin or
+contribution errors in the daemon log.
+
 ## Paseo 0.13.0 compatibility
 
 Verified against the **stable Paseo 0.13.0** release (2026-10-24).

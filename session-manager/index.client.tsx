@@ -10,7 +10,6 @@ export default function contribute(client: PluginClientContext) {
     id: "session-manager",
     title: "Agent Sessions",
     icon: "Database",
-    context: "workspace",
     locations: ["workspace", "explorer"],
     Component: SessionManagerPanel,
   });
