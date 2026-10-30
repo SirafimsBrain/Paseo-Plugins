@@ -24,12 +24,18 @@
     .muted { color: #888; font-size: 0.85rem; }
     .mono { font-family: monospace; font-size: 0.85rem; }
     /* modal */
-    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
-    .modal { background: #fff; color: #111; border-radius: 10px; padding: 1.25rem; min-width: 320px; max-width: 520px; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; z-index: 100; overflow-y: auto; }
+    .modal { background: #fff; color: #111; border-radius: 10px; padding: 1.25rem; min-width: 320px; max-width: 520px; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); margin: auto; }
     @media (prefers-color-scheme: dark) { .modal { background: #1f2937; color: #f3f4f6; } }
     .modal h3 { margin: 0 0 0.75rem; }
     .modal .field { display: flex; flex-direction: column; gap: 0.25rem; margin: 0.5rem 0; }
     .modal .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+    /* RDP option groups (stage 0.22.10) */
+    .rdp-advanced { margin: 0.5rem 0; border: 1px solid #8883; border-radius: 8px; padding: 0.35rem 0.75rem 0.6rem; }
+    .rdp-advanced summary { cursor: pointer; font-size: 0.9rem; font-weight: 600; padding: 0.2rem 0; }
+    .rdp-group { margin: 0.75rem 0 0.1rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #888; }
+    label.check { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; margin: 0.2rem 0; }
+    label.check input { width: auto; }
     .hidden { display: none !important; }
     pre { white-space: pre-wrap; font-size: 0.8rem; background: #0001; padding: 0.5rem; border-radius: 6px; }
   </style>

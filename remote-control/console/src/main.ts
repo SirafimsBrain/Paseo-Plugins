@@ -1,4 +1,5 @@
 import { nextCopyName } from "../../shared/naming";
+import { RDP_CHOICES, RDP_PAYLOAD_DEFAULTS } from "../../shared/rdp-fields";
 
 const params = new URLSearchParams(window.location.search);
 let token = params.get("token") ?? "";
@@ -52,6 +53,155 @@ function input(value = "", type = "text", placeholder = ""): HTMLInputElement {
   el.value = value;
   el.placeholder = placeholder;
   return el;
+}
+
+function selectEl(options: readonly (readonly [string, string])[], value: string): HTMLSelectElement {
+  const el = document.createElement("select");
+  for (const [v, text] of options) {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = text;
+    if (v === value) o.selected = true;
+    el.append(o);
+  }
+  return el;
+}
+
+/** A label+checkbox row for the advanced RDP sections. */
+function checkField(label: string, checked: boolean): [HTMLElement, HTMLInputElement] {
+  const wrap = document.createElement("label");
+  wrap.className = "check";
+  const el = document.createElement("input");
+  el.type = "checkbox";
+  el.checked = checked;
+  wrap.append(el, document.createTextNode(label));
+  return [wrap, el];
+}
+
+/**
+ * The RDP payload section of the connection form (stage 0.22.10): every
+ * FreeRDP 3 option group from rdp-pilot, basic fields visible and the rest
+ * collapsed behind "Advanced (RDP)" so the modal stays laconic. Controls
+ * register their payload key at build time; `read()` assembles the payload —
+ * keys at their "Automatic"/empty value are dropped, keys the form does not
+ * manage (payload.auth, values from an imported backup) pass through.
+ */
+function rdpForm(initial: any | null): { element: HTMLElement; read: () => Record<string, unknown> } {
+  const stored = initial && initial.protocol === "rdp" && initial.payload ? initial.payload : {};
+  const base: Record<string, any> = { ...RDP_PAYLOAD_DEFAULTS, ...stored };
+  const has = (k: string): boolean => base[k] !== undefined && base[k] !== null;
+
+  const bools: [string, HTMLInputElement][] = [];
+  const strs: [string, HTMLInputElement][] = [];
+  const selects: [string, HTMLSelectElement][] = [];
+
+  const adv = document.createElement("details");
+  adv.className = "rdp-advanced";
+  const summary = document.createElement("summary");
+  summary.textContent = "Advanced (RDP)";
+  adv.append(summary);
+
+  const group = (title: string): void => {
+    const h = document.createElement("p");
+    h.className = "rdp-group";
+    h.textContent = title;
+    adv.append(h);
+  };
+  const addCheck = (label: string, key: string, fallback = false): void => {
+    const [row, el] = checkField(label, has(key) ? base[key] === true : fallback);
+    bools.push([key, el]);
+    adv.append(row);
+  };
+  const addText = (label: string, key: string, placeholder: string): HTMLInputElement => {
+    const el = input(has(key) ? String(base[key]) : "", "text", placeholder);
+    strs.push([key, el]);
+    adv.append(field(label, el));
+    return el;
+  };
+  const addSelect = (label: string, key: string, choices: readonly (readonly [string, string])[], fallback = ""): void => {
+    const el = selectEl(choices, has(key) ? String(base[key]) : fallback);
+    selects.push([key, el]);
+    adv.append(field(label, el));
+  };
+
+  const domainI = input(has("domain") ? String(base.domain) : "", "text", "Windows domain (optional)");
+  strs.push(["domain", domainI]);
+
+  group("Display");
+  const [fullRow, fullI] = checkField("Fullscreen", base.fullscreen === true);
+  bools.push(["fullscreen", fullI]);
+  const [dynRow, dynI] = checkField("Dynamic resolution", base.dynamicResolution !== false);
+  bools.push(["dynamicResolution", dynI]);
+  adv.append(fullRow, dynRow);
+  const widthI = input(has("width") ? String(base.width) : "", "number", "width");
+  const heightI = input(has("height") ? String(base.height) : "", "number", "height");
+  const sizeRow = document.createElement("div");
+  sizeRow.className = "row";
+  sizeRow.append(widthI, heightI);
+  adv.append(field("Window size (width × height)", sizeRow));
+  addSelect("Color depth", "bpp", RDP_CHOICES.bpp, "24");
+  addCheck("Work area (fit within usable desktop)", "workarea");
+  addCheck("Multi-monitor", "multimon");
+
+  group("Performance");
+  addCheck("Smooth fonts (ClearType)", "fonts", true);
+  addCheck("Desktop composition", "aero");
+  addCheck("Full window drag", "windowDrag");
+  addCheck("Menu animations", "menuAnims");
+  addCheck("Themes", "themes");
+  addCheck("Wallpaper", "wallpaper");
+  addSelect("GDI rendering", "gdi", RDP_CHOICES.gdi);
+
+  group("Redirection");
+  addCheck("Clipboard", "clipboard", true);
+  addCheck("Redirect all drives", "drives");
+  addCheck("Redirect home directory", "homeDrive");
+  addCheck("Redirect printers", "printers");
+  addCheck("Redirect smartcards", "smartcards");
+  addText("Serial device", "serial", "/dev/ttyUSB0 (optional)");
+  addSelect("Audio output", "sound", RDP_CHOICES.sound, "0");
+  addCheck("Audio input (microphone)", "microphone");
+
+  group("Security");
+  addSelect("Protocol security", "sec", RDP_CHOICES.sec);
+  addCheck("Ignore certificate errors", "certIgnore", true);
+  addText("Certificate name", "certName", "accept only this name (optional)");
+
+  group("Keyboard");
+  addText("Layout", "kbdLayout", "e.g. 0x409 or 'US' (optional)");
+  addSelect("Type", "kbdType", RDP_CHOICES.kbdType);
+
+  group("Network");
+  addSelect("Connection type", "network", RDP_CHOICES.network);
+  addCheck("Compression", "compression", true);
+
+  group("Codecs");
+  addCheck("RemoteFX", "rfx");
+  addCheck("NSCodec", "nsc");
+  addCheck("JPEG codec", "jpeg");
+  addSelect("JPEG quality", "jpegQuality", RDP_CHOICES.jpegQuality);
+
+  const root = document.createElement("div");
+  root.className = "rdp-fields";
+  root.append(field("Domain", domainI), adv);
+
+  const read = (): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...base };
+    const put = (key: string, value: unknown): void => {
+      if (value === "" || value === undefined || value === null) delete out[key];
+      else out[key] = value;
+    };
+    for (const [key, el] of strs) put(key, el.value.trim());
+    for (const [key, el] of selects) put(key, el.value);
+    for (const [key, el] of bools) put(key, el.checked);
+    const w = Number(widthI.value);
+    const h = Number(heightI.value);
+    put("width", Number.isInteger(w) && w > 0 ? w : undefined);
+    put("height", Number.isInteger(h) && h > 0 ? h : undefined);
+    return out;
+  };
+
+  return { element: root, read };
 }
 
 // ---------- state ----------
@@ -206,6 +356,9 @@ function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } 
     if (initial && initial.groupId === g.id) o.selected = true;
     groupI.append(o);
   }
+  // New = `initial === null` → defaults; duplicate/edit prefill from the
+  // source row (payload only when it is an RDP connection).
+  const rdp = rdpForm(initial);
   openModal((close) => {
     const m = document.createElement("div");
     m.innerHTML = `<h3>${duplicateOf ? "Duplicate connection" : isNew ? "New connection" : "Edit connection"}</h3>`;
@@ -221,8 +374,16 @@ function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } 
       field("Port", portI),
       field("Username", userI),
       field(isNew ? "Password" : "New password", passI),
+      rdp.element,
       err,
     );
+    // The RDP option groups exist only for the RDP protocol; switching the
+    // select hides them and the submit handler then drops the payload.
+    const syncRdp = (): void => {
+      rdp.element.style.display = protoI.value === "rdp" ? "" : "none";
+    };
+    protoI.addEventListener("change", syncRdp);
+    syncRdp();
     const actions = document.createElement("div");
     actions.className = "actions";
     const cancel = document.createElement("button");
@@ -244,6 +405,9 @@ function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } 
         };
         if (passI.value !== "") {
           body.password = passI.value;
+        }
+        if (protoI.value === "rdp") {
+          body.payload = rdp.read();
         }
         if (duplicateOf) {
           body.duplicateOf = duplicateOf;

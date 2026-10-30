@@ -13,6 +13,7 @@ import { bundleHasSecrets, buildExportBundle, importBundle, openBundle } from ".
 import { testSshConnection } from "./probe";
 import type { SshProbe } from "./probe";
 import { nextCopyName } from "../shared/naming";
+import { validatePayload } from "../shared/protocols";
 
 export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 
@@ -352,6 +353,12 @@ export class ConsoleHttpServer {
                   ? null
                   : Number(b.port);
             const username = b.username ? String(b.username) : (source?.username ?? "");
+            // Payload is validated against the protocol schema *before* any
+            // vault write, so a rejected create stores nothing (0.22.10).
+            const payload = validatePayload(
+              protocol,
+              (b.payload as Record<string, unknown>) ?? (source ? { ...source.payload } : {}),
+            );
             const id = `conn_${Math.random().toString(36).slice(2)}`;
             let secretRefs: Record<string, string> = {
               ...((source?.secretRefs ?? {}) as Record<string, string>),
@@ -395,9 +402,7 @@ export class ConsoleHttpServer {
             }
             const conn = this.store!.createConnection({
               id, groupId, name, protocol, host, port, username,
-              payload:
-                (b.payload as Record<string, unknown>) ??
-                (source ? { ...source.payload } : {}),
+              payload,
               secretRefs,
             });
             this.sendJson(res, 201, { connection: conn });
@@ -461,7 +466,10 @@ export class ConsoleHttpServer {
             if ("host" in b) patch.host = String(b.host);
             if ("port" in b) patch.port = b.port === null ? null : Number(b.port);
             if ("username" in b) patch.username = String(b.username);
-            if ("payload" in b) patch.payload = b.payload as Record<string, unknown>;
+            if ("payload" in b) {
+              const effectiveProtocol = "protocol" in b ? String(b.protocol) : existing.protocol;
+              patch.payload = validatePayload(effectiveProtocol, b.payload);
+            }
             if ("secretRefs" in b) patch.secretRefs = b.secretRefs as Record<string, string>;
             // A changed target invalidates the recorded auth method (0.21.10):
             // back to "unknown" until the next successful test. An explicit

@@ -43,6 +43,82 @@ in v0.13.0 sources (verified via the terminal-close discussion and the
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## RDP connection creation (stage 0.22.10, 2026-10-30)
+
+Creating an RDP connection is now a first-class form: the protocol select in
+the connection modal shows the full FreeRDP 3 option set (ported from
+rdp-pilot), the server validates every payload against its protocol schema
+before anything is written, and a launch turns that payload into argv.
+
+### Payload schema (`shared/protocols.ts` + `shared/rdp-fields.ts`)
+
+- `rdpPayloadSchema` is a **loose** zod object: it type-checks the fields
+  the plugin owns and preserves unknown keys — `payload.auth` (written by
+  the connection test) and keys from imported backups must survive a save.
+  The `ssh`/`vnc` schemas are loose for the same reason.
+- Choice tables (`RDP_BPP`, `RDP_SEC`, … plus the human labels in
+  `RDP_CHOICES`) live in the dependency-free `shared/rdp-fields.ts`: the
+  console bundle imports it directly (zod stays out of the browser bundle)
+  and the schema derives its enums from the same arrays, so form and
+  validation cannot drift apart.
+- An empty choice ("Automatic"/"Default") is **not** a value — the key is
+  dropped and FreeRDP decides.
+- `validatePayload(protocol, payload)` is the single entry point used by
+  `POST /api/connections` and `PATCH /api/connections/:id`: a rejected
+  payload is a 400 naming the offending field, and on POST it throws
+  **before** any vault write, so a rejected create stores nothing.
+
+### Form (`console/src/main.ts`)
+
+Domain stays visible; everything else collapses behind "Advanced (RDP)"
+with rdp-pilot's group titles (Display, Performance, Redirection, Security,
+Keyboard, Network, Codecs) so the modal stays laconic. New connections
+pre-fill `RDP_PAYLOAD_DEFAULTS` (rdp-pilot's FieldSpec defaults, resolution
+1280×720); edit/duplicate pre-fill the stored payload. Controls register
+their payload key at build time: `read()` starts from the stored payload
+(so keys the form does not manage pass through) and overwrites or deletes
+by control state. Switching the protocol away hides the section and the
+submit handler then sends no `payload` at all.
+
+### argv (`server/protocols/external.ts`)
+
+`buildRdpArgs()` is the FreeRDP 3 port of rdp-pilot's `build_spawn()`:
+target → title → domain → display → performance → redirection → security →
+keyboard → network → codecs → `extraArgs` last.
+
+- `/t:` carries the connection name (identifiable windows), `/v:` brackets
+  IPv6 literals.
+- **Absent key → absent option.** A legacy row with an empty payload builds
+  exactly the argv it built before this stage; defaults materialize only
+  once the form has saved them.
+- Secrets still never enter argv: the user password travels via
+  `/from-stdin:force`.
+- `/cert:ignore` remains the detached default (nobody can answer FreeRDP's
+  prompt); `payload.cert` overrides it, `certIgnore: false` opts out
+  explicitly, `certName` adds `/cert:name:` after it.
+- `/kbd:layout:…,type:…` is one compound option; its values pass through
+  `rdpCsvValue()` — quoting only for FreeRDP's comma-separated sub-option
+  parser, never for plain scalar options.
+
+### Deliberately not in this stage
+
+- **RD Gateway** (`/gateway:g:,u:,d:,p:`): rdp-pilot puts the gateway
+  password into argv, which our contract forbids, and FreeRDP 3 has no
+  stdin path for it. The whole group is deferred until a safe mechanism is
+  chosen — half support would hang a detached window on a prompt.
+- Binary discovery (`wlfreerdp3`, `REMOTE_CONTROL_RDP_BIN` override) stays
+  stage E1; the launcher keeps its plain PATH search.
+- The console still shows no Launch button for RDP rows (unchanged): RDP
+  launches come from the sidebar panel (stage 0.18.10).
+
+### Tests
+
+`tests/rdp-create.test.ts`: schema acceptance and rejection (field named),
+unknown-key preservation, the full argv etalon in rdp-pilot's group order,
+legacy-row argv stability, IPv6 bracketing, CSV quoting, `/audio-mode:2`, a
+grep test proving no FreeRDP 2 conversion branch exists, and REST POST/PATCH
+rejection that stores nothing.
+
 ## Service layer: grouped duplicates and the connection test (stage 0.21.10, 2026-10-28)
 
 Three service functions the customer ordered before the key-copy stage: the
