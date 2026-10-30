@@ -70766,6 +70766,7 @@ function formatSearchResponse(response) {
 }
 
 // server/mcp-tools.ts
+var MCP_INSTRUCTIONS = "Bunny Search is your window on the live internet \u2014 use web_search before answering any question about the outside world (releases, versions, pricing, documentation, news) and before asserting anything that may have changed after your training data: an API, flag or library name that might not exist, an error you do not recognize, a fix after a failing build. Search instead of guessing. Results are pointers, not content: open the returned URLs before quoting them, cite the URL, and never present a snippet as verified fact.";
 function str(description) {
   return { type: "string", description };
 }
@@ -70949,7 +70950,7 @@ function parseSettingsFile(filePath = settingsFilePath()) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.4.2";
+var SERVER_VERSION = "0.5.2";
 function writeMessage(message) {
   process.stdout.write(`${JSON.stringify(message)}
 `);
@@ -71003,7 +71004,8 @@ function handleRequest(request, context, serverInfo) {
       respond(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
-        serverInfo
+        serverInfo,
+        instructions: MCP_INSTRUCTIONS
       });
       return;
     }

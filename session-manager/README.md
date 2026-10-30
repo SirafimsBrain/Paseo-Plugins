@@ -117,33 +117,39 @@ here (the plugin registers no hooks) but it is why nothing in this repository
 migrates to `addHook`. See the root
 [README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29).
 
-**Recommendations for improvement — written down, deliberately not
-implemented:** [`__doc.md`](./__doc.md) §18.3. The two worth having: react to
-0.14.0's new **idle-runtime release** (a session reopen fires `agent.closed`
-and re-runs `agent.session_open`, so the listing cache should be invalidated
-on that event instead of only expiring after 30 seconds), and a lighter
-**"stop runtime, keep the session"** action built on the new
-`session.can_stop_runtime` provider capability — a middle ground between
-"leave it running" and deleting the transcript. Adding agents' own tools via
-`defineAgentTool` is explicitly *not* recommended for this plugin: it offers
-destructive operations to agent processes.
+**Recommendations for improvement — implemented in 0.3.3:** the original
+recommendations stay in [`__doc.md`](./__doc.md) §18.3, what was built (and
+why one item was not) is in §18.5. The listing cache is now invalidated on
+0.14.0's new **`agent.closed`** event instead of only ageing out after 30
+seconds, a **"refresh session list"** Command Center action reopens the agent
+through `agents.ref(id).reload()` and rescans with a cold cache, and the panel's
+filters moved to **`useTabState`** so they survive a reload. The lighter
+**"stop runtime, keep the session"** action was investigated and **cannot be
+built from a plugin**: `session.can_stop_runtime` is answered inside the
+provider protocol and consumed by the host's own idle-runtime cleanup, and
+`PaseoApi` exposes no stop/close call — §18.5 lists the evidence. Adding
+agents' own tools via `defineAgentTool` is still explicitly *not* done here:
+it would offer destructive operations to agent processes.
 
-**Verification:** typecheck clean and vitest **8 suites / 70 tests** green
+**Verification:** typecheck clean and vitest **9 suites / 74 tests** green
 against `@getpaseo/plugin@0.14.0`; both entries build with the **real 0.14.0
 host compiler** (`compileDirectoryPlugin` from the installed `app.asar`) with
 no boundary errors and **zero deprecated calls**; the manifest passes the real
-0.14.0 parser with the new `>=0.13.0` floor (rejected for a 0.12.0 host,
-accepted for 0.13.0 and 0.14.0). Live: `running` in an **isolated 0.14.0
-daemon** (scratch home, production config untouched) installed from the
-working tree — `[paseo] Plugin ready`, seven RPC methods registered, no plugin
-or contribution errors in the daemon log.
+0.14.0 parser with the new `>=0.14.0` floor (rejected for 0.13.0 and 0.13.2
+— `reload()` does not exist in `@getpaseo/client@0.13.2` — accepted for
+0.14.0). The live evidence belongs to the 0.2.3 compatibility pass: `running`
+in an **isolated 0.14.0 daemon** (scratch home, production config untouched)
+installed from the working tree — `[paseo] Plugin ready`, seven RPC methods
+registered, no plugin or contribution errors in the daemon log. 0.3.3 was not
+re-run live; it is covered by the unit suites and the host compiler above.
 
 ## Paseo 0.13.0 compatibility
 
 Verified against the **stable Paseo 0.13.0** release (2026-10-24).
 Full evidence: [`__doc.md`](./__doc.md) §17. **No code change was needed**,
 so at that point the plugin was still `0.2.2` and `requirements.paseo` still
-`>=0.8.0`. Both changed in `0.2.3` — see the 0.14.0 section above.
+`>=0.8.0`. Both changed in `0.2.3`, and the floor moved again to `>=0.14.0`
+in `0.3.3` — see the 0.14.0 section above.
 
 **Deprecated in 0.13.0 and still used here (works today, deliberately not
 migrated):**

@@ -608,7 +608,10 @@ this section records what is specific to bunny-search.
 
 **Result: compatible, no code change and no deprecated API in it.** Version
 stays `0.4.2` — no bump and no tag, because this pass changed no code (only
-documentation).
+documentation). Superseded the same day: §15.2's recommendations were then
+implemented on request, which is a real code change and shipped as **0.5.2**
+(§15.4), with the annotated tag `bunny-search@0.5.2` and the floor raised to
+`requirements.paseo >=0.14.0` because the adopted APIs are 0.14.0's.
 
 ### 15.1 What 0.14.0 changed for this plugin
 
@@ -621,17 +624,20 @@ documentation).
 | `agent.turn_ended` `timeline` (always empty) | Not applicable — no lifecycle hooks of any kind are registered. |
 | `SettingsGroup`, panel `context` / `agentId`, `addSurface` / `addSidebarItem` / `openSurface`, `CreateAgentRequestOptions.git` / `worktreeName` | None used; the plugin creates no agents and contributes no panel. |
 | Client audit (DOM globals outside `client/web.ts`) | Still clean — §13.3's fix holds; 0.14.0 changes neither the rule nor the files involved. |
-| Manifest | Passes the real 0.14.0 `readPluginManifest` (strict `requirements` schema); `requirements.paseo` stays `>=0.11.0`, still the honest floor. Enforced by the real host: the same manifest is **rejected for `version: 0.10.0`** (`requires Paseo >=0.11.0`) and accepted for `0.11.0` and `0.14.0`. |
-| Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]`. The `0.14.0 → 0.12.0` pin in `package.json` is deliberate — no code needs a 0.14.0 API, and the host supplies the runtime SDK. |
+| Manifest | Passes the real 0.14.0 `readPluginManifest` (strict `requirements` schema); `requirements.paseo` stays `>=0.11.0`, still the honest floor **at the time of this pass** — §15.4 raises it to `>=0.14.0` once the recommendations are implemented. Enforced by the real host: the same manifest is **rejected for `version: 0.10.0`** (`requires Paseo >=0.11.0`) and accepted for `0.11.0` and `0.14.0`. |
+| Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]`. The `0.14.0 → 0.12.0` pin in `package.json` was deliberate — no code needed a 0.14.0 API at this point, and the host supplies the runtime SDK; §15.4 changes it to `^0.14.0` when the code starts using `defineAgentTool`. |
 | MCP server side | The bundled stdio `dist/mcp-server.js` is a standalone Node bundle that speaks no Paseo SDK API; nothing in 0.14.0 reaches it. |
 | New host behaviour that touches injection | **Idle agent runtimes are released after one hour** (`agents.idleRuntimeCleanup`, default on) and the saved session resumes on the next prompt — a *session reopen*. `agent.create` injection is written into the saved config, so it survives; but see §15.2 item 1 for the gap it exposes. |
 | `server.addHook` / `agent.open.before` | **Documented but absent.** The deployed hooks page claims `addHook` "is available from Paseo 0.14", yet `grep -r addHook` over `@getpaseo/plugin@0.14.0` **and** over the extracted 0.14.0 host's `@getpaseo/**` returns nothing. The type-safe 0.14.0 spelling stays `server.before("agent.session_open")`. |
 
-### 15.2 Recommendations for improvement (documented, not implemented)
+### 15.2 Recommendations for improvement (recorded during the pass, implemented in 0.5.2)
 
 Each item below is **new functionality**, so adopting any of them means a
-second-digit bump (`0.4.2 → 0.5.0`) and its own test pass. They are recorded
-here rather than built because this task asked for a compatibility check.
+second-digit bump (`0.4.2 → 0.5.2`) and its own test pass. They were written
+down here rather than built during the compatibility pass, because that task
+asked for a check; all five were then implemented when asked to. The original
+wording is kept unchanged so the reasoning stays auditable — what was actually
+built, item by item, is in §15.4.
 
 1. **Also contribute the MCP server in `before("agent.session_open")`**
    (`mcpServers` on that request is new in 0.14.0). The hook re-runs on
@@ -686,3 +692,41 @@ session-open contribution above is additive, not a replacement.
 | Live on an isolated 0.14.0 daemon | **PASS** — a scratch home (`/tmp/paseo-scratch`, `daemonVersion "0.14.0"`, loopback on its own port, production home untouched) with `pluginsEnabled: true` and the plugin installed **from the working tree**: status `running`, `[paseo] Plugin ready`, the six RPC methods registered (`bunny-search.connection-test`, `.search`, `.status`, `settings.bunny-search.*`) and the server-side effect visible — `[bunny-search] settings mirrored: …/plugins/bunny-search/settings.json`. No plugin or client-contribution errors in the daemon log; the only stderr lines are Node's own `DEP0176` / `DEP0129` runtime warnings, not Paseo plugin-API deprecations. |
 | Negative control | The same compiler run against a copy of session-manager with the old `client/react-native` import restored finds `client/react-native` in the bundle (1 hit), proving the scan would catch a regression. |
 | Post-check cleanup | SDKs restored to the pinned `0.12.0`, `git status` clean apart from the documentation this pass added, typecheck exit 0 on the restored state. |
+
+### 15.4 Implementation of §15.2 (2026-10-30, shipped as 0.5.2)
+
+All five recommendations are implemented. They are new functionality, so this
+is a second-digit release: `0.4.2 → 0.5.2`, annotated tag
+`bunny-search@0.5.2`. Two consequences follow the code:
+
+* **The SDK pin is now `@getpaseo/plugin@^0.14.0`** (it was `0.12.0`, held back
+  while no 0.14.0 API was used): `defineAgentTool` and the `labels` / `tools` /
+  `mcpServers` fields of the session-open request exist only there.
+* **`requirements.paseo` moved `>=0.11.0` → `>=0.14.0`** for the same reason —
+  a floor follows the APIs actually used, not the newest host tested. Verified
+  with the real host parser: rejected for 0.13.0 and 0.13.2, accepted for
+  0.14.0.
+
+| # | Recommendation (§15.2) | What was built |
+| --- | --- | --- |
+| 1 | Contribute the MCP server in `before("agent.session_open")` | New `server/session-open.ts` (pure decision) + `server/agent-record.ts` (collision-safe read of the agent's saved `mcpServers` from `$PASEO_HOME/agents/*/<agentId>.json`; every unreadable state fails safe to *skip*), wired in `index.server.ts`. Skips `purpose: "history"`, skips `reason: "create"` while the `agent.create` hook owns creation, and probes `capabilities.supportsMcpServers` only when a contribution is still possible — a gated-off or already-provisioned agent costs no daemon round trip on open. |
+| 2 | Native `web_search` agent tool | New `server/agent-tools.ts` → `bunny_web_search` via `defineAgentTool`: zod input (`query`, `max_results`, `categories`, `language` — the MCP tool's own argument names, so the two paths are interchangeable), a 10-minute call ceiling, `{ text, structuredContent, isError }` out, `signal.aborted` honoured, wrapping the same `searchWeb()` the RPC uses. Attached exactly where no MCP server is contributed in the same open, so an agent never sees two names for one search. **Named with a prefix on purpose:** Paseo rejects a plugin tool that collides with one of its own built-ins (`plugin-tools.js`) or with another plugin (`plugins/runtime.js`), and both rejections are load/open-time failures. |
+| 3 | "Repair search tools" Command Center action | `bunny-search.agent-reload` RPC → `paseo.agents.ref(id).reload()` in `index.server.ts`, surfaced as a `context: "agent"` command in `index.client.tsx`. A refused reload throws, which the host shows as an error toast, so it is never silent. |
+| 4 | Gate injection with `request.labels` | Two new settings, both on Settings → Integration: `labelGateKey` (empty = today's host-wide switch; otherwise the agent must carry that label key with an opt-in value — anything but `off` / `false` / `no` / `0` / empty) and `skipProviders` (comma-separated provider ids, matched case-insensitively). **`agent.create` has no labels** — `PluginBeforeRequests["agent.create"]` carries only `config` and `env` — so with a gate configured the create hook deliberately injects nothing and `agent.session_open` owns creation, where `request.labels` exists. The gate blocks *both* contributions: the attached tool must not become a back door around it. |
+| 5 | `instructions` in the MCP `initialize` response | `MCP_INSTRUCTIONS` lives in `server/mcp-tools.ts` rather than `server/mcp-server.ts` (that module runs `main()` on import and cannot be loaded in-process by a test) and is returned from `initialize`. One paragraph: when to search — outside-world questions, an API or flag that may not exist, an unfamiliar error, a failing build — and that results are pointers to be opened and cited, not quoted from the snippet. |
+
+Explicitly **unchanged**: the `agent.create` hook still persists the server
+into the agent's saved configuration whenever no gate is configured. That
+persistence across restarts is the property the plugin depends on; the
+session-open contribution is additive, not a replacement.
+
+**Verification of 0.5.2 (2026-10-30, this machine)**
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install -D @getpaseo/plugin@0.14.0` → `package.json` / `package-lock.json` now record `^0.14.0`, intentionally (the code needs those APIs). |
+| `npm run typecheck` (`tsc -b`, three projects) against 0.14.0 | **exit 0** |
+| `npm test` (`pretest` rebuilds `dist/mcp-server.js`, now stamped `0.5.2`) | **10 suites / 133 tests pass**, 1 suite with the 2 `BUNNY_LIVE=1` tests skipped — up from 9 / 95: the new `tests/agent-hooks.test.ts` adds 38 tests over the record reader, the gate, the decision matrix, both hooks, the repair RPC, the tool and the instructions, and `tests/mcp-server-e2e.test.ts` now asserts `instructions` on a real spawned server. |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | **both entries compile, no boundary errors, 0 warnings, `deprecatedHits: []`**; client bundle 39 555 chars, server 3 360 671 chars. |
+| Manifest floor | rejected for 0.13.0 and 0.13.2 with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
+| Live daemon | **Not re-run for 0.5.2** — the isolated scratch home of §15.3 was removed after that pass; the new code is covered by the unit/e2e suites and the real host compiler above. |

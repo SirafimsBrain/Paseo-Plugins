@@ -147,6 +147,22 @@ export const connectionStatus = defineRpc({
   output: connectionStatusSchema,
 });
 
+/**
+ * Reopens the agent's provider session (`agents.ref(id).reload()`), which reruns
+ * `before("agent.session_open")` and re-contributes the search server/tool. The
+ * supported answer to an agent that lost its search tools after an idle runtime
+ * release or an OpenCode location eviction, instead of recreating the agent.
+ */
+export const agentReload = defineRpc({
+  name: "bunny-search.agent-reload",
+  input: z.object({ agentId: z.string().trim().min(1) }),
+  output: z.object({
+    ok: z.boolean(),
+    /** Set when the reload was refused (unknown agent, busy session, …). */
+    error: z.string().nullable(),
+  }),
+});
+
 /** Runs a search through the configured provider (UI-side quick check). */
 export const runSearch = defineRpc({
   name: "bunny-search.search",

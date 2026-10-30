@@ -102,6 +102,25 @@ export const deleteSessions = defineRpc({
   }),
 });
 
+/**
+ * Reopens the agent's provider session (`agents.ref(id).reload()`), which reruns
+ * `before("agent.session_open")` and recomputes the runtime state a list/delete
+ * relies on. The server side also drops its listing cache afterwards, so the panel's
+ * next read is fresh instead of waiting out the 30-second TTL.
+ *
+ * The supported answer to a stale "still running" flag (§18.3 item 3): reopening is
+ * the step that reconciles the session with its provider.
+ */
+export const refreshSession = defineRpc({
+  name: "session-manager.refresh",
+  input: z.object({ agentId: z.string().trim().min(1) }),
+  output: z.object({
+    ok: z.boolean(),
+    /** Set when the reload was refused (unknown agent, busy session, …). */
+    error: z.string().nullable(),
+  }),
+});
+
 export const exportSession = defineRpc({
   name: "session-manager.export",
   input: z.object({

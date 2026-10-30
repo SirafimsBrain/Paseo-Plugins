@@ -113,34 +113,42 @@ neither `@getpaseo/plugin@0.14.0` nor the installed 0.14.0 host contains
 ships it — see the root
 [README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29).
 
-**Recommendations for improvement — written down, deliberately not
-implemented:** [__doc.md](./__doc.md) §15.2. The important one is to contribute
-the search server in `before("agent.session_open")` as well as in
-`agent.create`, so injection reaches agents created before `injectIntoAgents`
-was switched on and survives 0.14.0's new idle-runtime release; then a native
-`web_search` tool through the new `defineAgentTool`, and a "repair search
-tools" action on the new `agents.ref(id).reload()`.
+**Recommendations for improvement — implemented in 0.5.2:** the original
+recommendations stay in [__doc.md](./__doc.md) §15.2, what was built is in
+§15.4. The search server is now also contributed in
+`before("agent.session_open")`, so injection reaches agents created before
+`injectIntoAgents` was switched on and survives 0.14.0's new idle-runtime
+release — collision-safe, because the agent's saved `mcpServers` are read from
+the daemon's own record and every unreadable state fails safe to *skip*; a
+native `bunny_web_search` tool rides along through `defineAgentTool` (the
+fallback for providers without MCP support); a **"repair search tools"**
+Command Center action runs the new `agents.ref(id).reload()`; injection can be
+gated per agent by a **label** (`labelGateKey`) or excluded per **provider**
+(`skipProviders`); and the MCP `initialize` response now carries
+`instructions` telling agents when to search and to open the returned URLs.
 
-**Verification:** typecheck clean and vitest **9 suites / 95 tests** green
+**Verification:** typecheck clean and vitest **10 suites / 133 tests** green
 (2 live-search tests skipped without `BUNNY_LIVE=1`) against
-`@getpaseo/plugin@0.14.0`, installed with
-`--no-save --package-lock=false` — so `package.json` / `package-lock.json`
-still pin `0.12.0` on purpose. Both entries build with the **real 0.14.0 host
-compiler** (`compileDirectoryPlugin` extracted from the installed `app.asar`)
-with no boundary errors and **zero deprecated calls**, and the manifest passes
-the real 0.14.0 parser with its `>=0.11.0` floor (rejected for a 0.10.0 host,
-accepted for 0.11.0 and 0.14.0). Live: `running` in an **isolated 0.14.0
+`@getpaseo/plugin@0.14.0`, now pinned `^0.14.0` in `package.json` and
+`package-lock.json` because the code needs those APIs. Both entries build with
+the **real 0.14.0 host compiler** (`compileDirectoryPlugin` extracted from the
+installed `app.asar`) with no boundary errors and **zero deprecated calls**,
+and the manifest passes the real 0.14.0 parser with its `>=0.14.0` floor
+(rejected for 0.13.0 and 0.13.2, accepted for 0.14.0). The live evidence
+belongs to the 0.4.2 compatibility pass: `running` in an **isolated 0.14.0
 daemon** (scratch home, production config untouched) installed from the
 working tree — `[paseo] Plugin ready`, six RPC methods registered and
 `[bunny-search] settings mirrored: …` in the plugin log, with no plugin or
-contribution errors in the daemon log.
+contribution errors in the daemon log. 0.5.2 was not re-run live; it is
+covered by the unit/e2e suites and the host compiler above.
 
 ## Paseo 0.13.0 compatibility
 
 Verified against the **stable Paseo 0.13.0** release (2026-10-24).
 Full evidence: [__doc.md](./__doc.md) §14. **No code change was needed, and
-no deprecated 0.13.0 API remains in this plugin** — it is still `0.4.2` and
-`requirements.paseo` still `>=0.11.0`.
+no deprecated 0.13.0 API remains in this plugin** — at that point it was still
+`0.4.2` with `requirements.paseo` `>=0.11.0` (0.5.2 later moved the floor to
+`>=0.14.0`, see above).
 
 **Nothing deprecated reaches it.** The plugin imports its UI from
 `@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`, never from the

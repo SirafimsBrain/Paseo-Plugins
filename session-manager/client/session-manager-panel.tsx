@@ -1,9 +1,10 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc, useSettings } from "@getpaseo/plugin/client";
+import { useRpc, useSettings, useTabState } from "@getpaseo/plugin/client";
 import { ScrollView, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { z } from "zod";
 import type { AgentSession, SessionTarget } from "../shared/session-manager";
 import { deleteSessions, exportSession, listSessions } from "../shared/session-manager";
 import { DEFAULT_SETTINGS, sessionManagerSettings } from "../shared/settings";
@@ -42,6 +43,27 @@ interface Filters {
   ageDays: number;
   archivedOnly: boolean;
 }
+
+/**
+ * The three filters are persisted per panel tab (`useTabState`, §18.3 item 4).
+ * The panel used to reset them on every reopen, which is exactly wrong for a
+ * cleanup session: you come back to the same "older than 30 days" view. The schema
+ * validates whatever the tab hands back, so a stale or foreign value falls back to
+ * the defaults instead of corrupting the query.
+ */
+const filterStateSchema = z.object({
+  providerFilter: z.string(),
+  ageDays: z.number(),
+  archivedOnly: z.boolean(),
+});
+
+type FilterState = z.infer<typeof filterStateSchema>;
+
+const DEFAULT_FILTER_STATE: FilterState = {
+  providerFilter: "all",
+  ageDays: 0,
+  archivedOnly: false,
+};
 
 interface Progress {
   phase: "export" | "delete";
@@ -136,7 +158,12 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspacePanelProps) {
+export function SessionManagerPanel({
+  theme,
+  layout,
+  navigation,
+  tab,
+}: PluginWorkspacePanelProps) {
   const listRpc = useRpc(listSessions);
   const deleteBatchRpc = useRpc(deleteSessions);
   const exportRpc = useRpc(exportSession);
@@ -146,9 +173,22 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
   const settings = useSettings(sessionManagerSettings);
   const settingsValues = settings.status === "ready" ? settings.values : DEFAULT_SETTINGS;
 
-  const [providerFilter, setProviderFilter] = useState<string>("all");
-  const [ageDays, setAgeDays] = useState<number>(0);
-  const [archivedOnly, setArchivedOnly] = useState<boolean>(false);
+  // Filters live in the tab, not in component state: they survive a panel reload,
+  // a plugin reload and a workspace reopen (§18.3 item 4). The setters below are
+  // derived from one stored object, so the intent effect writes the whole filter
+  // set in one go instead of racing three independent updates.
+  const [filterState, setFilterState] = useTabState<FilterState>(
+    tab,
+    filterStateSchema,
+    DEFAULT_FILTER_STATE,
+  );
+  const { providerFilter, ageDays, archivedOnly } = filterState;
+  const setProviderFilter = (next: string): void =>
+    setFilterState({ ...filterState, providerFilter: next });
+  const setAgeDays = (next: number): void =>
+    setFilterState({ ...filterState, ageDays: next });
+  const setArchivedOnly = (next: boolean): void =>
+    setFilterState({ ...filterState, archivedOnly: next });
   const [oldestFirst, setOldestFirst] = useState<boolean>(DEFAULT_SETTINGS.sortOldestFirst);
   const [selected, setSelected] = useState<string[]>([]);
   const [pending, setPending] = useState<SessionTarget[] | null>(null);
@@ -206,9 +246,13 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
       ageDays: intent.ageDays ?? ageDays,
       archivedOnly: intent.archivedOnly ?? archivedOnly,
     };
-    setProviderFilter(next.providerFilter);
-    setAgeDays(next.ageDays);
-    setArchivedOnly(next.archivedOnly);
+    setFilterState(next);
+    if (intent.refresh) {
+      // "Refresh session list": the server already reopened the agent and dropped
+      // its listing cache, so bypass the 30 s cache on this read as well.
+      forceRefresh.current = true;
+      void refetch();
+    }
     setPending(null);
     if (intent.selectShown) {
       const matching = filterSessions(sessions, next);
@@ -630,7 +674,7 @@ export function SessionManagerPanel({ theme, layout, navigation }: PluginWorkspa
           accessibilityRole="button"
           style={archivedOnly ? styles.chipActive : styles.chip}
           onPress={() => {
-            setArchivedOnly((current) => !current);
+            setArchivedOnly(!archivedOnly);
             setPending(null);
           }}
         >

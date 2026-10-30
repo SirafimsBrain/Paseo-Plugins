@@ -25,6 +25,29 @@ export interface JsonSchemaProperty {
   default?: unknown;
 }
 
+/**
+ * `instructions` of the MCP `initialize` result (0.5.2).
+ *
+ * The MCP spec lets a server describe itself to the client, and the harnesses that
+ * surface it show these sentences next to the tool list — the one place an agent
+ * reads on every session, before it decides whether to search at all. One paragraph,
+ * covering when to search and what to do with the answer, rather than duplicating the
+ * tool description: clients that surface server instructions show it, clients that do
+ * not are unaffected. The same trick memory-flash 0.9.4 uses for its protocol.
+ *
+ * Lives here, not in `mcp-server.ts`, so it is testable without spawning the stdio
+ * process (that module runs `main()` on import).
+ */
+export const MCP_INSTRUCTIONS =
+  "Bunny Search is your window on the live internet — use web_search before answering " +
+  "any question about the outside world (releases, versions, pricing, documentation, " +
+  "news) and before asserting anything that may have changed after your training data: " +
+  "an API, flag or library name that might not exist, an error you do not recognize, " +
+  "a fix after a failing build. Search instead of guessing. Results are pointers, not " +
+  "content: open the returned URLs before quoting them, cite the URL, and never present " +
+  "a snippet as verified fact.";
+
+
 export interface McpToolDefinition {
   name: string;
   title: string;

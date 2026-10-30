@@ -122,11 +122,15 @@ describe("bunny-search MCP server (stdio e2e)", () => {
       protocolVersion?: string;
       capabilities?: { tools?: unknown };
       serverInfo?: { name?: string; version?: string };
+      instructions?: string;
     };
     expect(response.jsonrpc).toBe("2.0");
     expect(result.protocolVersion).toBe("2024-11-05");
     expect(result.capabilities?.tools).not.toBeUndefined();
     expect(result.serverInfo?.name).toBe("bunny-search");
+    // 0.5.2: the server describes itself to clients that surface instructions.
+    expect(result.instructions).toContain("web_search");
+    expect(result.instructions).toContain("open the returned URLs");
   });
 
   it("lists web_search and search_status tools", async () => {

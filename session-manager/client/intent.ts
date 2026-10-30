@@ -15,6 +15,12 @@ export interface SessionManagerIntent {
   archivedOnly?: boolean;
   /** Select every row that matches the intent. */
   selectShown?: boolean;
+  /**
+   * Rescan instead of trusting the server's listing cache. Set by the
+   * "refresh session list" command, which has just reopened the agent and
+   * invalidated that cache on the server side.
+   */
+  refresh?: boolean;
 }
 
 let intent: SessionManagerIntent | null = null;

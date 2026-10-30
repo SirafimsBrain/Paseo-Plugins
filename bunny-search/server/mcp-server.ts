@@ -1,4 +1,5 @@
 import {
+  MCP_INSTRUCTIONS,
   MCP_TOOLS,
   dispatchMcpTool,
   type McpDispatchContext,
@@ -98,6 +99,7 @@ function handleRequest(
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
         serverInfo,
+        instructions: MCP_INSTRUCTIONS,
       });
       return;
     }

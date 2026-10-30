@@ -19,6 +19,18 @@ import { paseoHome } from "./paths";
  * - the live MCP handshake probe of the connection test.
  */
 
+/**
+ * Key the plugin registers its MCP server under — in the `agent.create` hook (which
+ * writes it into the agent's saved configuration) and in
+ * `before("agent.session_open")` (which merges it launch-only).
+ *
+ * The two must agree: two different keys would spawn the server twice for one agent,
+ * and a key the agent's saved configuration already carries aborts the session open
+ * (see `server/agent-record.ts`), which is why the session-open side also uses this
+ * constant as the collision name.
+ */
+export const INJECTED_SERVER_NAME = "bunny-search";
+
 /** The command that spawns the MCP server, as given to agents. */
 export function mcpServerCommand(): { command: string; args: string[] } {
   const entry = resolveMcpEntry();

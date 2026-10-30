@@ -8,6 +8,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { bunnySearchSettings } from "./shared/settings";
 import type { BunnySearchSettings } from "./shared/settings";
 import {
+  agentReload,
   connectionStatus,
   connectionTest,
   runSearch,
@@ -15,7 +16,10 @@ import {
   type RuntimeSettings,
 } from "./shared/contracts";
 import { checkSearchService, formatSearchResponse, providerBaseUrl, searchWeb } from "./server/providers";
-import { mcpServerCommand } from "./server/mcp-launch";
+import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
+import { createWebSearchTool } from "./server/agent-tools";
+import { readSavedMcpServers } from "./server/agent-record";
+import { decideSessionOpen, needsCapabilityProbe, providerExcluded } from "./server/session-open";
 import { probeMcpServer } from "./server/probe";
 import { parseSettingsFile } from "./server/settings-file";
 import { settingsMirrorPath, writeSettingsMirror } from "./server/settings-mirror";
@@ -33,10 +37,14 @@ import { searchInterfaceUrl } from "./server/ui-url";
  *    store; the MCP process, spawned by agent providers,
  *    cannot use the plugin API and reads the file instead).
  * 3. Injects the bunny-search MCP server into every agent created
- *    through Paseo via the `agent.create` before-hook.
+ *    through Paseo via the `agent.create` before-hook, and re-contributes
+ *    it (or the attached `bunny_web_search` tool) on every
+ *    `agent.session_open` — the path that also reaches agents created
+ *    before injection was turned on.
  * 4. Serves the plugin RPC surface for the Paseo UI, including
  *    the connection test (real HTTP probe of the configured
- *    search service + live MCP handshake check).
+ *    search service + live MCP handshake check) and the repair
+ *    reload used by the Command Center action.
  */
 
 export default function contribute(server: PluginServerContext) {
@@ -120,6 +128,23 @@ export default function contribute(server: PluginServerContext) {
     // so the mutation below is guaranteed to be applied to agent creation.
     const state = await settings.read().catch(() => null);
     if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
+    // `PluginBeforeRequests["agent.create"]` carries only `config` and `env` — no
+    // labels — so a configured label gate cannot be evaluated here. Defer the whole
+    // creation-time injection to `agent.session_open`, which reads `request.labels`
+    // (see server/session-open.ts: `createHookOwnsCreation`).
+    if (state.values.labelGateKey.trim().length > 0) {
+      console.log(
+        `[bunny-search] label gate '${state.values.labelGateKey.trim()}' set: ` +
+          "session_open owns the creation-time contribution",
+      );
+      return request;
+    }
+    if (providerExcluded(request.config.provider, state.values.skipProviders)) {
+      console.log(
+        `[bunny-search] create skipped: provider '${request.config.provider}' excluded by skipProviders`,
+      );
+      return request;
+    }
     const { command, args } = mcpServerCommand();
     // `as const` instead of a named `McpStdioServerConfig` annotation: the MCP
     // config types live in @getpaseo/protocol, which is not a host-supplied
@@ -134,13 +159,90 @@ export default function contribute(server: PluginServerContext) {
     } as const;
     request.config.mcpServers = {
       ...(request.config.mcpServers ?? {}),
-      "bunny-search": config,
+      [INJECTED_SERVER_NAME]: config,
     };
     // Diagnostic: visible in `paseo plugin logs bunny-search` — helps to
     // troubleshoot MCP spawn failures on the agent side.
     console.log(`[bunny-search] MCP injected: ${command} ${args.join(" ")}`);
     return request;
   });
+
+  // -------------------------------------------------------------------------
+  // Session-open contribution (Paseo 0.14, 0.5.2)
+  //
+  // `agent.create` writes the agent's *saved* configuration once, at creation. This
+  // hook runs on every open — create, resume after the daemon restart or the 0.14.0
+  // idle-hour runtime release, refresh, import — and is the only place that can reach
+  // an agent created before bunny-search was installed or before `injectIntoAgents`
+  // was switched on (today such an agent keeps searching without a server until it is
+  // recreated).
+  //
+  // The constraints below are the ones memory-flash 0.9.4 learned first in this same
+  // repository: a name that collides with a *saved* server fails the session open, so
+  // the agent's saved `mcpServers` are read from the daemon record
+  // (server/agent-record.ts) and the contribution is skipped whenever that state is
+  // present, unreadable or unknown; `purpose: "history"` never gets a contribution;
+  // and a provider without MCP support aborts the open, hence the capability probe.
+  //
+  // What survives every failure mode is the attached `bunny_web_search` tool: it is
+  // re-derived on each open, never persisted, and cannot collide with an MCP server.
+  // -------------------------------------------------------------------------
+
+  const webSearchTool = createWebSearchTool(readRuntimeSettings);
+
+  const removeSessionOpenHook = server.before(
+    "agent.session_open",
+    async ({ request }, { paseo }) => {
+      const state = await settings.read().catch(() => null);
+      const values = state?.status === "ready" ? state.values : null;
+      const base = {
+        reason: request.reason,
+        purpose: request.purpose,
+        provider: request.provider,
+        labels: request.labels,
+        injectIntoAgents: values?.injectIntoAgents ?? false,
+        serverName: INJECTED_SERVER_NAME,
+        labelGateKey: values?.labelGateKey ?? "",
+        skipProviders: values?.skipProviders ?? "",
+        lookup: readSavedMcpServers(request.agentId),
+      };
+
+      // The daemon is only consulted when an MCP contribution is still possible;
+      // every other branch (gated off, history, create owned by the create hook,
+      // server already saved) is decided without touching it.
+      let supportsMcpServers: boolean | null = null;
+      if (needsCapabilityProbe({ ...base, supportsMcpServers: null })) {
+        const snapshot = await paseo.agents
+          .ref(request.agentId)
+          .refresh()
+          .catch(() => null);
+        supportsMcpServers = snapshot?.agent.capabilities.supportsMcpServers ?? null;
+      }
+
+      const decision = decideSessionOpen({ ...base, supportsMcpServers });
+      console.log(
+        `[bunny-search] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
+      );
+
+      if (!decision.injectMcp && !decision.attachTool) return request;
+
+      const tools = decision.attachTool ? [...request.tools, webSearchTool] : request.tools;
+      let mcpServers = request.mcpServers;
+      if (decision.injectMcp) {
+        const { command, args } = mcpServerCommand();
+        const config = {
+          type: "stdio",
+          command,
+          args,
+          alwaysLoad: true,
+        } as const;
+        mcpServers = { ...request.mcpServers, [INJECTED_SERVER_NAME]: config };
+        console.log(`[bunny-search] session_open MCP injected: ${command} ${args.join(" ")}`);
+      }
+
+      return { ...request, tools, mcpServers };
+    },
+  );
 
   // -------------------------------------------------------------------------
   // RPC surface
@@ -218,6 +320,25 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
+  // --- Repair: reopen the agent's session so the hooks above run again ----------
+  // The supported answer to "this agent lost its search tools": `reload()` reopens
+  // the provider session with its current configuration and reruns
+  // `agent.session_open`, which re-contributes the server or the attached tool.
+  server.handle(agentReload, async (input, { paseo }) => {
+    try {
+      const result = await paseo.agents.ref(input.agentId).reload();
+      if (result === null) {
+        return { ok: false, error: `Agent ${input.agentId} not found or not reloadable.` };
+      }
+      console.log(`[bunny-search] reloaded agent ${input.agentId} (search tools re-registered)`);
+      return { ok: true, error: null };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[bunny-search] agent reload failed: ${message}`);
+      return { ok: false, error: message };
+    }
+  });
+
   // -------------------------------------------------------------------------
 
   return () => {
@@ -225,5 +346,6 @@ export default function contribute(server: PluginServerContext) {
     void disposed;
     removeSettingsListener();
     removeCreateHook();
+    removeSessionOpenHook();
   };
 }

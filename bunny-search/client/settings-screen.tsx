@@ -350,6 +350,20 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
             initialValue={values.mcpServerName}
             onChangeText={(text: string) => patch({ mcpServerName: text })}
           />
+          <SettingsInput
+            label="Label gate"
+            hint="Empty = every agent gets search. Otherwise (e.g. web-search) only agents whose labels carry that key with an opt-in value get the server and the tool; off, false, no, 0 or an empty value are excluded. Applied on every session open."
+            initialValue={values.labelGateKey}
+            placeholder="(no gate)"
+            onChangeText={(text: string) => patch({ labelGateKey: text })}
+          />
+          <SettingsInput
+            label="Skipped providers"
+            hint="Comma-separated provider ids that never receive search tools, e.g. acpx, claude-code — for models you do not want to pay search latency for. Empty = none."
+            initialValue={values.skipProviders}
+            placeholder="(none)"
+            onChangeText={(text: string) => patch({ skipProviders: text })}
+          />
         </SettingsSection>
       </SettingsCard>
     </ScrollView>

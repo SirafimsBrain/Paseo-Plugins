@@ -87,6 +87,24 @@ export const bunnySearchSettings = defineSettings({
     categories: z.string().trim().min(1).max(200).default("general,web"),
     /** Default language code ("ru", "en", …) or "" for auto-detect. */
     language: z.string().trim().max(20).default(""),
+    /**
+     * Per-agent label gate, evaluated from `request.labels` on every session open
+     * (Paseo 0.14). Empty = no gate, one host-wide switch for every agent — the
+     * behaviour this plugin had before. When set (e.g. "web-search"), an agent only
+     * receives the MCP server and the attached tool when its labels carry that key
+     * with an opt-in value: anything except "off", "false", "no", "0" or empty.
+     *
+     * Labels are not available to the `agent.create` hook (its request has only
+     * `config` and `env`), so with a gate configured the create-time injection is
+     * deferred to `agent.session_open`, where the labels are read.
+     */
+    labelGateKey: z.string().trim().max(60).default(""),
+    /**
+     * Providers that never receive search tools, comma-separated and matched
+     * case-insensitively (e.g. "acpx, claude-code") — for models the user does not
+     * want to pay search latency for. Empty = no exclusion.
+     */
+    skipProviders: z.string().trim().max(500).default(""),
   }),
 });
 

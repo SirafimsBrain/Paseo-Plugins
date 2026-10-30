@@ -566,7 +566,11 @@ this section records what is specific to session-manager.
 
 **Result: compatible, two deprecated APIs migrated, shipped as `0.2.3`**
 (patch bump — a migration creates no new functionality), with the annotated
-tag `session-manager@0.2.3`.
+tag `session-manager@0.2.3`. §18.3's recommendations were then implemented on
+request the same day, which is new functionality and shipped as **0.3.3**
+(§18.5) with the annotated tag `session-manager@0.3.3` and the floor raised to
+`requirements.paseo >=0.14.0`, because `agents.ref(id).reload()` only exists
+in the 0.14.0 client (verified: `@getpaseo/client@0.13.2` has no `reload`).
 
 ### 18.1 What 0.14.0 changed for this plugin
 
@@ -580,7 +584,7 @@ tag `session-manager@0.2.3`.
 | Server side | Only `server.registerSettings` + four `server.handle` calls. No `server.on` / `server.before`, so the always-empty `agent.turn_ended` `timeline` and the `addHook` documentation gap are both moot here. |
 | `SettingsGroup` → `SettingsSection`, panel `params.agentId` / `addAgentPanel`, `CreateAgentRequestOptions.git` / `worktreeName` | None used; the plugin creates no agent and contributes no panel of those kinds. |
 | Client audit (DOM globals outside `client/web.ts`) | Still clean — §16.3's fix holds; 0.14.0 changes neither the rule nor these files. |
-| Manifest | Passes the real 0.14.0 `readPluginManifest` with the new `requirements.paseo >=0.13.0`; the same real host code **rejects it for `version: 0.12.0`** (`Plugin "session-manager" requires Paseo >=0.13.0. Your daemon is 0.12.0.`) and accepts 0.13.0 and 0.14.0. |
+| Manifest | Passes the real 0.14.0 `readPluginManifest` with the new `requirements.paseo >=0.13.0`; the same real host code **rejects it for `version: 0.12.0`** (`Plugin "session-manager" requires Paseo >=0.13.0. Your daemon is 0.12.0.`) and accepts 0.13.0 and 0.14.0. Superseded by §18.5: 0.3.3 uses `reload()`, so the floor is now `>=0.14.0`. |
 | SDK pin | `package.json` / `package-lock.json` moved `@getpaseo/plugin` `0.12.0` → `^0.14.0`, because the migration now needs an API (`client/ui`'s `ScrollView` / `useToast`) that the 0.12.0 typings do not have — a pin bump is unavoidable whenever code changes, so it rides along with 0.2.3. |
 | Install-time build step | Still none; every import remains on the host-supplied list (`@getpaseo/plugin`, `/client`, `/client/ui`, `/server`, `zod`, `react`, `react-native`, `@tanstack/react-query`, `@types/node`, Node built-ins) — verified against the 0.14.0 `plugin-sdk-specifiers.js`. |
 | New host behaviour relevant to this plugin | **Idle agent runtimes are released after one hour** (`agents.idleRuntimeCleanup`, default on) and the saved session resumes on the next prompt — a session reopen that fires `agent.closed` and re-runs `agent.session_open`. See §18.3. |
@@ -597,11 +601,15 @@ compile a bundle whose `ui` module cannot satisfy the import. Declaring
 floor is *not* raised to `>=0.14.0`: the plugin adopts no 0.14.0 API, and a
 floor is an API promise rather than a record of the newest host tested.
 
-### 18.3 Recommendations for improvement (documented, not implemented)
+### 18.3 Recommendations for improvement (recorded during the pass, implemented in 0.3.3)
 
 Each item is **new functionality** → second digit if adopted (`0.2.3 →
-0.3.0`). They are recorded here rather than built because this task asked for
-a compatibility check and the migration of deprecated API.
+0.3.3`). They were recorded here rather than built during the pass, because
+that task asked for a compatibility check and the migration of deprecated
+API; items 1, 3 and 4 were then implemented when asked to, and item 2 was
+found not to be implementable from a plugin at all. The original wording is
+kept unchanged — what was actually built (and why item 2 was not) is in
+§18.5.
 
 1. **Invalidate the listing cache on `server.on("agent.closed")`.** The
    30-second listing cache and the "due for cleanup" hint currently only
@@ -646,3 +654,56 @@ a compatibility check and the migration of deprecated API.
 `paseo plugin reload` flow — the 0.13.0 daemon had already loaded the plugin,
 and reloading a plugin the user is actively using is a live-system action this
 pass did not take.
+
+### 18.5 Implementation of §18.3 (2026-10-30, shipped as 0.3.3)
+
+Items 1, 3 and 4 are implemented; item 2 turned out **not to be implementable
+from a plugin at all** (evidence below) and item 5 stays deliberately not
+done. New functionality → second digit: `0.2.3 → 0.3.3`, annotated tag
+`session-manager@0.3.3`.
+
+One consequence follows the code: **`requirements.paseo` moved `>=0.13.0` →
+`>=0.14.0`**, because `agents.ref(id).reload()` exists only in the 0.14.0
+client — checked against the npm tarball: `@getpaseo/client@0.13.2` has no
+`reload` member at all. The other two adopted APIs are older
+(`server.on("agent.closed")` is present in 0.13.0, `useTabState` since
+0.13.0), so `reload()` alone moves the floor. Verified with the real host
+parser: rejected for 0.13.0 and 0.13.2 with the host's own message, accepted
+for 0.14.0.
+
+| # | Recommendation (§18.3) | Status |
+| --- | --- | --- |
+| 1 | Invalidate the listing cache on `server.on("agent.closed")` | **Implemented.** `index.server.ts` registers the hook and calls `invalidateListing()` (no argument → clears every provider entry), so the 30-second cache and the "due for cleanup" hint no longer have to age out after a runtime release or a crash. One `console.log` per close, visible in `paseo plugin logs session-manager`. |
+| 2 | "Stop runtime, keep the session" on `session.can_stop_runtime` | **Not implementable from a plugin — documented instead of faked.** See the evidence below. |
+| 3 | "Refresh session list" Command Center action on `agents.ref(id).reload()` | **Implemented.** New `session-manager.refresh` RPC: `paseo.agents.ref(id).reload()` followed by `invalidateListing()`, exposed as a `context: "agent"` command. The command then writes a `{ refresh: true }` intent (new field on `SessionManagerIntent`) and opens the panel, so the visible list rescans immediately with `refresh: true` instead of waiting for react-query to consider the data stale. A refused reload throws and the host shows an error toast. |
+| 4 | `useTabState` for the panel's filters | **Implemented.** `providerFilter` / `ageDays` / `archivedOnly` moved from three `useState` hooks to one `useTabState(tab, filterStateSchema, DEFAULT_FILTER_STATE)` — validated per tab, so a stale or foreign value falls back to the defaults. The Command Center intent now writes the whole filter set in one call (three independent setters derived from one stored object would race), and the archived chip toggles from the current state because a `useTabState` setter takes a value, not an updater. |
+| 5 | `defineAgentTool` for deletion | **Unchanged — still deliberately not done**, for the reason stated in §18.3. |
+
+**Why item 2 cannot be built (evidence, Paseo 0.14.0).**
+`session.can_stop_runtime` exists only in the *provider* protocol: it is
+declared in `@getpaseo/plugin/dist/server/provider.d.ts` and answered by the
+host's `ProviderRuntimeSession.canStopRuntime()`
+(`server/agent/plugin-provider.js`), which is consulted by exactly one
+internal caller — the idle-runtime cleanup
+(`server/agent/idle-runtime-cleanup/index.js`, after which it calls the
+host-internal `runtime.closeIfEligible()`). Nothing on the plugin's side of
+the API can ask for it: `PaseoAgentHandle` in `@getpaseo/client` exposes
+`refresh`, `reload`, `send`, `respondToPermission`, `run`, `waitForFinish`,
+`commands`, `archive`, `detach` and `subscribe`, and neither `PaseoApi` nor
+the daemon client has a stop/close/release call — `detachAgent`
+(`agent.detach.request`) only detaches a subagent from its parent. Reaching
+the capability would mean *being* the provider of that session, which this
+plugin is not: it reads the on-disk stores of other agents' CLIs. So the
+middle ground the recommendation wanted is simply absent from the 0.14.0
+plugin surface; recording that is more honest than a button that would have
+to shell out and kill processes itself.
+
+**Verification of 0.3.3 (2026-10-30, this machine)**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) against 0.14.0 | **exit 0** |
+| `npm test` | **9 suites / 74 tests pass** — up from 8 / 70: the new `tests/hooks.test.ts` proves the `agent.closed` invalidation *behaviourally* (prime the cache through `listAgentSessions()`, fire the hook, observe the provider scanned again) and covers both branches of the refresh RPC. |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | **both entries compile, no boundary errors, 0 warnings, `deprecatedHits: []`**; client bundle 49 677 chars, server 46 237 chars. |
+| Manifest floor | rejected for 0.13.0 and 0.13.2 with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
+| Live daemon | **Not re-run for 0.3.3** — the isolated scratch home of §18.4 was removed after that pass; the new code is covered by the unit suites and the real host compiler above. |
