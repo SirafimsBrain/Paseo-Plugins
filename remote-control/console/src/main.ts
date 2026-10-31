@@ -1,5 +1,6 @@
 import { nextCopyName } from "../../shared/naming";
 import { RDP_CHOICES, RDP_PAYLOAD_DEFAULTS } from "../../shared/rdp-fields";
+import { VNC_CHOICES, VNC_CLIENT_LABELS, VNC_PAYLOAD_DEFAULTS } from "../../shared/vnc-fields";
 
 const params = new URLSearchParams(window.location.search);
 let token = params.get("token") ?? "";
@@ -204,10 +205,150 @@ function rdpForm(initial: any | null): { element: HTMLElement; read: () => Recor
   return { element: root, read };
 }
 
+/**
+ * The VNC payload section of the connection form (stage 0.23.10): the
+ * vnc-pilot field groups. The client select is filled from
+ * `GET /api/vnc/clients` (the viewers actually installed on this machine);
+ * everything beyond the basic target fields is collapsed behind
+ * "Advanced (VNC)". `read()` behaves like the RDP form: keys at their
+ * "Auto"/empty value are dropped, keys the form does not manage pass through.
+ */
+function vncForm(initial: any | null): { element: HTMLElement; read: () => Record<string, unknown> } {
+  const stored = initial && initial.protocol === "vnc" && initial.payload ? initial.payload : {};
+  const base: Record<string, any> = { ...VNC_PAYLOAD_DEFAULTS, ...stored };
+  const has = (k: string): boolean => base[k] !== undefined && base[k] !== null;
+
+  const bools: [string, HTMLInputElement][] = [];
+  const strs: [string, HTMLInputElement][] = [];
+  const selects: [string, HTMLSelectElement][] = [];
+
+  const adv = document.createElement("details");
+  adv.className = "rdp-advanced";
+  const summary = document.createElement("summary");
+  summary.textContent = "Advanced (VNC)";
+  adv.append(summary);
+
+  const group = (title: string): void => {
+    const h = document.createElement("p");
+    h.className = "rdp-group";
+    h.textContent = title;
+    adv.append(h);
+  };
+  const addCheck = (label: string, key: string, fallback = false): void => {
+    const [row, el] = checkField(label, has(key) ? base[key] === true : fallback);
+    bools.push([key, el]);
+    adv.append(row);
+  };
+  const addText = (label: string, key: string, placeholder: string): HTMLInputElement => {
+    const el = input(has(key) ? String(base[key]) : "", "text", placeholder);
+    strs.push([key, el]);
+    adv.append(field(label, el));
+    return el;
+  };
+  const addSelect = (label: string, key: string, choices: readonly (readonly [string, string])[], fallback = ""): void => {
+    const el = selectEl(choices, has(key) ? String(base[key]) : fallback);
+    selects.push([key, el]);
+    adv.append(field(label, el));
+  };
+
+  const storedClient = has("vncClient") ? String(base.vncClient) : "";
+  const clientOptions: (readonly [string, string])[] = [["", "Automatic (first installed client)"]];
+  // The stored viewer is an option from the start: the fetch below only
+  // replaces its placeholder label, so a save before/n without the fetch can
+  // never silently reset the client to Automatic.
+  if (storedClient !== "" && storedClient !== "custom") {
+    clientOptions.push([storedClient, `${storedClient} (checking…)`]);
+  }
+  clientOptions.push(["custom", VNC_CLIENT_LABELS.custom]);
+  const clientI = selectEl(clientOptions, storedClient);
+  const displayI = input(has("display") ? String(base.display) : "", "number", "e.g. 1 → port 5901");
+  const customI = input(has("customBinary") ? String(base.customBinary) : "", "text", "/path/to/vncviewer or a name on PATH");
+
+  group("Display");
+  addCheck("View only", "viewOnly");
+  addCheck("Fullscreen", "fullscreen");
+  addCheck("Shared session", "shared", true);
+  addSelect("Quality / JPEG level", "quality", VNC_CHOICES.quality);
+  addSelect("Compression level", "compress", VNC_CHOICES.compress);
+  addSelect("Preferred encoding", "encoding", VNC_CHOICES.encoding);
+  addSelect("Color depth", "colorDepth", VNC_CHOICES.colorDepth, "24");
+  addCheck("Accept clipboard", "acceptClipboard", true);
+  addCheck("Send clipboard", "sendClipboard", true);
+
+  group("TigerVNC");
+  addText("Geometry", "tigervncGeometry", "e.g. 1280x720 (optional)");
+  addText("SSH tunnel via", "tigervncVia", "e.g. user@gateway (optional)");
+
+  group("TurboVNC");
+  addText("Geometry (DesktopSize)", "turbovncGeometry", "e.g. 1280x720 (optional)");
+  addText("SSH tunnel via", "turbovncVia", "e.g. user@gateway (optional)");
+  addCheck("Force JPEG compression", "turbovncJpeg");
+  addCheck("Local cursor", "turbovncLocal", true);
+
+  group("Extra");
+  const extraI = addText("Extra CLI arguments", "extraArgs", "-via user@gateway (quotes supported)");
+  // Legacy rows store extraArgs as an array; the field is shell-like text.
+  if (Array.isArray(base.extraArgs)) extraI.value = base.extraArgs.join(" ");
+
+  const root = document.createElement("div");
+  root.className = "rdp-fields";
+  root.append(
+    field("VNC client", clientI),
+    field("Display number (optional)", displayI),
+    field("Custom binary (only for Custom)", customI),
+    adv,
+  );
+
+  // Fill the client select with what is really installed. A stored client
+  // that is no longer installed stays visible (and is saved unchanged), so
+  // editing a connection never silently switches its viewer.
+  void (async () => {
+    try {
+      const body = await api("/api/vnc/clients");
+      const installed: any[] = Array.isArray(body.clients) ? body.clients : [];
+      const current = clientI.value;
+      const options: (readonly [string, string])[] = [
+        ["", "Automatic (first installed client)"],
+        ...installed.map((c) => [String(c.clientId), String(c.displayName)] as const),
+        ["custom", VNC_CLIENT_LABELS.custom],
+      ];
+      if (current !== "" && current !== "custom" && !installed.some((c) => c.clientId === current)) {
+        options.splice(options.length - 1, 0, [current, `${current} (not installed)`] as const);
+      }
+      const next = selectEl(options, current);
+      clientI.replaceWith(next);
+      // Keep the registry pointing at the live element.
+      const entry = selects.find(([key]) => key === "vncClient");
+      if (entry) entry[1] = next;
+      else selects.push(["vncClient", next]);
+    } catch {
+      // The select keeps its placeholder/custom entries; the server reports
+      // an actionable error if the viewer is missing at launch time.
+    }
+  })();
+  selects.push(["vncClient", clientI]);
+
+  const read = (): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...base };
+    const put = (key: string, value: unknown): void => {
+      if (value === "" || value === undefined || value === null) delete out[key];
+      else out[key] = value;
+    };
+    for (const [key, el] of strs) put(key, el.value.trim());
+    for (const [key, el] of selects) put(key, el.value);
+    for (const [key, el] of bools) put(key, el.checked);
+    const display = Number(displayI.value);
+    put("display", displayI.value.trim() !== "" && Number.isInteger(display) && display >= 0 ? display : undefined);
+    return out;
+  };
+
+  return { element: root, read };
+}
+
 // ---------- state ----------
 const state = {
-  view: "terminals" as string,
-  terminals: [] as any[],
+  view: "sessions" as string,
+  sessions: [] as any[],
   connections: [] as any[],
   groups: [] as any[],
   notice: null as string | null,
@@ -215,7 +356,7 @@ const state = {
 
 // ---------- nav ----------
 const NAV = [
-  { id: "terminals", label: "Terminals" },
+  { id: "sessions", label: "Sessions" },
   { id: "connections", label: "Connections" },
   { id: "settings", label: "Settings" },
 ];
@@ -246,26 +387,32 @@ function render(): void {
   if (view) view(main);
 }
 
-// ---------- terminals view ----------
-async function refreshTerminals(): Promise<void> {
+// ---------- sessions view ----------
+/**
+ * One list for every session the plugin can see (stage 0.23.10): Paseo
+ * workspace terminals (ssh/local, owned by the daemon) and the external RDP
+ * and VNC windows this plugin spawned (owned by the in-memory registry). The
+ * daemon list is polled, so the table follows terminals opened elsewhere.
+ */
+async function refreshSessions(): Promise<void> {
   try {
     const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
-    const body = await api(`/api/terminals${query}`);
-    state.terminals = body.terminals ?? [];
-    if (state.view === "terminals") render();
+    const body = await api(`/api/sessions${query}`);
+    state.sessions = body.sessions ?? [];
+    if (state.view === "sessions") render();
   } catch (e) {
     console.error(e);
   }
 }
 
-function terminalsView(main: HTMLElement): void {
+function sessionsView(main: HTMLElement): void {
   const row = document.createElement("div");
   row.className = "row";
   const hint = document.createElement("span");
   hint.className = "muted";
   hint.textContent = workspaceId
-    ? `Workspace ${workspaceId} — terminals are Paseo workspace tabs; open an SSH session from Connections.`
-    : "Terminals are Paseo workspace tabs; open an SSH session from Connections.";
+    ? `Workspace ${workspaceId} — Paseo terminal tabs and the RDP/VNC windows opened from this plugin.`
+    : "Paseo terminal tabs and the RDP/VNC windows opened from this plugin.";
   row.append(hint);
   main.append(row);
 
@@ -278,20 +425,25 @@ function terminalsView(main: HTMLElement): void {
 
   const table = document.createElement("table");
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>ID</th><th>Name</th><th>Kind</th><th>CWD</th><th>Started</th><th>Actions</th></tr>";
+  thead.innerHTML = "<tr><th>ID</th><th>Name</th><th>Kind</th><th>Target</th><th>Started</th><th>Actions</th></tr>";
   table.append(thead);
   const tbody = document.createElement("tbody");
-  for (const t of state.terminals) {
+  for (const t of state.sessions) {
     const tr = document.createElement("tr");
     const started = t.startedAt ? new Date(t.startedAt).toLocaleTimeString() : "-";
-    tr.innerHTML = `<td class="mono">${t.id}</td><td>${t.name}</td><td>${t.kind}</td><td class="mono">${t.cwd || "-"}</td><td>${started}</td>`;
+    tr.innerHTML = `<td class="mono">${t.id}</td><td>${t.name}</td><td>${t.kind}</td><td class="mono">${t.target || "-"}</td><td>${started}</td>`;
     const actions = document.createElement("td");
     const killBtn = document.createElement("button");
     killBtn.className = "danger";
     killBtn.textContent = "kill";
     killBtn.addEventListener("click", async () => {
-      await api(`/api/terminals/${encodeURIComponent(t.id)}/kill`, { method: "POST" });
-      await refreshTerminals();
+      try {
+        await api(`/api/sessions/${encodeURIComponent(t.id)}/kill`, { method: "POST" });
+        state.notice = null;
+      } catch (e) {
+        state.notice = `${t.name}: ${String(e)}`;
+      }
+      await refreshSessions();
     });
     actions.append(killBtn);
     tr.append(actions);
@@ -299,10 +451,10 @@ function terminalsView(main: HTMLElement): void {
   }
   table.append(tbody);
   main.append(table);
-  if (state.terminals.length === 0) {
+  if (state.sessions.length === 0) {
     const p = document.createElement("p");
     p.className = "muted";
-    p.textContent = "No terminals yet.";
+    p.textContent = "No sessions yet.";
     main.append(p);
   }
 }
@@ -357,8 +509,9 @@ function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } 
     groupI.append(o);
   }
   // New = `initial === null` → defaults; duplicate/edit prefill from the
-  // source row (payload only when it is an RDP connection).
+  // source row (each payload section only reads a payload of its protocol).
   const rdp = rdpForm(initial);
+  const vnc = vncForm(initial);
   openModal((close) => {
     const m = document.createElement("div");
     m.innerHTML = `<h3>${duplicateOf ? "Duplicate connection" : isNew ? "New connection" : "Edit connection"}</h3>`;
@@ -375,15 +528,18 @@ function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } 
       field("Username", userI),
       field(isNew ? "Password" : "New password", passI),
       rdp.element,
+      vnc.element,
       err,
     );
-    // The RDP option groups exist only for the RDP protocol; switching the
-    // select hides them and the submit handler then drops the payload.
-    const syncRdp = (): void => {
+    // Each protocol's option groups exist only for that protocol; switching
+    // the select hides the other section and the submit handler then drops
+    // the payload it does not belong to.
+    const syncProtocol = (): void => {
       rdp.element.style.display = protoI.value === "rdp" ? "" : "none";
+      vnc.element.style.display = protoI.value === "vnc" ? "" : "none";
     };
-    protoI.addEventListener("change", syncRdp);
-    syncRdp();
+    protoI.addEventListener("change", syncProtocol);
+    syncProtocol();
     const actions = document.createElement("div");
     actions.className = "actions";
     const cancel = document.createElement("button");
@@ -408,6 +564,8 @@ function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } 
         }
         if (protoI.value === "rdp") {
           body.payload = rdp.read();
+        } else if (protoI.value === "vnc") {
+          body.payload = vnc.read();
         }
         if (duplicateOf) {
           body.duplicateOf = duplicateOf;
@@ -545,14 +703,25 @@ function connectionSections(): { label: string; depth: number; connections: any[
 }
 
 /**
+ * Auth column (stage 0.23.10): a proven probe result wins; otherwise the
+ * protocol's only supported method is shown — RDP and VNC authenticate with
+ * the stored password, SSH may use a key or a password until a test proves
+ * which one, so it stays `unknown`.
+ */
+function authLabel(c: any): string {
+  if (c.payload?.auth === "key" || c.payload?.auth === "password") return c.payload.auth;
+  if (c.protocol === "rdp" || c.protocol === "vnc") return "password";
+  return "unknown";
+}
+
+/**
  * One connection row: target, the auth flag the last successful test left
  * (`unknown` when never proven) and the service actions — Launch, test the
  * connection, duplicate, edit, delete.
  */
 function connectionRow(c: any): HTMLTableRowElement {
   const tr = document.createElement("tr");
-  const auth =
-    c.payload?.auth === "key" || c.payload?.auth === "password" ? c.payload.auth : "unknown";
+  const auth = authLabel(c);
   tr.innerHTML = `<td>${c.name}</td><td>${c.protocol}</td><td class="mono">${c.username ? c.username + "@" : ""}${c.host}${c.port ? ":" + c.port : ""}</td><td class="mono${auth === "unknown" ? " muted" : ""}">${auth}</td>`;
   const actions = document.createElement("td");
   if (c.protocol === "ssh") {
@@ -570,8 +739,8 @@ function connectionRow(c: any): HTMLTableRowElement {
       } catch (e) {
         state.notice = String(e);
       }
-      state.view = "terminals";
-      await refreshTerminals();
+      state.view = "sessions";
+      await refreshSessions();
       render();
     });
     actions.append(launchBtn);
@@ -765,7 +934,7 @@ function settingsView(main: HTMLElement): void {
   void (async () => {
     try {
       const vs = await api("/api/vault/status");
-      status.textContent = JSON.stringify({ vault: vs, terminals: state.terminals.length }, null, 2);
+      status.textContent = JSON.stringify({ vault: vs, sessions: state.sessions.length }, null, 2);
     } catch (e) {
       status.textContent = String(e);
     }
@@ -799,7 +968,7 @@ function settingsView(main: HTMLElement): void {
 }
 
 const VIEWS: Record<string, (m: HTMLElement) => void> = {
-  terminals: terminalsView,
+  sessions: sessionsView,
   connections: connectionsView,
   settings: settingsView,
 };
@@ -811,14 +980,15 @@ function startLiveUpdates(): void {
   } catch {
     // ignore
   }
-  // Terminal state lives in the Paseo daemon, so this view polls it.
+  // Session state lives in the Paseo daemon and in the external-window
+  // registry, so this view polls it.
   setInterval(() => {
-    if (state.view === "terminals") void refreshTerminals();
+    if (state.view === "sessions") void refreshSessions();
   }, 3000);
 }
 
 // ---------- init ----------
 render();
-void refreshTerminals();
+void refreshSessions();
 void refreshConnections();
 startLiveUpdates();

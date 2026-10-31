@@ -12,6 +12,7 @@ import {
 } from "./shared/rpc";
 import { resolvePluginVersion } from "./server/paths";
 import { launchExternalWindow } from "./server/protocols/external";
+import { ExternalSessionRegistry } from "./server/sessions";
 import { Store } from "./server/store";
 import { TerminalService } from "./server/terminals";
 import { VaultService } from "./server/vault";
@@ -35,11 +36,15 @@ export default function contribute(server: PluginServerContext): () => void {
     store,
     vault,
   });
+  // RDP/VNC windows are detached desktop processes, not Paseo terminals: the
+  // registry makes them visible and killable in the console's Sessions view.
+  const sessions = new ExternalSessionRegistry();
 
   const endpoint = new ConsoleEndpoint({
     log: (m) => console.log(m),
     logError: (m) => console.error(m),
     terminals,
+    sessions,
     store,
     vault,
   });
@@ -108,9 +113,15 @@ export default function contribute(server: PluginServerContext): () => void {
     }
     const launched = await launchExternalWindow(connection, {
       vault,
+      sessions,
       log: (message) => console.log(message),
     });
-    return { kind: "external" as const, pid: launched.pid, binary: launched.binary };
+    return {
+      kind: "external" as const,
+      pid: launched.pid,
+      binary: launched.binary,
+      ...(launched.sessionId ? { sessionId: launched.sessionId } : {}),
+    };
   });
 
   console.log(`[remote-control] plugin ready (version ${resolvePluginVersion()})`);
@@ -118,6 +129,7 @@ export default function contribute(server: PluginServerContext): () => void {
   return async () => {
     vault.lock();
     terminals.dispose();
+    sessions.dispose();
     store.close();
     await endpoint.dispose();
   };

@@ -14,6 +14,7 @@ import { testSshConnection } from "./probe";
 import type { SshProbe } from "./probe";
 import { nextCopyName } from "../shared/naming";
 import { validatePayload } from "../shared/protocols";
+import { discoverVncClients } from "./protocols/vnc";
 
 export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 
@@ -51,6 +52,8 @@ export interface ConsoleHttpServerOptions {
   consoleDir?: string;
   /** Workspace terminals: create/list/kill through the Paseo SDK. */
   terminals?: TerminalService;
+  /** External-window sessions (RDP/VNC): list/kill via the in-memory registry. */
+  sessions?: import("./sessions").ExternalSessionRegistry;
   /** Store for connection lookups. */
   store?: import("./store").Store;
   /** Vault service: status route + connection-password storage. */
@@ -65,6 +68,7 @@ export class ConsoleHttpServer {
   private readonly version: string;
   private readonly consoleDir: string;
   private readonly terminals: TerminalService | null;
+  private readonly sessions: import("./sessions").ExternalSessionRegistry | null;
   private readonly store: import("./store").Store | null;
   private readonly vault: import("./vault").VaultService | null;
   private readonly sshProbe: SshProbe;
@@ -92,6 +96,7 @@ export class ConsoleHttpServer {
     this.version = options.version ?? resolvePluginVersion();
     this.consoleDir = options.consoleDir ?? resolveConsoleDir();
     this.terminals = options.terminals ?? null;
+    this.sessions = options.sessions ?? null;
     this.store = options.store ?? null;
     this.vault = options.vault ?? null;
     this.sshProbe =
@@ -211,6 +216,76 @@ export class ConsoleHttpServer {
       ) {
         this.sendJson(res, 404, {
           error: "removed: set up and unlock the storage in the Remote Control panel; secrets are managed only through connections",
+        });
+        return;
+      }
+      // /api/sessions — one list for every session the plugin can see:
+      // Paseo workspace terminals (ssh/local) plus the external RDP/VNC
+      // windows tracked by the in-memory registry. The console's Sessions
+      // view renders this; kill checks the registry first, then terminals.
+      if (url.pathname === "/api/sessions") {
+        if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        const workspaceId = url.searchParams.get("workspaceId");
+        const external = this.sessions?.list() ?? [];
+        const terminalPromise = this.terminals ? this.terminals.list(workspaceId) : Promise.resolve([]);
+        void terminalPromise.then((terminals) => {
+          const sessions = [
+            ...external.map((session) => ({
+              id: session.id,
+              kind: session.kind,
+              name: session.name,
+              workspaceId: null,
+              connectionId: session.connectionId,
+              target: session.target,
+              cwd: null,
+              pid: session.pid,
+              binary: session.binary,
+              startedAt: session.startedAt,
+            })),
+            ...terminals.map((terminal) => ({
+              id: terminal.id,
+              kind: terminal.kind,
+              name: terminal.name,
+              workspaceId: terminal.workspaceId,
+              connectionId: terminal.connectionId,
+              target: terminal.cwd || "",
+              cwd: terminal.cwd,
+              pid: null,
+              binary: null,
+              startedAt: terminal.startedAt,
+            })),
+          ];
+          this.sendJson(res, 200, { sessions });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
+        return;
+      }
+      const sessionKillMatch = /^\/api\/sessions\/(.+)\/kill$/.exec(url.pathname);
+      if (sessionKillMatch) {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        const sessionId = decodeURIComponent(sessionKillMatch[1]);
+        if (this.sessions?.get(sessionId)) {
+          const ok = this.sessions.kill(sessionId);
+          this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
+          return;
+        }
+        if (!this.terminals) { this.sendJson(res, 404, { error: "not found" }); return; }
+        void this.terminals.kill(sessionId).then((ok) => {
+          this.sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not found" });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
+        return;
+      }
+      // /api/vnc/clients — installed viewers for the connection form
+      // (vnc-pilot's PATH + version fingerprint discovery).
+      if (url.pathname === "/api/vnc/clients") {
+        if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        void discoverVncClients().then((clients) => {
+          this.sendJson(res, 200, { clients });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
         });
         return;
       }

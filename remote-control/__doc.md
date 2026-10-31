@@ -43,6 +43,148 @@ in v0.13.0 sources (verified via the terminal-close discussion and the
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## VNC, external sessions and the Sessions view (stage 0.23.10, 2026-10-31)
+
+Three customer requests landed together, because they share one lifecycle: the
+VNC launcher ported from vnc-pilot, the tracking of the desktop windows the
+plugin spawns, and the console view that shows those windows next to Paseo
+terminals.
+
+### VNC fields (`shared/vnc-fields.ts`, `shared/protocols.ts`)
+
+- `shared/vnc-fields.ts` is dependency-free (no zod) so the console bundle and
+  the schema import the same tables: client ids/labels in vnc-pilot's discovery
+  order, the quality/compress/encoding/color-depth choices, and
+  `VNC_PAYLOAD_DEFAULTS` (`shared: true`, `colorDepth: "24"`,
+  `acceptClipboard: true`, `sendClipboard: true`, `turbovncLocal: true`).
+- `vncPayloadSchema` is a loose zod object: `vncClient` (enum, **no "auto"
+  value** — an absent value means "first installed client", which is what old
+  rows get), `customBinary`, `display`, the shared/view flags, the four
+  quality selects, the TigerVNC/TurboVNC groups, and `extraArgs`
+  (`string[] | string`: the array is the RDP/legacy form, the string is
+  vnc-pilot's shell-like form). Unknown keys (`payload.auth`, import extras)
+  pass through.
+- The console modal builds both payload sections (`rdpForm` and `vncForm`) and
+  shows only the selected protocol's section; submit sends `payload` for RDP
+  and VNC, nothing for SSH. VNC keys at their Auto/empty value are dropped, as
+  in the RDP form.
+- The client select is filled from `GET /api/vnc/clients`: a stored client that
+  is no longer installed stays visible as `"<id> (not installed)"` so editing
+  never silently switches the viewer.
+
+### Discovery (`server/protocols/discovery.ts`, `server/protocols/vnc.ts`)
+
+- `findExecutable(names, pathEnv)` walks PATH in order and returns the first
+  executable match; `isExecutable` is shared with the custom-binary path.
+- `discoverVncClients` tries the nine viewers in preference order (TigerVNC,
+  TurboVNC, TightVNC, RealVNC, Remmina, KRDC, Vinagre, gvncviewer, Custom).
+- `vncviewer` is shared by four products, so a **bare shared binary must be
+  fingerprinted** by its `--version`/`-version`/`-help`/`-v` output; an
+  un-fingerprinted `vncviewer` is refused rather than launched with another
+  product's flags. Dedicated names (`remmina`, `krdc`, …) are accepted even
+  when the probe prints nothing.
+- Results are cached process-wide for 30 s keyed by PATH
+  (`resetVncDiscoveryCache()` for tests and a fresh-install refresh).
+- `resolveVncClient` precedence: `customBinary` > explicit `vncClient` > first
+  discovered. A missing viewer produces an actionable error listing the
+  supported clients and the custom-binary escape hatch.
+
+### Target formatting
+
+`splitHostPort` is IPv6-aware; `formatVncHost` brackets IPv6 literals.
+
+| Source | Target |
+|---|---|
+| `display: 1` (any port source ignored) | `host:1` (port 5901) |
+| `host: "h:5905"` | `h::5905` (embedded port wins over the row's port) |
+| `port: 5901` | `host::5901` |
+| nothing | `host::5900` |
+| GUI clients | `vnc://host:port` |
+
+The embedded port is stripped from the bare host before formatting: vnc-pilot
+emits `host:5901::5901` for a host that already carries the port, which is a
+reference bug we do not copy.
+
+### Per-viewer argv (`buildVncClientArgs`)
+
+- **TigerVNC/TurboVNC:** `-ViewOnly`, `-FullScreen`, `-Shared`/`-Shared=0`,
+  `-PreferredEncoding` (Tiger) / `-Encoding` (Turbo), `-QualityLevel`
+  (Tiger) / `-Quality q*10+5` (Turbo's 1–100), `-CompressLevel`, colour
+  mapping (`-LowColorLevel 2` / `-FullColor` for Tiger, `-Colors` for Turbo),
+  `-geometry`/`-DesktopSize`, `-via`, clipboard flags, Turbo `-JPEG=1` and
+  `-LocalCursor`, extra args, then `-passwd <file>`.
+- **TightVNC:** `-viewonly`, `-fullscreen`, `-shared`/`-noshared`,
+  `-encodings`, `-quality`, `-compresslevel`, `-bgr233`/`-truecolour`,
+  extra args, `-passwd`.
+- **RealVNC:** `-ViewOnly`, `-FullScreen`, `-Shared`, `-PreferredEncoding`
+  (Tight is not a RealVNC encoding and is skipped), `-via`, extra args,
+  `-passwd`.
+- **Remmina:** `--connect <temporary .remmina profile>`; without a password a
+  profile is still not needed and `-c vnc://host:port` is used.
+- **KRDC / Vinagre:** `vnc://` URI, `-f` / `--fullscreen`, extra args.
+- **gvncviewer / Custom:** `host::port`, extra args, `-passwd` for Custom.
+- Options a viewer does not support are omitted, never guessed.
+
+### Password material
+
+- VNC challenge/response only uses the first 8 characters:
+  `truncateVncPassword` mirrors `vncpasswd`'s own truncation.
+- TigerVNC/TurboVNC/TightVNC/RealVNC/Custom: `vncpasswd -f` receives the
+  password on stdin and its output is written as `vnc.passwd` mode 0600 in a
+  per-launch `$PASEO_HOME/run/ext_<uuid>/` directory; the run directory is
+  removed when the window exits and on plugin dispose.
+- Remmina: the password goes into the temporary `.remmina` profile (0600,
+  same run directory), because Remmina reads it from there.
+- Only TigerVNC/TurboVNC fall back to `VNC_PASSWORD` (plus `VNC_USERNAME`)
+  when `vncpasswd` is missing; the other viewers prompt for themselves. A
+  failed `vncpasswd` logs a warning and falls back the same way. The secret
+  never enters argv.
+
+### External session registry (`server/sessions.ts`)
+
+- RDP and VNC windows are detached desktop processes, so the plugin keeps an
+  in-memory registry: `register` after a successful spawn, `list` (prunes dead
+  pids and removes their run directories), `get`, `kill` (SIGTERM to the
+  detached process group, then removes the run directory) and `dispose`
+  (removes run directories on plugin reload but leaves windows running, just
+  as it leaves Paseo terminals alone).
+- Liveness probe, signal delivery and cleanup are injectable for tests.
+- `launchExternalWindow` returns `sessionId` in addition to pid/binary and the
+  RPC launch result carries it (`shared/rpc.ts`).
+
+### Console API and view
+
+- `GET /api/sessions[?workspaceId=]` merges the external windows (kind `rdp` /
+  `vnc`, target `host:port`) with Paseo terminals (kind `ssh`/`local`, target
+  their cwd) into one list.
+- `POST /api/sessions/:id/kill` dispatches by registry first, then to the
+  terminal service. The legacy `/api/terminals` and
+  `/api/terminals/:id/kill` routes stay for compatibility.
+- The console's left menu is **Sessions / Connections / Settings**; the
+  Sessions table shows ID, Name, Kind, Target, Started and a `kill` action for
+  every row, and polls every 3 s.
+- The Connections Auth column now reflects the protocol's actual method:
+  a proven `payload.auth` wins, otherwise RDP and VNC show `password` (the only
+  method they support) and SSH shows `unknown` until a test proves key or
+  password.
+
+### Tests
+
+`tests/vnc.test.ts` (targets, validation, extra-arg splitting, discovery and
+fingerprinting, per-viewer argv, passwd file permissions/truncation),
+`tests/sessions.test.ts` (registry lifecycle) and
+`tests/sessions-http.test.ts` (merged list, kill dispatch, legacy routes).
+`tests/external-launch.test.ts` now uses a fake `vncviewer` that answers the
+version fingerprint before recording the real launch argv.
+
+### Not done in this stage
+
+- No live VNC launch: no viewer is installed on the development machine, so
+  coverage comes from fake binaries. The "focus window" hint, filters and bulk
+  actions of the original G1 idea remain out of scope.
+- Reconnect for external windows is not implemented; a killed window is
+  relaunched from the panel.
+
 ## RDP connection creation (stage 0.22.10, 2026-10-30)
 
 Creating an RDP connection is now a first-class form: the protocol select in

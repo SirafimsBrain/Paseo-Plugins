@@ -27,6 +27,7 @@ export interface ConsoleEndpointOptions {
   log?: (message: string) => void;
   logError?: (message: string) => void;
   terminals?: import("./terminals").TerminalService;
+  sessions?: import("./sessions").ExternalSessionRegistry;
   store?: import("./store").Store;
   vault?: import("./vault").VaultService;
   onServerStarted?: (server: ConsoleHttpServer) => void;
@@ -145,6 +146,7 @@ export class ConsoleEndpoint {
         version: this.options.version,
         consoleDir: this.options.consoleDir,
         terminals: this.options.terminals,
+        sessions: this.options.sessions,
         store: this.options.store,
         vault: this.options.vault,
       });

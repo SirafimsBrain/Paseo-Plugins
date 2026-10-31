@@ -96,6 +96,59 @@ var RDP_PAYLOAD_DEFAULTS = {
   jpeg: false
 };
 
+// shared/vnc-fields.ts
+var VNC_CLIENT_LABELS = {
+  tigervnc: "TigerVNC",
+  turbovnc: "TurboVNC",
+  tightvnc: "TightVNC",
+  realvnc: "RealVNC",
+  remmina: "Remmina",
+  krdc: "KRDC (KDE)",
+  vinagre: "Vinagre (GNOME)",
+  gvncviewer: "gvncviewer (gtk-vnc)",
+  custom: "Custom (binary path below)"
+};
+function levelChoices(first, middle, last) {
+  return [
+    ["", "Auto"],
+    ["0", `0 - ${first}`],
+    ["1", "1"],
+    ["2", "2"],
+    ["3", "3"],
+    ["4", "4"],
+    ["5", `5 - ${middle}`],
+    ["6", "6"],
+    ["7", "7"],
+    ["8", "8"],
+    ["9", `9 - ${last}`]
+  ];
+}
+var VNC_CHOICES = {
+  quality: levelChoices("Lowest / smallest", "Medium", "Highest / largest"),
+  compress: levelChoices("No compression", "Medium", "Maximum"),
+  encoding: [
+    ["", "Auto"],
+    ["Tight", "Tight"],
+    ["ZRLE", "ZRLE"],
+    ["Hextile", "Hextile"],
+    ["Raw", "Raw"]
+  ],
+  colorDepth: [
+    ["", "Auto"],
+    ["8", "8-bit (256 colors)"],
+    ["16", "16-bit (65K colors)"],
+    ["24", "24-bit (16M colors)"],
+    ["32", "32-bit (16M+ colors)"]
+  ]
+};
+var VNC_PAYLOAD_DEFAULTS = {
+  shared: true,
+  colorDepth: "24",
+  acceptClipboard: true,
+  sendClipboard: true,
+  turbovncLocal: true
+};
+
 // console/src/main.ts
 var params = new URLSearchParams(window.location.search);
 var token = params.get("token") ?? "";
@@ -265,15 +318,124 @@ function rdpForm(initial) {
   };
   return { element: root, read };
 }
+function vncForm(initial) {
+  const stored = initial && initial.protocol === "vnc" && initial.payload ? initial.payload : {};
+  const base = { ...VNC_PAYLOAD_DEFAULTS, ...stored };
+  const has = (k) => base[k] !== void 0 && base[k] !== null;
+  const bools = [];
+  const strs = [];
+  const selects = [];
+  const adv = document.createElement("details");
+  adv.className = "rdp-advanced";
+  const summary = document.createElement("summary");
+  summary.textContent = "Advanced (VNC)";
+  adv.append(summary);
+  const group = (title) => {
+    const h = document.createElement("p");
+    h.className = "rdp-group";
+    h.textContent = title;
+    adv.append(h);
+  };
+  const addCheck = (label, key, fallback = false) => {
+    const [row, el] = checkField(label, has(key) ? base[key] === true : fallback);
+    bools.push([key, el]);
+    adv.append(row);
+  };
+  const addText = (label, key, placeholder) => {
+    const el = input(has(key) ? String(base[key]) : "", "text", placeholder);
+    strs.push([key, el]);
+    adv.append(field(label, el));
+    return el;
+  };
+  const addSelect = (label, key, choices, fallback = "") => {
+    const el = selectEl(choices, has(key) ? String(base[key]) : fallback);
+    selects.push([key, el]);
+    adv.append(field(label, el));
+  };
+  const storedClient = has("vncClient") ? String(base.vncClient) : "";
+  const clientOptions = [["", "Automatic (first installed client)"]];
+  if (storedClient !== "" && storedClient !== "custom") {
+    clientOptions.push([storedClient, `${storedClient} (checking\u2026)`]);
+  }
+  clientOptions.push(["custom", VNC_CLIENT_LABELS.custom]);
+  const clientI = selectEl(clientOptions, storedClient);
+  const displayI = input(has("display") ? String(base.display) : "", "number", "e.g. 1 \u2192 port 5901");
+  const customI = input(has("customBinary") ? String(base.customBinary) : "", "text", "/path/to/vncviewer or a name on PATH");
+  group("Display");
+  addCheck("View only", "viewOnly");
+  addCheck("Fullscreen", "fullscreen");
+  addCheck("Shared session", "shared", true);
+  addSelect("Quality / JPEG level", "quality", VNC_CHOICES.quality);
+  addSelect("Compression level", "compress", VNC_CHOICES.compress);
+  addSelect("Preferred encoding", "encoding", VNC_CHOICES.encoding);
+  addSelect("Color depth", "colorDepth", VNC_CHOICES.colorDepth, "24");
+  addCheck("Accept clipboard", "acceptClipboard", true);
+  addCheck("Send clipboard", "sendClipboard", true);
+  group("TigerVNC");
+  addText("Geometry", "tigervncGeometry", "e.g. 1280x720 (optional)");
+  addText("SSH tunnel via", "tigervncVia", "e.g. user@gateway (optional)");
+  group("TurboVNC");
+  addText("Geometry (DesktopSize)", "turbovncGeometry", "e.g. 1280x720 (optional)");
+  addText("SSH tunnel via", "turbovncVia", "e.g. user@gateway (optional)");
+  addCheck("Force JPEG compression", "turbovncJpeg");
+  addCheck("Local cursor", "turbovncLocal", true);
+  group("Extra");
+  const extraI = addText("Extra CLI arguments", "extraArgs", "-via user@gateway (quotes supported)");
+  if (Array.isArray(base.extraArgs)) extraI.value = base.extraArgs.join(" ");
+  const root = document.createElement("div");
+  root.className = "rdp-fields";
+  root.append(
+    field("VNC client", clientI),
+    field("Display number (optional)", displayI),
+    field("Custom binary (only for Custom)", customI),
+    adv
+  );
+  void (async () => {
+    try {
+      const body = await api("/api/vnc/clients");
+      const installed = Array.isArray(body.clients) ? body.clients : [];
+      const current = clientI.value;
+      const options = [
+        ["", "Automatic (first installed client)"],
+        ...installed.map((c) => [String(c.clientId), String(c.displayName)]),
+        ["custom", VNC_CLIENT_LABELS.custom]
+      ];
+      if (current !== "" && current !== "custom" && !installed.some((c) => c.clientId === current)) {
+        options.splice(options.length - 1, 0, [current, `${current} (not installed)`]);
+      }
+      const next = selectEl(options, current);
+      clientI.replaceWith(next);
+      const entry = selects.find(([key]) => key === "vncClient");
+      if (entry) entry[1] = next;
+      else selects.push(["vncClient", next]);
+    } catch {
+    }
+  })();
+  selects.push(["vncClient", clientI]);
+  const read = () => {
+    const out = { ...base };
+    const put = (key, value) => {
+      if (value === "" || value === void 0 || value === null) delete out[key];
+      else out[key] = value;
+    };
+    for (const [key, el] of strs) put(key, el.value.trim());
+    for (const [key, el] of selects) put(key, el.value);
+    for (const [key, el] of bools) put(key, el.checked);
+    const display = Number(displayI.value);
+    put("display", displayI.value.trim() !== "" && Number.isInteger(display) && display >= 0 ? display : void 0);
+    return out;
+  };
+  return { element: root, read };
+}
 var state = {
-  view: "terminals",
-  terminals: [],
+  view: "sessions",
+  sessions: [],
   connections: [],
   groups: [],
   notice: null
 };
 var NAV = [
-  { id: "terminals", label: "Terminals" },
+  { id: "sessions", label: "Sessions" },
   { id: "connections", label: "Connections" },
   { id: "settings", label: "Settings" }
 ];
@@ -301,22 +463,22 @@ function render() {
   const view = VIEWS[state.view];
   if (view) view(main);
 }
-async function refreshTerminals() {
+async function refreshSessions() {
   try {
     const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
-    const body = await api(`/api/terminals${query}`);
-    state.terminals = body.terminals ?? [];
-    if (state.view === "terminals") render();
+    const body = await api(`/api/sessions${query}`);
+    state.sessions = body.sessions ?? [];
+    if (state.view === "sessions") render();
   } catch (e) {
     console.error(e);
   }
 }
-function terminalsView(main) {
+function sessionsView(main) {
   const row = document.createElement("div");
   row.className = "row";
   const hint = document.createElement("span");
   hint.className = "muted";
-  hint.textContent = workspaceId ? `Workspace ${workspaceId} \u2014 terminals are Paseo workspace tabs; open an SSH session from Connections.` : "Terminals are Paseo workspace tabs; open an SSH session from Connections.";
+  hint.textContent = workspaceId ? `Workspace ${workspaceId} \u2014 Paseo terminal tabs and the RDP/VNC windows opened from this plugin.` : "Paseo terminal tabs and the RDP/VNC windows opened from this plugin.";
   row.append(hint);
   main.append(row);
   if (state.notice) {
@@ -327,20 +489,25 @@ function terminalsView(main) {
   }
   const table = document.createElement("table");
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>ID</th><th>Name</th><th>Kind</th><th>CWD</th><th>Started</th><th>Actions</th></tr>";
+  thead.innerHTML = "<tr><th>ID</th><th>Name</th><th>Kind</th><th>Target</th><th>Started</th><th>Actions</th></tr>";
   table.append(thead);
   const tbody = document.createElement("tbody");
-  for (const t of state.terminals) {
+  for (const t of state.sessions) {
     const tr = document.createElement("tr");
     const started = t.startedAt ? new Date(t.startedAt).toLocaleTimeString() : "-";
-    tr.innerHTML = `<td class="mono">${t.id}</td><td>${t.name}</td><td>${t.kind}</td><td class="mono">${t.cwd || "-"}</td><td>${started}</td>`;
+    tr.innerHTML = `<td class="mono">${t.id}</td><td>${t.name}</td><td>${t.kind}</td><td class="mono">${t.target || "-"}</td><td>${started}</td>`;
     const actions = document.createElement("td");
     const killBtn = document.createElement("button");
     killBtn.className = "danger";
     killBtn.textContent = "kill";
     killBtn.addEventListener("click", async () => {
-      await api(`/api/terminals/${encodeURIComponent(t.id)}/kill`, { method: "POST" });
-      await refreshTerminals();
+      try {
+        await api(`/api/sessions/${encodeURIComponent(t.id)}/kill`, { method: "POST" });
+        state.notice = null;
+      } catch (e) {
+        state.notice = `${t.name}: ${String(e)}`;
+      }
+      await refreshSessions();
     });
     actions.append(killBtn);
     tr.append(actions);
@@ -348,10 +515,10 @@ function terminalsView(main) {
   }
   table.append(tbody);
   main.append(table);
-  if (state.terminals.length === 0) {
+  if (state.sessions.length === 0) {
     const p = document.createElement("p");
     p.className = "muted";
-    p.textContent = "No terminals yet.";
+    p.textContent = "No sessions yet.";
     main.append(p);
   }
 }
@@ -392,6 +559,7 @@ function openConnectionForm(initial, opts = {}) {
     groupI.append(o);
   }
   const rdp = rdpForm(initial);
+  const vnc = vncForm(initial);
   openModal((close) => {
     const m = document.createElement("div");
     m.innerHTML = `<h3>${duplicateOf ? "Duplicate connection" : isNew ? "New connection" : "Edit connection"}</h3>`;
@@ -408,13 +576,15 @@ function openConnectionForm(initial, opts = {}) {
       field("Username", userI),
       field(isNew ? "Password" : "New password", passI),
       rdp.element,
+      vnc.element,
       err
     );
-    const syncRdp = () => {
+    const syncProtocol = () => {
       rdp.element.style.display = protoI.value === "rdp" ? "" : "none";
+      vnc.element.style.display = protoI.value === "vnc" ? "" : "none";
     };
-    protoI.addEventListener("change", syncRdp);
-    syncRdp();
+    protoI.addEventListener("change", syncProtocol);
+    syncProtocol();
     const actions = document.createElement("div");
     actions.className = "actions";
     const cancel = document.createElement("button");
@@ -439,6 +609,8 @@ function openConnectionForm(initial, opts = {}) {
         }
         if (protoI.value === "rdp") {
           body.payload = rdp.read();
+        } else if (protoI.value === "vnc") {
+          body.payload = vnc.read();
         }
         if (duplicateOf) {
           body.duplicateOf = duplicateOf;
@@ -569,9 +741,14 @@ function connectionSections() {
   walk(null, 0);
   return sections;
 }
+function authLabel(c) {
+  if (c.payload?.auth === "key" || c.payload?.auth === "password") return c.payload.auth;
+  if (c.protocol === "rdp" || c.protocol === "vnc") return "password";
+  return "unknown";
+}
 function connectionRow(c) {
   const tr = document.createElement("tr");
-  const auth = c.payload?.auth === "key" || c.payload?.auth === "password" ? c.payload.auth : "unknown";
+  const auth = authLabel(c);
   tr.innerHTML = `<td>${c.name}</td><td>${c.protocol}</td><td class="mono">${c.username ? c.username + "@" : ""}${c.host}${c.port ? ":" + c.port : ""}</td><td class="mono${auth === "unknown" ? " muted" : ""}">${auth}</td>`;
   const actions = document.createElement("td");
   if (c.protocol === "ssh") {
@@ -589,8 +766,8 @@ function connectionRow(c) {
       } catch (e) {
         state.notice = String(e);
       }
-      state.view = "terminals";
-      await refreshTerminals();
+      state.view = "sessions";
+      await refreshSessions();
       render();
     });
     actions.append(launchBtn);
@@ -764,7 +941,7 @@ function settingsView(main) {
   void (async () => {
     try {
       const vs = await api("/api/vault/status");
-      status.textContent = JSON.stringify({ vault: vs, terminals: state.terminals.length }, null, 2);
+      status.textContent = JSON.stringify({ vault: vs, sessions: state.sessions.length }, null, 2);
     } catch (e) {
       status.textContent = String(e);
     }
@@ -794,7 +971,7 @@ function settingsView(main) {
   });
 }
 var VIEWS = {
-  terminals: terminalsView,
+  sessions: sessionsView,
   connections: connectionsView,
   settings: settingsView
 };
@@ -804,10 +981,10 @@ function startLiveUpdates() {
   } catch {
   }
   setInterval(() => {
-    if (state.view === "terminals") void refreshTerminals();
+    if (state.view === "sessions") void refreshSessions();
   }, 3e3);
 }
 render();
-void refreshTerminals();
+void refreshSessions();
 void refreshConnections();
 startLiveUpdates();

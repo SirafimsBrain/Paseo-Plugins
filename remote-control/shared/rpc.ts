@@ -79,6 +79,11 @@ export const connectionLaunch = defineRpc({
   }),
   output: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("terminal"), terminalId: z.string(), name: z.string() }),
-    z.object({ kind: z.literal("external"), pid: z.number().int(), binary: z.string() }),
+    z.object({
+      kind: z.literal("external"),
+      pid: z.number().int(),
+      binary: z.string(),
+      sessionId: z.string().optional(),
+    }),
   ]),
 });

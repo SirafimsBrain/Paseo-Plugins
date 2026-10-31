@@ -140,7 +140,7 @@ describe("launchExternalWindow", () => {
     ).rejects.toThrow(/RDP client not found/);
     await expect(
       launchExternalWindow(connection({ protocol: "vnc" }), { pathEnv: dir, log: () => {} }),
-    ).rejects.toThrow(/VNC client not found/);
+    ).rejects.toThrow(/No VNC client was found/);
   });
 
   it("refuses protocols that have no external window", async () => {
@@ -198,9 +198,11 @@ describe("launchExternalWindow", () => {
     const capture = path.join(dir, "vnc-capture");
     // vncpasswd -f: password on stdin, obfuscated bytes on stdout.
     writeFileSync(path.join(dir, "vncpasswd"), "#!/bin/sh\ncat", { mode: 0o755 });
+    // The shared `vncviewer` name is fingerprinted by its version output, so
+    // the fake answers the probe and records the real launch argv otherwise.
     writeFileSync(
       path.join(dir, "vncviewer"),
-      `#!/bin/sh\nprintf '%s\\n' "$@" > "${capture}.argv"\n`,
+      `#!/bin/sh\ncase "$1" in\n  --version|-version|-v) echo "TigerVNC Viewer 1.13.90"; exit 0;;\nesac\nprintf '%s\\n' "$@" > "${capture}.argv"\n`,
       { mode: 0o755 },
     );
     const conn = connection({

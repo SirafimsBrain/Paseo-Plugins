@@ -11,8 +11,16 @@
 
 import { z } from "zod";
 import { RDP_BPP, RDP_GDI, RDP_JPEG_QUALITY, RDP_KBD_TYPES, RDP_NETWORK, RDP_SEC, RDP_SOUND_MODES } from "./rdp-fields";
+import {
+  VNC_CLIENT_IDS,
+  VNC_COLOR_DEPTHS,
+  VNC_COMPRESS,
+  VNC_ENCODINGS,
+  VNC_QUALITY,
+} from "./vnc-fields";
 
 export { RDP_PAYLOAD_DEFAULTS } from "./rdp-fields";
+export { VNC_PAYLOAD_DEFAULTS } from "./vnc-fields";
 
 export interface ProtocolDefinition {
   id: "ssh" | "rdp" | "vnc";
@@ -90,9 +98,36 @@ export const rdpPayloadSchema = z.looseObject({
 });
 export type RdpPayload = z.infer<typeof rdpPayloadSchema>;
 
+// VNC payload (stage 0.23.10), a port of vnc-pilot's connection_fields().
+// `vncClient` selects the viewer explicitly (there is no "auto" value); an
+// absent value falls back to the first installed client at launch time, the
+// same way vnc-pilot handles rows saved before the field existed. Legacy
+// `viewOnly`/`fullscreen` keys keep working.
 export const vncPayloadSchema = z.looseObject({
+  vncClient: z.enum(VNC_CLIENT_IDS).optional(),
+  customBinary: z.string().optional(),
+  display: z
+    .union([z.number().int().min(0), z.string().regex(/^\d+$/, "display must be a non-negative number")])
+    .optional(),
   viewOnly: z.boolean().optional(),
   fullscreen: z.boolean().optional(),
+  shared: z.boolean().optional(),
+  quality: z.enum(VNC_QUALITY).optional(),
+  compress: z.enum(VNC_COMPRESS).optional(),
+  encoding: z.enum(VNC_ENCODINGS).optional(),
+  colorDepth: z.enum(VNC_COLOR_DEPTHS).optional(),
+  acceptClipboard: z.boolean().optional(),
+  sendClipboard: z.boolean().optional(),
+  // Client-specific groups (only the selected viewer uses them).
+  tigervncGeometry: z.string().optional(),
+  tigervncVia: z.string().optional(),
+  turbovncGeometry: z.string().optional(),
+  turbovncVia: z.string().optional(),
+  turbovncJpeg: z.boolean().optional(),
+  turbovncLocal: z.boolean().optional(),
+  // vnc-pilot's extra_args is a shell-like string; this plugin's older rows
+  // and the RDP payload use an array, so both are accepted.
+  extraArgs: z.union([z.array(z.string()), z.string()]).optional(),
 });
 export type VncPayload = z.infer<typeof vncPayloadSchema>;
 
