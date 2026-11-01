@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { z } from "zod";
 import { changesTouchNode } from "../shared/api";
 import type { Bee } from "../shared/links";
 import type { Bug } from "../shared/links";
@@ -18,7 +19,12 @@ import {
   treeSearch,
 } from "../shared/rpc";
 import type { HistoryEntry, LeafStatus, Node } from "../shared/tree";
-import { LEAF_STATUSES, NODE_KINDS } from "../shared/tree";
+import {
+  LEAF_STATUSES,
+  NODE_KINDS,
+  leafStatusSchema,
+  nodeKindSchema,
+} from "../shared/tree";
 import {
   breadcrumbLabels,
   defaultPanelFilters,
@@ -30,6 +36,7 @@ import {
   type TreeSection,
 } from "../shared/panel";
 import { type DashboardOpenReport, openDashboard } from "./dashboard-screen";
+import { subscribeFocus, takePendingFocus, type FocusRequest } from "./focus";
 import { scaledFont } from "./host-font-scale";
 import { useHostFontScale } from "./use-host-typography";
 
@@ -57,6 +64,36 @@ export interface DetailState {
   history: HistoryEntry[];
   growth: Growth | null;
 }
+
+/**
+ * The panel's persisted per-tab view state (0.35.1, recommendation §10.8
+ * item 4): query, filters, selection and expansion survive a panel remount,
+ * a plugin reload and a workspace reopen — the same move session-manager
+ * 0.3.3 made for its three filters. One stored object and one schema:
+ * `useTabState` persists `tab.state` as a whole, so several independent
+ * hooks would overwrite each other. The schema validates whatever the tab
+ * hands back, so a stale or foreign value falls back to the defaults
+ * instead of corrupting the view. Search hits are deliberately *not*
+ * persisted: they re-derive from the restored query through the same
+ * debounced effect that produced them.
+ */
+const panelViewSchema = z.object({
+  query: z.string(),
+  statusFilter: leafStatusSchema.nullable(),
+  kindFilter: nodeKindSchema.nullable(),
+  selectedId: z.string().nullable(),
+  expanded: z.record(z.string(), z.boolean()),
+});
+
+type PanelView = z.infer<typeof panelViewSchema>;
+
+const DEFAULT_PANEL_VIEW: PanelView = {
+  query: "",
+  statusFilter: null,
+  kindFilter: null,
+  selectedId: null,
+  expanded: {},
+};
 
 export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
   const { theme, layout, workspaceId } = props;
@@ -95,9 +132,35 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((key) => key + 1), []);
 
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<LeafStatusFilter>(null);
-  const [kindFilter, setKindFilter] = useState<NodeKindFilter>(null);
+  // Filters, query, selection and expansion live in the tab, not in
+  // component state (0.35.1, §10.8 item 4): they survive a panel remount, a
+  // plugin reload and a workspace reopen. One stored object; every setter
+  // patches it through a latest-state ref that also updates synchronously,
+  // so two writes in one tick (a focus request selecting a node and then
+  // expanding its ancestors) compose instead of clobbering each other.
+  const [view, setView] = useTabState<PanelView>(
+    props.tab,
+    panelViewSchema,
+    DEFAULT_PANEL_VIEW,
+  );
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const patchView = useCallback(
+    (patch: Partial<PanelView>) => {
+      const next = { ...viewRef.current, ...patch };
+      viewRef.current = next;
+      setView(next);
+    },
+    [setView],
+  );
+  const { query, statusFilter, kindFilter, selectedId, expanded } = view;
+  const setQuery = (next: string): void => patchView({ query: next });
+  const setStatusFilter = (next: LeafStatusFilter): void =>
+    patchView({ statusFilter: next });
+  const setKindFilter = (next: NodeKindFilter): void =>
+    patchView({ kindFilter: next });
+  const setSelectedId = (next: string | null): void =>
+    patchView({ selectedId: next });
   useEffect(() => {
     if (!projectRootPath) return;
     let cancelled = false;
@@ -163,21 +226,69 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
   }, [projectRootPath, query, statusFilter, kindFilter, treeSearchRpc]);
 
   const openDetail = useCallback(
-    async (nodeId: string) => {
-      if (!projectRootPath) return;
+    async (nodeId: string): Promise<DetailState | null> => {
+      if (!projectRootPath) return null;
       setSelectedId(nodeId);
       setDetailError(null);
       setActionError(null);
       try {
         const result = await nodeDetailRpc({ projectKey: projectRootPath, nodeId });
         setDetail(result);
+        return result;
       } catch (cause) {
         setDetail(null);
         setDetailError(cause instanceof Error ? cause.message : "Failed to load details");
+        return null;
       }
     },
     [nodeDetailRpc, projectRootPath],
   );
+
+  // Deep links (0.35.1, §10.8 item 5): a slash command that just changed a
+  // leaf records a request in the client focus mailbox. A mounted panel
+  // applies it through the subscription; a closed one applies it on the next
+  // mount. The target's ancestors are expanded from the loaded path, so the
+  // row is not only selected but actually reachable in the outline.
+  const applyFocus = useCallback(
+    async (request: FocusRequest): Promise<void> => {
+      const result = await openDetail(request.nodeId);
+      if (!result) return;
+      const ancestors: Record<string, boolean> = {};
+      for (const node of result.path) ancestors[node.id] = true;
+      patchView({
+        expanded: { ...viewRef.current.expanded, ...ancestors },
+      });
+    },
+    [openDetail, patchView],
+  );
+
+  // Mount: consume a focus request made while the panel was closed,
+  // otherwise re-open the selection the tab state restored — the detail
+  // record itself is transient state and does not survive a remount, so
+  // without this the restored row would be highlighted next to an empty
+  // details pane. Runs once per panel instance (the restore half).
+  const restoredSelection = useRef(view.selectedId);
+  const restoreDone = useRef(false);
+  useEffect(() => {
+    if (!projectRootPath) return;
+    const focus = takePendingFocus(projectRootPath);
+    if (focus) {
+      void applyFocus(focus);
+      return;
+    }
+    if (restoreDone.current) return;
+    restoreDone.current = true;
+    const initial = restoredSelection.current;
+    if (initial) void openDetail(initial);
+  }, [applyFocus, openDetail, projectRootPath]);
+
+  useEffect(() => {
+    if (!projectRootPath) return;
+    return subscribeFocus(() => {
+      const focus = takePendingFocus(projectRootPath);
+      if (focus) void applyFocus(focus);
+    });
+  }, [applyFocus, projectRootPath]);
 
   const changeStatus = useCallback(
     async (nodeId: string, status: LeafStatus) => {
@@ -227,8 +338,6 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
     }
   }, [dashboardStatusRpc, paseo, projectRootPath, props, workspaceId]);
 
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailState | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -443,10 +552,14 @@ export function LuckPlannerPanel(props: PluginWorkspacePanelProps) {
               section={section}
               expanded={expanded[section.node.id] ?? true}
               onToggle={() =>
-                setExpanded((prev) => ({
-                  ...prev,
-                  [section.node.id]: !(prev[section.node.id] ?? true),
-                }))
+                patchView({
+                  expanded: {
+                    ...viewRef.current.expanded,
+                    [section.node.id]: !(
+                      viewRef.current.expanded[section.node.id] ?? true
+                    ),
+                  },
+                })
               }
               selectedId={selectedId}
               onSelect={openDetail}

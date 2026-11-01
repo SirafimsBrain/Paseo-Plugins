@@ -1,6 +1,6 @@
 import { LuckPlannerStore, defaultDbPath } from "./store";
 import type { McpDispatchContext, ToolResult } from "./mcp-tools";
-import { MCP_TOOLS, dispatchMcpTool } from "./mcp-tools";
+import { MCP_INSTRUCTIONS, MCP_TOOLS, dispatchMcpTool } from "./mcp-tools";
 
 /**
  * luck-planner MCP server — JSON-RPC 2.0 over stdio (PLAN.md stage D2).
@@ -30,7 +30,7 @@ export const PROTOCOL_VERSION = "2024-11-05";
  * `package.json` by `tests/mcp-server-e2e.test.ts`, so every version bump
  * must update this constant — the handshake is what agents see.
  */
-export const SERVER_VERSION = "0.34.1";
+export const SERVER_VERSION = "0.35.1";
 
 /**
  * Default server name agents see in `initialize`. The `mcpServerName`
@@ -77,6 +77,11 @@ function handleJsonRpcRequest(request: JsonRpcRequest): JsonRpcResponse | null {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: reportedServerName(), version: SERVER_VERSION },
+          // 0.35.1 (§10.8 item 6): the handshake carries the protocol summary,
+          // so an MCP-capable client learns when to use the tools even if the
+          // agent skill never landed (its install targets existing skills
+          // directories and can be skipped).
+          instructions: MCP_INSTRUCTIONS,
         },
       };
     case "notifications/initialized":

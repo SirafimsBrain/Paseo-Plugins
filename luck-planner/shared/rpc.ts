@@ -398,6 +398,25 @@ export const agentMcpUnregister = defineRpc({
   }),
 });
 
+/**
+ * `luck-planner.agent-reload`: reopen the agent's provider session so the
+ * plugin's `agent.session_open` hook runs again and re-derives the MCP
+ * server or the native fallback tool (0.35.1, recommendation §10.8 item 3).
+ * The one-click answer to an agent that lost its luck-planner tools after
+ * an idle runtime release, an OpenCode location eviction or a settings
+ * change — instead of asking the user to recreate the agent.
+ */
+export const agentReload = defineRpc({
+  name: "luck-planner.agent-reload",
+  input: z.object({
+    agentId: z.string().min(1),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -413,4 +432,5 @@ export const RPC_CONTRACT_NAMES = [
   agentMcpStatus.name,
   agentMcpRegister.name,
   agentMcpUnregister.name,
+  agentReload.name,
 ] as const;

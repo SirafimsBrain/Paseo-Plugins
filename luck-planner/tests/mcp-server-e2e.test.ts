@@ -145,6 +145,29 @@ describe("MCP server end-to-end (real process)", () => {
     }
   }, 30000);
 
+  it("publishes the plugin's MCP instructions in initialize", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "luck-e2e-instructions-"));
+    const server = startServer(home, {});
+    try {
+      const init = await server.request("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "e2e", version: "0.0.1" },
+      });
+      // The installed skill complements these instructions (README §Skills);
+      // providers that skip the skill read the same workflow from here.
+      const instructions = (init as { instructions?: unknown }).instructions;
+      expect(typeof instructions).toBe("string");
+      expect(String(instructions)).toContain("Luck Planner");
+      expect(String(instructions)).toContain("Read before writing");
+      expect(String(instructions)).toContain("record a fact as a leaf");
+      expect(server.unparsed()).toBe(0);
+    } finally {
+      server.stop();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 30000);
+
   it("rebuilds the bundle deterministically, without touching the committed artifact", () => {
     // The build goes to temp roots (see `scripts/bundle.mjs --outdir`): a
     // rebuild of the shared `dist/` here would race the parallel test files

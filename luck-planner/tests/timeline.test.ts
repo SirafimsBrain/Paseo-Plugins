@@ -862,6 +862,10 @@ function createWiringServer(): WiringServer {
             reason: "resume",
             purpose: "interactive",
             env: {},
+            // The SDK always hands the hook these two collections; the
+            // session-open hook spreads/merges them when it contributes.
+            tools: [],
+            mcpServers: {},
           },
         } as never,
         { paseo, signal: new AbortController().signal } as never,

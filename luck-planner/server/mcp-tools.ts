@@ -104,6 +104,27 @@ const PROJECT_KEY = str(
   "Canonical absolute path of the project this call addresses. Every read and write is scoped by it.",
 );
 
+/**
+ * `instructions` of the MCP `initialize` result (0.35.1, recommendation
+ * §10.8 item 6).
+ *
+ * Lives here, not in `mcp-server.ts`, so it is testable without spawning the
+ * stdio process (that module runs `main()` on import). The text complements
+ * the `luck-planner` agent skill rather than replacing it: the skill is
+ * installed into skills directories that already exist and can be skipped,
+ * while `instructions` rides every handshake — a client that surfaces server
+ * instructions shows it even when the skill never landed.
+ */
+export const MCP_INSTRUCTIONS =
+  "Luck Planner is the project's durable planning tree: leaves record facts, " +
+  "bees record dependencies between them, bugs record incidents that block " +
+  "leaves, and goals are plans a human approves. Read before writing — " +
+  "luck_tree_get_context or luck_tree_search first — then record a fact as a " +
+  "leaf when it changes, follow the leaf state machine (draft → ready → " +
+  "claimed → in_progress → done), and never manage the tree by hand outside " +
+  "these tools. When to write and what not to write is the luck-planner agent " +
+  "skill; this server is how the writes happen.";
+
 export const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "luck_tree_get_context",

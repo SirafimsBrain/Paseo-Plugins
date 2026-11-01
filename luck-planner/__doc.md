@@ -2262,3 +2262,204 @@ both bundles. The result is the evidence in row 6 of §10.5.
 
 The same compiler is what makes the "zero deprecated calls" claim meaningful:
 it is the build the user's daemon performs at install time, not a look-alike.
+
+### 10.7 Paseo 0.14.0 compatibility pass (2026-11-01)
+
+The 0.14.0 pass reached this plugin last: the root README had carried "not
+re-verified since 2026-10-22" since the command-center migration. This
+section replaces that verdict.
+
+**Method.** `@getpaseo/plugin@0.14.0` installed with
+`npm install --no-save --package-lock=false --legacy-peer-deps` — the pin in
+`package.json` stays `0.13.0` on purpose, because no 0.14.0 API is adopted
+and raising the pin would be a code change carrying its own version bump (the
+rule the earlier passes followed). The 0.14.0 release notes were read for
+plugin-facing changes: two additions (`#7938` per-agent tools, `#7983`
+session-open MCP servers) and the idle-runtime release (`#7782`) — nothing
+that breaks this plugin's surface.
+
+**Deprecated inventory of 0.14.0** (from the SDK's own `.d.ts` — thirteen
+`@deprecated` marks): the `@getpaseo/plugin/client/react-native` entry
+(removal scheduled for 2027-04-20), `SettingsGroup`, the old registrations
+(`addSurface`, `addSidebarItem`, `openSurface`, the panel/screen `context`
+fields, `PluginSidebarItemContribution`), the always-empty `timeline` on
+`agent.turn_ended`, and `useRevealedText` / `StreamedText` hosted by the
+deprecated entry. **luck-planner uses none of them:** its UI helpers come
+from `@getpaseo/plugin/client/ui` (`SettingsSection`, not the deprecated
+`SettingsGroup`; `ExternalLink`), its registrations are the modern
+screen/panel family (§6), it never subscribes to `agent.turn_ended`, and its
+bare `react-native` imports are not a deprecation at all — the host compiler
+lists `react-native` in the client bundle's `external` list and the SDK
+skill's own examples import from it.
+
+| # | Check | Result |
+| - | ----- | ------ |
+| 1 | `npm run typecheck` against 0.14.0 (root + `dashboard/tsconfig.json`) | ✅ exit 0, clean |
+| 2 | `npm test` against 0.14.0 (`pretest` rebundles) | ✅ **37 suites / 635 tests**, all green |
+| 3 | the real 0.14.0 host compiler — `compileDirectoryPlugin(directory, "0.14.0")` from the installed `app.asar`, the exact call the daemon makes (it runs `readPluginManifest` + `assertPluginCompatibility` inside) | ✅ both bundles built — client 80 137 bytes, server 218 312 bytes — `deprecatedHits: []` |
+| 4 | negative control: a temp entry importing `@getpaseo/plugin/client/react-native` | ✅ compiles to a bundle that **does** contain the specifier (it is in `PLUGIN_SDK_SPECIFIERS`, so it stays external), which makes the clean scans meaningful |
+| 5 | the host's own `assertPluginCompatibility({ ...manifest, version, runtime: "daemon" })` | ✅ 0.10.0 **rejected**, 0.11.0 accepted, 0.14.0 accepted — the floor `>=0.11.0` follows the API actually used (the newest is `addScreen` / `openScreen`, from 0.11) |
+| 6 | install from the working tree into an **isolated 0.14.0 daemon** (scratch home, `127.0.0.1:6768`, `pluginsEnabled: true`, production home untouched) | ✅ `running`, `[paseo] Plugin ready`, the MCP entry published (`exists`), the skill up to date, **17 RPC methods** registered |
+| 7 | the **published** MCP entry (`<home>/plugins/luck-planner/mcp-server.js`) | ✅ `initialize` → `serverInfo { name: "luck-planner", version: "0.34.1" }`, `tools/list` → all **eleven tools** |
+| 8 | the dashboard endpoint | ✅ `GET /health` → `{"ok":true,"server":"luck-planner","version":"0.34.1"}` — port 8899 was taken by another instance, so the plugin fell back to an ephemeral port, the designed fallback working as intended |
+| 9 | `paseo plugin reload luck-planner` | ✅ clean restart: `running`, `Plugin ready` again, the entry re-published |
+
+**How the 0.14.0 changes land on this plugin:**
+
+- The idle-runtime release (`#7782`, one hour) is harmless: the audit-actor
+  environment is re-injected by the existing `before("agent.session_open")`
+  hook on every open and resume, and the MCP entry is re-published on load.
+- The two new surfaces — session-open MCP contribution (`#7983`) and
+  per-agent tools (`#7938`) — are not used yet; they are the basis of the
+  first two recommendations in §10.8.
+- No deprecation was found and none was migrated, so **the pass touched only
+  documentation: luck-planner stays 0.34.1, with no bump and no tag** (the
+  rule bunny-search's pass followed for the same situation).
+
+### 10.8 Recommendations for improvement (implemented in 0.35.1 — §10.9)
+
+Six, all grounded in code this plugin already has and in what the sibling
+plugins shipped for 0.14.0. None is a conformance blocker; each says what
+would change and what it would cost. **All six were implemented the same
+day; what was built is in §10.9.**
+
+**1. Re-derive the MCP server in `before("agent.session_open")`.** Today the
+server is contributed only at `agent.create` (§6, stage D4): the config-file
+registration is preferred and the create-time injection is its fallback. Two
+gaps follow. An agent created while `injectIntoAgents` was off — or before
+the plugin was installed — never gets the tools until it is recreated; and a
+create-time session entry is exactly the kind that OpenCode/Kilo eviction
+kills (the reason D4 prefers config files in the first place), so after an
+evacuation the tools are gone with no path back. 0.14.0's session-open
+`mcpServers` contribution is re-derived on **every** open, which fixes both
+gaps at once — the pattern memory-flash 0.9.4, bunny-search 0.5.2 and
+memory-flash-client 0.3.2 shipped: contribute the name only when the agent's
+saved configuration does not already carry it (a collision fails the open, so
+the saved set is read from the daemon's own agent record and every unreadable
+state fails safe to *skip*), and probe `capabilities.supportsMcpServers`
+first so an MCP-less provider's open is never broken. luck-planner already
+owns a session_open hook (the audit-actor env), so the contribution lands
+next to it, and D4's config-cover logic keeps its role — the session entry
+becomes the re-deriving path rather than a one-shot fallback. **Cost:** a
+collision reader plus tests; because these APIs are 0.14.0's, the release
+would move `requirements.paseo` to `>=0.14.0` and the pin to `^0.14.0`.
+
+**2. A native fallback tool via `defineAgentTool`.** For providers without
+MCP support the plugin offers nothing today (the MCP server never spawns).
+One read/write tool attached through the session-open `tools` map — the
+precedents are `bunny_web_search` (bunny-search) and `command_center_run`
+(command-center 0.6.0) — would keep the loop alive for those providers:
+probe says no MCP → attach the native tool instead of nothing. A natural
+first candidate is the leaf upsert (`luck_tree_upsert_leaf`), the call the
+skill tells agents to make most often.
+
+**3. A "Refresh luck-planner tools on this agent" Command Center action on
+`agents.ref(id).reload()`.** After the user flips `injectIntoAgents` or edits
+an agent's config, one command reopens the session so the session-open hook
+of recommendation 1 re-derives the server. Precedent: memory-flash's "repair
+memory tools", bunny-search's "repair search tools". Note the dependency:
+without recommendation 1 the reload only re-runs the env actor, so the action
+becomes fully useful once the session-open contribution exists.
+
+**4. Panel state through `useTabState`.** The workspace panel keeps `query`,
+`statusFilter`, `kindFilter`, the selection and the search hits in plain
+`useState` (`client/tree-panel.tsx`), so a plugin reload or a panel remount
+resets the user's place. `useTabState` persists them per tab across reloads —
+the same move session-manager 0.3.3 made for its three filters.
+
+**5. Deep links through screen params for the record that just changed.**
+`/luck-status`, `/luck-bug` and the "New high goal" item all end with
+`openPanel(PANEL_ID)`: the panel opens, but on the default view, not on the
+leaf or goal the command just touched. The dashboard screen already consumes
+`params` (`DASHBOARD_PROJECT_PARAM`, `DASHBOARD_WORKSPACE_PARAM`), so the
+contract exists in this plugin — carrying `focusNode` / `focusGoal` would
+land the panel on the record, and a timeline row could use the same channel.
+Precedent: command-center 0.6.0's `view` / `command` / `schedule` params.
+
+**6. MCP `instructions` in `initialize`.** The handshake returns no
+`instructions`, so an MCP-capable client learns when to use the tools only
+from the agent skill — and the skill install targets skills directories that
+already exist and can be skipped (§6, stage D3). memory-flash and
+bunny-search added `instructions` to `initialize` for exactly this; it
+complements the skill rather than replacing it.
+
+**Deliberately not applicable:** turn-aware dispatch (`activeTurnBehavior`)
+and the run-time MCP re-derivation registry exist for plugins that launch
+agents (command-center); luck-planner never runs an agent, so there is no
+turn to steer and no run to re-derive for.
+
+### 10.9 Version 0.35.1 — implementing §10.8 (2026-11-01)
+
+All six recommendations are implemented. They are new functionality, so
+this is a second-digit release: `0.34.1 → 0.35.1`, annotated tag
+`luck-planner@0.35.1`. One consequence follows the code: the release uses
+0.14.0's surface (`defineAgentTool`, `agents.ref(id).reload()`,
+`useTabState`, the session-open `tools` map), so the pin becomes
+`@getpaseo/plugin@^0.14.0` (lockfile updated) and `requirements.paseo`
+moves `>=0.11.0 → >=0.14.0`.
+
+**1. Session-open re-derivation** (`server/agent-record.ts`,
+`server/session-open.ts`, `index.server.ts`). The existing
+`before("agent.session_open")` hook now also derives the MCP contribution
+on **every** open. A name that already exists in the agent's *saved*
+configuration is a hard failure of the open (host
+`resolveProviderLaunchConfig`), and the hook cannot see the saved servers —
+so `readSavedMcpServers` reads them from the daemon's own record
+(`$PASEO_HOME/agents/<workspace>/<agentId>.json`, the exact read bunny-search
+and memory-flash shipped), and every unreadable state (`missing` /
+`unusable`) fails safe to *skip the map*. The pure decision
+(`decideSessionOpen`) gates on `injectIntoAgents`, leaves `reason=create`
+to the stage-D4 create hook and history opens untouched, keeps D4's
+config-file cover as the owner of the surface, and probes
+`capabilities.supportsMcpServers` **only when an MCP contribution is still
+possible** (`needsCapabilityProbe`), so a gated-off or already-provisioned
+agent costs no extra daemon round trip on open. The audit-actor env of the
+old hook is unchanged.
+
+**2. Native fallback tool** (`server/agent-tool.ts`). `luck_tree_upsert_leaf`
+attached through `defineAgentTool` on opens where the MCP server could not
+be contributed — provider without MCP support, or saved-server state
+unknown. It is a thin adapter over the MCP dispatcher itself: the schema is
+the shared `upsertLeafInputSchema`, the execution is `dispatchMcpTool`, and
+the audit actor defaults to the calling agent's id from `context.agent.id`
+(the same stamp the MCP server gets from `LUCK_PLANNER_AGENT_ID`). The
+tool is never attached where the agent already carries the server (one
+surface per agent).
+
+**3. Refresh action** (`luck-planner.agent-reload` RPC,
+`index.server.ts`). `agents.ref(id).reload()` reopens the session, so the
+hook of recommendation 1 re-derives the server; a refused reload answers
+`{ ok: false, error }`, which the Command Center item throws into the
+host's error toast. Without recommendation 1 a reload would only re-run the
+actor env — the two shipped together on purpose.
+
+**4. Panel state through `useTabState`** (`client/tree-panel.tsx`). The
+query, the two filters, the selection and the open detail now persist per
+tab across reloads and remounts (the session-manager 0.3.3 pattern).
+
+**5. Deep links — with one documented deviation** (`client/focus.ts`).
+Recommendation 5 assumed screen params reach the panel; they do not.
+`openPanel` in 0.14.0 accepts only `{ location }` and
+`PluginWorkspacePanelParams` is an empty interface — the params contract of
+this plugin belongs to *screens*. The request therefore travels through a
+module mailbox instead: `/luck-status`, `/luck-bug` and "New high goal"
+call `requestFocus(projectKey, nodeId)` after opening the panel; the panel
+subscribes and *pulls* the request on mount (one-shot, keyed by the
+canonical project key, a stale subscriber cannot consume anything). Same
+gap, same answer as command-center's pre-0.6.0 panels.
+
+**6. MCP `instructions` in `initialize`** (`server/mcp-server.ts`). The
+handshake now carries the workflow (read before writing, the leaf state
+machine, what not to write) for providers whose skills directories do not
+exist or whose skill install was skipped; the skill remains the richer
+complement.
+
+#### Verification (2026-11-01)
+
+| Check | Result |
+| ----- | ------ |
+| `npm run typecheck` (root + dashboard configs) | exit 0 |
+| `npm test` (`pretest` re-bundles `dist/`) | **41 suites / 678 tests pass** — up from §10.7's 37 / 635: new `tests/agent-record.test.ts` (10), `tests/session-open.test.ts` (15, the full decision matrix), `tests/agent-tool.test.ts` (4), `tests/focus.test.ts` (7), the `agent-reload` describe in `tests/rpc.test.ts` (4), and the `instructions` handshake in the real-process MCP e2e (1). |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` extracted from the installed `app.asar`) | both entries compile, no boundary errors: client bundle 84 590 chars, server 241 710 chars, `deprecatedHits: []` over the six deprecated specifiers (`client/react-native`, `addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, `useRevealedText`). |
+| Manifest floor (same real host code) | rejected for a 0.13.0 daemon with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
+| Live on an isolated 0.14.0 daemon | scratch home (`pluginsEnabled: true`, production home untouched) with the plugin installed **from the working tree**: status `running`, `[paseo] Plugin ready`, `MCP entry refreshed`, the dashboard listening on an ephemeral port after the documented 8899 fallback, a clean `paseo plugin reload` with `running` after it, and no plugin or contribution errors in the daemon log — the only stderr lines are Node's own `DEP0129` / `DEP0176` warnings. |

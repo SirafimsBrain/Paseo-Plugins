@@ -371,6 +371,16 @@ var agentMcpUnregister = defineRpc({
     )
   })
 });
+var agentReload = defineRpc({
+  name: "luck-planner.agent-reload",
+  input: external_exports.object({
+    agentId: external_exports.string().min(1)
+  }),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    error: external_exports.string().nullable()
+  })
+});
 var RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -385,7 +395,8 @@ var RPC_CONTRACT_NAMES = [
   treeChanges.name,
   agentMcpStatus.name,
   agentMcpRegister.name,
-  agentMcpUnregister.name
+  agentMcpUnregister.name,
+  agentReload.name
 ];
 
 // shared/api.ts

@@ -19,6 +19,7 @@ import {
   agentMcpRegister,
   agentMcpStatus,
   agentMcpUnregister,
+  agentReload,
   bugReport,
   dashboardStatus,
   goalApprove,
@@ -47,6 +48,12 @@ import {
   registerAgentMcp,
   unregisterAgentMcp,
 } from "./server/agent-mcp-config";
+import { readSavedMcpServers } from "./server/agent-record";
+import {
+  decideSessionOpen,
+  needsCapabilityProbe,
+} from "./server/session-open";
+import { createUpsertLeafTool } from "./server/agent-tool";
 import { ensureSkillInstalled } from "./server/skill";
 import { ChangeFeed, readChangesSince } from "./server/change-feed";
 import {
@@ -272,21 +279,81 @@ export default function contribute(server: PluginServerContext) {
   );
 
   // -------------------------------------------------------------------------
-  // Audit actor: the MCP server stamps writes with LUCK_PLANNER_AGENT_ID.
-  // The id exists only at session open (the create request predates the
-  // agent record), and the daemon spawns stdio servers with
-  // `env: { ...sessionEnv, ...config.env }` — so the session env is where
-  // the id has to travel.
+  // Audit actor + MCP re-derivation (stage D3 + 0.35.1, §10.8 items 1/2):
+  // the MCP server is stamped onto the session env so the spawned server
+  // identifies the agent (the create request predates the agent record), and
+  // since 0.35.1 the hook also re-derives the *launch-only* MCP contribution
+  // on every open — the path that reaches agents created before
+  // `injectIntoAgents` was on and survives OpenCode/Kilo's per-directory
+  // eviction — falling back to the native `luck_tree_upsert_leaf` tool for
+  // providers without MCP support. The decision is pure (server/session-open.ts);
+  // a collision with the agent's saved configuration aborts the open, so the
+  // saved set is read from the daemon's agent record and every unknown state
+  // fails safe to *skip the MCP map* (the native tool cannot collide).
   // -------------------------------------------------------------------------
+
+  const upsertLeafTool = createUpsertLeafTool(store);
 
   const removeSessionHook = server.before(
     "agent.session_open",
     async ({ request }, context) => {
       rememberPaseo(context.paseo);
       const values = await readValues();
-      if (!values.injectIntoAgents) return request;
-      request.env = { ...request.env, ...sessionActorEnv(request.agentId) };
-      return request;
+      let env = request.env;
+      if (values.injectIntoAgents) {
+        env = { ...env, ...sessionActorEnv(request.agentId) };
+      }
+
+      const cover = agentConfigCoversProvider(request.provider);
+      const base = {
+        reason: request.reason,
+        purpose: request.purpose,
+        injectIntoAgents: values.injectIntoAgents,
+        serverName: MCP_SERVER_KEY,
+        configCovered: cover.covered,
+        lookup: readSavedMcpServers(request.agentId),
+        supportsMcpServers: null as boolean | null,
+      };
+
+      // The daemon is only consulted when an MCP contribution is still
+      // possible; every other branch (gated off, history, create owned by the
+      // create hook, config-file cover, server already saved) is decided
+      // without touching it.
+      let supportsMcpServers: boolean | null = null;
+      if (needsCapabilityProbe({ ...base, supportsMcpServers: null })) {
+        const snapshot = await context.paseo.agents
+          .ref(request.agentId)
+          .refresh()
+          .catch(() => null);
+        supportsMcpServers =
+          snapshot?.agent?.capabilities?.supportsMcpServers ?? null;
+      }
+
+      const decision = decideSessionOpen({ ...base, supportsMcpServers });
+      console.log(
+        `[luck-planner] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
+      );
+
+      if (!decision.injectMcp && !decision.attachTool) {
+        return { ...request, env };
+      }
+
+      const tools = decision.attachTool
+        ? [...request.tools, upsertLeafTool]
+        : request.tools;
+      let mcpServers = request.mcpServers;
+      if (decision.injectMcp) {
+        const config = injectedMcpConfig({ serverName: values.mcpServerName });
+        mcpServers = { ...request.mcpServers, [MCP_SERVER_KEY]: config };
+        console.log(
+          `[luck-planner] session_open MCP injected: ${config.command} ${config.args.join(" ")}`,
+        );
+      } else {
+        console.log(
+          `[luck-planner] session_open native upsert tool attached: ${decision.why}`,
+        );
+      }
+      return { ...request, env, tools, mcpServers };
     },
   );
 
@@ -423,6 +490,36 @@ export default function contribute(server: PluginServerContext) {
           : failed.map((result) => `${result.label}: ${result.error}`).join("; "),
       results,
     };
+  });
+
+  // 0.35.1 (§10.8 item 3): "Refresh luck-planner tools on this agent" — the
+  // supported answer to an agent that lost its tools: `reload()` reopens the
+  // provider session with its current configuration and reruns
+  // `agent.session_open`, which re-derives the MCP contribution or attaches
+  // the native fallback. A refused reload surfaces as `{ ok: false, error }`,
+  // which the Command Center item throws into the host's error toast.
+  handle(agentReload, async (input, context) => {
+    try {
+      const client = context.paseo;
+      if (!client) {
+        return {
+          ok: false,
+          error: "Paseo host client is unavailable.",
+        };
+      }
+      const result = await client.agents.ref(input.agentId).reload();
+      if (result === null) {
+        return { ok: false, error: `Agent ${input.agentId} not found or not reloadable.` };
+      }
+      console.log(
+        `[luck-planner] reloaded agent ${input.agentId} (luck-planner tools re-derived)`,
+      );
+      return { ok: true, error: null };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[luck-planner] agent reload failed: ${message}`);
+      return { ok: false, error: message };
+    }
   });
 
   handle(nodeSetStatus, (input) => {

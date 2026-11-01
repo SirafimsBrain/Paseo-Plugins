@@ -10,6 +10,7 @@ import {
   agentMcpRegister,
   agentMcpStatus,
   agentMcpUnregister,
+  agentReload,
   bugReport,
   dashboardStatus,
   goalApprove,
@@ -201,6 +202,7 @@ describe("RPC surface", () => {
           agentMcpRegister.name,
           agentMcpStatus.name,
           agentMcpUnregister.name,
+          agentReload.name,
           bugReport.name,
           dashboardStatus.name,
           goalApprove.name,
@@ -819,6 +821,103 @@ describe("dashboard.status (stage F2)", () => {
         port: null,
         portFallback: false,
         error: null,
+      });
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("agent-reload (the refresh tools action)", () => {
+  it("reloads the agent through the host and reports success", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const reloaded: string[] = [];
+      const handle = server.handlers.get("luck-planner.agent-reload");
+      expect(handle, "the RPC handler must be registered").toBeDefined();
+      const result = await handle!(
+        { agentId: "agent-1" } as never,
+        {
+          paseo: {
+            agents: {
+              ref: (id: string) => ({
+                reload: async () => {
+                  reloaded.push(id);
+                  return { ok: true };
+                },
+              }),
+            },
+          },
+        } as never,
+      );
+      expect(result).toEqual({ ok: true, error: null });
+      expect(reloaded).toEqual(["agent-1"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("reports a missing or non-reloadable agent", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const handle = server.handlers.get("luck-planner.agent-reload");
+      const result = await handle!(
+        { agentId: "ghost" } as never,
+        {
+          paseo: {
+            agents: {
+              ref: () => ({ reload: async () => null }),
+            },
+          },
+        } as never,
+      );
+      expect(result).toEqual({
+        ok: false,
+        error: "Agent ghost not found or not reloadable.",
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("turns a host failure into a message instead of a throw", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const handle = server.handlers.get("luck-planner.agent-reload");
+      const result = await handle!(
+        { agentId: "agent-1" } as never,
+        {
+          paseo: {
+            agents: {
+              ref: () => ({
+                reload: async () => {
+                  throw new Error("daemon busy");
+                },
+              }),
+            },
+          },
+        } as never,
+      );
+      expect(result).toEqual({ ok: false, error: "daemon busy" });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("fails politely when the host client is absent", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const handle = server.handlers.get("luck-planner.agent-reload");
+      const result = await handle!({ agentId: "agent-1" } as never, {
+        paseo: undefined,
+      } as never);
+      expect(result).toEqual({
+        ok: false,
+        error: "Paseo host client is unavailable.",
       });
     } finally {
       cleanup();

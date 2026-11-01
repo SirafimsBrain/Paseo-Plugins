@@ -15,7 +15,14 @@ import {
   parseLuckStatus,
   resolveLeaf,
 } from "./client/slash";
-import { bugReport, goalCreate, nodeSetStatus, treeSearch } from "./shared/rpc";
+import { requestFocus } from "./client/focus";
+import {
+  agentReload,
+  bugReport,
+  goalCreate,
+  nodeSetStatus,
+  treeSearch,
+} from "./shared/rpc";
 import {
   LUCK_PLANNER_TIMELINE_KIND,
   LUCK_PLANNER_TIMELINE_VERSION,
@@ -132,7 +139,31 @@ export default function contribute(client: PluginClientContext) {
       if (!result.ok) {
         throw new Error(result.error ?? "Failed to create the draft goal");
       }
+      // No focus request: a draft goal is not a node yet — it materializes
+      // into the tree only when a human approves it — and the panel renders
+      // nodes (see __doc.md §10.9 for the API-grounded limit).
       openPanel(PANEL_ID);
+    },
+  });
+
+  // "Refresh luck-planner tools on this agent" (0.35.1, §10.8 item 3): the
+  // new `agents.ref(id).reload()` reopens the agent's session, rerunning
+  // `agent.session_open` so the launch-only MCP server or the native
+  // `luck_tree_upsert_leaf` fallback is re-derived — the one-click answer to
+  // an agent that lost its tools after an idle runtime release, an OpenCode
+  // eviction or a settings change. A refused reload throws into the host's
+  // error toast, so a failed repair is never silent.
+  client.addCommandCenterItem({
+    id: "refresh-luck-planner-tools",
+    title: "Refresh luck-planner tools on this agent",
+    icon: "RefreshCw",
+    keywords: ["luck", "planner", "tools", "refresh", "reload", "mcp"],
+    context: "agent",
+    async onSelect({ agent, rpc }) {
+      const result = await rpc(agentReload, { agentId: agent.id });
+      if (!result.ok) {
+        throw new Error(result.error ?? "The agent session could not be reloaded.");
+      }
     },
   });
 
@@ -165,6 +196,10 @@ export default function contribute(client: PluginClientContext) {
       if (!result.ok) {
         throw new Error(result.error ?? "Status change failed");
       }
+      // Land the panel on the leaf this command just moved (0.35.1, §10.8
+      // item 5): `openPanel` carries no params in 0.14.0, so the request
+      // travels through the client focus mailbox the panel subscribes to.
+      requestFocus(projectKey, resolved.value.nodeId);
       openPanel(PANEL_ID);
     },
   });
@@ -185,6 +220,9 @@ export default function contribute(client: PluginClientContext) {
       if (!result.ok) {
         throw new Error(result.error ?? "Bug report failed");
       }
+      // No focus request: `/luck-bug` reports an unattached incident (the
+      // command takes a title only), so there is no node to land on — bugs
+      // appear in a node's details once an agent attaches them.
       openPanel(PANEL_ID);
     },
   });
