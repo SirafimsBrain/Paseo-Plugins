@@ -22,6 +22,10 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 - **History** — the last N runs (configurable, default 50) with the rendered payload, target, used model/agent, and error; any entry can be repeated in one click with its values, target, and model prefilled.
 - **MCP servers per command** — a prompt command can carry MCP server configs (`stdio`/`http`/`sse`), attached to every agent the command creates.
 - **Automation** — optional server-side hooks, configured in the plugin settings: run a command (with template defaults) every time an agent finishes a turn successfully, and/or bootstrap every newly created workspace with a command.
+- **Agent tool** — every agent gets a native `command_center_run` tool (delivered by Paseo's own tool transport, no MCP config): it runs a saved command by name or id — shell commands in a terminal of the agent's own workspace, prompt commands as a new agent in that workspace (never the calling agent itself).
+- **MCP re-derivation for existing agents** — running a command with MCP servers against an *existing* agent registers them for that agent; the next session reopen (`resume`/`refresh`, including the idle-hour release) contributes the servers the agent's saved config lacks — launch-only, never saved, collision-checked against the daemon's own agent record, and every unknown state fails safe to skip. A "Refresh Command Center tools on this agent" Command Center action forces the reopen via `agents.ref(id).reload()`.
+- **Turn-aware dispatch** — when a run targets an existing agent that is mid-turn, the run dialog asks: interrupt the turn (the daemon default) or steer the prompt into it.
+- **Deep links** — the screen accepts `view` / `command` / `schedule` params: `/cc list`, `/cc history` and `/cc schedule …` land on the right tab (the new schedule expanded), and the history and schedules tabs can jump to the exact source command, which is border-highlighted in the library.
 - **Settings screen** — Paseo Settings → Plugins → Command Center: history retention (10–500), default provider/model for new prompt commands, and the automation hooks.
 - **Schedules** — any command (prompt or shell) can be scheduled on the standard Paseo scheduler, managed entirely from the plugin: the `Schedule` button next to `Edit` on a command card opens the form prefilled from the saved command (rendered prompt with default inputs, stored model, workspace), while the run dialog's `Schedule…` button freezes exactly the values you previewed. Pick a cadence preset or a cron expression, cap the number of runs, optionally fire once immediately; shell lines are wrapped into an agent instruction for each run. Schedules run on the daemon host (they also appear in the native Schedules sidebar), the plugin keeps the link to the creating command, and a dedicated tab offers pause/resume, run-now, an inline cadence editor and per-run tracking (status, timing, output/errors).
 - **Composer attachment source** — saved commands are searchable from the composer's attachment picker; picking one inserts the template text into the message.
@@ -34,7 +38,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center
 ```
 
-Requires Paseo ≥ 0.13.0 (verified against the stable 0.14.0 release, 2026-11-01; the screen/sidebar API, settings screen, attachment source and lifecycle hooks are all SDK 0.11+ APIs, and the floor is 0.13.0 because the UI import comes from `@getpaseo/plugin/client/ui`, which gained `Modal` / `useToast` in 0.13.0).
+Requires Paseo ≥ 0.14.0 (verified against the stable 0.14.0 release, 2026-11-01). Version 0.6.0 uses 0.14.0-only surface — the `agent.session_open` tool/MCP maps and `agents.ref(id).reload()` — so the real host gate rejects older daemons; earlier versions raised the floor to 0.13.0 for the `client/ui` `Modal` / `useToast` exports.
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/command-center/<revision>/checkout/command-center`, together with its dependencies. It talks to the standard Paseo scheduler through the low-level `@getpaseo/client` daemon client, which Paseo does **not** supply to plugins — so the manifest runs `npm ci` as its install-time build step, and the daemon installs the dependencies before bundling. That means the host needs npm-registry access at install and update time. Updates: `paseo plugin update command-center`.
 
@@ -57,6 +61,38 @@ $PASEO_HOME/plugins/command-center/
 ├── history.json     # the last N runs (settings.historyLimit)
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
+
+## Version 0.6.0 — the §12.3 recommendations (2026-11-01)
+
+Implements all four recommendations recorded by the 0.14.0 pass; full
+design notes and evidence: [__doc.md](./__doc.md) §13. New functionality →
+second-digit bump; `requirements.paseo` `>=0.13.0` → `>=0.14.0`.
+
+- **`command_center_run` agent tool** (`defineAgentTool`) — runs a saved
+  command by name from inside any agent; delivered on every interactive
+  session open through the hook's `tools` map (the SDK has no global tool
+  registration). Shell → a terminal in the agent's own workspace; prompt →
+  a **new** agent there with the stored provider and MCP servers, never the
+  calling agent (no self-prompt recursion).
+- **Session-open MCP re-derivation** — runs against an *existing* agent
+  register the command's MCP servers in a per-agent registry; on the next
+  `resume`/`refresh` reopen the hook contributes the names the agent's
+  saved config lacks, launch-only, with the collision check reading the
+  daemon's own agent record and failing safe to skip on any unknown state.
+- **"Refresh Command Center tools on this agent"** — a `context: "agent"`
+  Command Center action on the new `agents.ref(id).reload()`, which reopens
+  the session and re-derives both contributions.
+- **Turn-aware dispatch** — the run dialog asks what happens when the
+  existing-agent target is busy: `interrupt` (daemon default) or `steer`.
+  (The protocol has no `queue` value.)
+- **Deep links** — `view`/`command`/`schedule` screen params, used by `/cc`
+  and by the "Show command" actions in the history and schedules tabs.
+
+**Verification:** typecheck clean, vitest **13 suites / 149 tests**, both
+entries built by the real 0.14.0 host compiler with zero deprecated strings
+(plus a negative control), the manifest gate rejecting 0.12.0/0.13.0 and
+accepting 0.14.0, and `running` with `[paseo] Plugin ready` and **21 RPC
+methods** in an isolated 0.14.0 daemon.
 
 ## Paseo 0.14.0 compatibility
 
@@ -86,11 +122,12 @@ change to existing functionality).
   (`wholeTurns`, local speech models). The `agent.turn_ended` automation
   still reads only `event.outcome`, so the always-empty `timeline` does not
   bite.
-- **Recommendations recorded, not implemented** ([__doc.md](./__doc.md)
-  §12.3): a native `command_center_run` agent tool via `defineAgentTool`,
+- **Recommendations recorded by the pass** ([__doc.md](./__doc.md)
+  §12.3) — a native `command_center_run` agent tool via `defineAgentTool`,
   session-open MCP re-derivation for runs against an existing agent plus a
   "refresh command tools" action on `agents.ref(id).reload()`, turn-aware
-  dispatch (`activeTurnBehavior`), and deep links through screen params.
+  dispatch (`activeTurnBehavior`), and deep links through screen params —
+  **all four implemented in 0.6.0** (see above and §13).
 
 **Verification:** typecheck clean against both 0.14.0 SDKs, vitest **9
 suites / 98 tests** pass, both entries build with the **real 0.14.0 host

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import type { CommandDefinition, ProviderWithModels, RunResult } from "../shared/commands";
+import type { ActiveTurnBehavior, CommandDefinition, ProviderWithModels, RunResult } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { renderPreview } from "./preview";
@@ -39,6 +39,12 @@ export interface BatchTarget {
   agentId?: string;
   provider?: string;
   newWorktree: boolean;
+  /**
+   * Turn-aware dispatch (0.6.0), only for targets with an existing `agentId`:
+   * `interrupt` stops the running turn (the daemon default when omitted),
+   * `steer` delivers the prompt into the running turn.
+   */
+  activeTurnBehavior?: ActiveTurnBehavior;
 }
 
 export interface BatchItemResult {
@@ -134,6 +140,8 @@ export function RunDialog({
       : "",
   );
   const [newWorktree, setNewWorktree] = useState(false);
+  /** What happens when the existing-agent target is mid-turn (0.6.0). */
+  const [activeTurn, setActiveTurn] = useState<ActiveTurnBehavior>("interrupt");
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<BatchItemResult[] | null>(null);
   const [scheduling, setScheduling] = useState(false);
@@ -217,14 +225,16 @@ export function RunDialog({
 
   const handleRun = () => {
     if (!canRun) return;
+    const turnBehavior = agentId !== "" ? activeTurn : undefined;
     const targets: BatchTarget[] =
       selectedKeys.length === 0
-        ? [{ workspaceKey: null, agentId: agentId !== "" ? agentId : undefined, provider: provider || undefined, newWorktree }]
+        ? [{ workspaceKey: null, agentId: agentId !== "" ? agentId : undefined, provider: provider || undefined, newWorktree, activeTurnBehavior: turnBehavior }]
         : selectedKeys.map((workspaceKey) => ({
             workspaceKey,
             agentId: selectedKeys.length === 1 && agentId !== "" ? agentId : undefined,
             provider: provider || undefined,
             newWorktree,
+            activeTurnBehavior: turnBehavior,
           }));
     setBusy(true);
     setResults(null);
@@ -372,6 +382,28 @@ export function RunDialog({
               </Text>
             )}
           </View>
+          {agentId !== "" ? (
+            <View style={styles.field}>
+              <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>If the agent is busy</Text>
+              <View style={styles.row}>
+                <Pressable
+                  style={[styles.chip, { borderColor: theme.colors.border }, activeTurn === "interrupt" && styles.chipActive]}
+                  onPress={() => setActiveTurn("interrupt")}
+                >
+                  <Text style={[styles.chipText, { color: foreground }]}>Interrupt the turn</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.chip, { borderColor: theme.colors.border }, activeTurn === "steer" && styles.chipActive]}
+                  onPress={() => setActiveTurn("steer")}
+                >
+                  <Text style={[styles.chipText, { color: foreground }]}>Steer into it</Text>
+                </Pressable>
+              </View>
+              <Text style={[styles.hint, { color: foregroundMuted }]}>
+                Interrupt is the daemon default. Steer delivers the prompt into the running turn instead of stopping it.
+              </Text>
+            </View>
+          ) : null}
         </>
       ) : null}
 

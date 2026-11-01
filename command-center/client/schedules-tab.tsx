@@ -23,6 +23,10 @@ interface Props {
   theme: PluginTheme;
   reloadKey: number;
   onChanged: () => void;
+  /** Deep link (0.6.0): expand and highlight this schedule. */
+  focusScheduleId?: string | null;
+  /** Deep link (0.6.0): jump to the command that created a schedule. */
+  onShowCommand?: (commandId: string) => void;
 }
 
 function formatWhen(iso: string | null): string {
@@ -38,7 +42,7 @@ const RUN_BADGE: Record<ScheduleRun["status"], string> = {
   failed: "failed",
 };
 
-export function SchedulesTab({ theme, reloadKey, onChanged }: Props) {
+export function SchedulesTab({ theme, reloadKey, onChanged, focusScheduleId = null, onShowCommand }: Props) {
   const listRpc = useRpc(listSchedules);
   const runsRpc = useRpc(listScheduleRuns);
   const actionRpc = useRpc(scheduleAction);
@@ -75,6 +79,15 @@ export function SchedulesTab({ theme, reloadKey, onChanged }: Props) {
   }, [listRpc]);
 
   useEffect(() => load(), [load, reloadKey]);
+
+  // Deep link (0.6.0): a focused schedule is expanded and its runs loaded.
+  useEffect(() => {
+    if (!focusScheduleId) return;
+    setExpanded(focusScheduleId);
+    if (!runs[focusScheduleId]) loadRuns(focusScheduleId);
+    // `runs` intentionally not a dependency: expand-once, not re-expand on run updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusScheduleId]);
 
   const loadRuns = useCallback(
     (id: string) => {
@@ -140,7 +153,14 @@ export function SchedulesTab({ theme, reloadKey, onChanged }: Props) {
         const statusColor =
           schedule.status === "active" ? statusSuccess : schedule.status === "paused" ? foregroundMuted : statusDanger;
         return (
-          <View key={schedule.id} style={[styles.card, { borderColor: theme.colors.border }]}>
+          <View
+            key={schedule.id}
+            style={[
+              styles.card,
+              { borderColor: theme.colors.border },
+              schedule.id === focusScheduleId ? { borderColor: theme.colors.accent } : null,
+            ]}
+          >
             <Pressable onPress={() => toggle(schedule.id)}>
               <View style={styles.cardHeader}>
                 <Text style={[styles.cardTitle, { color: foreground }, uiFont ? { fontFamily: uiFont } : null, { fontSize: font(14) }]} numberOfLines={1}>
@@ -203,6 +223,14 @@ export function SchedulesTab({ theme, reloadKey, onChanged }: Props) {
               >
                 <Text style={[styles.actionText, styles.deleteText, { fontSize: font(12) }]}>Delete</Text>
               </Pressable>
+              {schedule.commandId && onShowCommand ? (
+                <Pressable
+                  style={styles.actionButton}
+                  onPress={() => onShowCommand(schedule.commandId!)}
+                >
+                  <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Show command</Text>
+                </Pressable>
+              ) : null}
             </View>
 
             {editingCron?.id === schedule.id ? (

@@ -1,7 +1,8 @@
 import type { PaseoApi } from "@getpaseo/client";
-import type { CommandDefinition, HistoryEntry, RunResult, RunTarget } from "../shared/commands";
+import type { ActiveTurnBehavior, CommandDefinition, HistoryEntry, RunResult, RunTarget } from "../shared/commands";
 import { isFullModelRef } from "../shared/commands";
 import { renderTemplate, worktreeBranchFor } from "../shared/template";
+import { forgetAgentMcp, rememberAgentMcp } from "./agent-mcp";
 import { appendHistory, loadHistory } from "./store";
 
 /** Workspace fields the executor and the template context rely on. */
@@ -101,6 +102,11 @@ export async function executeCommand(
     provider?: string;
     /** Groups history entries of one fan-out run; null for single runs. */
     batchId?: string | null;
+    /**
+     * Turn-aware dispatch for existing-agent targets (0.6.0): omitted means
+     * the daemon default (`interrupt`).
+     */
+    activeTurnBehavior?: ActiveTurnBehavior;
   },
   deps: RunDeps,
 ): Promise<RunResult> {
@@ -177,8 +183,20 @@ export async function executeCommand(
           `Agent ${input.agentId} is archived or unknown; reopen it or create a new agent.`,
         );
       }
+      // Session-open MCP re-derivation (0.6.0): the registry now reflects the
+      // MCP servers of *this* command, so the next `resume`/`refresh` reopen
+      // contributes the ones the agent's saved config lacks (`server/session-open.ts`).
+      const servers = command.mcpServers ?? {};
+      if (Object.keys(servers).length > 0) {
+        rememberAgentMcp(input.agentId, servers, command.name);
+      } else {
+        forgetAgentMcp(input.agentId);
+      }
       const handle = paseo.agents.ref(input.agentId);
-      await handle.send(rendered);
+      await handle.send(
+        rendered,
+        input.activeTurnBehavior ? { activeTurnBehavior: input.activeTurnBehavior } : undefined,
+      );
       recordHistory(
         command,
         rendered,
@@ -271,6 +289,7 @@ export async function executeBatch(
           newWorktree: target.newWorktree ?? false,
           provider: target.provider,
           batchId,
+          activeTurnBehavior: target.activeTurnBehavior,
         },
         deps,
       ),

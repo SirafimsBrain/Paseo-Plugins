@@ -205,6 +205,16 @@ export const historyEntrySchema = z.object({
 
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 
+/**
+ * Turn-aware dispatch (`SendMessageOptions.activeTurnBehavior`, 0.11+ protocol,
+ * `@getpaseo/client`): `interrupt` stops the running turn (the daemon's
+ * default when omitted), `steer` delivers the prompt into the running turn.
+ * No `queue` value exists — verified in `@getpaseo/protocol@0.14.0`.
+ */
+export const activeTurnBehaviorSchema = z.enum(["interrupt", "steer"]);
+
+export type ActiveTurnBehavior = z.output<typeof activeTurnBehaviorSchema>;
+
 export const runResultSchema = z.object({
   ok: z.boolean(),
   kind: z.enum(["new-agent", "existing-agent", "terminal"]),
@@ -278,6 +288,12 @@ export const runCommand = defineRpc({
     newWorktree: z.boolean().optional(),
     /** Run-time provider/model override; falls back to the stored command provider. */
     provider: z.string().optional(),
+    /**
+     * Turn-aware dispatch for runs against an existing agent (0.6.0): what
+     * happens when the target agent is mid-turn. Omitted = the daemon default
+     * (`interrupt`).
+     */
+    activeTurnBehavior: activeTurnBehaviorSchema.optional(),
   }),
   output: runResultSchema,
 });
@@ -289,6 +305,8 @@ export const runTargetSchema = z.object({
   agentId: z.string().optional(),
   provider: z.string().optional(),
   newWorktree: z.boolean().optional(),
+  /** Only meaningful for targets with an existing `agentId`. */
+  activeTurnBehavior: activeTurnBehaviorSchema.optional(),
 });
 
 export type RunTarget = z.infer<typeof runTargetSchema>;
@@ -372,5 +390,24 @@ export const appendHistory = defineRpc({
   output: z.object({
     ok: z.boolean(),
     id: z.string().nullable(),
+  }),
+});
+
+/**
+ * "Refresh Command Center tools" (0.6.0, recommendation §12.3 item 2): reopens
+ * the agent's provider session through `agents.ref(id).reload()` (new in
+ * 0.14.0), which reruns `before("agent.session_open")` — re-deriving the
+ * `command_center_run` tool and the launch-only MCP servers of the last
+ * command run against this agent. The supported answer to "this agent lost
+ * its Command Center tools".
+ */
+export const agentReload = defineRpc({
+  name: "command-center.agent-reload",
+  input: z.object({ agentId: z.string().min(1) }),
+  output: z.object({
+    ok: z.boolean(),
+    /** Refreshed agent title, when the daemon returned a snapshot. */
+    title: z.string().nullable(),
+    error: z.string().nullable(),
   }),
 });

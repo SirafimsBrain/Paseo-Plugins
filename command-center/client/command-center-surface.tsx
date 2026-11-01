@@ -20,6 +20,7 @@ import {
   toggleFavorite,
 } from "../shared/commands";
 import { createSchedule } from "../shared/schedules";
+import { parseScreenParams, screenParams, type ScreenParams, type ScreenView } from "../shared/screen-params";
 import { CommandForm, type CommandFormResult } from "./command-form";
 import { dispatchRemoteTarget } from "./dispatch";
 import { renderPreview } from "./preview";
@@ -63,7 +64,7 @@ export function splitWorkspaceKey(key: string): { serverId: string; workspaceId:
   return { serverId: '', workspaceId: key };
 }
 
-export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
+export function CommandCenterSurface({ theme, host, params }: PluginScreenProps) {
   const paseo = usePaseo();
   const toast = useToast();
   const listRpc = useRpc(listCommands);
@@ -118,6 +119,39 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchVisible, setSearchVisible] = useState(false);
+  /** Deep links (0.6.0): command/schedule the screen params asked to focus. */
+  const [focusedCommandId, setFocusedCommandId] = useState<string | null>(null);
+  const [highlightScheduleId, setHighlightScheduleId] = useState<string | null>(null);
+
+  /**
+   * Apply validated screen params (`shared/screen-params.ts`) — the one path
+   * used by the host deep links (`/cc`, `openScreen({ params })`) and by the
+   * in-screen "Show" actions, which build the same params object.
+   */
+  const applyParams = useCallback((next: ScreenParams) => {
+    setTab(next.view);
+    if (next.view === "library" && next.commandId) {
+      // A focused command must be visible: drop the filters that could hide it.
+      setCategoryFilter(null);
+      setSearchQuery("");
+      setSearchVisible(false);
+      setFocusedCommandId(next.commandId);
+    }
+    if (next.view === "schedules" && next.scheduleId) {
+      setHighlightScheduleId(next.scheduleId);
+    }
+  }, []);
+
+  useEffect(() => {
+    applyParams(parseScreenParams(params));
+  }, [params, applyParams]);
+
+  /** Manual tab switches drop any deep-link focus. */
+  const selectTab = useCallback((next: ScreenView) => {
+    setFocusedCommandId(null);
+    setHighlightScheduleId(null);
+    setTab(next);
+  }, []);
 
   const refresh = useCallback(() => {
     setReloadKey((key) => key + 1);
@@ -566,6 +600,7 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
             agentId: resolved[index]!.target.agentId,
             provider: resolved[index]!.target.provider,
             newWorktree: resolved[index]!.target.newWorktree,
+            activeTurnBehavior: resolved[index]!.target.activeTurnBehavior,
           })),
         });
         results.forEach((result, position) => {
@@ -595,6 +630,7 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
             agentId: target.agentId,
             provider: target.provider,
             newWorktree: target.newWorktree,
+            activeTurnBehavior: target.activeTurnBehavior,
           },
           workspace
             ? { id: workspace.id, name: workspace.name, directory: workspace.directory }
@@ -688,7 +724,7 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
           <Pressable
             key={option}
             style={[styles.tab, tab === option && styles.tabActive]}
-            onPress={() => setTab(option)}
+            onPress={() => selectTab(option)}
           >
             <Text
               style={[
@@ -711,7 +747,7 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
                 refresh();
               });
             } else {
-              setTab("history");
+              selectTab("history");
             }
           }}
         >
@@ -727,7 +763,13 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
       </View>
 
       {tab === "schedules" ? (
-        <SchedulesTab theme={theme} reloadKey={reloadKey} onChanged={refresh} />
+        <SchedulesTab
+          theme={theme}
+          reloadKey={reloadKey}
+          onChanged={refresh}
+          focusScheduleId={highlightScheduleId}
+          onShowCommand={(commandId) => applyParams(screenParams("library", { commandId }))}
+        />
       ) : tab === "library" ? (
         <ScrollView contentContainerStyle={styles.list}>
           <View style={styles.toolbar}>
@@ -790,7 +832,14 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
             </Text>
           ) : null}
           {sorted.map((command) => (
-            <View key={command.id} style={[styles.card, { borderColor: theme.colors.border }]}>
+            <View
+              key={command.id}
+              style={[
+                styles.card,
+                { borderColor: theme.colors.border },
+                command.id === focusedCommandId ? { borderColor: theme.colors.accent } : null,
+              ]}
+            >
               <View style={styles.cardHeader}>
                 <Pressable style={styles.star} onPress={() => void handleFavorite(command)}>
                   <Text style={[styles.starText, { color: foreground, fontSize: font(16) }]}>
@@ -897,6 +946,16 @@ export function CommandCenterSurface({ theme, host }: PluginScreenProps) {
                       {repeatable ? "Repeat the task" : "Command deleted"}
                     </Text>
                   </Pressable>
+                  {repeatable ? (
+                    // Deep link (0.6.0): jump to the source command in the
+                    // library — the same params the host links use.
+                    <Pressable
+                      style={styles.actionButton}
+                      onPress={() => applyParams(screenParams("library", { commandId: entry.commandId }))}
+                    >
+                      <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Show command</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
             );

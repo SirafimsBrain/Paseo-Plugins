@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { executeBatch, executeCommand } from "../server/executor";
+import { loadAgentMcpRegistry } from "../server/agent-mcp";
 import { loadHistory, paseoHome } from "../server/store";
 import type { CommandDefinition } from "../shared/commands";
 
@@ -12,6 +13,7 @@ function fakePaseo(overrides: {
   agentsListFails?: boolean;
 } = {}) {
   const sent: string[] = [];
+  const sentOptions: unknown[] = [];
   const createdAgents: Record<string, unknown>[] = [];
   const written: { terminalId: string; text: string }[] = [];
   const terminals: Record<string, unknown>[] = [];
@@ -31,8 +33,9 @@ function fakePaseo(overrides: {
         return agent;
       },
       ref: (agentId: string) => ({
-        send: async (text: string) => {
+        send: async (text: string, options?: unknown) => {
           sent.push(text);
+          sentOptions.push(options);
           return { ok: true };
         },
       }),
@@ -51,7 +54,7 @@ function fakePaseo(overrides: {
     },
   };
 
-  return { paseo, sent, createdAgents, written, terminals };
+  return { paseo, sent, sentOptions, createdAgents, written, terminals };
 }
 
 function promptCommand(overrides: Partial<CommandDefinition> = {}): CommandDefinition {
@@ -329,5 +332,105 @@ describe("executeBatch", () => {
       provider: "claude/opus-4.6",
       values: { who: "grouped" },
     });
+  });
+});
+
+describe("0.6.0: turn-aware dispatch and the session-open MCP registry", () => {
+  it("omits send options when no activeTurnBehavior is given", async () => {
+    const fake = fakePaseo({
+      workspaces: [workspace],
+      agents: [{ id: "ag_1", archivedAt: null }],
+    });
+    await executeCommand(
+      promptCommand(),
+      { values: {}, agentId: "ag_1", newWorktree: false },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+    expect(fake.sentOptions).toEqual([undefined]);
+  });
+
+  it("passes activeTurnBehavior through to the agent send", async () => {
+    const fake = fakePaseo({
+      workspaces: [workspace],
+      agents: [{ id: "ag_1", archivedAt: null }],
+    });
+    const result = await executeCommand(
+      promptCommand(),
+      { values: {}, agentId: "ag_1", newWorktree: false, activeTurnBehavior: "steer" },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.sentOptions).toEqual([{ activeTurnBehavior: "steer" }]);
+  });
+
+  it("threads a per-target activeTurnBehavior through executeBatch", async () => {
+    const fake = fakePaseo({
+      workspaces: [workspace],
+      agents: [{ id: "ag_1", archivedAt: null }],
+    });
+    await executeBatch(
+      promptCommand(),
+      {
+        values: {},
+        targets: [{ agentId: "ag_1", activeTurnBehavior: "interrupt" }],
+      },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+    expect(fake.sentOptions).toEqual([{ activeTurnBehavior: "interrupt" }]);
+  });
+
+  it("remembers a command's MCP servers after a run against an existing agent", async () => {
+    const fake = fakePaseo({
+      workspaces: [workspace],
+      agents: [{ id: "ag_1", archivedAt: null }],
+    });
+    await executeCommand(
+      promptCommand({
+        mcpServers: { github: { type: "http", url: "https://api.github.com/mcp" } },
+      }),
+      { values: {}, agentId: "ag_1", newWorktree: false },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    const registry = loadAgentMcpRegistry();
+    expect(registry["ag_1"]).toMatchObject({
+      commandName: "Say hi",
+      servers: { github: { type: "http", url: "https://api.github.com/mcp" } },
+    });
+  });
+
+  it("a later run without servers clears the agent's registry entry", async () => {
+    const fake = fakePaseo({
+      workspaces: [workspace],
+      agents: [{ id: "ag_1", archivedAt: null }],
+    });
+    await executeCommand(
+      promptCommand({
+        mcpServers: { github: { type: "http", url: "https://api.github.com/mcp" } },
+      }),
+      { values: {}, agentId: "ag_1", newWorktree: false },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+    await executeCommand(
+      promptCommand(),
+      { values: {}, agentId: "ag_1", newWorktree: false },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(loadAgentMcpRegistry()["ag_1"]).toBeUndefined();
+  });
+
+  it("never writes a registry entry for new-agent runs", async () => {
+    const fake = fakePaseo({ workspaces: [workspace] });
+    await executeCommand(
+      promptCommand({
+        mcpServers: { github: { type: "http", url: "https://api.github.com/mcp" } },
+      }),
+      { values: {}, newWorktree: false },
+      { paseo: fake.paseo as never, now: fixedNow },
+    );
+
+    expect(loadAgentMcpRegistry()).toEqual({});
   });
 });

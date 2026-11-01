@@ -2,7 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
 import contribute from "../index.server";
+import { rememberAgentMcp } from "../server/agent-mcp";
 import { clearHistoryStore, loadCommands, loadHistory } from "../server/store";
 import type { CommandDefinition } from "../shared/commands";
 
@@ -21,6 +23,8 @@ afterAll(() => {
 
 type Handler = (input: never, ctx: { paseo: unknown }) => unknown;
 const handlers = new Map<string, Handler>();
+const beforeHooks = new Map<string, Handler>();
+const eventHooks = new Map<string, Handler>();
 
 function fakeServer(): never {
   return {
@@ -41,8 +45,12 @@ function fakeServer(): never {
         },
       };
     },
-    on() {},
-    before() {},
+    on(name: string, handler: Handler) {
+      eventHooks.set(name, handler);
+    },
+    before(name: string, handler: Handler) {
+      beforeHooks.set(name, handler);
+    },
   } as never;
 }
 
@@ -72,6 +80,8 @@ function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition 
 describe("command-center RPC handlers", () => {
   beforeEach(() => {
     handlers.clear();
+    beforeHooks.clear();
+    eventHooks.clear();
     contribute(fakeServer());
   });
 
@@ -304,5 +314,124 @@ describe("command-center RPC handlers", () => {
       items: unknown[];
     };
     expect(result.items).toHaveLength(1);
+  });
+});
+
+describe("0.6.0: session-open hook and the agent-reload RPC", () => {
+  beforeEach(() => {
+    handlers.clear();
+    beforeHooks.clear();
+    eventHooks.clear();
+    contribute(fakeServer());
+  });
+
+  function hookPaseo(supportsMcpServers = true) {
+    return {
+      agents: {
+        ref: () => ({
+          refresh: async () => ({ agent: { capabilities: { supportsMcpServers } } }),
+          reload: async () => ({ agent: { title: "Refurbed" } }),
+        }),
+      },
+    };
+  }
+
+  function sessionOpenRequest(overrides: Record<string, unknown> = {}) {
+    return {
+      agentId: "ag_hook",
+      workspaceId: "ws_1",
+      provider: "claude/opus-4.6",
+      cwd: "/disk/plugins",
+      reason: "resume",
+      purpose: "interactive",
+      title: null,
+      labels: {},
+      tools: [],
+      env: {},
+      mcpServers: {},
+      ...overrides,
+    } as never;
+  }
+
+  async function runHook(request: unknown, paseo: unknown) {
+    const hook = beforeHooks.get("agent.session_open");
+    if (!hook) throw new Error("agent.session_open hook not registered");
+    return (await hook({ request } as never, { paseo } as never)) as {
+      tools: { name: string }[];
+      mcpServers: Record<string, unknown>;
+    };
+  }
+
+  function writeAgentRecord(agentId: string, mcpServers: unknown): void {
+    mkdirSync(`${process.env.PASEO_HOME}/agents/ws-slug`, { recursive: true });
+    writeFileSync(
+      `${process.env.PASEO_HOME}/agents/ws-slug/${agentId}.json`,
+      JSON.stringify({ config: { mcpServers } }),
+      "utf-8",
+    );
+  }
+
+  it("registers the session_open hook and the archived cleanup", () => {
+    expect(beforeHooks.has("agent.session_open")).toBe(true);
+    expect(eventHooks.has("agent.archived")).toBe(true);
+  });
+
+  it("attaches the command_center_run tool on interactive opens", async () => {
+    const result = await runHook(sessionOpenRequest(), hookPaseo());
+    expect(result.tools.map((tool) => tool.name)).toEqual(["command_center_run"]);
+    expect(result.mcpServers).toEqual({});
+  });
+
+  it("adds no tool and no servers for purpose history", async () => {
+    writeAgentRecord("ag_hook", {});
+    rememberAgentMcp("ag_hook", { github: { type: "http", url: "https://api.github.com/mcp" } }, "Review");
+    const result = await runHook(sessionOpenRequest({ purpose: "history" }), hookPaseo());
+    expect(result.tools).toEqual([]);
+    expect(result.mcpServers).toEqual({});
+  });
+
+  it("contributes registry servers the saved config lacks", async () => {
+    writeAgentRecord("ag_hook", {});
+    rememberAgentMcp("ag_hook", { github: { type: "http", url: "https://api.github.com/mcp" } }, "Review");
+    const result = await runHook(sessionOpenRequest(), hookPaseo());
+    expect(result.mcpServers).toEqual({ github: { type: "http", url: "https://api.github.com/mcp" } });
+    expect(result.tools.map((tool) => tool.name)).toEqual(["command_center_run"]);
+  });
+
+  it("skips a name the saved configuration already carries", async () => {
+    writeAgentRecord("ag_hook", { github: { type: "http", url: "https://api.github.com/mcp" } });
+    rememberAgentMcp("ag_hook", { github: { type: "http", url: "https://api.github.com/mcp" } }, "Review");
+    const result = await runHook(sessionOpenRequest(), hookPaseo());
+    expect(result.mcpServers).toEqual({});
+  });
+
+  it("fails safe to skip when the provider cannot do MCP", async () => {
+    writeAgentRecord("ag_hook", {});
+    rememberAgentMcp("ag_hook", { github: { type: "http", url: "https://api.github.com/mcp" } }, "Review");
+    const result = await runHook(sessionOpenRequest(), hookPaseo(false));
+    expect(result.mcpServers).toEqual({});
+    // The tool survives — it cannot collide with anything.
+    expect(result.tools.map((tool) => tool.name)).toEqual(["command_center_run"]);
+  });
+
+  it("agent-reload reopens the session through agents.ref(id).reload()", async () => {
+    const result = (await call("command-center.agent-reload", { agentId: "ag_1" }, hookPaseo())) as {
+      ok: boolean;
+      title: string | null;
+      error: string | null;
+    };
+    expect(result).toEqual({ ok: true, title: "Refurbed", error: null });
+  });
+
+  it("agent-reload surfaces reload failures instead of throwing", async () => {
+    const paseo = {
+      agents: { ref: () => ({ reload: async () => { throw new Error("session is busy"); } }) },
+    };
+    const result = (await call("command-center.agent-reload", { agentId: "ag_1" }, paseo)) as {
+      ok: boolean;
+      error: string | null;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("busy");
   });
 });

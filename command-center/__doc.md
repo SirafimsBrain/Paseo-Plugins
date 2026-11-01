@@ -303,10 +303,19 @@ The same defect existed in three sibling plugins and was fixed the same way — 
 
 ## 6. Compatibility
 
-Current: **verified on 2026-11-01 against Paseo `0.14.0`** with
+Current: **verified on 2026-11-01 against Paseo `0.14.0`**, shipped as
+`0.6.0` with `@getpaseo/plugin@^0.14.0` + `@getpaseo/client@^0.14.0` — the
+§12.3 recommendations are now implemented (§13), which makes the 0.14.0
+surface (`defineAgentTool` delivery via `request.tools`, the
+`agent.session_open` request maps, `agents.ref(id).reload()`) a hard
+requirement: `requirements.paseo` is `>=0.14.0` and the real host gate
+rejects older daemons. The deprecated `client/react-native` UI entry was
+migrated in 0.5.3 (§12).
+
+Earlier, on 2026-11-01 against Paseo `0.14.0` with
 `@getpaseo/plugin@^0.14.0` + `@getpaseo/client@^0.14.0` (a real pin bump) —
 the one deprecation 0.13.0 left in the plugin is migrated: the UI import now
-comes from `@getpaseo/plugin/client/ui`, `requirements.paseo` is `>=0.13.0`,
+comes from `@getpaseo/plugin/client/ui`, `requirements.paseo` was `>=0.13.0`,
 shipped as `0.5.3` — see §12.
 
 Earlier, on 2026-10-24 against Paseo `0.13.0` with
@@ -603,6 +612,9 @@ versioning: a change to existing functionality, no new functionality).
 
 ### 12.3 Recommendations for improvement (recorded, not implemented)
 
+**Status update (2026-11-01): all four items below are implemented in
+version 0.6.0 — see §13.** The section is kept as the pass's record.
+
 Each item was written down by this pass and left for a future release;
 items 1–2 are new functionality (second-digit bump), items 3–4 change
 existing behaviour or add capability (each carries its own bump under the
@@ -662,3 +674,44 @@ stronger guarantee.
 | Floor enforced by the daemon's own gate (`assertPluginCompatibility`, the call `plugins/index.js` makes with the daemon version) | `0.12.0`: **REJECTED** (`requires Paseo >=0.13.0`); `0.13.0`: accepted; `0.14.0`: accepted. |
 | Live, isolated 0.14.0 daemon (scratch home, `127.0.0.1:16767`, `pluginsEnabled: true`, production `~/.paseo` untouched) | **PASS** — installed from the working tree: status `running`, `[paseo] Plugin ready`, **20 RPC methods** registered (17 `command-center.*` + 3 `settings.command-center.*`), a clean `paseo plugin reload` (still `running`, ready twice), and no plugin or contribution errors in the daemon log. One benign `DEP0176 fs.F_OK` Node warning from the bundled dependency chain (§12.1). |
 | Post-check cleanup | Isolated daemon stopped, scratch state removed, `git status` shows only this release's files. |
+
+## 13. Version 0.6.0 — implementing the §12.3 recommendations (2026-11-01)
+
+Implements **all four** recommendations recorded by the 0.14.0 pass (§12.3).
+New functionality → second-digit bump `0.5.3 → 0.6.0`; the floor follows the
+adopted APIs: `requirements.paseo` `>=0.13.0` → **`>=0.14.0`**, because the
+plugin now uses 0.14.0-only surface (`defineAgentTool` delivered through the
+`agent.session_open` request's `tools`, the request's editable `mcpServers`
+map, and `agents.ref(id).reload()`); the SDK pins stay `^0.14.0`.
+
+### 13.1 What was built
+
+| # | Recommendation | Implementation | Key decisions |
+| - | -------------- | -------------- | ------------- |
+| 1 | Native `command_center_run` agent tool | `server/agent-tool.ts` (`defineAgentTool`), delivered by appending it to `request.tools` in `before("agent.session_open")` — the SDK's `PluginServerContext` exposes **no** global tool registration, and bunny-search delivers its tool the same way. Pure helpers (`findCommand`, the input schema) are exported for tests. | Name `command_center_run` (host regex `/^[a-z][a-z0-9_]*$/`, ≤64 chars). Resolved by exact id or case-insensitive name. **Shell** commands run in a terminal of the *calling agent's own workspace*; **prompt** commands create a **new** agent there with the command's stored provider and MCP servers — deliberately never the calling agent, because an agent prompting itself mid-turn recurses. Stored defaults fill the template, `values` override them. Unknown command → `isError` with the library listing. Every run lands in the shared history. Attached on every `purpose: "interactive"` open; the only collision rule is against Paseo's own and other plugins' tools. |
+| 2 | Session-open MCP re-derivation + refresh action | Registry `server/agent-mcp.ts` (`$PASEO_HOME/plugins/command-center/agent-mcp.json`, last-run-wins per agent, capped at 200 entries oldest-dropped, cleared on `agent.archived`); pure decision `server/session-open.ts`; collision-safe reader `server/agent-record.ts` (a copy of bunny-search's proven reader). | Written by the executor on every run against an **existing** agent (a run with no servers clears the entry). The hook contributes only on `resume`/`refresh` reopens with `purpose: interactive`, only the names the agent's **saved** config lacks, and only when the record on disk proves it — a missing/unusable record, an unknown capability or a provider without MCP all **fail safe to skip**, because a name collision aborts the session open. The capability probe (`agents.ref(id).refresh()`) runs only when a contribution is still possible. Runs against *created* agents are unchanged: their create-time attachment is saved into the agent config and is the stronger guarantee. |
+| 3 | "Refresh Command Center tools" action | RPC `command-center.agent-reload` → `paseo.agents.ref(id).reload()` in `index.server.ts`; surfaced as a `context: "agent"` Command Center item (`index.client.tsx`). | A refused reload throws, which the host shows as an error toast — never silent. The reload reruns `agent.session_open`, re-deriving both contributions above. |
+| 4 | Turn-aware dispatch | `activeTurnBehavior: "interrupt" \| "steer"` (the real `SendMessageOptions` enum) threaded run dialog → `runCommand` / `runTargetSchema` → executor `handle.send(...)` and the remote-host dispatch (`client/dispatch.ts`). | **The protocol has no `queue` value** — §9's "queue vs. interrupt" wording is corrected here: the choices are `interrupt` (the daemon default when omitted) and `steer` (deliver into the running turn). The run dialog shows the two chips only when an existing agent is the target; fan-out targets never carry it (the agent picker is single-target only). Omitted value ⇒ send options omitted ⇒ daemon default, so behaviour is unchanged unless the user picks. |
+| 5 | Deep links through screen params | `shared/screen-params.ts` (`view=library\|history\|schedules`, `command=<id>`, `schedule=<id>`), applied in the screen via one `applyParams` path; `/cc` subcommands pass params (`list` → library, `history` → history, `schedule …` → schedules with the new schedule expanded, unknown name → library). | The same params object is built by the in-screen actions — history entries gained "Show command", schedule rows gained "Show command", and a focused command/schedule is border-highlighted (its filters are cleared so it cannot be hidden; a focused schedule is auto-expanded). Unknown views and empty ids degrade to defaults, so a hand-edited link never breaks the screen. Manual tab switches drop the focus. |
+
+### 13.2 Deliberately not built
+
+1. **No settings toggle for the agent tool.** It attaches on every interactive
+   open; Paseo's own permission system covers tool calls. A host-wide switch
+   (like bunny-search's `injectIntoAgents`) can ride along with a future
+   settings release if the tool ever proves too loud.
+2. **No registry for remote-host targets.** The registry lives on the local
+   daemon; a fan-out target on another host is dispatched through that host's
+   API, and its session-open hooks run on *that* daemon.
+3. **Schedules pass no `activeTurnBehavior`** — a scheduled prompt always
+   creates its own agent, so there is never an active turn to steer into.
+
+### 13.3 Verification (2026-11-01, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` against the 0.14.0 SDKs | **exit 0** |
+| `npm test` | **13 suites / 149 tests pass** — new suites: `agent-tool` (definition legality, resolution, shell/prompt dispatch, error paths), `agent-record` (the full fail-safe matrix), `session-open` (decision matrix + registry store incl. the cap), `screen-params` (parse/round-trip); extended: `executor` (activeTurnBehavior threading, registry write/clear), `server-rpc` (hook wiring, contribution matrix, reload RPC). |
+| Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | Manifest accepted with `>=0.14.0`; `clientBundle` 149,071 bytes and `serverBundle` 8,932,342 bytes with **zero** deprecated strings; negative control (old `client/react-native` import restored) **does** produce the hit. |
+| Floor enforced by the daemon's own `assertPluginCompatibility` | `0.12.0`: REJECTED; `0.13.0`: **REJECTED** (the floor is now a real API requirement, not just the `client/ui` exports); `0.14.0`: ACCEPTED. |
+| Live, isolated 0.14.0 daemon (scratch home, `127.0.0.1:16767`, production untouched) | **PASS** — installed from the working tree: `running`, `[paseo] Plugin ready`, **21 RPC methods** (18 `command-center.*` incl. the new `command-center.agent-reload`, + 3 `settings.command-center.*`), no plugin errors, and a clean `paseo plugin reload`. |

@@ -1,5 +1,5 @@
 import type { PaseoApi } from "@getpaseo/client";
-import type { CommandDefinition } from "../shared/commands";
+import type { ActiveTurnBehavior, CommandDefinition } from "../shared/commands";
 import { isFullModelRef } from "../shared/commands";
 import { renderTemplate, worktreeBranchFor } from "../shared/template";
 
@@ -8,6 +8,8 @@ export interface RemoteTargetInput {
   agentId?: string;
   provider?: string;
   newWorktree: boolean;
+  /** Turn-aware dispatch for existing-agent targets (0.6.0). */
+  activeTurnBehavior?: ActiveTurnBehavior;
 }
 
 export interface RemoteWorkspaceInfo {
@@ -103,7 +105,10 @@ export async function dispatchRemoteTarget(
     const rendered = renderTemplate(command.template, values, context);
 
     if (target.agentId) {
-      await paseo.agents.ref(target.agentId).send(rendered);
+      await paseo.agents.ref(target.agentId).send(
+        rendered,
+        target.activeTurnBehavior ? { activeTurnBehavior: target.activeTurnBehavior } : undefined,
+      );
       return {
         ok: true,
         kind: "existing-agent",

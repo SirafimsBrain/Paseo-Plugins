@@ -1,6 +1,7 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { commandCenterSettings } from "./shared/settings";
 import {
+  agentReload,
   appendHistory,
   clearHistory,
   deleteCommand,
@@ -37,6 +38,10 @@ import {
   setHistoryLimit,
 } from "./server/store";
 import { executeBatch, executeCommand } from "./server/executor";
+import { createCommandCenterTool } from "./server/agent-tool";
+import { readSavedMcpServers } from "./server/agent-record";
+import { forgetAgentMcp, loadAgentMcpRegistry } from "./server/agent-mcp";
+import { decideSessionOpen, needsCapabilityProbe } from "./server/session-open";
 import { renderTemplate } from "./shared/template";
 import {
   createScheduleFromCommand,
@@ -97,6 +102,77 @@ export default function contribute(server: PluginServerContext) {
       { values: {}, newWorktree: false, workspaceId: event.workspace.id },
       { paseo },
     ).catch(() => undefined);
+  });
+
+  // The MCP registry tracks live agents only; an archived agent's entry is
+  // worthless (a later reopen of the same id would be a different session).
+  server.on("agent.archived", (event) => {
+    forgetAgentMcp(event.agent.id);
+  });
+
+  // -------------------------------------------------------------------------
+  // Session-open re-derivation (Paseo 0.14.0, 0.6.0 — recommendations §12.3
+  // items 1 and 2).
+  //
+  // Every interactive reopen re-derives two contributions:
+  //
+  // 1. the `command_center_run` agent tool — attached unconditionally (its
+  //    only collision rule is against Paseo's own and other plugins' tools);
+  // 2. the launch-only MCP servers of the last command that ran against this
+  //    agent (the registry, `server/agent-mcp.ts`) — contributed only for the
+  //    names the agent's *saved* configuration lacks, and only when the
+  //    record on disk proves that (`server/agent-record.ts`); every unreadable
+  //    or unknown state fails safe to *skip*, because a name collision aborts
+  //    the session open (host `agent-manager.js`).
+  //
+  // Runs against *created* agents need none of this: their servers are saved
+  // into the agent config at `agents.create` time and survive every reopen.
+  // -------------------------------------------------------------------------
+
+  const commandCenterTool = createCommandCenterTool();
+
+  server.before("agent.session_open", async ({ request }, { paseo }) => {
+    const registry = loadAgentMcpRegistry()[request.agentId] ?? null;
+    const decisionInput = {
+      reason: request.reason,
+      purpose: request.purpose,
+      lookup: readSavedMcpServers(request.agentId),
+      registry,
+      supportsMcpServers: null as boolean | null,
+    };
+
+    // The daemon is only consulted when an MCP contribution is still possible;
+    // every other branch is decided without touching it.
+    if (needsCapabilityProbe(decisionInput)) {
+      const snapshot = await paseo.agents
+        .ref(request.agentId)
+        .refresh()
+        .catch(() => null);
+      decisionInput.supportsMcpServers = snapshot?.agent.capabilities.supportsMcpServers ?? null;
+    }
+
+    const decision = decideSessionOpen(decisionInput);
+    console.log(
+      `[command-center] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
+    );
+
+    const tools =
+      request.purpose === "interactive" ? [...request.tools, commandCenterTool] : request.tools;
+    if (decision.contribute.length === 0) {
+      return { ...request, tools };
+    }
+
+    const contributed = Object.fromEntries(
+      decision.contribute.map((name) => [name, registry!.servers[name]]),
+    );
+    console.log(
+      `[command-center] session_open MCP contributed: ${decision.contribute.join(", ")}`,
+    );
+    return {
+      ...request,
+      tools,
+      mcpServers: { ...request.mcpServers, ...contributed } as typeof request.mcpServers,
+    };
   });
 
   server.handle(listCommands, () => ({
@@ -344,6 +420,24 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(scheduleAction, (input) => runScheduleAction(input.id, input.action));
+
+  // "Refresh Command Center tools" (0.6.0): `agents.ref(id).reload()` (new in
+  // 0.14.0) reopens the provider session with the current configuration,
+  // rerunning `agent.session_open` — the programmatic answer to "this agent
+  // lost its Command Center tools". A refused reload throws, which the client
+  // surfaces as an error toast, so it is never silent.
+  server.handle(agentReload, async (input, { paseo }) => {
+    try {
+      const result = await paseo.agents.ref(input.agentId).reload();
+      return { ok: true, title: result?.agent?.title ?? null, error: null };
+    } catch (error) {
+      return {
+        ok: false,
+        title: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
 
   server.handle(searchCommandsForAttachment, (input) => {
     const query = input.query.trim().toLowerCase();
