@@ -653,10 +653,33 @@ function connectionsView(main: HTMLElement): void {
   // group a connection was created in; empty groups stay on screen too.
   const sections = connectionSections();
   for (const section of sections) {
+    const groupBar = document.createElement("div");
+    groupBar.style.display = "flex";
+    groupBar.style.alignItems = "center";
+    groupBar.style.gap = "0.5rem";
+    groupBar.style.marginLeft = `${section.depth * 1.25}rem`;
+    groupBar.style.marginBottom = "0.25rem";
+
     const h = document.createElement("h2");
     h.textContent = section.label;
-    h.style.marginLeft = `${section.depth * 1.25}rem`;
-    main.append(h);
+    h.style.margin = "0";
+    groupBar.append(h);
+
+    if (section.id !== null) {
+      const groupId = section.id;
+      const editBtn = document.createElement("button");
+      editBtn.textContent = "edit";
+      editBtn.addEventListener("click", () => openEditGroupModal(groupId, section.label));
+      groupBar.append(editBtn);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "danger";
+      delBtn.textContent = "delete";
+      delBtn.addEventListener("click", () => deleteGroup(groupId, section.label));
+      groupBar.append(delBtn);
+    }
+
+    main.append(groupBar);
     if (section.connections.length === 0) {
       const empty = document.createElement("p");
       empty.className = "muted";
@@ -682,16 +705,17 @@ function connectionsView(main: HTMLElement): void {
 }
 
 /** Root-level connections first, then every group in tree order (0.21.10). */
-function connectionSections(): { label: string; depth: number; connections: any[] }[] {
-  const sections: { label: string; depth: number; connections: any[] }[] = [];
+function connectionSections(): { label: string; id: string | null; depth: number; connections: any[] }[] {
+  const sections: { label: string; id: string | null; depth: number; connections: any[] }[] = [];
   const root = state.connections.filter((c) => !c.groupId);
   if (root.length > 0) {
-    sections.push({ label: "(no group)", depth: 0, connections: root });
+    sections.push({ label: "(no group)", id: null, depth: 0, connections: root });
   }
   const walk = (parentId: string | null, depth: number): void => {
     for (const g of state.groups.filter((x) => (x.parentId ?? null) === parentId)) {
       sections.push({
         label: g.name,
+        id: g.id,
         depth,
         connections: state.connections.filter((c) => c.groupId === g.id),
       });
@@ -700,6 +724,62 @@ function connectionSections(): { label: string; depth: number; connections: any[
   };
   walk(null, 0);
   return sections;
+}
+
+/** Edit a group's name. */
+function openEditGroupModal(groupId: string, currentName: string): void {
+  const nameI = input(currentName, "text", "group name");
+  openModal((close) => {
+    const m = document.createElement("div");
+    m.innerHTML = "<h3>Edit group</h3>";
+    const err = document.createElement("p");
+    err.style.color = "#ef4444";
+    err.style.fontSize = "0.85rem";
+    err.style.display = "none";
+    m.append(field("Name", nameI), err);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", close);
+    const ok = document.createElement("button");
+    ok.className = "primary";
+    ok.textContent = "Save";
+    ok.addEventListener("click", async () => {
+      const name = nameI.value.trim();
+      if (!name) {
+        err.textContent = "group name is required";
+        err.style.display = "";
+        return;
+      }
+      try {
+        await api(`/api/groups/${encodeURIComponent(groupId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        close();
+        await refreshConnections();
+      } catch (e) {
+        err.textContent = String(e);
+        err.style.display = "";
+      }
+    });
+    actions.append(cancel, ok);
+    m.append(actions);
+    return m;
+  });
+}
+
+/** Delete a group. Connections inside it become root-level (group_id = NULL). */
+async function deleteGroup(groupId: string, groupName: string): Promise<void> {
+  if (!confirm(`Delete group “${groupName}”? Its connections become root-level (no group).`)) return;
+  try {
+    await api(`/api/groups/${encodeURIComponent(groupId)}`, { method: "DELETE" });
+    await refreshConnections();
+  } catch (e) {
+    state.notice = String(e);
+  }
 }
 
 /**

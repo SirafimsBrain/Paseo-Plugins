@@ -1,21 +1,11 @@
 # remote-control — план разработки (атомарные этапы)
 
-> **Статус: 0.23.10 — VNC (перенос vnc-pilot) и единый вид «Sessions»:**
-> VNC-подключение стало полноценной формой: discovery девяти viewer'ов по
-> PATH с фингерпринтом версии (общий `vncviewer` без фингерпринта
-> отвергается) и кэшем 30 с, argv-билдеры per viewer (TigerVNC/TurboVNC/
-> TightVNC/RealVNC/Remmina/KRDC/Vinagre/gvncviewer/Custom), форматирование
-> цели (`host:display` / `host::port` / `vnc://` / IPv6), пароль усекается до
-> 8 символов и идёт через `vncpasswd -f` в 0600-файл (Remmina — профиль
-> 0600, TigerVNC/TurboVNC — env-фолбэк без `vncpasswd`), в argv пароля нет.
-> Внешние окна RDP/VNC попали в in-memory реестр: `GET /api/sessions`
-> объединяет их с терминалами Paseo, `POST /api/sessions/:id/kill` гасит
-> процессную группу; левое меню консоли — Sessions / Connections / Settings,
-> в таблице RDP-сессии с kill. Колонка Auth показывает фактический метод:
-> доказанный `payload.auth`, иначе `password` для RDP/VNC и `unknown` для
-> SSH. В `__doc.md` — раздел «VNC, external sessions and the Sessions view».
-> Следующий анонсированный этап — `~/.ssh/config` + публичный ключ
-> (`0.24.10`, H3).
+> **Статус: 0.23.11 — группы Connections получили редактирование и удаление:**
+> у каждого заголовка группы в разделе Connections появились кнопки «edit» (PATCH
+> /api/groups/:id — переименование) и «delete» (DELETE /api/groups/:id — соединения
+> группы становятся корневыми, group_id = NULL). Серверная часть (PATCH/DELETE групп,
+> updateGroup/deleteGroup в Store) уже существовала; эта версия добавляет клиентский UI.
+> «Следующий анонсированный этап — `~/.ssh/config` + публичный ключ (`0.24.10`, H3).
 > **Статус 0.22.10 — создание RDP-подключений:** модалка соединения
 > показывает полный набор опций FreeRDP 3 (перенос `connection_fields()`
 > rdp-pilot: Display / Performance / Redirection / Security / Keyboard /

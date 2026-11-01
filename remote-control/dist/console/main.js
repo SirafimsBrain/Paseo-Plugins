@@ -695,10 +695,29 @@ function connectionsView(main) {
   main.append(row);
   const sections = connectionSections();
   for (const section of sections) {
+    const groupBar = document.createElement("div");
+    groupBar.style.display = "flex";
+    groupBar.style.alignItems = "center";
+    groupBar.style.gap = "0.5rem";
+    groupBar.style.marginLeft = `${section.depth * 1.25}rem`;
+    groupBar.style.marginBottom = "0.25rem";
     const h = document.createElement("h2");
     h.textContent = section.label;
-    h.style.marginLeft = `${section.depth * 1.25}rem`;
-    main.append(h);
+    h.style.margin = "0";
+    groupBar.append(h);
+    if (section.id !== null) {
+      const groupId = section.id;
+      const editBtn = document.createElement("button");
+      editBtn.textContent = "edit";
+      editBtn.addEventListener("click", () => openEditGroupModal(groupId, section.label));
+      groupBar.append(editBtn);
+      const delBtn = document.createElement("button");
+      delBtn.className = "danger";
+      delBtn.textContent = "delete";
+      delBtn.addEventListener("click", () => deleteGroup(groupId, section.label));
+      groupBar.append(delBtn);
+    }
+    main.append(groupBar);
     if (section.connections.length === 0) {
       const empty = document.createElement("p");
       empty.className = "muted";
@@ -726,12 +745,13 @@ function connectionSections() {
   const sections = [];
   const root = state.connections.filter((c) => !c.groupId);
   if (root.length > 0) {
-    sections.push({ label: "(no group)", depth: 0, connections: root });
+    sections.push({ label: "(no group)", id: null, depth: 0, connections: root });
   }
   const walk = (parentId, depth) => {
     for (const g of state.groups.filter((x) => (x.parentId ?? null) === parentId)) {
       sections.push({
         label: g.name,
+        id: g.id,
         depth,
         connections: state.connections.filter((c) => c.groupId === g.id)
       });
@@ -740,6 +760,58 @@ function connectionSections() {
   };
   walk(null, 0);
   return sections;
+}
+function openEditGroupModal(groupId, currentName) {
+  const nameI = input(currentName, "text", "group name");
+  openModal((close) => {
+    const m = document.createElement("div");
+    m.innerHTML = "<h3>Edit group</h3>";
+    const err = document.createElement("p");
+    err.style.color = "#ef4444";
+    err.style.fontSize = "0.85rem";
+    err.style.display = "none";
+    m.append(field("Name", nameI), err);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", close);
+    const ok = document.createElement("button");
+    ok.className = "primary";
+    ok.textContent = "Save";
+    ok.addEventListener("click", async () => {
+      const name = nameI.value.trim();
+      if (!name) {
+        err.textContent = "group name is required";
+        err.style.display = "";
+        return;
+      }
+      try {
+        await api(`/api/groups/${encodeURIComponent(groupId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        close();
+        await refreshConnections();
+      } catch (e) {
+        err.textContent = String(e);
+        err.style.display = "";
+      }
+    });
+    actions.append(cancel, ok);
+    m.append(actions);
+    return m;
+  });
+}
+async function deleteGroup(groupId, groupName) {
+  if (!confirm(`Delete group \u201C${groupName}\u201D? Its connections become root-level (no group).`)) return;
+  try {
+    await api(`/api/groups/${encodeURIComponent(groupId)}`, { method: "DELETE" });
+    await refreshConnections();
+  } catch (e) {
+    state.notice = String(e);
+  }
 }
 function authLabel(c) {
   if (c.payload?.auth === "key" || c.payload?.auth === "password") return c.payload.auth;
