@@ -60,6 +60,12 @@ export class Store {
     if (!row) {
       this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(SCHEMA_VERSION));
     }
+    // 0.24.0: add `color` column for group background color (existing DBs)
+    try {
+      this.db.prepare("ALTER TABLE groups ADD COLUMN color TEXT DEFAULT NULL").run();
+    } catch {
+      // column already exists
+    }
   }
 
   schemaVersion(): number {
@@ -79,13 +85,13 @@ export class Store {
 
   // ---------- groups ----------
 
-  createGroup(input: { id: string; parentId: string | null; name: string; sortOrder?: number }): Group {
+  createGroup(input: { id: string; parentId: string | null; name: string; color?: string | null; sortOrder?: number }): Group {
     const now = Date.now();
     this.db
       .prepare(
-        "INSERT INTO groups (id, parent_id, name, sort_order, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO groups (id, parent_id, name, color, sort_order, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
       )
-      .run(input.id, input.parentId, input.name, input.sortOrder ?? 0, now, now);
+      .run(input.id, input.parentId, input.name, input.color ?? null, input.sortOrder ?? 0, now, now);
     return this.getGroup(input.id)!;
   }
 
@@ -100,16 +106,17 @@ export class Store {
     return rows.map(rowToGroup);
   }
 
-  updateGroup(id: string, patch: { name?: string; parentId?: string | null; sortOrder?: number }): Group | null {
+  updateGroup(id: string, patch: { name?: string; parentId?: string | null; color?: string | null; sortOrder?: number }): Group | null {
     const existing = this.getGroup(id);
     if (!existing) return null;
     const now = Date.now();
     const name = patch.name ?? existing.name;
     const parentId = patch.parentId === undefined ? existing.parentId : patch.parentId;
+    const color = patch.color === undefined ? existing.color : patch.color;
     const sortOrder = patch.sortOrder ?? existing.sortOrder;
     this.db
-      .prepare("UPDATE groups SET name = ?, parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?")
-      .run(name, parentId, sortOrder, now, id);
+      .prepare("UPDATE groups SET name = ?, parent_id = ?, color = ?, sort_order = ?, updated_at = ? WHERE id = ?")
+      .run(name, parentId, color, sortOrder, now, id);
     return this.getGroup(id);
   }
 
@@ -247,6 +254,7 @@ function rowToGroup(row: Record<string, unknown>): Group {
     id: String(row.id),
     parentId: row.parent_id === null ? null : String(row.parent_id),
     name: String(row.name),
+    color: row.color === null ? null : String(row.color),
     sortOrder: Number(row.sort_order),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),

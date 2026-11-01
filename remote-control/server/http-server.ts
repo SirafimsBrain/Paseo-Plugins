@@ -347,8 +347,11 @@ export class ConsoleHttpServer {
             const parentId = body && typeof body === "object" && "parentId" in body
               ? ((body as { parentId: unknown }).parentId === null ? null : String((body as { parentId: unknown }).parentId))
               : null;
+            const color = body && typeof body === "object" && "color" in body
+              ? ((body as { color: unknown }).color === null ? null : String((body as { color: unknown }).color))
+              : null;
             const id = `grp_${Math.random().toString(36).slice(2)}`;
-            const group = this.store!.createGroup({ id, parentId, name });
+            const group = this.store!.createGroup({ id, parentId, name, color });
             this.sendJson(res, 201, { group });
           }).catch((cause) => {
             this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
@@ -363,10 +366,13 @@ export class ConsoleHttpServer {
         const id = decodeURIComponent(groupMatch[1]);
         if (req.method === "PATCH") {
           void this.readJsonBody(req).then((body) => {
-            const patch: { name?: string; parentId?: string | null } = {};
+            const patch: { name?: string; parentId?: string | null; color?: string | null } = {};
             if (body && typeof body === "object" && "name" in body) patch.name = String((body as { name: unknown }).name);
             if (body && typeof body === "object" && "parentId" in body) {
               patch.parentId = (body as { parentId: unknown }).parentId === null ? null : String((body as { parentId: unknown }).parentId);
+            }
+            if (body && typeof body === "object" && "color" in body) {
+              patch.color = (body as { color: unknown }).color === null ? null : String((body as { color: unknown }).color);
             }
             const group = this.store!.updateGroup(id, patch);
             if (!group) { this.sendJson(res, 404, { error: "not found" }); return; }

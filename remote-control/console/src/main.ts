@@ -56,6 +56,50 @@ function input(value = "", type = "text", placeholder = ""): HTMLInputElement {
   return el;
 }
 
+/** Color picker input (sshpilot-style): shows current color swatch + clear button. */
+function colorInput(value: string | null): HTMLDivElement {
+  const wrap = document.createElement("div");
+  wrap.className = "color-field";
+  wrap.style.display = "flex";
+  wrap.style.alignItems = "center";
+  wrap.style.gap = "0.5rem";
+
+  const swatch = document.createElement("div");
+  swatch.className = "color-swatch";
+  swatch.style.width = "1.5rem";
+  swatch.style.height = "1.5rem";
+  swatch.style.border = "1px solid #8886";
+  swatch.style.borderRadius = "4px";
+  swatch.style.backgroundColor = value ?? "transparent";
+  swatch.style.backgroundImage = value ? "" : "repeating-linear-gradient(45deg,#8888 25%,transparent 25%,transparent 75%,#8888 75%),repeating-linear-gradient(45deg,#8888 25%,transparent 25%,transparent 75%,#8888 75%)";
+  swatch.style.backgroundSize = "10px 10px";
+  swatch.style.backgroundPosition = "0 0,5px 5px";
+
+  const colorI = document.createElement("input");
+  colorI.type = "color";
+  colorI.value = value ?? "#ffffff";
+  colorI.style.border = "none";
+  colorI.style.background = "none";
+  colorI.style.width = "1.5rem";
+  colorI.style.height = "1.5rem";
+  colorI.style.cursor = "pointer";
+  colorI.style.padding = "0";
+  colorI.addEventListener("input", () => { swatch.style.backgroundColor = colorI.value; });
+  colorI.addEventListener("change", () => { swatch.style.backgroundColor = colorI.value; });
+
+  const clearBtn = document.createElement("button");
+  clearBtn.textContent = "Очистить";
+  clearBtn.style.fontSize = "0.8rem";
+  clearBtn.addEventListener("click", () => {
+    colorI.value = "#ffffff";
+    swatch.style.backgroundColor = "transparent";
+  });
+
+  wrap.append(swatch, colorI, clearBtn);
+  (wrap as any).value = () => colorI.value === "#ffffff" && !value ? null : colorI.value;
+  return wrap;
+}
+
 function selectEl(options: readonly (readonly [string, string])[], value: string): HTMLSelectElement {
   const el = document.createElement("select");
   for (const [v, text] of options) {
@@ -619,10 +663,11 @@ function connectionsView(main: HTMLElement): void {
   newGroupBtn.textContent = "New group";
   newGroupBtn.addEventListener("click", () => {
     const nameInput = input("", "text", "group name");
+    const colorEl = colorInput(null);
     openModal((close) => {
       const m = document.createElement("div");
       m.innerHTML = "<h3>New group</h3>";
-      m.append(field("Name", nameInput));
+      m.append(field("Name", nameInput), field("Цвет группы", colorEl));
       const actions = document.createElement("div");
       actions.className = "actions";
       const cancel = document.createElement("button");
@@ -632,7 +677,10 @@ function connectionsView(main: HTMLElement): void {
       ok.className = "primary";
       ok.textContent = "Create";
       ok.addEventListener("click", async () => {
-        await api("/api/groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nameInput.value }) });
+        const name = nameInput.value.trim();
+        if (!name) return;
+        const color = (colorEl as any).value?.();
+        await api("/api/groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, color }) });
         close();
         await refreshConnections();
       });
@@ -663,13 +711,20 @@ function connectionsView(main: HTMLElement): void {
     const h = document.createElement("h2");
     h.textContent = section.label;
     h.style.margin = "0";
+    if (section.color) {
+      h.style.backgroundColor = section.color;
+      const isLight = section.color === "#ffffff" || section.color === "#fff";
+      h.style.color = isLight ? "#000000" : "#ffffff";
+      h.style.padding = "0.15rem 0.5rem";
+      h.style.borderRadius = "4px";
+    }
     groupBar.append(h);
 
     if (section.id !== null) {
       const groupId = section.id;
       const editBtn = document.createElement("button");
       editBtn.textContent = "edit";
-      editBtn.addEventListener("click", () => openEditGroupModal(groupId, section.label));
+      editBtn.addEventListener("click", () => openEditGroupModal(groupId, section.label, section.color));
       groupBar.append(editBtn);
 
       const delBtn = document.createElement("button");
@@ -705,17 +760,18 @@ function connectionsView(main: HTMLElement): void {
 }
 
 /** Root-level connections first, then every group in tree order (0.21.10). */
-function connectionSections(): { label: string; id: string | null; depth: number; connections: any[] }[] {
-  const sections: { label: string; id: string | null; depth: number; connections: any[] }[] = [];
+function connectionSections(): { label: string; id: string | null; color: string | null; depth: number; connections: any[] }[] {
+  const sections: { label: string; id: string | null; color: string | null; depth: number; connections: any[] }[] = [];
   const root = state.connections.filter((c) => !c.groupId);
   if (root.length > 0) {
-    sections.push({ label: "(no group)", id: null, depth: 0, connections: root });
+    sections.push({ label: "(no group)", id: null, color: null, depth: 0, connections: root });
   }
   const walk = (parentId: string | null, depth: number): void => {
     for (const g of state.groups.filter((x) => (x.parentId ?? null) === parentId)) {
       sections.push({
         label: g.name,
         id: g.id,
+        color: g.color ?? null,
         depth,
         connections: state.connections.filter((c) => c.groupId === g.id),
       });
@@ -726,9 +782,10 @@ function connectionSections(): { label: string; id: string | null; depth: number
   return sections;
 }
 
-/** Edit a group's name. */
-function openEditGroupModal(groupId: string, currentName: string): void {
+/** Edit a group's name and color. */
+function openEditGroupModal(groupId: string, currentName: string, currentColor: string | null): void {
   const nameI = input(currentName, "text", "group name");
+  const colorEl = colorInput(currentColor);
   openModal((close) => {
     const m = document.createElement("div");
     m.innerHTML = "<h3>Edit group</h3>";
@@ -736,7 +793,7 @@ function openEditGroupModal(groupId: string, currentName: string): void {
     err.style.color = "#ef4444";
     err.style.fontSize = "0.85rem";
     err.style.display = "none";
-    m.append(field("Name", nameI), err);
+    m.append(field("Name", nameI), field("Цвет группы", colorEl), err);
     const actions = document.createElement("div");
     actions.className = "actions";
     const cancel = document.createElement("button");
@@ -752,11 +809,12 @@ function openEditGroupModal(groupId: string, currentName: string): void {
         err.style.display = "";
         return;
       }
+      const color = (colorEl as any).value?.();
       try {
         await api(`/api/groups/${encodeURIComponent(groupId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }),
+          body: JSON.stringify({ name, color }),
         });
         close();
         await refreshConnections();

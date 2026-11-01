@@ -9,6 +9,7 @@ export const groupSchema = z.object({
   id: z.string().min(1),
   parentId: z.string().nullable(),
   name: z.string().min(1),
+  color: z.string().nullable(),
   sortOrder: z.number().int(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
@@ -39,6 +40,7 @@ export type Connection = z.infer<typeof connectionSchema>;
 export const newGroupInputSchema = z.object({
   parentId: z.string().nullable().optional(),
   name: z.string().min(1),
+  color: z.string().nullable().optional(),
 });
 export type NewGroupInput = z.infer<typeof newGroupInputSchema>;
 
