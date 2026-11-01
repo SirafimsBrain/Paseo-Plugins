@@ -25,9 +25,12 @@ function configuredPluginRoot(): string | null {
 
 function candidateRoots(): string[] {
   const roots: string[] = [];
-  roots.push(path.join(moduleDirectory(), ".."));
+  // The configured path from $PASEO_HOME/config.json is the source of truth
+  // for where the daemon installed the plugin checkout — check it first.
   const configured = configuredPluginRoot();
   if (configured !== null) roots.push(configured);
+  // Fallback: directory of this module (ESM: import.meta.url; CJS: __dirname).
+  roots.push(path.join(moduleDirectory(), ".."));
   return roots;
 }
 
