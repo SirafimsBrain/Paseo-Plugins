@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
-import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
+import { Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderWithModels } from "../shared/commands";
 import { defaultValuesForCommand, isFullModelRef, normalizeProviderModels, resolveModelRef } from "../shared/commands";

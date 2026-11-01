@@ -34,7 +34,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center
 ```
 
-Requires Paseo ≥ 0.11.0 (verified against the stable 0.13.0 release, 2026-10-24; the screen/sidebar API, settings screen, attachment source and lifecycle hooks are all SDK 0.11+ APIs — 0.13.0 adds nothing this plugin needs).
+Requires Paseo ≥ 0.13.0 (verified against the stable 0.14.0 release, 2026-11-01; the screen/sidebar API, settings screen, attachment source and lifecycle hooks are all SDK 0.11+ APIs, and the floor is 0.13.0 because the UI import comes from `@getpaseo/plugin/client/ui`, which gained `Modal` / `useToast` in 0.13.0).
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/command-center/<revision>/checkout/command-center`, together with its dependencies. It talks to the standard Paseo scheduler through the low-level `@getpaseo/client` daemon client, which Paseo does **not** supply to plugins — so the manifest runs `npm ci` as its install-time build step, and the daemon installs the dependencies before bundling. That means the host needs npm-registry access at install and update time. Updates: `paseo plugin update command-center`.
 
@@ -57,6 +57,47 @@ $PASEO_HOME/plugins/command-center/
 ├── history.json     # the last N runs (settings.historyLimit)
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
+
+## Paseo 0.14.0 compatibility
+
+Verified against the **stable Paseo 0.14.0** release (2026-10-29), pass run
+2026-11-01. Full evidence: [__doc.md](./__doc.md) §12. **The one deprecation
+0.13.0 left in the plugin is now migrated — shipped as `0.5.3`** (patch bump:
+change to existing functionality).
+
+- **Migrated off the deprecated UI entry point.**
+  `client/command-center-surface.tsx` now imports `Modal` and `useToast`
+  from `@getpaseo/plugin/client/ui` instead of
+  `@getpaseo/plugin/client/react-native` (removal 2027-04-20). Both symbols
+  exist in `client/ui` since 0.13.0 — verified in the npm tarballs, not
+  assumed — and no deprecated API remains anywhere in the plugin.
+- **The floor follows the API actually used:** `requirements.paseo`
+  `>=0.11.0` → `>=0.13.0`. The real 0.14.0 host gate
+  (`assertPluginCompatibility`) rejects the manifest for a 0.12.0 daemon and
+  accepts 0.13.0 / 0.14.0.
+- **Real pin bump:** `@getpaseo/plugin` and `@getpaseo/client` now pin
+  `^0.14.0` (lockfile updated). The `@getpaseo/client` pin is shipped — the
+  manifest's `npm ci` installs it and the scheduler bridge is bundled from
+  the plugin's own `node_modules`, so the bridge now runs 0.14.0's daemon
+  client.
+- **The scheduler bridge is untouched by the SDK diff:** all nine `schedule*`
+  methods keep **byte-identical** option/payload types between 0.13.0 and
+  0.14.0, and the `@getpaseo/client` daemon-client diff is additive only
+  (`wholeTurns`, local speech models). The `agent.turn_ended` automation
+  still reads only `event.outcome`, so the always-empty `timeline` does not
+  bite.
+- **Recommendations recorded, not implemented** ([__doc.md](./__doc.md)
+  §12.3): a native `command_center_run` agent tool via `defineAgentTool`,
+  session-open MCP re-derivation for runs against an existing agent plus a
+  "refresh command tools" action on `agents.ref(id).reload()`, turn-aware
+  dispatch (`activeTurnBehavior`), and deep links through screen params.
+
+**Verification:** typecheck clean against both 0.14.0 SDKs, vitest **9
+suites / 98 tests** pass, both entries build with the **real 0.14.0 host
+compiler** (from the installed `app.asar`) with zero deprecated strings —
+plus a negative control that *does* find the old specifier — and the plugin
+installs into an isolated 0.14.0 daemon (scratch home) as `running` with
+`[paseo] Plugin ready`, 20 RPC methods registered and a clean reload.
 
 ## Paseo 0.13.0 compatibility
 
