@@ -2463,3 +2463,19 @@ complement.
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` extracted from the installed `app.asar`) | both entries compile, no boundary errors: client bundle 84 590 chars, server 241 710 chars, `deprecatedHits: []` over the six deprecated specifiers (`client/react-native`, `addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, `useRevealedText`). |
 | Manifest floor (same real host code) | rejected for a 0.13.0 daemon with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
 | Live on an isolated 0.14.0 daemon | scratch home (`pluginsEnabled: true`, production home untouched) with the plugin installed **from the working tree**: status `running`, `[paseo] Plugin ready`, `MCP entry refreshed`, the dashboard listening on an ephemeral port after the documented 8899 fallback, a clean `paseo plugin reload` with `running` after it, and no plugin or contribution errors in the daemon log — the only stderr lines are Node's own `DEP0129` / `DEP0176` warnings. |
+
+#### 0.35.2 — the lockfile the release shipped with (2026-11-01)
+
+The first production `paseo plugin update` from git failed at the manifest's
+`npm ci` build step: `package-lock.json` recorded `@getpaseo/plugin@^0.14.0`
+without its transitive closure (`@getpaseo/client` / `@getpaseo/protocol` /
+`@getpaseo/relay`, `ws`, `@noble/*`, `tweetnacl` were "Missing … from lock
+file"), so the EUSAGE guard rejected the install. The cause was the pin
+update itself: the earlier install had run with `--package-lock=false`, and
+the follow-up `npm install` wrote a top-level entry without resolving the
+dependency graph. The lock was regenerated with `npm install`, the exact
+build command `npm ci` now verifies clean, the bundle was rebuilt (the
+`SERVER_VERSION` constant in `server/mcp-server.ts` carries the version the
+handshake reports, so it moves with the release), and the full suite
+re-passes: 41 suites / 678 tests. Patch release: `0.35.1 → 0.35.2`,
+annotated tag `luck-planner@0.35.2`.
