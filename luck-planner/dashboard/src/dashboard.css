@@ -1051,7 +1051,9 @@ button.lp-plain-card:hover {
   filter: drop-shadow(0 0 1px rgba(224, 93, 93, 0.55));
 }
 
-/* Кнопка «скопировать инструкцию агенту» на карточке, требующей внимания. */
+/* Кнопка «скопировать инструкцию агенту» на карточке, требующей внимания.
+   Всегда в одном месте — в конце заголовка карточки, сразу после статуса,
+   поэтому у неё фиксированный отступ от соседа, а не авто-отступ справа. */
 .lp-plain-card-copy {
   display: inline-flex;
   align-items: center;
@@ -1065,7 +1067,6 @@ button.lp-plain-card:hover {
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  margin-inline-start: auto;
   flex: none;
 }
 .lp-plain-card-copy:hover,

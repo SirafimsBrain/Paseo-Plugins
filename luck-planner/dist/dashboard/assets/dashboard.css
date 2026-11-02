@@ -1424,7 +1424,6 @@ button.lp-plain-card:hover {
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  margin-inline-start: auto;
   flex: none;
 }
 .lp-plain-card-copy:hover,

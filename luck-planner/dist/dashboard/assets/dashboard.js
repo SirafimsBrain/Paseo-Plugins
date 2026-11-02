@@ -11268,6 +11268,17 @@ function Card(props) {
         ] }),
         card.name
       ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-status", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+          "span",
+          {
+            className: "lp-plain-card-dot",
+            style: { backgroundColor: cardStatusColor(card.kind, card.status) },
+            "aria-hidden": "true"
+          }
+        ),
+        cardStatusLabel(card.kind, card.status)
+      ] }),
       attention ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
         "span",
         {
@@ -11288,18 +11299,7 @@ function Card(props) {
           },
           children: "\u{1F4CB}"
         }
-      ) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-status", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
-          "span",
-          {
-            className: "lp-plain-card-dot",
-            style: { backgroundColor: cardStatusColor(card.kind, card.status) },
-            "aria-hidden": "true"
-          }
-        ),
-        cardStatusLabel(card.kind, card.status)
-      ] })
+      ) : null
     ] }),
     card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(LeafCardBody, { card }) : card.kind === "goal" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(GoalCardBody, { card }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BugCardBody, { card }),
     attention && nextStep ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-nextstep", children: [

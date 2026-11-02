@@ -360,6 +360,14 @@ function Card(props: {
           <span aria-hidden="true">{cardGlyph(card.kind)} </span>
           {card.name}
         </span>
+        <span className="lp-plain-card-status">
+          <span
+            className="lp-plain-card-dot"
+            style={{ backgroundColor: cardStatusColor(card.kind, card.status) }}
+            aria-hidden="true"
+          />
+          {cardStatusLabel(card.kind, card.status)}
+        </span>
         {attention ? (
           <span
             role="button"
@@ -381,14 +389,6 @@ function Card(props: {
             📋
           </span>
         ) : null}
-        <span className="lp-plain-card-status">
-          <span
-            className="lp-plain-card-dot"
-            style={{ backgroundColor: cardStatusColor(card.kind, card.status) }}
-            aria-hidden="true"
-          />
-          {cardStatusLabel(card.kind, card.status)}
-        </span>
       </div>
       {card.kind === "leaf" ? (
         <LeafCardBody card={card} />
