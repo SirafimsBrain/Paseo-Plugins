@@ -26,6 +26,8 @@ paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:luck-planner
 
 The plugin needs a build step at install and update time (`npm ci` and `npm run bundle`), so the host needs npm-registry access once. The build produces two artifacts: the standalone stdio MCP server (`dist/mcp-server.js`, a single file with no runtime dependencies beyond Node's built-in `node:sqlite`) and the dashboard web app (`dist/dashboard/`, a readable, unminified ESM bundle).
 
+**Browser cache after an update.** After `paseo plugin update luck-planner` (or `paseo plugin reload`), the host ships new `dist/dashboard` assets, but the **in-app browser tab keeps the previous `dashboard.js`/`dashboard.css` in its HTTP cache**. New dashboard code (for example, the red attention hand 🫴 and the “Copy agent instruction” 📋 button on cards) will not appear until you **hard-reload the tab**: `Ctrl + F5` / `Ctrl + Shift + R` (Linux/Windows) or `Cmd + Shift + R` (macOS). The MCP server and the native panel pick up the new code immediately on plugin reload; only the dashboard tab needs the hard reload.
+
 The MCP server is injected into every agent created through Paseo (configurable in the settings), so agents from any provider connected to Paseo get the tools without manual configuration. The tool names are registered under the prefix `luck-planner`, so they appear as `luck-planner_luck_tree_search` and friends.
 
 ## The MCP tools
@@ -55,6 +57,8 @@ The dashboard is a standalone web app the plugin serves over loopback HTTP (`htt
 **3D — the scene.** The same payload in a WebGL scene: the tree becomes a radial cone (depth is height, siblings fan around the trunk axis), the leaves are billboarded sprites, the bees fly along curved arcs between the leaves, the blocking incidents pulse above the leaves they block, an approved goal floats as a ring over its subtree and the growth glows as rings in the growth layer. A click picks a node and fills the **same** details panel the 2D diagram fills; the selection shows the nodes sharing an incident with it and draws its influence links as curves; a search flies the camera to the node it found. The 2D/3D choice is remembered in the URL and in the tab, so a copied link opens in the diagram the sender was looking at.
 
 The 3D view needs a real WebGL context. A tab without one (a workspace browser started with `--disable-webgl`, a phone client, a blocked driver) keeps the 2D diagram and says why in the status line — it never shows a black viewport. The 3D scene is a separate lazy bundle, so the 2D dashboard stays small and the WebGL libraries are only downloaded when 3D is actually opened.
+
+**Browser cache after an update.** After `paseo plugin update luck-planner` (or `paseo plugin reload`), hard-reload any open dashboard tab so the browser picks up the new `dist/dashboard` assets instead of the cached ones: `Ctrl + F5` / `Ctrl + Shift + R` (Linux/Windows) or `Cmd + Shift + R` (macOS). The MCP server and the native panel update immediately on plugin reload; only the dashboard tab needs the hard reload.
 
 ## The workspace panel, Command Center and slash commands
 

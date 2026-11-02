@@ -828,6 +828,16 @@ F1 HTTP server from `dist/dashboard` and fed by its read-only API. Stage G1 lays
 chrome — toolbar, canvas region, details panel, legend — and the build pipeline; the
 diagram itself arrives in G2–G5.
 
+**Browser cache after an update.** The dashboard SPA is served from `dist/dashboard` by
+the F1 HTTP server. After `paseo plugin update luck-planner` (or `paseo plugin reload`),
+new dashboard assets land on disk, but the **in-app browser tab retains the previous
+`dashboard.js`/`dashboard.css` in its HTTP cache**. Until the tab is hard-reloaded
+(`Ctrl + F5` / `Ctrl + Shift + R` on Linux/Windows, `Cmd + Shift + R` on macOS), the user
+sees the old dashboard code and misses any new UI (for example, the red attention hand
+🫴 or the “Copy agent instruction” 📋 button on cards). The MCP server and the native
+panel are updated immediately by the plugin reload; only the dashboard tab requires the
+hard reload.
+
 **Layout** (`dashboard/src/app.tsx`): a fixed three-row grid — toolbar, body (canvas +
 details panel), legend — so mounting the React Flow viewport in G2 changes nothing about
 the surrounding chrome. What is already live at G1: the app parses `?token=&project=`
