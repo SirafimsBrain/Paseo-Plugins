@@ -22826,6 +22826,22 @@ var findBugsInputSchema = external_exports.object({
   limit: external_exports.number().int().positive().max(200).optional(),
   actor: actorSchema.optional()
 });
+var findGoalsInputSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  /** Filter by goal status: `draft`, `proposed`, `approved`, `in_progress`, `done`, `cancelled`, `superseded`. Omit for all. */
+  status: external_exports.enum([
+    "draft",
+    "proposed",
+    "approved",
+    "in_progress",
+    "done",
+    "cancelled",
+    "superseded"
+  ]).optional(),
+  /** Maximum number of goals to return (default 50). */
+  limit: external_exports.number().int().positive().max(200).optional(),
+  actor: actorSchema.optional()
+});
 var setGoalActionSchema = external_exports.enum(["create", "update", "propose"]);
 var setGoalInputSchema = external_exports.object({
   projectKey: projectKeySchema,
@@ -23144,6 +23160,36 @@ var MCP_TOOLS = [
     }
   },
   {
+    name: "luck_tree_find_goals",
+    title: "Find goals of a project",
+    description: "List high goals of the project, optionally filtered by status. Use it to discover planned and approved work: proposed goals await human approval, approved goals are materialized in the tree.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        status: {
+          type: "string",
+          enum: [
+            "draft",
+            "proposed",
+            "approved",
+            "in_progress",
+            "done",
+            "cancelled",
+            "superseded"
+          ],
+          description: "Filter by goal status. Omit to return every goal of the project."
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of goals to return (default 50, max 200)."
+        },
+        actor: str("Who performs the change (agent id).")
+      },
+      required: ["projectKey"]
+    }
+  },
+  {
     name: "luck_tree_set_goal",
     title: "Manage a high goal (pre-approval)",
     description: "Manage a high goal BEFORE the approval gate: create a draft (formalText + plan), update a draft/proposed plan, or propose it for human review. There is deliberately no approve action \u2014 only a human or the managing agent approves through the native panel, and only an approved plan grows into the tree.",
@@ -23402,6 +23448,28 @@ function dispatchMcpTool(name, args, context) {
           returned: limited.length
         });
       }
+      case "luck_tree_find_goals": {
+        const parsed = findGoalsInputSchema.safeParse(input2);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value = parsed.data;
+        const all = store.listGoals(value.projectKey);
+        const filtered = value.status === void 0 ? all : all.filter((goal) => goal.status === value.status);
+        const limited = filtered.slice(0, value.limit ?? 50);
+        return text({
+          goals: limited.map((goal) => ({
+            id: goal.id,
+            formalText: goal.formalText,
+            status: goal.status,
+            revision: goal.revision,
+            materializedNodeId: goal.materializedNodeId,
+            planSteps: goal.plan.length,
+            createdAt: goal.createdAt,
+            updatedAt: goal.updatedAt
+          })),
+          total: filtered.length,
+          returned: limited.length
+        });
+      }
       case "luck_tree_set_goal": {
         const parsed = setGoalInputSchema.safeParse(input2);
         if (!parsed.success) return invalidInput(parsed.error.issues);
@@ -23649,7 +23717,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.37.7";
+var SERVER_VERSION = "0.38.7";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

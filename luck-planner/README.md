@@ -43,6 +43,7 @@ The MCP server is injected into every agent created through Paseo (configurable 
 | `luck_tree_add_bee` | A directed influence link between two leaves, with an impact description and a status. |
 | `luck_tree_report_bug` | An incident with a title, a description and a severity, optionally attached to the leaves it blocks. |
 | `luck_tree_find_bugs` | List incidents of the project, optionally filtered by status (`open`, `investigating`, `resolved`, `cancelled`). Agents use it to discover what requires attention. |
+| `luck_tree_find_goals` | List high goals of the project, optionally filtered by status (`draft`, `proposed`, `approved`, `in_progress`, `done`, `cancelled`, `superseded`). Agents use it to discover planned and approved work. |
 | `luck_tree_set_goal` | Manages a high goal **before** the approval gate: `create` a draft, `update` a draft or proposed plan, or `propose` it for human review. There is no `approve` action — approval is the human's. |
 | `luck_tree_update_growth` | Upserts the progress record of one subject (a node or a goal): the steps, their state and the record's own status. |
 | `luck_tree_history` | The append-only audit trail of one entity: who changed what, when and from which revision. |

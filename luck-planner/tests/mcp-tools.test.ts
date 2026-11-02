@@ -123,6 +123,7 @@ describe("MCP tool surface", () => {
       "luck_tree_add_bee",
       "luck_tree_report_bug",
       "luck_tree_find_bugs",
+      "luck_tree_find_goals",
       "luck_tree_set_goal",
       "luck_tree_update_growth",
       "luck_tree_history",
@@ -784,6 +785,69 @@ describe("luck_tree_find_bugs", () => {
     const store = openStore();
     expectError(
       call(store, "luck_tree_find_bugs", {
+        projectKey: P,
+        status: "ciao" as any,
+      }),
+      /Invalid input/,
+    );
+  });
+});
+
+describe("luck_tree_find_goals", () => {
+  it("lists all goals of a project, optionally filtered by status", () => {
+    const store = openStore();
+    seedTree(store);
+    call(store, "luck_tree_set_goal", {
+      projectKey: P,
+      action: "create",
+      formalText: "Goal one",
+      plan: [{ id: "s1", title: "step one", description: "" }],
+    });
+    call(store, "luck_tree_set_goal", {
+      projectKey: P,
+      action: "create",
+      formalText: "Goal two",
+      plan: [{ id: "s2", title: "step two", description: "" }],
+    });
+    call(store, "luck_tree_set_goal", {
+      projectKey: P,
+      action: "create",
+      formalText: "Goal three",
+      plan: [{ id: "s3", title: "step three", description: "" }],
+    });
+
+    const all = payload<{ goals: Array<{ id: string; status: string }>; total: number; returned: number }>(
+      call(store, "luck_tree_find_goals", { projectKey: P }),
+    );
+    expect(all.total).toBe(3);
+    expect(all.returned).toBe(3);
+    expect(all.goals.map((g) => g.status).sort()).toEqual(["draft", "draft", "draft"]);
+
+    const onlyDraft = payload<{ goals: Array<{ id: string; status: string }>; total: number }>(
+      call(store, "luck_tree_find_goals", { projectKey: P, status: "draft" }),
+    );
+    expect(onlyDraft.total).toBe(3);
+
+    const onlyProposed = payload<{ goals: Array<{ id: string; status: string }>; total: number }>(
+      call(store, "luck_tree_find_goals", { projectKey: P, status: "proposed" }),
+    );
+    expect(onlyProposed.total).toBe(0);
+  });
+
+  it("returns empty list for project without goals", () => {
+    const store = openStore();
+    seedTree(store);
+    const result = payload<{ goals: unknown[]; total: number }>(
+      call(store, "luck_tree_find_goals", { projectKey: P }),
+    );
+    expect(result.goals).toEqual([]);
+    expect(result.total).toBe(0);
+  });
+
+  it("rejects unknown status", () => {
+    const store = openStore();
+    expectError(
+      call(store, "luck_tree_find_goals", {
         projectKey: P,
         status: "ciao" as any,
       }),

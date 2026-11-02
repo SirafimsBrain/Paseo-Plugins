@@ -37,6 +37,7 @@ export const MCP_TOOL_NAMES = [
   "luck_tree_add_bee",
   "luck_tree_report_bug",
   "luck_tree_find_bugs",
+  "luck_tree_find_goals",
   "luck_tree_set_goal",
   "luck_tree_update_growth",
   "luck_tree_history",
@@ -125,6 +126,25 @@ export const findBugsInputSchema = z.object({
   actor: actorSchema.optional(),
 });
 export type FindBugsInput = z.infer<typeof findBugsInputSchema>;
+
+/** `luck_tree_find_goals`: list high goals of a project, optionally filtered by status. */
+export const findGoalsInputSchema = z.object({
+  projectKey: projectKeySchema,
+  /** Filter by goal status: `draft`, `proposed`, `approved`, `in_progress`, `done`, `cancelled`, `superseded`. Omit for all. */
+  status: z.enum([
+    "draft",
+    "proposed",
+    "approved",
+    "in_progress",
+    "done",
+    "cancelled",
+    "superseded",
+  ]).optional(),
+  /** Maximum number of goals to return (default 50). */
+  limit: z.number().int().positive().max(200).optional(),
+  actor: actorSchema.optional(),
+});
+export type FindGoalsInput = z.infer<typeof findGoalsInputSchema>;
 
 /**
  * `luck_tree_set_goal`: agents manage a high goal only **before** the

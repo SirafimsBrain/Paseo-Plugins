@@ -4,6 +4,7 @@ import type {
   AddBeeInput,
   ArchiveNodeInput,
   FindBugsInput,
+  FindGoalsInput,
   GetContextInput,
   HistoryInput,
   MoveNodeInput,
@@ -18,6 +19,7 @@ import {
   addBeeInputSchema,
   archiveNodeInputSchema,
   findBugsInputSchema,
+  findGoalsInputSchema,
   getContextInputSchema,
   historyInputSchema,
   moveNodeInputSchema,
@@ -419,6 +421,41 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
+    name: "luck_tree_find_goals",
+    title: "Find goals of a project",
+    description:
+      "List high goals of the project, optionally filtered by status. " +
+      "Use it to discover planned and approved work: proposed goals await " +
+      "human approval, approved goals are materialized in the tree.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        status: {
+          type: "string",
+          enum: [
+            "draft",
+            "proposed",
+            "approved",
+            "in_progress",
+            "done",
+            "cancelled",
+            "superseded",
+          ],
+          description:
+            "Filter by goal status. Omit to return every goal of the project.",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Maximum number of goals to return (default 50, max 200).",
+        },
+        actor: str("Who performs the change (agent id)."),
+      },
+      required: ["projectKey"],
+    },
+  },
+  {
     name: "luck_tree_set_goal",
     title: "Manage a high goal (pre-approval)",
     description:
@@ -745,6 +782,32 @@ export function dispatchMcpTool(
             revision: bug.revision,
             updatedAt: bug.updatedAt,
             updatedBy: bug.updatedBy,
+          })),
+          total: filtered.length,
+          returned: limited.length,
+        });
+      }
+
+      case "luck_tree_find_goals": {
+        const parsed = findGoalsInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value: FindGoalsInput = parsed.data;
+        const all = store.listGoals(value.projectKey);
+        const filtered =
+          value.status === undefined
+            ? all
+            : all.filter((goal) => goal.status === value.status);
+        const limited = filtered.slice(0, value.limit ?? 50);
+        return text({
+          goals: limited.map((goal) => ({
+            id: goal.id,
+            formalText: goal.formalText,
+            status: goal.status,
+            revision: goal.revision,
+            materializedNodeId: goal.materializedNodeId,
+            planSteps: goal.plan.length,
+            createdAt: goal.createdAt,
+            updatedAt: goal.updatedAt,
           })),
           total: filtered.length,
           returned: limited.length,
