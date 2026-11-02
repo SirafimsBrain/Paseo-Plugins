@@ -3,6 +3,7 @@ import type { GrowthProgress } from "./store";
 import type {
   AddBeeInput,
   ArchiveNodeInput,
+  FindBugsInput,
   GetContextInput,
   HistoryInput,
   MoveNodeInput,
@@ -16,6 +17,7 @@ import type {
 import {
   addBeeInputSchema,
   archiveNodeInputSchema,
+  findBugsInputSchema,
   getContextInputSchema,
   historyInputSchema,
   moveNodeInputSchema,
@@ -377,10 +379,43 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           enum: ["low", "medium", "high", "critical"],
           description: "Triage severity.",
         },
+        /** Initial status (defaults to `open`). */
+        status: {
+          type: "string",
+          enum: ["open", "investigating", "resolved", "cancelled"],
+          description: "Initial incident status (default open).",
+        },
         nodeIds: strArray("Leaves this incident blocks right away."),
         actor: str("Who performs the change (agent id)."),
       },
       required: ["projectKey", "title", "severity"],
+    },
+  },
+  {
+    name: "luck_tree_find_bugs",
+    title: "Find incidents of a project",
+    description:
+      "List bugs (incidents) of the project, optionally filtered by status. " +
+      "Use it to discover what requires attention: open bugs are work to do, " +
+      "resolved/cancelled ones are processed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        status: {
+          type: "string",
+          enum: ["open", "investigating", "resolved", "cancelled"],
+          description:
+            "Filter by bug status. Omit to return every incident of the project.",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Maximum number of incidents to return (default 50, max 200).",
+        },
+        actor: str("Who performs the change (agent id)."),
+      },
+      required: ["projectKey"],
     },
   },
   {
@@ -684,10 +719,36 @@ export function dispatchMcpTool(
           title: value.title,
           description: value.description,
           severity: value.severity,
+          status: value.status,
           nodeIds: value.nodeIds,
           actor,
         });
         return text({ bug, blockedLeaves: value.nodeIds?.length ?? 0 });
+      }
+
+      case "luck_tree_find_bugs": {
+        const parsed = findBugsInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value: FindBugsInput = parsed.data;
+        const all = store.listBugs(value.projectKey);
+        const filtered =
+          value.status === undefined
+            ? all
+            : all.filter((bug) => bug.status === value.status);
+        const limited = filtered.slice(0, value.limit ?? 50);
+        return text({
+          bugs: limited.map((bug) => ({
+            id: bug.id,
+            title: bug.title,
+            severity: bug.severity,
+            status: bug.status,
+            revision: bug.revision,
+            updatedAt: bug.updatedAt,
+            updatedBy: bug.updatedBy,
+          })),
+          total: filtered.length,
+          returned: limited.length,
+        });
       }
 
       case "luck_tree_set_goal": {

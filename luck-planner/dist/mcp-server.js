@@ -22813,7 +22813,17 @@ var reportBugInputSchema = external_exports.object({
   title: external_exports.string().min(1),
   description: external_exports.string().optional(),
   severity: bugSeveritySchema,
+  /** Initial status (defaults to `open`). */
+  status: bugStatusSchema.optional(),
   nodeIds: external_exports.array(idSchema).optional(),
+  actor: actorSchema.optional()
+});
+var findBugsInputSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  /** Filter by bug status: `open`, `investigating`, `resolved`, `cancelled`. Omit for all. */
+  status: external_exports.enum(["open", "investigating", "resolved", "cancelled"]).optional(),
+  /** Maximum number of incidents to return (default 50). */
+  limit: external_exports.number().int().positive().max(200).optional(),
   actor: actorSchema.optional()
 });
 var setGoalActionSchema = external_exports.enum(["create", "update", "propose"]);
@@ -23099,10 +23109,38 @@ var MCP_TOOLS = [
           enum: ["low", "medium", "high", "critical"],
           description: "Triage severity."
         },
+        /** Initial status (defaults to `open`). */
+        status: {
+          type: "string",
+          enum: ["open", "investigating", "resolved", "cancelled"],
+          description: "Initial incident status (default open)."
+        },
         nodeIds: strArray("Leaves this incident blocks right away."),
         actor: str("Who performs the change (agent id).")
       },
       required: ["projectKey", "title", "severity"]
+    }
+  },
+  {
+    name: "luck_tree_find_bugs",
+    title: "Find incidents of a project",
+    description: "List bugs (incidents) of the project, optionally filtered by status. Use it to discover what requires attention: open bugs are work to do, resolved/cancelled ones are processed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        status: {
+          type: "string",
+          enum: ["open", "investigating", "resolved", "cancelled"],
+          description: "Filter by bug status. Omit to return every incident of the project."
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of incidents to return (default 50, max 200)."
+        },
+        actor: str("Who performs the change (agent id).")
+      },
+      required: ["projectKey"]
     }
   },
   {
@@ -23337,10 +23375,32 @@ function dispatchMcpTool(name, args, context) {
           title: value.title,
           description: value.description,
           severity: value.severity,
+          status: value.status,
           nodeIds: value.nodeIds,
           actor
         });
         return text({ bug, blockedLeaves: value.nodeIds?.length ?? 0 });
+      }
+      case "luck_tree_find_bugs": {
+        const parsed = findBugsInputSchema.safeParse(input2);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value = parsed.data;
+        const all = store.listBugs(value.projectKey);
+        const filtered = value.status === void 0 ? all : all.filter((bug) => bug.status === value.status);
+        const limited = filtered.slice(0, value.limit ?? 50);
+        return text({
+          bugs: limited.map((bug) => ({
+            id: bug.id,
+            title: bug.title,
+            severity: bug.severity,
+            status: bug.status,
+            revision: bug.revision,
+            updatedAt: bug.updatedAt,
+            updatedBy: bug.updatedBy
+          })),
+          total: filtered.length,
+          returned: limited.length
+        });
       }
       case "luck_tree_set_goal": {
         const parsed = setGoalInputSchema.safeParse(input2);
@@ -23589,7 +23649,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.36.6";
+var SERVER_VERSION = "0.37.7";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

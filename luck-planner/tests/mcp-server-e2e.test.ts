@@ -233,6 +233,7 @@ describe("MCP server end-to-end (real process)", () => {
         "luck_tree_archive_node",
         "luck_tree_add_bee",
         "luck_tree_report_bug",
+        "luck_tree_find_bugs",
         "luck_tree_set_goal",
         "luck_tree_update_growth",
         "luck_tree_history",

@@ -6,7 +6,7 @@ import {
   nodeKindSchema,
   projectKeySchema,
 } from "./tree";
-import { beeStatusSchema, bugSeveritySchema } from "./links";
+import { beeStatusSchema, bugSeveritySchema, bugStatusSchema } from "./links";
 import { goalStepSchema } from "./goals";
 import {
   growthStatusSchema,
@@ -36,6 +36,7 @@ export const MCP_TOOL_NAMES = [
   "luck_tree_archive_node",
   "luck_tree_add_bee",
   "luck_tree_report_bug",
+  "luck_tree_find_bugs",
   "luck_tree_set_goal",
   "luck_tree_update_growth",
   "luck_tree_history",
@@ -107,10 +108,23 @@ export const reportBugInputSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   severity: bugSeveritySchema,
+  /** Initial status (defaults to `open`). */
+  status: bugStatusSchema.optional(),
   nodeIds: z.array(idSchema).optional(),
   actor: actorSchema.optional(),
 });
 export type ReportBugInput = z.infer<typeof reportBugInputSchema>;
+
+/** `luck_tree_find_bugs`: list incidents of a project, optionally filtered by status. */
+export const findBugsInputSchema = z.object({
+  projectKey: projectKeySchema,
+  /** Filter by bug status: `open`, `investigating`, `resolved`, `cancelled`. Omit for all. */
+  status: z.enum(["open", "investigating", "resolved", "cancelled"]).optional(),
+  /** Maximum number of incidents to return (default 50). */
+  limit: z.number().int().positive().max(200).optional(),
+  actor: actorSchema.optional(),
+});
+export type FindBugsInput = z.infer<typeof findBugsInputSchema>;
 
 /**
  * `luck_tree_set_goal`: agents manage a high goal only **before** the

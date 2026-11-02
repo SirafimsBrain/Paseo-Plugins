@@ -122,6 +122,7 @@ describe("MCP tool surface", () => {
       "luck_tree_archive_node",
       "luck_tree_add_bee",
       "luck_tree_report_bug",
+      "luck_tree_find_bugs",
       "luck_tree_set_goal",
       "luck_tree_update_growth",
       "luck_tree_history",
@@ -716,6 +717,78 @@ describe("luck_tree_report_bug", () => {
     expectError(result, /not found in project/);
     expect(store.listBugs(P)).toHaveLength(0);
     expect(store.listBlockingBugs(P, leafA.id)).toHaveLength(0);
+  });
+});
+
+describe("luck_tree_find_bugs", () => {
+  it("lists all bugs of a project, optionally filtered by status", () => {
+    const store = openStore();
+    const { leafA } = seedTree(store);
+    call(store, "luck_tree_report_bug", {
+      projectKey: P,
+      title: "webhook 500s",
+      description: "retries exhaust",
+      severity: "high",
+      nodeIds: [leafA.id],
+    });
+    call(store, "luck_tree_report_bug", {
+      projectKey: P,
+      title: "db connection pool",
+      description: "exhausted under load",
+      severity: "medium",
+      status: "investigating",
+    });
+    call(store, "luck_tree_report_bug", {
+      projectKey: P,
+      title: "typo in docs",
+      description: "fix later",
+      severity: "low",
+      status: "resolved",
+    });
+
+    const all = payload<{ bugs: Array<{ id: string; title: string; status: string }>; total: number; returned: number }>(
+      call(store, "luck_tree_find_bugs", { projectKey: P }),
+    );
+    expect(all.total).toBe(3);
+    expect(all.returned).toBe(3);
+    expect(all.bugs.map((b) => b.status).sort()).toEqual([
+      "investigating",
+      "open",
+      "resolved",
+    ]);
+
+    const onlyOpen = payload<{ bugs: Array<{ id: string; title: string; status: string }>; total: number }>(
+      call(store, "luck_tree_find_bugs", { projectKey: P, status: "open" }),
+    );
+    expect(onlyOpen.total).toBe(1);
+    expect(onlyOpen.bugs[0].title).toBe("webhook 500s");
+
+    const onlyResolved = payload<{ bugs: Array<{ id: string; title: string; status: string }>; total: number }>(
+      call(store, "luck_tree_find_bugs", { projectKey: P, status: "resolved" }),
+    );
+    expect(onlyResolved.total).toBe(1);
+    expect(onlyResolved.bugs[0].title).toBe("typo in docs");
+  });
+
+  it("returns empty list for project without bugs", () => {
+    const store = openStore();
+    seedTree(store);
+    const result = payload<{ bugs: unknown[]; total: number }>(
+      call(store, "luck_tree_find_bugs", { projectKey: P }),
+    );
+    expect(result.bugs).toEqual([]);
+    expect(result.total).toBe(0);
+  });
+
+  it("rejects unknown status", () => {
+    const store = openStore();
+    expectError(
+      call(store, "luck_tree_find_bugs", {
+        projectKey: P,
+        status: "ciao" as any,
+      }),
+      /Invalid input/,
+    );
   });
 });
 
