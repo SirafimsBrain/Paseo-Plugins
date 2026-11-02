@@ -124,6 +124,7 @@ describe("MCP tool surface", () => {
       "luck_tree_report_bug",
       "luck_tree_find_bugs",
       "luck_tree_find_goals",
+      "luck_tree_approve_goal",
       "luck_tree_set_goal",
       "luck_tree_update_growth",
       "luck_tree_history",
@@ -852,6 +853,97 @@ describe("luck_tree_find_goals", () => {
         status: "ciao" as any,
       }),
       /Invalid input/,
+    );
+  });
+});
+
+describe("luck_tree_approve_goal", () => {
+  it("approves a proposed goal and materializes its subtree", () => {
+    const store = openStore();
+    const { branch } = seedTree(store);
+    call(store, "luck_tree_set_goal", {
+      projectKey: P,
+      action: "create",
+      formalText: "Goal to approve",
+      plan: [{ id: "s1", title: "step one", description: "" }],
+    });
+
+    const created = payload<{ goal: { id: string; status: string } }>(
+      call(store, "luck_tree_set_goal", {
+        projectKey: P,
+        action: "create",
+        formalText: "Goal to approve",
+        plan: [{ id: "s1", title: "step one", description: "" }],
+      }),
+    );
+    const goalId = created.goal.id;
+
+    call(store, "luck_tree_set_goal", {
+      projectKey: P,
+      action: "propose",
+      goalId,
+    });
+
+    const result = payload<{ goal: { id: string; status: string; materializedNodeId: string | null } }>(
+      call(store, "luck_tree_approve_goal", {
+        projectKey: P,
+        goalId,
+        parentBranchId: branch.id,
+      }),
+    );
+    expect(result.goal.status).toBe("approved");
+    expect(result.goal.materializedNodeId).not.toBeNull();
+
+    const goal = store.getGoal(P, goalId);
+    expect(goal?.status).toBe("approved");
+    expect(goal?.materializedNodeId).not.toBeNull();
+  });
+
+  it("rejects approving a non-proposed goal", () => {
+    const store = openStore();
+    const { branch } = seedTree(store);
+    const created = payload<{ goal: { id: string; status: string } }>(
+      call(store, "luck_tree_set_goal", {
+        projectKey: P,
+        action: "create",
+        formalText: "Draft goal",
+        plan: [{ id: "s1", title: "step one", description: "" }],
+      }),
+    );
+    expectError(
+      call(store, "luck_tree_approve_goal", {
+        projectKey: P,
+        goalId: created.goal.id,
+        parentBranchId: branch.id,
+      }),
+      /only a proposed goal may be approved/,
+    );
+  });
+
+  it("rejects unknown parent branch", () => {
+    const store = openStore();
+    seedTree(store);
+    const created = payload<{ goal: { id: string } }>(
+      call(store, "luck_tree_set_goal", {
+        projectKey: P,
+        action: "create",
+        formalText: "Goal with bad parent",
+        plan: [{ id: "s1", title: "step one", description: "" }],
+      }),
+    );
+    call(store, "luck_tree_set_goal", {
+      projectKey: P,
+      action: "propose",
+      goalId: created.goal.id,
+    });
+
+    expectError(
+      call(store, "luck_tree_approve_goal", {
+        projectKey: P,
+        goalId: created.goal.id,
+        parentBranchId: "00000000-0000-4000-8000-000000000000",
+      }),
+      /not found/,
     );
   });
 });

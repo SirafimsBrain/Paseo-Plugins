@@ -2,6 +2,7 @@ import type { Node, NodeKind } from "../shared/tree";
 import type { GrowthProgress } from "./store";
 import type {
   AddBeeInput,
+  ApproveGoalInput,
   ArchiveNodeInput,
   FindBugsInput,
   FindGoalsInput,
@@ -17,6 +18,7 @@ import type {
 } from "../shared/tools";
 import {
   addBeeInputSchema,
+  approveGoalInputSchema,
   archiveNodeInputSchema,
   findBugsInputSchema,
   findGoalsInputSchema,
@@ -456,6 +458,27 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
+    name: "luck_tree_approve_goal",
+    title: "Approve a high goal",
+    description:
+      "Cross the approval gate and materialize the goal's subtree in the tree. " +
+      "Only a `proposed` goal may be approved; approval creates a side branch " +
+      "and one leaf per plan step. ADR-7: this is the human's approval gate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        goalId: str("Goal to approve."),
+        /** Live branch (or subbranch) the goal's side branch grows under. */
+        parentBranchId: str(
+          "Branch under which the goal's side branch will grow.",
+        ),
+        actor: str("Who performs the change (agent id)."),
+      },
+      required: ["projectKey", "goalId", "parentBranchId"],
+    },
+  },
+  {
     name: "luck_tree_set_goal",
     title: "Manage a high goal (pre-approval)",
     description:
@@ -811,6 +834,27 @@ export function dispatchMcpTool(
           })),
           total: filtered.length,
           returned: limited.length,
+        });
+      }
+
+      case "luck_tree_approve_goal": {
+        const parsed = approveGoalInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        const value: ApproveGoalInput = parsed.data;
+        const goal = store.approveGoal({
+          projectKey: value.projectKey,
+          id: value.goalId,
+          parentBranchId: value.parentBranchId,
+          actor: value.actor ?? actor,
+        });
+        return text({
+          goal: {
+            id: goal.id,
+            formalText: goal.formalText,
+            status: goal.status,
+            revision: goal.revision,
+            materializedNodeId: goal.materializedNodeId,
+          },
         });
       }
 

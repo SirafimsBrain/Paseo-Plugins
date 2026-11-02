@@ -38,6 +38,7 @@ export const MCP_TOOL_NAMES = [
   "luck_tree_report_bug",
   "luck_tree_find_bugs",
   "luck_tree_find_goals",
+  "luck_tree_approve_goal",
   "luck_tree_set_goal",
   "luck_tree_update_growth",
   "luck_tree_history",
@@ -145,6 +146,16 @@ export const findGoalsInputSchema = z.object({
   actor: actorSchema.optional(),
 });
 export type FindGoalsInput = z.infer<typeof findGoalsInputSchema>;
+
+/** `luck_tree_approve_goal`: cross the approval gate and materialize the goal's subtree. */
+export const approveGoalInputSchema = z.object({
+  projectKey: projectKeySchema,
+  goalId: idSchema,
+  /** Live branch (or subbranch) the goal's side branch grows under. */
+  parentBranchId: idSchema,
+  actor: actorSchema.optional(),
+});
+export type ApproveGoalInput = z.infer<typeof approveGoalInputSchema>;
 
 /**
  * `luck_tree_set_goal`: agents manage a high goal only **before** the
