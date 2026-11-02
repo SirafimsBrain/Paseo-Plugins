@@ -22889,9 +22889,9 @@ function num(description) {
   return { type: "number", description };
 }
 var PROJECT_KEY = str(
-  "Canonical absolute path of the project this call addresses. Every read and write is scoped by it."
+  "Canonical absolute path of the project this call addresses \u2014 the current workspace only. Do not probe other projectKeys; expanding scope requires an explicit user request."
 );
-var MCP_INSTRUCTIONS = "Luck Planner is the project's durable planning tree: leaves record facts, bees record dependencies between them, bugs record incidents that block leaves, and goals are plans a human approves. Read before writing \u2014 luck_tree_get_context or luck_tree_search first \u2014 then record a fact as a leaf when it changes, follow the leaf state machine (draft \u2192 ready \u2192 claimed \u2192 in_progress \u2192 done), and never manage the tree by hand outside these tools. When to write and what not to write is the luck-planner agent skill; this server is how the writes happen.";
+var MCP_INSTRUCTIONS = "Luck Planner is the project's durable planning tree: leaves record facts, bees record dependencies between them, bugs record incidents that block leaves, and goals are plans a human approves. Read before writing \u2014 luck_tree_get_context or luck_tree_search first \u2014 then record a fact as a leaf when it changes, follow the leaf state machine (draft \u2192 ready \u2192 claimed \u2192 in_progress \u2192 done), and never manage the tree by hand outside these tools. Scope: one projectKey per session = the current workspace; never enumerate other projectKeys unless the user explicitly asks. When to write and what not to write is the luck-planner agent skill; this server is how the writes happen.";
 var MCP_TOOLS = [
   {
     name: "luck_tree_get_context",
@@ -23589,7 +23589,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.35.2";
+var SERVER_VERSION = "0.35.4";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

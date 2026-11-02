@@ -412,6 +412,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-size: 10px;
   color: var(--lp-text-muted, #8b93a3);
 }
@@ -423,9 +424,22 @@ body {
   flex: none;
 }
 
+/* Status label next to the colour dot: the text carries the state, so it
+   must never burst out of the fixed-width node box. */
+.lp-node-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 .lp-node-version {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .lp-node-toggle {
@@ -751,6 +765,15 @@ body {
   gap: 2px;
   font-size: 10px;
   color: var(--lp-text-muted, #8b93a3);
+  min-width: 0;
+}
+
+.lp-node-growth-status,
+.lp-node-growth-subtree {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .lp-node-growth-status {
