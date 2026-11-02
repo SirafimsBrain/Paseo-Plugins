@@ -58,6 +58,22 @@ path of the project root (the workspace's working directory). Use the exact
 same string every time; a slightly different path silently creates a second
 tree.
 
+**Scope rule (hard):** \`projectKey\` is **the current workspace only**. Use one
+and the same value for every call in this session.
+
+- **Never** enumerate or probe other \`projectKey\`s — not even when
+  \`memory-flash\` mentions them — unless the user explicitly asks for "all
+  projects", "across projects", or names another path.
+- If the task does not specify a project, use the current working directory;
+  do not guess other project roots.
+- If you believe another project's tree is relevant, **ask the user first**, or
+  state in your reply that you are expanding scope.
+- State the \`projectKey\` you are about to use in your first reply, so the
+  scope is transparent and can be corrected before any tokens are spent.
+- An explicit user request ("take X from project Y", "compare with project Z")
+  **does** allow reading another project's tree — that is a legitimate
+  cross-project workflow, not a scope violation.
+
 ---
 
 ## 1. Orient before you work
@@ -87,6 +103,9 @@ optional \`kinds\`/\`statuses\` arrays. When a hit looks relevant, read its
 context with \`luck_tree_get_context\` before acting on it.
 
 If the tree contradicts the code, **the code is truth** — fix the tree.
+
+**Scope for this section:** orient only in the **current** project's tree. Do not
+descend into other projects' trees while orienting.
 
 ---
 

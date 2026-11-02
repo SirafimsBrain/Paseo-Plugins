@@ -101,7 +101,9 @@ function num(description: string): JsonSchemaProperty {
 }
 
 const PROJECT_KEY = str(
-  "Canonical absolute path of the project this call addresses. Every read and write is scoped by it.",
+  "Canonical absolute path of the project this call addresses — the current " +
+    "workspace only. Do not probe other projectKeys; expanding scope requires " +
+    "an explicit user request.",
 );
 
 /**
@@ -122,8 +124,10 @@ export const MCP_INSTRUCTIONS =
   "luck_tree_get_context or luck_tree_search first — then record a fact as a " +
   "leaf when it changes, follow the leaf state machine (draft → ready → " +
   "claimed → in_progress → done), and never manage the tree by hand outside " +
-  "these tools. When to write and what not to write is the luck-planner agent " +
-  "skill; this server is how the writes happen.";
+  "these tools. Scope: one projectKey per session = the current workspace; " +
+  "never enumerate other projectKeys unless the user explicitly asks. When to " +
+  "write and what not to write is the luck-planner agent skill; this server is " +
+  "how the writes happen.";
 
 export const MCP_TOOLS: McpToolDefinition[] = [
   {

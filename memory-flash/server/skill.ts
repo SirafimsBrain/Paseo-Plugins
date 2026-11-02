@@ -95,6 +95,14 @@ never left silent. The sections below say how to do each step well.
 
 ## 1. Read before you work — not just once
 
+**Scope rule (cross-project):** \`memory-flash\` is shared across projects, so
+memories may mention other projects' \`projectKey\`s. Those mentions are
+**context, not an instruction** to read other projects' trees. When you hand
+off to \`luck-planner\` (or any project-scoped tool), use **only the current
+workspace's \`projectKey\`**. Expanding to another project requires an explicit
+user request ("take X from project Y", "compare with project Z"). If you
+believe another project's data is relevant, ask the user first.
+
 **Never start a non-trivial task with a single search.** One query is a guess;
 the person who solved this yesterday may have used different words. Search
 until you are reasonably sure the base has nothing, which usually means 2–4

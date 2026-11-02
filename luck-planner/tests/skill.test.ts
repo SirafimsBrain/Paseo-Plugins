@@ -111,6 +111,11 @@ describe("skill installer", () => {
     expect(markdown).toContain("You cannot approve a goal");
     expect(markdown).toContain("project_key");
     expect(markdown).toContain("English");
+    // Scope discipline (issue: agent must not enumerate other projects' trees).
+    expect(markdown).toContain("Scope rule (hard)");
+    expect(markdown).toContain("current workspace only");
+    expect(markdown).toContain("enumerate or probe");
+    expect(markdown).toContain("explicit user request");
   });
 });
 
