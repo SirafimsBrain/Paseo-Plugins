@@ -1405,6 +1405,45 @@ button.lp-plain-card:hover {
   border-color: var(--lp-selection, rgba(91, 157, 255, 0.16));
   box-shadow: 0 0 0 1px var(--lp-selection, rgba(91, 157, 255, 0.16));
 }
+.lp-plain-card-attention {
+  color: #e05d5d;
+  font-weight: 700;
+  margin-inline-end: 6px;
+  filter: drop-shadow(0 0 1px rgba(224, 93, 93, 0.55));
+}
+.lp-plain-card-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 4px;
+  background: var(--lp-surface, #171a21);
+  color: var(--lp-text, #e6e9ef);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  margin-inline-start: auto;
+  flex: none;
+}
+.lp-plain-card-copy:hover,
+.lp-plain-card-copy:focus-visible {
+  border-color: #e05d5d;
+  color: #e05d5d;
+  outline: none;
+}
+.lp-plain-card-nextstep {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(224, 93, 93, 0.3);
+  font-size: 11px;
+  color: #e05d5d;
+}
+.lp-plain-card-nextstep-label {
+  font-weight: 700;
+  margin-inline-end: 4px;
+}
 .lp-plain-card-head {
   display: flex;
   align-items: baseline;

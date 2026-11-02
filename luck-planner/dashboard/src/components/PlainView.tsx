@@ -238,6 +238,100 @@ function SectionNode(props: {
   );
 }
 
+/**
+ * Требует ли карта внимания пользователя.
+ * В зонах Plan и Active — да (нужно подтвердить, отправить агенту, проверить).
+ * В зоне Done — нет, задача завершена.
+ */
+function requiresAttention(card: PlainCard): boolean {
+  if (card.kind === "leaf") {
+    const status = card.status as LeafStatus;
+    return status !== "done" && status !== "cancelled" && status !== "superseded";
+  }
+  if (card.kind === "goal") {
+    const status = card.status as GoalStatus;
+    return status !== "done" && status !== "cancelled" && status !== "superseded";
+  }
+  const status = card.status as BugStatus;
+  return status !== "resolved" && status !== "cancelled";
+}
+
+/** Ожидаемый следующий шаг от пользователя для карты, требующей внимания. */
+function nextStepFor(card: PlainCard): string {
+  const kind = card.kind;
+  const status = card.status;
+  if (kind === "leaf") {
+    switch (status as LeafStatus) {
+      case "draft":
+        return "Подтвердите факт — переведите в ready (в план) или сразу в claimed (в работу агенту).";
+      case "ready":
+        return "Отправьте агенту в работу — luck_tree_upsert_leaf со статусом claimed.";
+      case "claimed":
+        return "Проверьте, что агент взял задачу; при бездействии верните в ready.";
+      case "in_progress":
+        return "Проверьте прогресс и при завершении переведите в done.";
+      case "blocked":
+        return "Устраните блокер/откройте инцидент или подтвердите отмену.";
+      default:
+        return "Проверьте состояние листа.";
+    }
+  }
+  if (kind === "goal") {
+    switch (status as GoalStatus) {
+      case "draft":
+        return "Подтвердите цель и отправьте на утверждение (proposed).";
+      case "proposed":
+        return "Одобрите цель (approved), чтобы агент материализовал поддерево.";
+      case "approved":
+        return "Запустите реализацию (in_progress).";
+      case "in_progress":
+        return "Проверьте ход реализации цели.";
+      default:
+        return "Проверьте состояние цели.";
+    }
+  }
+  switch (status as BugStatus) {
+    case "open":
+      return "Подтвердите инцидент и определите исполнителя.";
+    case "investigating":
+      return "Проверьте ход расследования; при закрытии переведите в resolved.";
+    default:
+      return "Проверьте состояние инцидента.";
+  }
+}
+
+/** Инструкция для агента — точное целевое описание карты и следующего шага. */
+function agentInstruction(card: PlainCard): string {
+  const lines: string[] = [];
+  const statusLabel = cardStatusLabel(card.kind, card.status);
+  const nextStep = nextStepFor(card);
+  if (card.kind === "leaf") {
+    lines.push(`Лист: ${card.name}`);
+    lines.push(`Идентификатор: ${card.entityId}`);
+    lines.push(`Путь: ${card.path || "—"}`);
+    lines.push(`Статус: ${statusLabel}`);
+    if (card.openBugCount > 0) lines.push(`Открытых инцидентов: ${card.openBugCount}`);
+    lines.push(`Следующий шаг: ${nextStep}`);
+    lines.push(`Агент: luck_tree_upsert_leaf id="${card.entityId}"`);
+  } else if (card.kind === "goal") {
+    lines.push(`Цель: ${card.name}`);
+    lines.push(`Идентификатор: ${card.entityId}`);
+    lines.push(`Статус: ${statusLabel}`);
+    lines.push(`Шагов плана: ${card.planSteps}`);
+    lines.push(`В дереве: ${card.materializedNodeId ? "да" : "нет"}`);
+    lines.push(`Следующий шаг: ${nextStep}`);
+    lines.push(`Агент: luck_tree_upsert_node id="${card.entityId}"`);
+  } else {
+    lines.push(`Инцидент: ${card.name}`);
+    lines.push(`Идентификатор: ${card.entityId}`);
+    lines.push(`Критичность: ${card.severity}`);
+    lines.push(`Листьев: ${card.attachmentCount}`);
+    lines.push(`Следующий шаг: ${nextStep}`);
+    lines.push(`Агент: укажите идентификатор инцидента ${card.entityId}`);
+  }
+  return lines.join("\n");
+}
+
 /** One card — a button for every kind: the click opens the K2 modal. */
 function Card(props: {
   card: PlainCard;
@@ -245,6 +339,8 @@ function Card(props: {
   onSelectCard: (kind: PlainCardKind, entityId: string) => void;
 }): ReactElement {
   const { card } = props;
+  const attention = requiresAttention(card);
+  const nextStep = attention ? nextStepFor(card) : null;
   const className = props.selected
     ? "lp-plain-card lp-plain-card-selected"
     : "lp-plain-card";
@@ -252,9 +348,39 @@ function Card(props: {
     <>
       <div className="lp-plain-card-head">
         <span className="lp-plain-card-title">
+          {attention ? (
+            <span
+              className="lp-plain-card-attention"
+              aria-label="Требует вашего внимания"
+              title="Требует вашего внимания — см. следующий шаг ниже"
+            >
+              🫴
+            </span>
+          ) : null}
           <span aria-hidden="true">{cardGlyph(card.kind)} </span>
           {card.name}
         </span>
+        {attention ? (
+          <span
+            role="button"
+            tabIndex={0}
+            className="lp-plain-card-copy"
+            aria-label="Скопировать инструкцию для агента"
+            title="Скопировать инструкцию для агента (идентификатор и следующий шаг)"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                copyInstruction(card);
+              }
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              copyInstruction(card);
+            }}
+          >
+            📋
+          </span>
+        ) : null}
         <span className="lp-plain-card-status">
           <span
             className="lp-plain-card-dot"
@@ -271,6 +397,12 @@ function Card(props: {
       ) : (
         <BugCardBody card={card} />
       )}
+      {attention && nextStep ? (
+        <div className="lp-plain-card-nextstep">
+          <span className="lp-plain-card-nextstep-label">Следующий шаг:</span>{" "}
+          {nextStep}
+        </div>
+      ) : null}
     </>
   );
 
@@ -281,11 +413,28 @@ function Card(props: {
       className={className}
       data-kind={card.kind}
       aria-pressed={card.kind === "leaf" ? props.selected : undefined}
+      aria-label={
+        attention
+          ? `${card.name} — требует внимания. ${nextStep}`
+          : undefined
+      }
       onClick={() => props.onSelectCard(card.kind, card.entityId)}
     >
       {body}
     </button>
   );
+}
+
+function copyInstruction(card: PlainCard): void {
+  const text = agentInstruction(card);
+  void navigator.clipboard
+    .writeText(text)
+    .then(() => {
+      // Intentionally silent — the clipboard is a convenience only.
+    })
+    .catch(() => {
+      // Clipboard unavailable in some contexts; silently ignore.
+    });
 }
 
 /** The extra facts a leaf card shows: path, version, growth, badges. */

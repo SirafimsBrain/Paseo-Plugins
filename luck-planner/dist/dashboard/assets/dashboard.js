@@ -11161,18 +11161,134 @@ function SectionNode(props) {
     }
   );
 }
+function requiresAttention(card) {
+  if (card.kind === "leaf") {
+    const status2 = card.status;
+    return status2 !== "done" && status2 !== "cancelled" && status2 !== "superseded";
+  }
+  if (card.kind === "goal") {
+    const status2 = card.status;
+    return status2 !== "done" && status2 !== "cancelled" && status2 !== "superseded";
+  }
+  const status = card.status;
+  return status !== "resolved" && status !== "cancelled";
+}
+function nextStepFor(card) {
+  const kind = card.kind;
+  const status = card.status;
+  if (kind === "leaf") {
+    switch (status) {
+      case "draft":
+        return "\u041F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0444\u0430\u043A\u0442 \u2014 \u043F\u0435\u0440\u0435\u0432\u0435\u0434\u0438\u0442\u0435 \u0432 ready (\u0432 \u043F\u043B\u0430\u043D) \u0438\u043B\u0438 \u0441\u0440\u0430\u0437\u0443 \u0432 claimed (\u0432 \u0440\u0430\u0431\u043E\u0442\u0443 \u0430\u0433\u0435\u043D\u0442\u0443).";
+      case "ready":
+        return "\u041E\u0442\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u0430\u0433\u0435\u043D\u0442\u0443 \u0432 \u0440\u0430\u0431\u043E\u0442\u0443 \u2014 luck_tree_upsert_leaf \u0441\u043E \u0441\u0442\u0430\u0442\u0443\u0441\u043E\u043C claimed.";
+      case "claimed":
+        return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435, \u0447\u0442\u043E \u0430\u0433\u0435\u043D\u0442 \u0432\u0437\u044F\u043B \u0437\u0430\u0434\u0430\u0447\u0443; \u043F\u0440\u0438 \u0431\u0435\u0437\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0438 \u0432\u0435\u0440\u043D\u0438\u0442\u0435 \u0432 ready.";
+      case "in_progress":
+        return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043F\u0440\u043E\u0433\u0440\u0435\u0441\u0441 \u0438 \u043F\u0440\u0438 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u0438 \u043F\u0435\u0440\u0435\u0432\u0435\u0434\u0438\u0442\u0435 \u0432 done.";
+      case "blocked":
+        return "\u0423\u0441\u0442\u0440\u0430\u043D\u0438\u0442\u0435 \u0431\u043B\u043E\u043A\u0435\u0440/\u043E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442 \u0438\u043B\u0438 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043E\u0442\u043C\u0435\u043D\u0443.";
+      default:
+        return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u043B\u0438\u0441\u0442\u0430.";
+    }
+  }
+  if (kind === "goal") {
+    switch (status) {
+      case "draft":
+        return "\u041F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0446\u0435\u043B\u044C \u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u043D\u0430 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u0435 (proposed).";
+      case "proposed":
+        return "\u041E\u0434\u043E\u0431\u0440\u0438\u0442\u0435 \u0446\u0435\u043B\u044C (approved), \u0447\u0442\u043E\u0431\u044B \u0430\u0433\u0435\u043D\u0442 \u043C\u0430\u0442\u0435\u0440\u0438\u0430\u043B\u0438\u0437\u043E\u0432\u0430\u043B \u043F\u043E\u0434\u0434\u0435\u0440\u0435\u0432\u043E.";
+      case "approved":
+        return "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0440\u0435\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044E (in_progress).";
+      case "in_progress":
+        return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0445\u043E\u0434 \u0440\u0435\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u0438 \u0446\u0435\u043B\u0438.";
+      default:
+        return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0446\u0435\u043B\u0438.";
+    }
+  }
+  switch (status) {
+    case "open":
+      return "\u041F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442 \u0438 \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u0441\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044F.";
+    case "investigating":
+      return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0445\u043E\u0434 \u0440\u0430\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u044F; \u043F\u0440\u0438 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u0438 \u043F\u0435\u0440\u0435\u0432\u0435\u0434\u0438\u0442\u0435 \u0432 resolved.";
+    default:
+      return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442\u0430.";
+  }
+}
+function agentInstruction(card) {
+  const lines = [];
+  const statusLabel = cardStatusLabel(card.kind, card.status);
+  const nextStep = nextStepFor(card);
+  if (card.kind === "leaf") {
+    lines.push(`\u041B\u0438\u0441\u0442: ${card.name}`);
+    lines.push(`\u0418\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440: ${card.entityId}`);
+    lines.push(`\u041F\u0443\u0442\u044C: ${card.path || "\u2014"}`);
+    lines.push(`\u0421\u0442\u0430\u0442\u0443\u0441: ${statusLabel}`);
+    if (card.openBugCount > 0) lines.push(`\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0445 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442\u043E\u0432: ${card.openBugCount}`);
+    lines.push(`\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433: ${nextStep}`);
+    lines.push(`\u0410\u0433\u0435\u043D\u0442: luck_tree_upsert_leaf id="${card.entityId}"`);
+  } else if (card.kind === "goal") {
+    lines.push(`\u0426\u0435\u043B\u044C: ${card.name}`);
+    lines.push(`\u0418\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440: ${card.entityId}`);
+    lines.push(`\u0421\u0442\u0430\u0442\u0443\u0441: ${statusLabel}`);
+    lines.push(`\u0428\u0430\u0433\u043E\u0432 \u043F\u043B\u0430\u043D\u0430: ${card.planSteps}`);
+    lines.push(`\u0412 \u0434\u0435\u0440\u0435\u0432\u0435: ${card.materializedNodeId ? "\u0434\u0430" : "\u043D\u0435\u0442"}`);
+    lines.push(`\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433: ${nextStep}`);
+    lines.push(`\u0410\u0433\u0435\u043D\u0442: luck_tree_upsert_node id="${card.entityId}"`);
+  } else {
+    lines.push(`\u0418\u043D\u0446\u0438\u0434\u0435\u043D\u0442: ${card.name}`);
+    lines.push(`\u0418\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440: ${card.entityId}`);
+    lines.push(`\u041A\u0440\u0438\u0442\u0438\u0447\u043D\u043E\u0441\u0442\u044C: ${card.severity}`);
+    lines.push(`\u041B\u0438\u0441\u0442\u044C\u0435\u0432: ${card.attachmentCount}`);
+    lines.push(`\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433: ${nextStep}`);
+    lines.push(`\u0410\u0433\u0435\u043D\u0442: \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u0438\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442\u0430 ${card.entityId}`);
+  }
+  return lines.join("\n");
+}
 function Card(props) {
   const { card } = props;
+  const attention = requiresAttention(card);
+  const nextStep = attention ? nextStepFor(card) : null;
   const className = props.selected ? "lp-plain-card lp-plain-card-selected" : "lp-plain-card";
   const body = /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-head", children: [
       /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-title", children: [
+        attention ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+          "span",
+          {
+            className: "lp-plain-card-attention",
+            "aria-label": "\u0422\u0440\u0435\u0431\u0443\u0435\u0442 \u0432\u0430\u0448\u0435\u0433\u043E \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F",
+            title: "\u0422\u0440\u0435\u0431\u0443\u0435\u0442 \u0432\u0430\u0448\u0435\u0433\u043E \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F \u2014 \u0441\u043C. \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433 \u043D\u0438\u0436\u0435",
+            children: "\u{1FAF4}"
+          }
+        ) : null,
         /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { "aria-hidden": "true", children: [
           cardGlyph(card.kind),
           " "
         ] }),
         card.name
       ] }),
+      attention ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+        "span",
+        {
+          role: "button",
+          tabIndex: 0,
+          className: "lp-plain-card-copy",
+          "aria-label": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u043D\u0441\u0442\u0440\u0443\u043A\u0446\u0438\u044E \u0434\u043B\u044F \u0430\u0433\u0435\u043D\u0442\u0430",
+          title: "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u043D\u0441\u0442\u0440\u0443\u043A\u0446\u0438\u044E \u0434\u043B\u044F \u0430\u0433\u0435\u043D\u0442\u0430 (\u0438\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440 \u0438 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433)",
+          onKeyDown: (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              copyInstruction(card);
+            }
+          },
+          onClick: (event) => {
+            event.stopPropagation();
+            copyInstruction(card);
+          },
+          children: "\u{1F4CB}"
+        }
+      ) : null,
       /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-status", children: [
         /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
           "span",
@@ -11185,7 +11301,12 @@ function Card(props) {
         cardStatusLabel(card.kind, card.status)
       ] })
     ] }),
-    card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(LeafCardBody, { card }) : card.kind === "goal" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(GoalCardBody, { card }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BugCardBody, { card })
+    card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(LeafCardBody, { card }) : card.kind === "goal" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(GoalCardBody, { card }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(BugCardBody, { card }),
+    attention && nextStep ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-nextstep", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-card-nextstep-label", children: "\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433:" }),
+      " ",
+      nextStep
+    ] }) : null
   ] });
   return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     "button",
@@ -11195,10 +11316,17 @@ function Card(props) {
       className,
       "data-kind": card.kind,
       "aria-pressed": card.kind === "leaf" ? props.selected : void 0,
+      "aria-label": attention ? `${card.name} \u2014 \u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F. ${nextStep}` : void 0,
       onClick: () => props.onSelectCard(card.kind, card.entityId),
       children: body
     }
   );
+}
+function copyInstruction(card) {
+  const text = agentInstruction(card);
+  void navigator.clipboard.writeText(text).then(() => {
+  }).catch(() => {
+  });
 }
 function LeafCardBody(props) {
   const { card } = props;
