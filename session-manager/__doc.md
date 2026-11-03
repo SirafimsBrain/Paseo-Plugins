@@ -691,7 +691,7 @@ fires this event without awaiting (`pluginHookRegistry["agent.close.after"].wait
 `^0.14.0` → `^0.15.0`, version `0.3.3` → `0.3.4` (deprecated-API replacement,
 no new capability → last digit), annotated tag `session-manager@0.3.4`.
 
-### 19.3 Recommendations for improvement (item 1 shipped in 0.3.5, rest recorded)
+### 19.3 Recommendations for improvement
 
 1. **Invalidate the listing cache on the archive events too — implemented in
    0.3.5 (§19.5).** Archiving an agent (and `workspace.archive.after` for a
@@ -699,11 +699,18 @@ no new capability → last digit), annotated tag `session-manager@0.3.4`.
    the 30-second cache, so an archived entry could stay visible — with its stale
    "still running" / "due for cleanup" hints — until the TTL aged out. Both
    events now call the same `invalidateListing()`; no new settings, patch-level.
-2. **Host-managed processes** (carried from §15.1): `spawnProcess` /
-   `terminateProcess` / `execCommand` from `@getpaseo/plugin/server` in the
-   provider adapters that shell out, for Windows `.cmd`/`.bat` handling and a
-   host-owned process tree on timeout. Still optional; `node:child_process`
-   remains legal in `server/`.
+2. **Host-managed processes — long-term prospect, deliberately not scheduled**
+   (carried from §15.1). Moving the adapters that shell out onto
+   `spawnProcess` / `terminateProcess` / `execCommand` from
+   `@getpaseo/plugin/server` would buy two things: `.cmd` / `.bat` resolution on
+   Windows, and a process tree the host owns and reaps on timeout instead of
+   `node:child_process` doing it locally. Both are Windows-shaped benefits, and
+   **Windows is not a priority for this plugin right now**, so the migration
+   stays a future-development note rather than a planned change:
+   `node:child_process` is legal in `server/` and already works on the macOS /
+   Linux hosts the plugin is used on. Revisit it when Windows support becomes a
+   goal, or when an adapter starts needing a structured exit code / kill
+   semantics that `execFile` cannot express.
 3. **Extra sidebar entry points** (carried from §18.3): `addSidebarFooterItem`
    and multi-row `SidebarRow` / `SidebarSeparator` for a status or count row.
    New capability → second-digit bump.

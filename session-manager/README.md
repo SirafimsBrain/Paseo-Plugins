@@ -126,12 +126,17 @@ the SDK pin do not move. Also verified live on an isolated 0.15.0 daemon
 invalidated`, `paseo archive <agent>` → `agent archived (…): listing cache
 invalidated`); details and evidence table in [`__doc.md`](./__doc.md) §19.5.
 
-**Still recorded, not implemented:** [`__doc.md`](./__doc.md) §19.3 — move the
-provider adapters that shell out onto `spawnProcess` / `terminateProcess`, and
-add an `addSidebarFooterItem` status row.
+**Recorded, not scheduled:** [`__doc.md`](./__doc.md) §19.3 — moving the
+provider adapters that shell out onto `spawnProcess` / `terminateProcess` stays
+a **long-term prospect**: its benefits (`.cmd` / `.bat` resolution, a
+host-owned process tree) are Windows-shaped, and Windows support is not a
+priority for this plugin right now — `node:child_process` is legal in `server/`
+and works on the macOS / Linux hosts in use. An `addSidebarFooterItem` status
+row remains an open idea as well.
 
-**Verification:** typecheck clean (`tsc --noEmit`) and vitest **9 suites / 74
-tests** green against `@getpaseo/plugin@^0.15.0`, no `server.on(` /
+**Verification:** typecheck clean (`tsc --noEmit`) and vitest **9 suites / 77
+tests** green against `@getpaseo/plugin@^0.15.0` (74 at the 0.3.4 pass; 0.3.5
+added the three archive-hook tests), no `server.on(` /
 `server.before(` call left in the plugin, and **live on the real 0.15.0
 daemon**: installed from the working tree into an isolated scratch home,
 `running` with `[paseo] Plugin ready`, zero `Unknown lifecycle hook` errors —
