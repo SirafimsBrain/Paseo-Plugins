@@ -778,3 +778,96 @@ build step is needed. Linux-x64 only.
   install-trap memory: plugin files are not next to the running module).
 - The native panel is a thin wrapper (status + "Open console"), polling the
   RPC; `state` now also reports `transport` and live `transportConnections`.
+
+## Paseo 0.15.0 — compatibility pass (2026-11-03)
+
+Audited against the stable `0.15.0` release (2026-11-03).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.15.0>.
+The repository-wide inventory of what 0.15.0 adds and deprecates is in the
+root [README](../README.md#paseo-0150--new-and-deprecated-sdk-surface-2026-11-03).
+
+**Result: compatible as-is — no deprecated API is used anywhere in this
+plugin, so nothing had to be migrated.** The pass changed documentation only:
+the plugin stays **0.24.11** (no bump, no tag), `requirements.paseo` stays
+`>=0.11.0` and the dev pin stays `@getpaseo/plugin@0.13.0` — the host supplies
+the SDK at bundle and run time and no 0.15.0 API is needed. This is the same
+outcome and the same rationale as bunny-search's 0.14.0 pass.
+
+### What 0.15.0 changed in the SDK
+
+| Check | Result |
+| --- | --- |
+| SDK diff `@getpaseo/plugin@0.13.0 → 0.15.0` (the versions this plugin pins) | **`dist/client/` is byte-identical** (`diff -rq` → no differences at all), so every client registration here — `addWorkspacePanel` ×2, `addScreen`, `addCommandCenterItem`, `SidebarRow`, the panel props — is untouched by construction. Server-side changes: `lifecycle.*` (the deprecations below), `provider.*` (additive `session.can_stop_runtime`), `agent-tools.*` (new), `index.*`, `acp-internal/connection.js`. |
+| `@getpaseo/client@0.13.0 → 0.15.0` | `terminals/index.d.ts` is **byte-identical** — `terminals.create/list/ref`, `ref(id).kill()`, `capture()` are exactly what the plugin already calls. Additions only where this plugin does not reach: `PaseoAgentHandle.reload()`, `FetchAgentTimelineOptions.wholeTurns`, `ShutdownServerOptions.keepTerminals`, `PluginClientBundleStore`. |
+| **Deprecated in 0.15.0: `server.on(...)` and `server.before(...)`** | `@deprecated Use addHook with the renamed hook. Removed after 2027-04-30.` **Not used by this plugin** — `index.server.ts` registers seven `server.handle(...)` RPCs and no lifecycle hooks at all, so there is nothing to replace. |
+| Other `@deprecated` members at 0.15.0 | `addSurface` / `addSidebarItem` / `openSurface`, `SettingsGroup`, the `client/react-native` entry (`useRevealedText`), the `addWorkspacePanel` `context` field, `plugin-panel` `agentId`, `CreateAgentRequestOptions.git` / `worktreeName` — **none of them is referenced** by this plugin: registrations are the modern screen/panel family, UI comes from `@getpaseo/plugin/client/ui`, panels only *receive* `PluginWorkspacePanelProps` (they never pass `context`), and no agent or workspace is ever created. |
+| Breaking type change worth knowing | `TerminalStreamEvent` lost `snapshot` (`state: TerminalState`) and `restore` and gained `replay` (`TerminalReplayEvent` = `begin`/`data`/`end`) in `@getpaseo/client@0.15.0`. **This plugin consumes no terminal stream** — it creates terminals and kills them, it never subscribes to their output — so it is unaffected. See recommendation 1, which would rely on the new shape if it is ever built. |
+| `DaemonClient.sendHostFrame` | returns `Promise<void>` instead of `void` since 0.15.0. Not used here (no host routes). |
+
+### 0.15.0 behaviour that lands in this plugin's favour
+
+| Release item | Effect on remote-control |
+| --- | --- |
+| **Terminal programs survive daemon restarts, crashes and supported updates** (#7644, #8155) | The SSH sessions this plugin opens are `paseo.terminals.create` terminals, so they now outlive a daemon restart instead of dying with it. The console's Sessions view therefore no longer sees a whole row of dead sessions after an update. Note from the release: the *first* upgrade from 0.14.0 still closes terminals — preservation starts once the new daemon is installed. |
+| **Scrollback restored on reconnect, up to 10 000 retained lines** (#8282) | An SSH tab reconnected after a network drop or an app reload comes back with its history instead of an empty screen. Nothing to change in the plugin; it never owned that buffer. |
+| Smaller plugin client bundles with a cache reused across reconnects and app launches (#8040, #8076) | The native panel bundle is re-fetched less often. The **console** is a separate web app served by the plugin's own loopback HTTP server, so it is unaffected either way. |
+| Plugin screens keep their local state during temporary host disconnections (#8105) | The Settings tab and Explorer panel no longer reset on a reconnect. |
+| `ShutdownServerOptions.keepTerminals` + `requireTerminalKeepCapability` in `@getpaseo/client@0.15.0` | A plugin can now stop/restart the daemon **without** killing terminals, gated by `features.terminalsSurviveRestart` (`COMPAT(terminalsSurviveRestart): added in v0.12.0`) and `TerminalKeepUnsupportedError` (`TERMINALS_KEEP_UNSUPPORTED`). Unused; see recommendation 2. |
+| bunny-search finding: OpenCode shared service rejects custom MCP (#7435) | **Not applicable** — this plugin injects no MCP servers and registers no create hook. |
+
+### Verification (2026-11-03, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.15.0` → `node_modules` holds `@getpaseo/plugin|client|protocol` **0.15.0**; `package.json` / `package-lock.json` deliberately keep `0.13.0` (no API needed). |
+| `npm run typecheck` (`tsc --noEmit` + the console project) against 0.15.0 | **exit 0** |
+| `npm test` | **14 suites / 137 tests pass** (the `pretest` step rebuilt `dist/console`) |
+| Both entries bundled with the host's externals (`@getpaseo/*`, `zod`, react/react-native) | client 28 283 chars, server 137 094 chars, no bundler-boundary errors |
+| Deprecated-marker scan of the compiled bundles | client: `client/react-native`, `addSurface(`, `addSidebarItem(`, `openSurface(`, `SettingsGroup`, `useRevealedText`, `StreamedText` → **all 0**; server: `addSurface(` … `renderArtifact(` → **all 0**. Negative control: a temp entry importing `@getpaseo/plugin/client/react-native` *does* contain the specifier, so the scan is meaningful. |
+| Live daemon | **PASS** — installed from the working tree into an **isolated 0.15.0 daemon** (scratch home under `.tmp/`, own loopback port 6798, `pluginsEnabled: true`, production home untouched): status `running`, `[remote-control] plugin ready (version 0.24.11)`, all **7 RPC methods** registered (`connections.launch`, `connections.list`, `console-url`, `state`, `vault.lock`, `vault.setup`, `vault.unlock`), no plugin errors in the daemon log. |
+| Console end-to-end on 0.15.0 | **PASS** — `[remote-control] console listening on http://127.0.0.1:34135/?token=…`; `GET /` → 200 `text/html` (3 390 bytes), `GET /health` → `{"ok":true,"server":"remote-control","version":"0.24.11"}`, `/api/state` and `/api/connections` → 200 with the token (query **and** `Authorization: Bearer`), **401 without a token**, `/api/state?token=bad` → 401. |
+| Manifest | `requirements.paseo >=0.11.0` accepted by the real 0.15.0 gate (`assertPluginCompatibility` runs inside `compileDirectoryPlugin` before load) — the plugin reached `running`. |
+
+### Recommendations for improvement (recorded, not implemented)
+
+Ordered by value; 1 and 2 are the ones 0.15.0 actually makes possible or
+worthwhile.
+
+1. **Read-only terminal mirror in the console's Sessions view.** Every row for
+   a Paseo terminal could show the last N lines through
+   `paseo.terminals.ref(id).capture({ start, end, stripAnsi: true })`, which
+   already exists in `@getpaseo/client` (unchanged in 0.15.0) and needs no new
+   dependency in the console bundle. 0.15.0 makes this genuinely useful — the
+   daemon now retains up to 10 000 scrollback lines and restores them after a
+   reconnect — and it is a *read* of host-owned state, so it does not break
+   ADR-5 (the PTY and the tab stay Paseo's; the console only peeks). Do **not**
+   build live streaming on `TerminalStreamEvent` for this: its shape changed in
+   0.15.0 (`snapshot`/`restore` → `replay`), so a stream-based viewer would
+   pin the plugin to one SDK generation for no gain.
+2. **"Restart host and keep terminals" action in the console.** With
+   `ShutdownServerOptions.keepTerminals` + `requireTerminalKeepCapability`
+   (`@getpaseo/client@0.15.0`, daemon capability
+   `features.terminalsSurviveRestart`) the console can offer the operation it is
+   already the natural home for — restart the daemon after a plugin update
+   without losing the SSH sessions listed right next to the button — and refuse
+   with `TerminalKeepUnsupportedError`'s message on an older host instead of
+   silently closing them. Needs a confirmation dialog; the action is
+   host-wide.
+3. **Drop the two `as any` casts on the `addWorkspacePanel` registrations.**
+   Verified on 0.15.0: with both casts removed `tsc --noEmit` still exits 0, so
+   they no longer buy anything and only hide future registration mistakes
+   (`locations`, `icon`, `Component` are all checked by the real
+   `PluginWorkspacePanelContribution`). Patch-level cleanup.
+4. **Retire or wire up `client/console-sidebar-item.tsx`.** It is the only
+   orphan in the package (already noted in `PLAN.md`): `RemoteControlSidebarItem`
+   is imported nowhere, so `addSidebarHeaderItem` — which is how a sidebar
+   entry is registered since 0.11 — never runs. Either register it (a sidebar
+   row opening the console screen, complementing the Explorer panel) or delete
+   the file. Registering it is a new surface → second-digit bump.
+5. **`server.addHook` for the new 0.15.0 worktree hooks** is *not* recommended
+   for this plugin: `worktree.create.before` / `worktree.create.after` would let
+   it pre-seed an SSH config or a tunnel per worktree, but nothing in the
+   current product asks for that, and both hooks run on the critical path of
+   worktree creation (the `after` one is awaited before workspace setup and
+   agents start) — an always-on hook there would tax every worktree for a
+   feature nobody uses.

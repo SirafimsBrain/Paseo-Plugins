@@ -22,3 +22,59 @@ What it does:
 Requires a Paseo daemon with workspace terminals (>= 0.7.3) and Linux for the shipped tooling assumptions (`xfreerdp3`/`xfreerdp` for RDP windows; one of the supported VNC viewers plus `vncpasswd` for password-file launches on VNC).
 
 See `__doc.md` for the technical design and `PLAN.md` for the roadmap.
+
+## Paseo 0.15.0 compatibility
+
+Verified against the **stable Paseo 0.15.0** release (2026-11-03).
+Full evidence: [`__doc.md`](./__doc.md#paseo-0150--compatibility-pass-2026-11-03).
+**Compatible as-is — no deprecated API is used anywhere in this plugin, so
+nothing was migrated, no code changed and the version stays `0.24.11`** (no
+bump, no tag). `requirements.paseo` stays `>=0.11.0` and the dev pin stays
+`@getpaseo/plugin@0.13.0`: the host supplies the SDK at bundle and run time and
+no 0.15.0 API is needed.
+
+**Deprecated in 0.15.0 and *not* used here:** `server.before(...)` /
+`server.on(...)` (removal after 2027-04-30 — the plugin registers no lifecycle
+hooks at all, only seven RPC handlers), `addSurface` / `addSidebarItem` /
+`openSurface` (the plugin already registers `addWorkspacePanel` / `addScreen` /
+`addCommandCenterItem`), `SettingsGroup`, the `client/react-native` UI entry,
+the `addWorkspacePanel` `context` field (panels only *receive*
+`PluginWorkspacePanelProps`; the registrations never pass `context`) and
+`CreateAgentRequestOptions.git` / `worktreeName`. The 0.13.0 → 0.15.0 SDK diff
+leaves **`dist/client/` byte-identical**, so the panel, screen, sidebar row and
+Command Center item cannot have moved.
+
+**0.15.0 works in this plugin's favour:** SSH sessions are
+`paseo.terminals.create` terminals, and terminal programs now survive daemon
+restarts, crashes and supported updates (the first upgrade from 0.14.0 still
+closes them once), while reconnecting restores up to 10 000 lines of retained
+scrollback — so an SSH tab no longer comes back empty after an app reload.
+Plugin screens also keep their local state across temporary host
+disconnections.
+
+**Recommendations for improvement — recorded, not implemented**
+([`__doc.md`](./__doc.md#recommendations-for-improvement-recorded-not-implemented)):
+
+1. **Read-only terminal mirror** in the console's Sessions view via
+   `paseo.terminals.ref(id).capture({ stripAnsi: true })` — now worthwhile
+   because 0.15.0 retains far more scrollback, and it only *reads* host-owned
+   state, so ADR-5 (the PTY and tab stay Paseo's) still holds.
+2. **"Restart host and keep terminals"** action in the console, using
+   `ShutdownServerOptions.keepTerminals` + `requireTerminalKeepCapability`
+   (new in `@getpaseo/client@0.15.0`), which refuses cleanly with
+   `TerminalKeepUnsupportedError` on an older daemon instead of silently
+   closing the sessions.
+3. Drop the two now-unnecessary `as any` casts on the `addWorkspacePanel`
+   registrations (verified: `tsc --noEmit` passes without them on 0.15.0), and
+   either register or delete the orphaned `client/console-sidebar-item.tsx`.
+
+**Verification:** `npm run typecheck` (both projects) exit 0 and
+**14 suites / 137 tests** pass against `@getpaseo/plugin@0.15.0`; the compiled
+client and server bundles contain **zero** deprecated markers (with a negative
+control proving the scan works); and the plugin was installed **from the
+working tree into an isolated 0.15.0 daemon** (scratch home, own loopback
+port) where it reported `running`, `[remote-control] plugin ready (version
+0.24.11)`, all seven RPC methods, and a working console — `GET /` 200 HTML,
+`/health` `{"ok":true,…,"version":"0.24.11"}`, `/api/state` and
+`/api/connections` 200 with the token (query or `Authorization: Bearer`) and
+**401 without it**.
