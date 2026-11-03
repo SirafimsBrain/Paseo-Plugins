@@ -27,7 +27,8 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.11.0 (verified against the stable 0.13.0 release, 2026-10-24; uses the plugin SDK screen/sidebar API and settings screens — 0.13.0 adds nothing this plugin needs). Node ≥ 18 on the daemon host (global `fetch`).
+Requires Paseo ≥ 0.15.0 (verified against the stable release of 2026-11-03;
+uses the plugin SDK screen/sidebar API, settings screens and `server.addHook`). Node ≥ 18 on the daemon host (global `fetch`).
 
 ### Python requirement (for the DDGS Python service)
 
@@ -158,8 +159,8 @@ deprecated API exists in this plugin** — it stays `0.4.2` (no bump, no tag:
 this pass changed no code) and `requirements.paseo` stays `>=0.11.0`.
 
 **Nothing deprecated reaches it.** The `@deprecated` set in
-`@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0, and `dist/client/` did
-not change at all between 0.13.0 and 0.14.0, so `addScreen` /
+`@getpaseo/plugin@0.14.0` is byte-identical to the release before it, and `dist/client/` did not
+change at all across that step, so `addScreen` /
 `addSidebarHeaderItem` / `addSettingsScreen` / `addCommandCenterItem` and the
 `client/ui` imports are exactly what they were. `server.before("agent.create")`
 — the plugin's only hook — is still the supported spelling in 0.14.0.
@@ -192,55 +193,13 @@ gated per agent by a **label** (`labelGateKey`) or excluded per **provider**
 the **real 0.14.0 host compiler** (`compileDirectoryPlugin` extracted from the
 installed `app.asar`) with no boundary errors and **zero deprecated calls**,
 and the manifest passes the real 0.14.0 parser with its `>=0.14.0` floor
-(rejected for 0.13.0 and 0.13.2, accepted for 0.14.0). The live evidence
+(an older daemon is rejected, 0.14.0 is accepted). The live evidence
 belongs to the 0.4.2 compatibility pass: `running` in an **isolated 0.14.0
 daemon** (scratch home, production config untouched) installed from the
 working tree — `[paseo] Plugin ready`, six RPC methods registered and
 `[bunny-search] settings mirrored: …` in the plugin log, with no plugin or
 contribution errors in the daemon log. 0.5.2 was not re-run live; it is
 covered by the unit/e2e suites and the host compiler above.
-
-## Paseo 0.13.0 compatibility
-
-Verified against the **stable Paseo 0.13.0** release (2026-10-24).
-Full evidence: [__doc.md](./__doc.md) §14. **No code change was needed, and
-no deprecated 0.13.0 API remains in this plugin** — at that point it was still
-`0.4.2` with `requirements.paseo` `>=0.11.0` (0.5.2 later moved the floor to
-`>=0.14.0`, see above).
-
-**Nothing deprecated reaches it.** The plugin imports its UI from
-`@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`, never from the
-`client/react-native` entry that 0.13.0 deprecates (removal 2027-04-20, with
-`useRevealedText`); it registers `addScreen`, `addSidebarHeaderItem`,
-`addSettingsScreen` and `addCommandCenterItem`, none deprecated; and it uses
-neither the always-empty `agent.turn_ended` `timeline`, nor `SettingsGroup`,
-nor the `CreateAgentRequestOptions.git`/`worktreeName` options that
-`createAgent` now rejects at runtime.
-
-**Deprecated in 0.13.0 that does not reach this plugin:** panel `context` /
-`agentId` and `addAgentPanel`, and the `defineAttachmentSource` label/icon
-shape change (this plugin contributes no attachment source).
-
-**New in 0.13.0, not adopted (all optional):** plugin translations
-(`defineTranslations` / `useTranslation` / `client.i18n` — provider and label
-strings stay valid English `PluginText`; the translated plugin listing that
-0.13.0 adds only matters once the registry listing of
-[__doc.md](./__doc.md) §10.2 item 3 exists), `Markdown` / `StreamedText` /
-`Loading` / `DocumentFrame`, inline-SVG and component icons (`Icon` now also
-accepts a component or `{ svg }`, and `SidebarIcon` is `PluginIcon`), file
-panels, agent panels, `useTabState`, `createWorkspace`, and `PaseoApi.hosts`.
-The full inventory is in the root
-[README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24).
-
-**Verification:** typecheck clean (`tsc -b`, three projects) against SDK
-0.13.0, vitest **9 suites / 95 tests** pass (plus 2 live-search tests skipped
-without `BUNNY_LIVE=1`), and both entries build with the **real 0.13.0 host
-compiler** (from the installed `app.asar`) with no boundary errors and zero
-deprecated calls. The manifest passes the real 0.13.0 parser. Live:
-`running` on this machine's 0.13.0 daemon with `Plugin ready`, and the
-server-side effect visible in the log — `[bunny-search] settings mirrored:
-~/.paseo/plugins/bunny-search/settings.json`. The SDK was installed with
-`--no-save`, so `package.json` still pins `@getpaseo/plugin@0.12.0`.
 
 ## Paseo 0.12.0 spec conformance
 

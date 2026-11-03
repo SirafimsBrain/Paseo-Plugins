@@ -2280,8 +2280,7 @@ re-verified since 2026-10-22" since the command-center migration. This
 section replaces that verdict.
 
 **Method.** `@getpaseo/plugin@0.14.0` installed with
-`npm install --no-save --package-lock=false --legacy-peer-deps` — the pin in
-`package.json` stays `0.13.0` on purpose, because no 0.14.0 API is adopted
+`npm install --no-save --package-lock=false --legacy-peer-deps` — the pin in `package.json` stays where it was on purpose, because no 0.14.0 API is adopted
 and raising the pin would be a code change carrying its own version bump (the
 rule the earlier passes followed). The 0.14.0 release notes were read for
 plugin-facing changes: two additions (`#7938` per-agent tools, `#7983`
@@ -2471,7 +2470,7 @@ complement.
 | `npm run typecheck` (root + dashboard configs) | exit 0 |
 | `npm test` (`pretest` re-bundles `dist/`) | **41 suites / 678 tests pass** — up from §10.7's 37 / 635: new `tests/agent-record.test.ts` (10), `tests/session-open.test.ts` (15, the full decision matrix), `tests/agent-tool.test.ts` (4), `tests/focus.test.ts` (7), the `agent-reload` describe in `tests/rpc.test.ts` (4), and the `instructions` handshake in the real-process MCP e2e (1). |
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` extracted from the installed `app.asar`) | both entries compile, no boundary errors: client bundle 84 590 chars, server 241 710 chars, `deprecatedHits: []` over the six deprecated specifiers (`client/react-native`, `addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, `useRevealedText`). |
-| Manifest floor (same real host code) | rejected for a 0.13.0 daemon with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
+| Manifest floor (same real host code) | rejected for an older daemon with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
 | Live on an isolated 0.14.0 daemon | scratch home (`pluginsEnabled: true`, production home untouched) with the plugin installed **from the working tree**: status `running`, `[paseo] Plugin ready`, `MCP entry refreshed`, the dashboard listening on an ephemeral port after the documented 8899 fallback, a clean `paseo plugin reload` with `running` after it, and no plugin or contribution errors in the daemon log — the only stderr lines are Node's own `DEP0129` / `DEP0176` warnings. |
 
 #### 0.35.2 — the lockfile the release shipped with (2026-11-01)

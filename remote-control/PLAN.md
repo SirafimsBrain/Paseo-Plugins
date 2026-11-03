@@ -503,7 +503,7 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 **A1. Каркас плагина** → `0.1.0`
 - `paseo plugin init remote-control` по конвенциям репо:
   `paseo-plugin.json` (`id: remote-control`, `requirements: {paseo: ">=0.11.0"}`),
-  `package.json` (devDeps `@getpaseo/plugin@0.13.0`, `zod`, `react`,
+  `package.json` (devDeps `@getpaseo/plugin`, `zod`, `react`,
   `react-native`, `vitest`, `esbuild`, `typescript`), `tsconfig.json`,
   `vitest.config.mts`, пустые `index.client.tsx`/`index.server.ts` с cleanup.
 - Приёмка: typecheck/tests зелёные; `paseo plugin install <путь>` →

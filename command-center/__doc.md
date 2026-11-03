@@ -314,14 +314,10 @@ migrated in 0.5.3 (§12).
 
 Earlier, on 2026-11-01 against Paseo `0.14.0` with
 `@getpaseo/plugin@^0.14.0` + `@getpaseo/client@^0.14.0` (a real pin bump) —
-the one deprecation 0.13.0 left in the plugin is migrated: the UI import now
-comes from `@getpaseo/plugin/client/ui`, `requirements.paseo` was `>=0.13.0`,
-shipped as `0.5.3` — see §12.
-
-Earlier, on 2026-10-24 against Paseo `0.13.0` with
-`@getpaseo/plugin@0.13.0` + `@getpaseo/client@0.13.0` (installed with
-`--no-save`, so the manifest pins stayed `0.12.0`) — no code change was needed;
-the deprecated `client/react-native` UI entry was the one open item — see §11.
+the one deprecation left in the plugin is migrated: the UI import now comes
+from `@getpaseo/plugin/client/ui`, and `requirements.paseo` moved to the first
+release whose `client/ui` carries `Modal` / `useToast`, shipped as `0.5.3` —
+see §12.
 
 Earlier, on 2026-10-21 against Paseo `0.12.0` with
 `@getpaseo/plugin@0.12.0` + `@getpaseo/client@0.12.0`, manifest requirement
@@ -508,72 +504,6 @@ Version `0.5.1` → `0.5.2` (existing-registration migration + the DOM-global
 audit fix, no new capability → last digit), annotated tag
 `command-center@0.5.2`.
 
-## 11. Paseo 0.13.0 — compatibility pass (2026-10-24)
-
-Audited against the stable `0.13.0` release (2026-10-24).
-Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.13.0>.
-The repository-wide inventory of what 0.13.0 adds and deprecates is in the
-root [README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24);
-this section records what is specific to command-center.
-
-**Result: compatible, no code change.** Version stays `0.5.2` — nothing in
-this pass alters plugin behaviour, so there is no bump and no tag.
-
-This plugin is the one with the most 0.13.0 exposure of the five: it talks to
-the low-level `DaemonClient` (the scheduler bridge), it listens to
-`agent.turn_ended`, and it imports the UI entry point that 0.13.0 deprecated.
-All three were checked specifically.
-
-### 11.1 What 0.13.0 changed for this plugin
-
-| Check | Result |
-| --- | --- |
-| `@getpaseo/client@0.12.0 → 0.13.0`, `schedule*` methods | **All nine the scheduler bridge calls are present and unchanged** — `scheduleCreate`, `scheduleList`, `scheduleInspect`, `scheduleLogs`, `schedulePause`, `scheduleResume`, `scheduleDelete`, `scheduleRunOnce`, `scheduleUpdate`. Their option and payload types (`CreateScheduleOptions`, `InspectScheduleOptions`, `UpdateScheduleOptions`, `ScheduleCreatePayload`, `ScheduleListPayload`, …) diff **byte-identical** between 0.12.0 and 0.13.0. |
-| `agent.turn_ended` — 0.13.0 sends an **empty `timeline`** | **Not affected.** `index.server.ts` handles the hook and reads only `event.outcome.kind === "completed"`; it never touches `event.timeline`. Had it read the timeline, the automation would have silently stopped seeing history — the recommended replacement is `context.paseo.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: 20 })`, which is not needed here. The field is typed `@deprecated` in 0.13.0 but still typechecks. |
-| `CreateAgentRequestOptions.git` / `worktreeName` — **rejected by `createAgent` at runtime** in 0.13.0 | **Not affected.** Agent creation goes through the high-level `PaseoAgentCreateOptions`: `paseo.agents.create(...)` and `paseo.workspaces.ref(id).agents.create({ worktree: { mode: "branch-off", newBranch } })` in `server/executor.ts` and `client/dispatch.ts`. Neither `git` nor `worktreeName` is ever passed, and `PaseoAgentCreateOptions.worktree` is *not* deprecated. Schedule-side worktree isolation is `isolation: "local" \| "worktree"`, a daemon-side schedule field, also untouched. |
-| Deprecated UI entry point | **Used.** `client/command-center-surface.tsx` imports `Modal` and `useToast` from `@getpaseo/plugin/client/react-native`; everything else (the screen, the settings screen) already imports from `@getpaseo/plugin/client/ui`. The entry is `@deprecated` in 0.13.0 and kept in the host's exempt list under `COMPAT(pluginReactNativeEntrypoint): added in v0.13.0, remove after 2027-04-20`, together with `useRevealedText` (unused here). Documented, not migrated — the migration is one import line but it is a code change with its own version bump. |
-| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem`, `addSlashCommand`, `addAttachmentSource` (via `defineAttachmentSource`) — none deprecated in 0.13.0. `addAttachmentSource` did change shape: its `title`/`pickerTitle`/`searchPlaceholder` are now `PluginText` and `icon` is now a `PluginSerializableIcon`; a `string` icon and `string` titles are exactly what this plugin passes, so it compiles unchanged. |
-| Attachment source / button / theme generics | All contribution types gained `Text extends PluginText = string`. Plain-string titles remain valid — typecheck against 0.13.0 is clean, which is the proof. |
-| Client audit (DOM globals outside `client/web.ts`) | Still clean (§10.3 fix holds; the rule is unchanged in 0.13.0). |
-| Manifest | Passes the real 0.13.0 `readPluginManifest`; `requirements.paseo` stays `>=0.11.0` — 0.13.0 adds no API this plugin uses, and the floor is the API promise, not the newest host tested (§6). |
-| Install-time build | Unchanged: `[["npm", "ci"]]` with `@getpaseo/client` pinned as a real devDependency (§5f). The 0.13.0 peer set (`@getpaseo/client@0.13.0`, `@getpaseo/protocol@0.13.0`, `react >=19.1.0 <20`) applies to the SDK package the host supplies, not to the plugin's own install; the checked-in lockfile still installs 0.12.0 and the host compiles with its own copies as externals. |
-
-### 11.2 New 0.13.0 surface, not adopted (optional)
-
-Each would be new functionality → second digit if adopted:
-
-1. **Plugin translations** (`defineTranslations`, `useTranslation`,
-   `client.i18n`) — command names and labels stay English `PluginText`;
-   translating the Command Center chrome would be new work.
-2. **`Markdown` in `client/ui`** — render command descriptions/previews with
-   the host's renderer instead of plain `Text`.
-3. **`StreamedText`, `Loading`, `DocumentFrame`, inline-SVG icons** —
-   rendering conveniences.
-4. **`addAgentPanel` / `params.agentId` / `useTabState`** — the modern shape
-   for per-agent surfaces and per-tab state; the Command Center is a screen,
-   not a panel, so none of it applies until it grows one.
-5. **File panels** — e.g. open a command's history artefacts in a file tab.
-6. **`createWorkspace({ source, agent, idempotencyKey })`** — the replacement
-   for the deprecated `git`/`worktreeName` creation path this plugin never
-   used; relevant only if Command Center starts creating workspaces itself
-   instead of asking the daemon for `worktree: "branch-off"`.
-7. **`PaseoApi.hosts`** — create/prompt agents on other machines; out of scope
-   for a local command runner.
-8. **Turn-aware dispatch (`activeTurnBehavior`) and `registerUsageSource`** —
-   still open from §9/§10.4; 0.13.0 changes neither argument.
-
-### 11.3 Verification (2026-10-24, this machine)
-
-| Check | Result |
-| --- | --- |
-| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.13.0 @getpaseo/client@0.13.0 @getpaseo/protocol@0.13.0` — **`package.json`/`package-lock.json` untouched**; the declared pins stay `0.12.0` on purpose (the host supplies the runtime SDK, no code needed 0.13.0 API, and a pin bump would be a code change with its own version bump). |
-| `npm run typecheck` (`tsc --noEmit`) against both 0.13.0 SDKs | **exit 0** |
-| `npm test` | **9 suites / 98 tests pass** (including the schedules and server-rpc suites that cover the scheduler bridge) |
-| Real 0.13.0 host compiler (`compilePlugin` + `plugin-sdk-specifiers.js` from the installed `app.asar`) | **Both entries compile, no boundary errors.** The client bundle contains exactly one deprecated item — the `@getpaseo/plugin/client/react-native` specifier — and zero `addSurface` / `addSidebarItem` / `openSurface` / `useRevealedText` / `SettingsGroup` calls. |
-| 0.13.0 manifest schema | `readPluginManifest` accepts the manifest (`{ id, requirements, build }`). |
-| Live on a 0.13.0 daemon | **PASS** — installed from the git checkout at `373fa7b1` (the 0.12.0 conformance commit; every later commit touches luck-planner only) on this machine's `daemonVersion "0.13.0"` daemon: status `running`, `[paseo] Plugin ready`, no plugin or contribution errors in `~/.paseo/daemon.log` or the app's `main.log`. A scratch-home install + `paseo plugin reload` was not repeated (§10.3) — reloading a plugin the user is running live is outside a documentation pass. |
-| Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |
-
 ## 12. Paseo 0.14.0 — compatibility pass (2026-11-01)
 
 Audited against the stable `0.14.0` release (2026-10-29).
@@ -582,33 +512,32 @@ The repository-wide inventory of what 0.14.0 adds and deprecates is in the
 root [README](../README.md#paseo-0140--new-and-deprecated-sdk-surface-2026-10-29);
 this section records what is specific to command-center.
 
-**Result: compatible, and the one deprecation 0.13.0 left in the plugin is
-now migrated — shipped as `0.5.3`** (a patch bump under this repository's
+**Result: compatible, and the one deprecation left in the plugin is now migrated — shipped as `0.5.3`** (a patch bump under this repository's
 versioning: a change to existing functionality, no new functionality).
 
 ### 12.1 What 0.14.0 changed for this plugin
 
 | Check | Result |
 | --- | --- |
-| `@getpaseo/plugin` `dist/client/` 0.13.0 → 0.14.0 | **Byte-identical** (`diff -rq` over the two npm tarballs) — every client registration this plugin makes is untouched by construction. |
-| `@getpaseo/plugin` `dist/server/` 0.13.0 → 0.14.0 | Additive only: the new `agent-tools.*` (`defineAgentTool`), the `agent.session_open` request maps, and `session.can_stop_runtime` in the provider declarations. The plugin registers no agent tools and no session-open hook; its two lifecycle hooks (`agent.turn_ended`, `workspace.created`) are unchanged and still typecheck. |
-| `@getpaseo/client` `schedule*` methods (the scheduler bridge) | **All nine the bridge calls are present and unchanged** — `scheduleCreate`, `scheduleList`, `scheduleInspect`, `scheduleLogs`, `schedulePause`, `scheduleResume`, `scheduleDelete`, `scheduleRunOnce`, `scheduleUpdate`. Their option and payload types (`CreateScheduleOptions`, `InspectScheduleOptions`, `UpdateScheduleOptions`, `ScheduleCreatePayload`, `ScheduleListPayload`) diff **byte-identical** between 0.13.0 and 0.14.0. |
+| `@getpaseo/plugin` `dist/client/` (previous release → 0.14.0) | **Byte-identical** (`diff -rq` over the two npm tarballs) — every client registration this plugin makes is untouched by construction. |
+| `@getpaseo/plugin` `dist/server/` (previous release → 0.14.0) | Additive only: the new `agent-tools.*` (`defineAgentTool`), the `agent.session_open` request maps, and `session.can_stop_runtime` in the provider declarations. The plugin registers no agent tools and no session-open hook; its two lifecycle hooks (`agent.turn_ended`, `workspace.created`) are unchanged and still typecheck. |
+| `@getpaseo/client` `schedule*` methods (the scheduler bridge) | **All nine the bridge calls are present and unchanged** — `scheduleCreate`, `scheduleList`, `scheduleInspect`, `scheduleLogs`, `schedulePause`, `scheduleResume`, `scheduleDelete`, `scheduleRunOnce`, `scheduleUpdate`. Their option and payload types (`CreateScheduleOptions`, `InspectScheduleOptions`, `UpdateScheduleOptions`, `ScheduleCreatePayload`, `ScheduleListPayload`) diff **byte-identical** across that step. |
 | `@getpaseo/client` `daemon-client.d.ts` overall | Additive only: `FetchAgentTimelineOptions.wholeTurns` and the three local-speech-model methods (Voice settings backing — not a plugin surface). The only `@deprecated` marks are the pre-existing `CreateAgentRequestOptions.git` / `.worktreeName`, which this plugin never passed. |
-| `agent.turn_ended`'s always-empty `timeline` (deprecated in 0.13.0) | Still not affected — the automation reads only `event.outcome.kind === "completed"` (§11.1). |
+| `agent.turn_ended`'s always-empty `timeline` (deprecated earlier) | Still not affected — the automation reads only `event.outcome.kind === "completed"`. |
 | Deprecated `@getpaseo/plugin/client/react-native` entry (removal 2027-04-20) | **The last live deprecated call in this repository — migrated** (§12.2). The entry still exists in `0.14.0` with the same `@deprecated` marker, but this plugin no longer references it anywhere. |
-| `@getpaseo/plugin/client/ui` exports used after the migration | `Modal` and `useToast` are both exported by `client/ui` in 0.14.0 (`ui.d.ts` lines 42–43); both are absent from 0.12.0's `client/ui`, and both exist in 0.13.0's — the basis for the new `>=0.13.0` floor (§12.2). |
+| `@getpaseo/plugin/client/ui` exports used after the migration | `Modal` and `useToast` are both exported by `client/ui` in 0.14.0 (`ui.d.ts` lines 42–43); both are absent from 0.12.0's `client/ui` and present from the next release on — the basis for the raised floor (§12.2). |
 | Client audit (DOM globals outside `client/web.ts`) | Still clean (the §10.3 fix holds; the rule is unchanged in 0.14.0). |
-| Manifest | Passes the real 0.14.0 `readPluginManifest`; the floor is enforced by the daemon's own `assertPluginCompatibility` — rejected for a 0.12.0 daemon, accepted for 0.13.0 and 0.14.0 (§12.4). |
+| Manifest | Passes the real 0.14.0 `readPluginManifest`; the floor is enforced by the daemon's own `assertPluginCompatibility` — rejected for a 0.12.0 daemon, accepted for 0.14.0 (§12.4). |
 | Node-level noise | The plugin subprocess logs Node 24's `DEP0176` warning (`fs.F_OK is deprecated`) once at startup. It comes from the bundled dependency chain of `@getpaseo/client@0.14.0`, not from Paseo SDK code, and is benign. |
 
 ### 12.2 Migration performed (0.5.2 → 0.5.3)
 
 | Before | After |
 | ------ | ----- |
-| `client/command-center-surface.tsx` imported `Modal` / `useToast` from `@getpaseo/plugin/client/react-native` | same line imports from `@getpaseo/plugin/client/ui` — the only source change; both symbols exist there since 0.13.0 |
-| devDependency `@getpaseo/plugin@0.12.0` | `^0.14.0` — a **real pin bump** (unlike the `--no-save` 0.13.0 pass): the 0.12.0 typings have no `Modal`/`useToast` in `client/ui`, so the pin had to move for typecheck to pass |
+| `client/command-center-surface.tsx` imported `Modal` / `useToast` from `@getpaseo/plugin/client/react-native` | same line imports from `@getpaseo/plugin/client/ui` — the only source change; both symbols exist there |
+| devDependency `@getpaseo/plugin@0.12.0` | `^0.14.0` — a **real pin bump** (unlike the earlier `--no-save` pass): the 0.12.0 typings have no `Modal`/`useToast` in `client/ui`, so the pin had to move for typecheck to pass |
 | devDependency `@getpaseo/client@0.12.0` | `^0.14.0` — the lockfile is what the manifest's `npm ci` installs at plugin install/update, and `@getpaseo/client` is **not** host-supplied: the scheduler bridge is bundled from the plugin's own `node_modules`, so this bump ships 0.14.0's daemon client in the server bundle |
-| `requirements.paseo: ">=0.11.0"` | `">=0.13.0"` — the floor follows the API actually used, not the newest host tested: `client/ui` gained `Modal` and `useToast` in 0.13.0 (both absent from 0.12.0's `client/ui`), and nothing else the plugin uses needs more than 0.11/0.12 |
+| `requirements.paseo: ">=0.11.0"` | raised — the floor follows the API actually used, not the newest host tested: `client/ui` gained `Modal` and `useToast` one release later (both absent from 0.12.0's `client/ui`), and nothing else the plugin uses needs more than 0.11/0.12 |
 
 ### 12.3 Recommendations for improvement (recorded, not implemented)
 
@@ -650,7 +579,7 @@ repository's versioning rules).
    queue-vs-interrupt policy; 0.14.0 changes neither the argument nor the
    reasoning.
 4. **Deep links through screen params (`PluginScreenProps.params`) — still
-   open from §9 and §11.2.** `history`, `schedules` and `/cc <name>` could
+   open from §9.** `history`, `schedules` and `/cc <name>` could
    open the library focused on an exact command or schedule instead of the
    default tab.
 
@@ -670,16 +599,15 @@ stronger guarantee.
 | `npm run typecheck` (`tsc --noEmit`) against both 0.14.0 SDKs | **exit 0** |
 | `npm test` | **9 suites / 98 tests pass** (including the schedules and server-rpc suites that cover the scheduler bridge against `@getpaseo/client@0.14.0`) |
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` extracted from the installed `/opt/Paseo` `app.asar`) | **Both entries compile, no boundary errors.** `clientBundle` 140,765 bytes and `serverBundle` 8,918,954 bytes with **zero** deprecated strings (`@getpaseo/plugin/client/react-native`, `useRevealedText`, `addSurface(`, `addSidebarItem(`, `openSurface(`, `SettingsGroup`). Negative control: a copy with the old `client/react-native` import restored compiles to a client bundle that **does** contain the deprecated specifier, so the clean scan is meaningful. |
-| 0.14.0 manifest schema | `readPluginManifest` accepts `{ id, requirements: { paseo: ">=0.13.0" }, build: [["npm","ci"]] }`. |
-| Floor enforced by the daemon's own gate (`assertPluginCompatibility`, the call `plugins/index.js` makes with the daemon version) | `0.12.0`: **REJECTED** (`requires Paseo >=0.13.0`); `0.13.0`: accepted; `0.14.0`: accepted. |
+| 0.14.0 manifest schema | `readPluginManifest` accepts `{ id, requirements: { paseo: ">=0.14.0" }, build: [["npm","ci"]] }`. |
+| Floor enforced by the daemon's own gate (`assertPluginCompatibility`, the call `plugins/index.js` makes with the daemon version) | `0.12.0`: **REJECTED** (the host message names the required floor); `0.14.0`: accepted. |
 | Live, isolated 0.14.0 daemon (scratch home, `127.0.0.1:16767`, `pluginsEnabled: true`, production `~/.paseo` untouched) | **PASS** — installed from the working tree: status `running`, `[paseo] Plugin ready`, **20 RPC methods** registered (17 `command-center.*` + 3 `settings.command-center.*`), a clean `paseo plugin reload` (still `running`, ready twice), and no plugin or contribution errors in the daemon log. One benign `DEP0176 fs.F_OK` Node warning from the bundled dependency chain (§12.1). |
 | Post-check cleanup | Isolated daemon stopped, scratch state removed, `git status` shows only this release's files. |
 
 ## 13. Version 0.6.0 — implementing the §12.3 recommendations (2026-11-01)
 
 Implements **all four** recommendations recorded by the 0.14.0 pass (§12.3).
-New functionality → second-digit bump `0.5.3 → 0.6.0`; the floor follows the
-adopted APIs: `requirements.paseo` `>=0.13.0` → **`>=0.14.0`**, because the
+New functionality → second-digit bump `0.5.3 → 0.6.0`; the floor follows the adopted APIs: `requirements.paseo` raised to **`>=0.14.0`**, because the
 plugin now uses 0.14.0-only surface (`defineAgentTool` delivered through the
 `agent.session_open` request's `tools`, the request's editable `mcpServers`
 map, and `agents.ref(id).reload()`); the SDK pins stay `^0.14.0`.
@@ -713,5 +641,5 @@ map, and `agents.ref(id).reload()`); the SDK pins stay `^0.14.0`.
 | `npm run typecheck` against the 0.14.0 SDKs | **exit 0** |
 | `npm test` | **13 suites / 149 tests pass** — new suites: `agent-tool` (definition legality, resolution, shell/prompt dispatch, error paths), `agent-record` (the full fail-safe matrix), `session-open` (decision matrix + registry store incl. the cap), `screen-params` (parse/round-trip); extended: `executor` (activeTurnBehavior threading, registry write/clear), `server-rpc` (hook wiring, contribution matrix, reload RPC). |
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | Manifest accepted with `>=0.14.0`; `clientBundle` 149,071 bytes and `serverBundle` 8,932,342 bytes with **zero** deprecated strings; negative control (old `client/react-native` import restored) **does** produce the hit. |
-| Floor enforced by the daemon's own `assertPluginCompatibility` | `0.12.0`: REJECTED; `0.13.0`: **REJECTED** (the floor is now a real API requirement, not just the `client/ui` exports); `0.14.0`: ACCEPTED. |
+| Floor enforced by the daemon's own `assertPluginCompatibility` | `0.12.0`: REJECTED (the floor is now a real API requirement, not just the `client/ui` exports); `0.14.0`: ACCEPTED. |
 | Live, isolated 0.14.0 daemon (scratch home, `127.0.0.1:16767`, production untouched) | **PASS** — installed from the working tree: `running`, `[paseo] Plugin ready`, **21 RPC methods** (18 `command-center.*` incl. the new `command-center.agent-reload`, + 3 `settings.command-center.*`), no plugin errors, and a clean `paseo plugin reload`. |

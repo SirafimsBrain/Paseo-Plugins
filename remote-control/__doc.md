@@ -38,8 +38,7 @@ contract; later stages must not change them.
    tabs, each killed independently.
 
 Evidence gaps to keep in mind: the exact Paseo close-X → `killTerminal`
-call site and the full `addMissingEntityTabs()` body were not read directly
-in v0.13.0 sources (verified via the terminal-close discussion and the
+call site and the full `addMissingEntityTabs()` body were not read directly in the host sources available then (verified via the terminal-close discussion and the
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
@@ -620,8 +619,7 @@ stays an explicitly unimplemented stub (`SsePostTransport` in
 
 Evidence, recorded from the live run described below:
 
-- WebSocket works from the Paseo workspace browser tab (Paseo 0.13.0,
-  Electron 44 / Chrome 152 UA) against the plugin's loopback server: connect,
+- WebSocket works from the Paseo workspace browser tab (Electron 44 / Chrome 152 UA) against the plugin's loopback server: connect,
   byte-exact binary echo, JSON control frames — all pass. So the full §5.3
   frame contract is viable, no downgrade to SSE needed.
 - SSE (`/api/events`) also streams fine in the same tab, so as a fallback
@@ -789,16 +787,15 @@ root [README](../README.md#paseo-0150--new-and-deprecated-sdk-surface-2026-11-03
 **Result: compatible as-is — no deprecated API is used anywhere in this
 plugin, so nothing had to be migrated.** The pass changed documentation only:
 the plugin stays **0.24.11** (no bump, no tag), `requirements.paseo` stays
-`>=0.11.0` and the dev pin stays `@getpaseo/plugin@0.13.0` — the host supplies
-the SDK at bundle and run time and no 0.15.0 API is needed. This is the same
+`>=0.11.0` and the dev pin stays where it is — the host supplies the SDK at bundle and run time and no 0.15.0 API is needed. This is the same
 outcome and the same rationale as bunny-search's 0.14.0 pass.
 
 ### What 0.15.0 changed in the SDK
 
 | Check | Result |
 | --- | --- |
-| SDK diff `@getpaseo/plugin@0.13.0 → 0.15.0` (the versions this plugin pins) | **`dist/client/` is byte-identical** (`diff -rq` → no differences at all), so every client registration here — `addWorkspacePanel` ×2, `addScreen`, `addCommandCenterItem`, `SidebarRow`, the panel props — is untouched by construction. Server-side changes: `lifecycle.*` (the deprecations below), `provider.*` (additive `session.can_stop_runtime`), `agent-tools.*` (new), `index.*`, `acp-internal/connection.js`. |
-| `@getpaseo/client@0.13.0 → 0.15.0` | `terminals/index.d.ts` is **byte-identical** — `terminals.create/list/ref`, `ref(id).kill()`, `capture()` are exactly what the plugin already calls. Additions only where this plugin does not reach: `PaseoAgentHandle.reload()`, `FetchAgentTimelineOptions.wholeTurns`, `ShutdownServerOptions.keepTerminals`, `PluginClientBundleStore`. |
+| SDK diff from the pinned `@getpaseo/plugin` to 0.15.0 | **`dist/client/` is byte-identical** (`diff -rq` → no differences at all), so every client registration here — `addWorkspacePanel` ×2, `addScreen`, `addCommandCenterItem`, `SidebarRow`, the panel props — is untouched by construction. Server-side changes: `lifecycle.*` (the deprecations below), `provider.*` (additive `session.can_stop_runtime`), `agent-tools.*` (new), `index.*`, `acp-internal/connection.js`. |
+| `@getpaseo/client`, same range | `terminals/index.d.ts` is **byte-identical** — `terminals.create/list/ref`, `ref(id).kill()`, `capture()` are exactly what the plugin already calls. Additions only where this plugin does not reach: `PaseoAgentHandle.reload()`, `FetchAgentTimelineOptions.wholeTurns`, `ShutdownServerOptions.keepTerminals`, `PluginClientBundleStore`. |
 | **Deprecated in 0.15.0: `server.on(...)` and `server.before(...)`** | `@deprecated Use addHook with the renamed hook. Removed after 2027-04-30.` **Not used by this plugin** — `index.server.ts` registers seven `server.handle(...)` RPCs and no lifecycle hooks at all, so there is nothing to replace. |
 | Other `@deprecated` members at 0.15.0 | `addSurface` / `addSidebarItem` / `openSurface`, `SettingsGroup`, the `client/react-native` entry (`useRevealedText`), the `addWorkspacePanel` `context` field, `plugin-panel` `agentId`, `CreateAgentRequestOptions.git` / `worktreeName` — **none of them is referenced** by this plugin: registrations are the modern screen/panel family, UI comes from `@getpaseo/plugin/client/ui`, panels only *receive* `PluginWorkspacePanelProps` (they never pass `context`), and no agent or workspace is ever created. |
 | Breaking type change worth knowing | `TerminalStreamEvent` lost `snapshot` (`state: TerminalState`) and `restore` and gained `replay` (`TerminalReplayEvent` = `begin`/`data`/`end`) in `@getpaseo/client@0.15.0`. **This plugin consumes no terminal stream** — it creates terminals and kills them, it never subscribes to their output — so it is unaffected. See recommendation 1, which would rely on the new shape if it is ever built. |
@@ -819,7 +816,7 @@ outcome and the same rationale as bunny-search's 0.14.0 pass.
 
 | Check | Result |
 | --- | --- |
-| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.15.0` → `node_modules` holds `@getpaseo/plugin|client|protocol` **0.15.0**; `package.json` / `package-lock.json` deliberately keep `0.13.0` (no API needed). |
+| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.15.0` → `node_modules` holds `@getpaseo/plugin\|client\|protocol` **0.15.0**; `package.json` / `package-lock.json` deliberately keep their previous pin (no API needed). |
 | `npm run typecheck` (`tsc --noEmit` + the console project) against 0.15.0 | **exit 0** |
 | `npm test` | **14 suites / 137 tests pass** (the `pretest` step rebuilt `dist/console`) |
 | Both entries bundled with the host's externals (`@getpaseo/*`, `zod`, react/react-native) | client 28 283 chars, server 137 094 chars, no bundler-boundary errors |

@@ -132,11 +132,11 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.15.0 (2026-11-03, §16); requirement `>=0.15.0` — `server.addHook` exists only from 0.15.0 (§16). Earlier: 0.14.0 (2026-10-30, §15), 0.13.0 (2026-10-24, §14), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
+| Paseo | verified against 0.15.0 (2026-11-03, §16); requirement `>=0.15.0` — `server.addHook` exists only from 0.15.0 (§16). Earlier: 0.14.0 (2026-10-30, §15), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
 | SDK | `@getpaseo/plugin@^0.15.0` (pin raised from `^0.14.0` for the 2026-11-03 pass; the host supplies the runtime instance) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`) and vitest **10 suites / 133 tests** green against SDK 0.15.0, with 2 live-search tests skipped by default (`BUNNY_LIVE=1`) (§16.5); both hooks registered and firing on the **real 0.15.0 daemon** — `agent.create.before` logged `MCP injected`, `agent.open.before` logged the session-open decision (§16.5); older evidence: 0.14.0 (§15.3), 0.12.0 client audit still clean (§13.3), stable-0.11.0 checks in §10.1, live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0). Older passes: SDK 0.13.0 (§14.3), 0.12.0 (§13.4) |
+| Verification | typecheck clean (three-project `tsc -b`) and vitest **10 suites / 133 tests** green against SDK 0.15.0, with 2 live-search tests skipped by default (`BUNNY_LIVE=1`) (§16.5); both hooks registered and firing on the **real 0.15.0 daemon** — `agent.create.before` logged `MCP injected`, `agent.open.before` logged the session-open decision (§16.5); older evidence: 0.14.0 (§15.3), 0.12.0 client audit still clean (§13.3), stable-0.11.0 checks in §10.1, live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0). Older passes: SDK 0.12.0 (§13.4) |
 
 ## 8. Alternatives considered
 
@@ -538,66 +538,6 @@ one-file fix when it is audited (that is a per-plugin patch bump for each).
 Version `0.4.1` → `0.4.2` (existing-registration migration + a real audit
 fix, no new capability → last digit), annotated tag `bunny-search@0.4.2`.
 
-## 14. Paseo 0.13.0 — compatibility pass (2026-10-24)
-
-Audited against the stable `0.13.0` release (2026-10-24).
-Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.13.0>.
-The repository-wide inventory of what 0.13.0 adds and deprecates is in the
-root [README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24);
-this section records what is specific to bunny-search.
-
-**Result: compatible, no code change and no deprecated API in it.** Version
-stays `0.4.2` — no bump and no tag, because this pass changed no code.
-
-### 14.1 What 0.13.0 changed for this plugin
-
-| Check | Result |
-| --- | --- |
-| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` — none deprecated in 0.13.0. The plugin contributes no attachment source, so the `defineAttachmentSource` shape change (`PluginText` labels, `PluginSerializableIcon` icon) does not reach it either. |
-| UI imports | Everything comes from `@getpaseo/plugin/client` and **`@getpaseo/plugin/client/ui`** — this plugin never used `client/react-native`, so the entry 0.13.0 deprecates (removal after 2027-04-20, with `useRevealedText`) does not touch it. The compiled client bundle contains **zero** deprecated items. |
-| SDK diff `@getpaseo/plugin@0.12.0 → 0.13.0` | **Additive** for everything used here: contribution text fields gained `Text extends PluginText = string`, panels gained `params`/`revision`/`tab`, `PluginIconProps` moved to `icons` and is still re-exported from `client` and `client/ui`. Typecheck (`tsc -b`, three projects) against 0.13.0 is clean. |
-| `agent.turn_ended` `timeline` (always empty in 0.13.0) | Not applicable — no lifecycle hooks are registered. |
-| `SettingsGroup` → `SettingsSection`, panel `context`/`agentId`, `CreateAgentRequestOptions.git`/`worktreeName` | None used; the plugin creates no agents and contributes no panel. |
-| Client audit (DOM globals outside `client/web.ts`) | Still clean — §13.3's fix holds, the rule is unchanged in 0.13.0. |
-| Manifest | Passes the real 0.13.0 `readPluginManifest`; `requirements.paseo` stays `>=0.11.0` (§7: the API floor actually used). |
-| Install-time build | Unchanged: `[["npm", "ci"], ["npm", "run", "bundle"]]` — esbuild bundles `dist/mcp-server.js`. The SDK's new `i18next` dependency belongs to the package the host supplies and does not enter this plugin's install. |
-| MCP server side | The bundled stdio server speaks no Paseo SDK API (it is a standalone Node bundle); nothing in 0.13.0 reaches it. |
-
-### 14.2 New 0.13.0 surface, not adopted (optional)
-
-Carrying the §10.2 / §13.5 list forward, plus what 0.13.0 added:
-
-1. **Host-managed processes** (`spawnProcess` / `terminateProcess`) in
-   `server/probe.ts` — unchanged reasoning, still optional.
-2. **Deep-link quick search** through `PluginScreenProps.params` and an
-   `addSidebarFooterItem` status row — still optional; `params` already
-   exists since 0.11.
-3. **Plugin translations** (`defineTranslations`, `useTranslation`,
-   `client.i18n`) — provider/label strings stay English `PluginText`;
-   localising the settings screen would be new functionality.
-4. **`Markdown`, `StreamedText`, `Loading`, `DocumentFrame`, inline-SVG
-   icons** — rendering conveniences; `Icon` now also takes a component or
-   `{ svg }`, and `SidebarIcon` is `PluginIcon`.
-5. **File panels, agent panels, `useTabState`** — no matching surface in this
-   plugin yet.
-6. **Registry readiness (`name` / `icon` / `media` + `OVERVIEW.md`)** — 0.13.0
-   adds translated listings (`translations` in `paseo-plugin.json` and
-   `OVERVIEW.<locale>.md`), which only matters once the plugin is listed
-   (§10.2 item 3). Not a conformance requirement.
-7. **`PaseoApi.hosts`, `createWorkspace`** — out of scope for a search tool.
-
-### 14.3 Verification (2026-10-24, this machine)
-
-| Check | Result |
-| --- | --- |
-| SDK installation | `npm install --no-save --package-lock=false @getpaseo/plugin@0.13.0 @getpaseo/client@0.13.0 @getpaseo/protocol@0.13.0` — **`package.json`/`package-lock.json` untouched**; the pin stays `0.12.0` on purpose (the host supplies the runtime SDK, no code needed 0.13.0 API, and a pin bump would be a code change with its own version bump). |
-| `npm run typecheck` (`tsc -b tsconfig.json`) against 0.13.0 | **exit 0** |
-| `npm test` (with `pretest` rebuilding `dist/mcp-server.js`) | **9 suites / 95 tests pass**, 1 suite with 2 live-search tests skipped by default (they need `BUNNY_LIVE=1`, §7) |
-| Real 0.13.0 host compiler (`compilePlugin` + `plugin-sdk-specifiers.js` from the installed `app.asar`) | **Both entries compile, no boundary errors**; client bundle has **zero** deprecated calls. |
-| 0.13.0 manifest schema | `readPluginManifest` accepts the manifest (`{ id, build, requirements }`). |
-| Live on a 0.13.0 daemon | **PASS** — installed from the git checkout at `373fa7b1` on this machine's `daemonVersion "0.13.0"` daemon: status `running`, `[paseo] Plugin ready`, and the server-side effect observed in the log: `[bunny-search] settings mirrored: ~/.paseo/plugins/bunny-search/settings.json`. No plugin or contribution errors in `~/.paseo/daemon.log` or the app's `main.log`. |
-| Post-check cleanup | SDKs restored to `0.12.0`, `git status` clean, typecheck still exit 0. |
-
 ## 15. Paseo 0.14.0 — compatibility pass (2026-10-30)
 
 Audited against the stable `0.14.0` release (2026-10-29).
@@ -617,10 +557,10 @@ implemented on request, which is a real code change and shipped as **0.5.2**
 
 | Check | Result |
 | --- | --- |
-| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` — none deprecated. `dist/client/` of `@getpaseo/plugin` is **byte-identical** between 0.13.0 and 0.14.0, so every client registration this plugin makes is untouched by construction. |
+| Registrations used | `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` — none deprecated. `dist/client/` of `@getpaseo/plugin` is **byte-identical** across that step, so every client registration this plugin makes is untouched by construction. |
 | UI imports | Everything comes from `@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`; the deprecated `client/react-native` entry (removal 2027-04-20) is still unused. The compiled client bundle contains **zero** deprecated items. |
 | The plugin's only hook | `server.before("agent.create")` — **not deprecated in 0.14.0**. `PluginLifecycleRegistration` still exposes exactly `on` and `before`, with no `@deprecated` marks. |
-| SDK diff `@getpaseo/plugin@0.13.0 → 0.14.0` | **Additive, server-side only**: `defineAgentTool` + `AgentToolDefinition` / `AgentToolContext` / `AgentToolResult`, and `before("agent.session_open")`'s request gained `title`, `labels`, `tools`, `mcpServers`. Nothing was removed and the client half did not move. |
+| SDK diff `@getpaseo/plugin` (previous release → 0.14.0) | **Additive, server-side only**: `defineAgentTool` + `AgentToolDefinition` / `AgentToolContext` / `AgentToolResult`, and `before("agent.session_open")`'s request gained `title`, `labels`, `tools`, `mcpServers`. Nothing was removed and the client half did not move. |
 | `agent.turn_ended` `timeline` (always empty) | Not applicable — no lifecycle hooks of any kind are registered. |
 | `SettingsGroup`, panel `context` / `agentId`, `addSurface` / `addSidebarItem` / `openSurface`, `CreateAgentRequestOptions.git` / `worktreeName` | None used; the plugin creates no agents and contributes no panel. |
 | Client audit (DOM globals outside `client/web.ts`) | Still clean — §13.3's fix holds; 0.14.0 changes neither the rule nor the files involved. |
@@ -704,8 +644,7 @@ is a second-digit release: `0.4.2 → 0.5.2`, annotated tag
   `mcpServers` fields of the session-open request exist only there.
 * **`requirements.paseo` moved `>=0.11.0` → `>=0.14.0`** for the same reason —
   a floor follows the APIs actually used, not the newest host tested. Verified
-  with the real host parser: rejected for 0.13.0 and 0.13.2, accepted for
-  0.14.0.
+  with the real host parser: an older daemon is rejected, 0.14.0 is accepted.
 
 | # | Recommendation (§15.2) | What was built |
 | --- | --- | --- |
@@ -728,7 +667,7 @@ session-open contribution is additive, not a replacement.
 | `npm run typecheck` (`tsc -b`, three projects) against 0.14.0 | **exit 0** |
 | `npm test` (`pretest` rebuilds `dist/mcp-server.js`, now stamped `0.5.2`) | **10 suites / 133 tests pass**, 1 suite with the 2 `BUNNY_LIVE=1` tests skipped — up from 9 / 95: the new `tests/agent-hooks.test.ts` adds 38 tests over the record reader, the gate, the decision matrix, both hooks, the repair RPC, the tool and the instructions, and `tests/mcp-server-e2e.test.ts` now asserts `instructions` on a real spawned server. |
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | **both entries compile, no boundary errors, 0 warnings, `deprecatedHits: []`**; client bundle 39 555 chars, server 3 360 671 chars. |
-| Manifest floor | rejected for 0.13.0 and 0.13.2 with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
+| Manifest floor | an older daemon is rejected with the host's own message (`requires Paseo >=0.14.0`), 0.14.0 is accepted. |
 | Live daemon | **Not re-run for 0.5.2** — the isolated scratch home of §15.3 was removed after that pass; the new code is covered by the unit/e2e suites and the real host compiler above. |
 
 ## 16. Paseo 0.15.0 — compatibility pass (2026-11-03)

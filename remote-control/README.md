@@ -29,9 +29,8 @@ Verified against the **stable Paseo 0.15.0** release (2026-11-03).
 Full evidence: [`__doc.md`](./__doc.md#paseo-0150--compatibility-pass-2026-11-03).
 **Compatible as-is — no deprecated API is used anywhere in this plugin, so
 nothing was migrated, no code changed and the version stays `0.24.11`** (no
-bump, no tag). `requirements.paseo` stays `>=0.11.0` and the dev pin stays
-`@getpaseo/plugin@0.13.0`: the host supplies the SDK at bundle and run time and
-no 0.15.0 API is needed.
+bump, no tag). `requirements.paseo` stays `>=0.11.0` and the dev pin stays where it is: the host
+supplies the SDK at bundle and run time and no 0.15.0 API is needed.
 
 **Deprecated in 0.15.0 and *not* used here:** `server.before(...)` /
 `server.on(...)` (removal after 2027-04-30 — the plugin registers no lifecycle
@@ -40,8 +39,7 @@ hooks at all, only seven RPC handlers), `addSurface` / `addSidebarItem` /
 `addCommandCenterItem`), `SettingsGroup`, the `client/react-native` UI entry,
 the `addWorkspacePanel` `context` field (panels only *receive*
 `PluginWorkspacePanelProps`; the registrations never pass `context`) and
-`CreateAgentRequestOptions.git` / `worktreeName`. The 0.13.0 → 0.15.0 SDK diff
-leaves **`dist/client/` byte-identical**, so the panel, screen, sidebar row and
+`CreateAgentRequestOptions.git` / `worktreeName`. The SDK diff from the pinned version to 0.15.0 leaves **`dist/client/` byte-identical**, so the panel, screen, sidebar row and
 Command Center item cannot have moved.
 
 **0.15.0 works in this plugin's favour:** SSH sessions are

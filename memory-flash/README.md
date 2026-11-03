@@ -111,9 +111,9 @@ plugin**, and the release's new surface is not just compatible with it — it is
 (`agent.session_open`, `defineAgentTool` and `reload()` are 0.14.0 API).
 
 **Nothing deprecated reaches it.** The `@deprecated` list in
-`@getpaseo/plugin@0.14.0` is byte-identical to 0.13.0, and the plugin's whole
-client surface — `dist/client/` — did not change at all between 0.13.0 and
-0.14.0, so `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen` and
+`@getpaseo/plugin@0.14.0` is byte-identical to the release before it, and the
+plugin's whole client surface — `dist/client/` — did not change at all across
+that step, so `addScreen`, `addSidebarHeaderItem`, `addSettingsScreen` and
 `addCommandCenterItem` are exactly what they were.
 
 **New in 0.9.4 — the 0.14.0 features, implemented** (design and decision
@@ -159,50 +159,6 @@ a non-trivial task starts with a search and ends with a handoff; a skipped
 step must be named in the final answer), a new `## The non-negotiable
 baseline` checklist section, and the `memory_save`/`memory_search`/
 `memory_handoff` tool descriptions. Details: [__doc.md](./__doc.md) §18.4.
-
-## Paseo 0.13.0 compatibility
-
-Verified against the **stable Paseo 0.13.0** release (2026-10-24).
-Full evidence: [__doc.md](./__doc.md) §17. **No code change was needed, and
-no deprecated 0.13.0 API remains in this plugin** — it is still `0.8.3` and
-`requirements.paseo` still `>=0.11.0`.
-
-**Nothing deprecated reaches it.** The plugin already imports its UI from
-`@getpaseo/plugin/client` and `@getpaseo/plugin/client/ui`, so it never used
-the `client/react-native` entry that 0.13.0 deprecates (removal 2027-04-20,
-with `useRevealedText`); it registers `addScreen`, `addSidebarHeaderItem`,
-`addSettingsScreen` and `addCommandCenterItem`, none deprecated; and it uses
-neither the always-empty `agent.turn_ended` `timeline` nor the
-`CreateAgentRequestOptions.git`/`worktreeName` options that `createAgent` now
-rejects at runtime.
-
-**Deprecated in 0.13.0 that does not reach this plugin:** panel `context` /
-`agentId` and `addAgentPanel`, `SettingsGroup` → `SettingsSection`.
-
-**New in 0.13.0, not adopted (all optional):** plugin translations
-(`defineTranslations` / `useTranslation` / `client.i18n` — memory-flash is
-deliberately English-only and its strings stay valid `PluginText`), `Markdown`
-for memory bodies, `StreamedText` / `Loading` / `DocumentFrame`, inline-SVG
-icons, file panels (for exports/backups), agent panels, `useTabState`,
-`createWorkspace` and `PaseoApi.hosts` (connected hosts are Paseo-to-Paseo
-delegation — a different mechanism from this plugin's remote memory hosts over
-HTTP API keys). The full inventory is in the root
-[README](../README.md#paseo-0130--new-and-deprecated-sdk-surface-2026-10-24).
-
-**One manifest note worth keeping:** the manifest's `mcp` key is not part of
-the host's 0.13.0 schema and is *stripped* (not rejected) by it. The plugin
-never depended on the host reading it — it publishes its own entry, which the
-0.13.0 daemon log confirms (`[memory-flash] MCP entry: … (exists)` right
-before `[paseo] Plugin ready`).
-
-**Verification:** typecheck clean against SDK 0.13.0, vitest **15 suites /
-166 tests** pass (the MCP bundle is rebuilt first, as at install time), and
-both entries build with the **real 0.13.0 host compiler** (from the installed
-`app.asar`) with no boundary errors and zero deprecated calls. The manifest
-passes the real 0.13.0 parser. Live: `running` on this machine's 0.13.0
-daemon with `Plugin ready` and no plugin errors in the daemon or app logs.
-The SDK was installed with `--no-save`, so `package.json` still pins
-`@getpaseo/plugin@0.12.0`.
 
 ## Paseo 0.12.0 spec conformance
 
