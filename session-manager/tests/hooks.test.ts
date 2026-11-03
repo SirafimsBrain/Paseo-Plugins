@@ -10,8 +10,10 @@ import { providers } from "../server/providers/registry";
 import type { ProviderListResult } from "../server/providers/types";
 
 /**
- * 0.3.3 coverage: the two lifecycle additions of §18.3 — the `agent.closed` cache
- * invalidation and the `session-manager.refresh` reload RPC.
+ * 0.3.3 coverage: the two lifecycle additions of §18.3 — the close-hook cache
+ * invalidation and the `session-manager.refresh` reload RPC. Since 0.3.4 the hook is
+ * registered through `server.addHook("agent.close.after")`: 0.15.0 renamed the event
+ * `agent.closed` → `agent.close.after` and deprecated `server.on`.
  *
  * The interesting assertion is behavioural, not wiring: the listing cache is a
  * module-private 30-second store, so the test primes it through the public
@@ -22,7 +24,7 @@ import type { ProviderListResult } from "../server/providers/types";
 
 interface FakeServer extends PluginServerContext {
   call<T>(name: string, input: unknown, context?: unknown): Promise<T>;
-  onHooks: Map<string, (event: never, context: never) => unknown>;
+  hooks: Map<string, (event: never, context: never) => unknown>;
   handlers: Map<string, (input: never, context: never) => unknown>;
 }
 
@@ -41,7 +43,7 @@ function fakeContext(reloadable = true) {
 
 function createFakeServer(): FakeServer {
   const handlers = new Map<string, (input: never, context: never) => unknown>();
-  const onHooks = new Map<string, (event: never, context: never) => unknown>();
+  const hooks = new Map<string, (event: never, context: never) => unknown>();
 
   const server = {
     registerSettings() {
@@ -57,13 +59,10 @@ function createFakeServer(): FakeServer {
     handle(contract: { name: string }, handler: (input: never, context: never) => unknown) {
       handlers.set(contract.name, handler);
     },
-    before() {
-      return () => {};
-    },
-    on(name: string, handler: (event: never, context: never) => unknown) {
-      onHooks.set(name, handler);
+    addHook(name: string, handler: (event: never, context: never) => unknown) {
+      hooks.set(name, handler);
       return () => {
-        onHooks.delete(name);
+        hooks.delete(name);
       };
     },
     registerProvider() {},
@@ -73,7 +72,7 @@ function createFakeServer(): FakeServer {
       return (await handler(input as never, (context ?? fakeContext()) as never)) as T;
     },
     handlers,
-    onHooks,
+    hooks,
   };
   return server as unknown as FakeServer;
 }
@@ -113,19 +112,19 @@ afterEach(() => {
 
 // ---------------------------------------------------------------------------
 
-describe("agent.closed hook", () => {
+describe("agent.close.after hook", () => {
   it("is registered by contribute() and removed by the cleanup", () => {
     const server = createFakeServer();
     const cleanup = contribute(server);
-    expect(server.onHooks.has("agent.closed")).toBe(true);
+    expect(server.hooks.has("agent.close.after")).toBe(true);
     cleanup();
-    expect(server.onHooks.has("agent.closed")).toBe(false);
+    expect(server.hooks.has("agent.close.after")).toBe(false);
   });
 
   it("drops the listing cache so the next list rescans instead of ageing out", async () => {
     const server = createFakeServer();
     const cleanup = contribute(server);
-    const hook = server.onHooks.get("agent.closed");
+    const hook = server.hooks.get("agent.close.after");
     expect(hook).toBeDefined();
 
     await listAgentSessions(); // prime

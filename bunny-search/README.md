@@ -18,7 +18,7 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 - **Test connection button** — Settings → Plugins → Bunny Search runs a real probe against the configured service (with the configured timeout) **and** a live MCP handshake check (spawn + `initialize`) of the bundled server, showing latency or a friendly, actionable error (connection refused, DNS, timeout, HTTP status, invalid JSON, rejected API key).
 - **Open search interface** — the API endpoint and the human-facing web interface are separate settings (`Search interface URL`). When the interface URL is empty it is derived from the API URL's origin (e.g. API `http://omnirouter/search` → interface `http://omnirouter`); DuckDuckGo and Brave fall back to their public front pages. The **Open in browser** action opens it inside Paseo's own browser tab on the desktop app, or the system browser elsewhere. The sidebar screen has a matching **Open** button.
 - **Connected indicator** — the sidebar screen shows a green/red/gray dot with the current provider, base URL, last-check latency and time, so "is my web search MCP working?" is always one glance away. A quick-search box runs a real query through the configured service without touching an agent.
-- **Automatic MCP injection** — via the Paseo `agent.create` before-hook the MCP server is added to every agent created through Paseo (configurable, on by default; configurable tool name).
+- **Automatic MCP injection** — via the Paseo `agent.create.before` hook the MCP server is added to every agent created through Paseo (configurable, on by default; configurable tool name), and re-contributed on every `agent.open.before`.
 - **Standalone use outside Paseo** — the MCP server reads `$PASEO_HOME/plugins/bunny-search/settings.json` and honors `BUNNY_SEARCH_*` environment variables (`SEARXNG_BASE_URL` is honored too, for drop-in compatibility with the reference MCP), so it also works with any MCP client.
 
 ## Install
@@ -91,6 +91,64 @@ $PASEO_HOME/plugins/bunny-search/
 ```
 
 The host keeps the authoritative settings in its own store (exposed to the plugin via the `settings.bunny-search.read` RPC and change subscription); the JSON file above is a mirror for the MCP server process, which is spawned by agent providers outside the plugin host and therefore cannot use the plugin API.
+
+## Paseo 0.15.0 compatibility
+
+Verified against the **stable Paseo 0.15.0** release (2026-11-03).
+Full evidence: [__doc.md](./__doc.md) §16. **Compatible after a mandatory
+migration — shipped as `0.5.3`**, with `requirements.paseo` `>=0.14.0` →
+`>=0.15.0` and the SDK pin `^0.14.0` → `^0.15.0`.
+
+**Deprecated in 0.15.0 and used here — both migrated:**
+
+| Deprecated (`@deprecated`, removal after **2027-04-30**) | Migration in 0.5.3 |
+| ---------- | ------------------ |
+| `server.before(...)` | `server.addHook(...)`, with the renamed hook: `agent.create` → **`agent.create.before`**, `agent.session_open` → **`agent.open.before`**. Payload (`{ request }`) and return (the request or `void`) are unchanged, so the hook bodies did not move — only the registration and the names did. |
+| `server.on(...)` | not used by this plugin (it registers no event hooks), listed because it carries the same deprecation mark. |
+
+The legacy spellings still work on 0.15.0 — the SDK maps them through
+`legacyRequests` / `legacyEvents` — so this is a deprecation-driven
+migration, not a breakage. `addHook` exists on the shipped host: the
+installed `app.asar` builds the plugin `server` object with
+`createLifecycleRegistration(...)` from `@getpaseo/plugin/internal/lifecycle`.
+Because `addHook` does not exist on a 0.14.0 host, the manifest floor had to
+move with it.
+
+**Nothing else changed for this plugin.** The 0.14.0 → 0.15.0 SDK diff is
+server-only (`dist/server/lifecycle.*`, `dist/server/index.d.ts`,
+`package.json`); **`dist/client/` is byte-identical**, so the screen, sidebar,
+settings-screen and Command Center registrations and the `client/ui` imports
+are untouched by construction. New 0.15.0 hooks (`worktree.create.before` /
+`worktree.create.after`) have no search-shaped purpose here.
+
+**One host-side finding, recorded with a recommended fix:** on 0.15.0 the
+host reuses a running OpenCode v2 service (#7435), and an agent that carries
+custom MCP servers is then **rejected** with `Custom OpenCode MCP servers or
+process environment require an isolated server …` — which hits every agent
+this plugin injects into, for the `opencode` provider only, whenever a local
+OpenCode service is registered (`~/.local/state/opencode/service.json`).
+Reproduced and controlled (plugin on / plugin off / discovery removed) in the
+isolated 0.15.0 daemon; the mechanism, the exact scope and the proposed fix
+are in [__doc.md](./__doc.md) §16.3, the fix itself as recommendation
+§16.4 item 1. Until it is built, adding `opencode` to `skipProviders`
+avoids the failure — at the cost of losing search on opencode agents.
+
+**Recommendations for improvement — recorded, not implemented:**
+[__doc.md](./__doc.md) §16.4 — skip MCP for `opencode` while a shared
+OpenCode service is discoverable (falling back to the native
+`bunny_web_search` tool), deep-link quick search through
+`PluginScreenProps.params` with an `addSidebarFooterItem` status row, registry
+metadata (`name` / `icon` / `media` + `OVERVIEW.md`), response caching and
+per-project presets, and more providers behind the same adapter.
+
+**Verification:** typecheck clean (three-project `tsc -b`) and vitest
+**10 suites / 133 tests** green against `@getpaseo/plugin@^0.15.0` (2
+live-search tests skipped without `BUNNY_LIVE=1`), no `server.before(` /
+`server.on(` call left in the plugin, and **live on the real 0.15.0 daemon**:
+installed from the working tree into an isolated scratch home, `running` with
+`[paseo] Plugin ready`, the settings mirror written, zero `Unknown lifecycle
+hook` errors — and both hooks proven to fire on a real agent creation and a
+real `paseo send` (`[bunny-search] MCP injected: …`).
 
 ## Paseo 0.14.0 compatibility
 

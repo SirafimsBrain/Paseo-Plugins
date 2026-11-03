@@ -132,11 +132,11 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.14.0 (2026-10-30, §15); requirement `>=0.11.0` — the plugin uses the 0.11+ screen/sidebar API (§13). Earlier: 0.13.0 (2026-10-24, §14), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
-| SDK | `@getpaseo/plugin@0.14.0` (installed with `--no-save --package-lock=false` for the 2026-10-30 pass; the declared pin stays `0.12.0` and the host supplies the runtime instance) |
+| Paseo | verified against 0.15.0 (2026-11-03, §16); requirement `>=0.15.0` — `server.addHook` exists only from 0.15.0 (§16). Earlier: 0.14.0 (2026-10-30, §15), 0.13.0 (2026-10-24, §14), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
+| SDK | `@getpaseo/plugin@^0.15.0` (pin raised from `^0.14.0` for the 2026-11-03 pass; the host supplies the runtime instance) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`) and vitest **9 hermetic suites / 95 tests** green against SDK 0.14.0, with 2 live-search tests skipped by default (`BUNNY_LIVE=1`); both entries built by the real 0.14.0 host compiler with no boundary errors, 0 warnings and zero deprecated calls (§15.3); manifest accepted by the real 0.14.0 parser with its `>=0.11.0` floor enforced (rejected at 0.10.0); `running` in an isolated 0.14.0 daemon from the working tree (§15.3); 0.12.0 client audit still clean (§13.3); stable-0.11.0 checks in §10.1; live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0). Older passes: SDK 0.13.0 (§14.3), 0.12.0 (§13.4) |
+| Verification | typecheck clean (three-project `tsc -b`) and vitest **10 suites / 133 tests** green against SDK 0.15.0, with 2 live-search tests skipped by default (`BUNNY_LIVE=1`) (§16.5); both hooks registered and firing on the **real 0.15.0 daemon** — `agent.create.before` logged `MCP injected`, `agent.open.before` logged the session-open decision (§16.5); older evidence: 0.14.0 (§15.3), 0.12.0 client audit still clean (§13.3), stable-0.11.0 checks in §10.1, live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0). Older passes: SDK 0.13.0 (§14.3), 0.12.0 (§13.4) |
 
 ## 8. Alternatives considered
 
@@ -730,3 +730,154 @@ session-open contribution is additive, not a replacement.
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | **both entries compile, no boundary errors, 0 warnings, `deprecatedHits: []`**; client bundle 39 555 chars, server 3 360 671 chars. |
 | Manifest floor | rejected for 0.13.0 and 0.13.2 with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
 | Live daemon | **Not re-run for 0.5.2** — the isolated scratch home of §15.3 was removed after that pass; the new code is covered by the unit/e2e suites and the real host compiler above. |
+
+## 16. Paseo 0.15.0 — compatibility pass (2026-11-03)
+
+Audited against the stable `0.15.0` release (2026-11-03).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.15.0>.
+The repository-wide inventory of what 0.15.0 adds and deprecates is in the
+root [README](../README.md#paseo-0150--new-and-deprecated-sdk-surface-2026-11-03);
+this section records what is specific to bunny-search.
+
+**Result: compatible, but only after a mandatory migration — `server.before`
+and `server.on` are `@deprecated` in 0.15.0, so both of this plugin's hooks
+moved to `server.addHook`. Shipped as `0.5.3`, `requirements.paseo`
+`>=0.14.0` → `>=0.15.0`, SDK pin `^0.14.0` → `^0.15.0`.** One host-side
+interaction with the new OpenCode shared-service reuse is recorded in §16.3
+with a recommended fix; it is not caused by the migration.
+
+### 16.1 What 0.15.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| SDK diff `@getpaseo/plugin@0.14.0 → 0.15.0` | **Server-only.** `diff -rq` over the two unpacked npm tarballs reports exactly four changed files: `dist/server/index.d.ts`, `dist/server/lifecycle.d.ts`, `dist/server/lifecycle.js`, `package.json`. **`dist/client/` is byte-identical**, so every client registration in this plugin (screen, sidebar header, settings screen, Command Center item) is untouched by construction, and the `client/ui` imports still resolve. `package.json` also gains the export path `./internal/lifecycle`, which is what the host imports. |
+| **Deprecated: `server.before(...)` and `server.on(...)`** | Both carry `/** @deprecated Use addHook with the renamed hook. Removed after 2027-04-30. */` on `PluginLifecycleRegistration`. They keep working on 0.15.0 — the SDK adapter maps them through `legacyRequests` / `legacyEvents` — so this is a deprecation-driven migration, not a breakage. |
+| Replacement: `server.addHook(name, handler)` | Type-safe and name-validated against `pluginHookRegistry` (throws `Unknown lifecycle hook: …` for anything else). Handlers are `(payload, context) => Promise<result>`; for request hooks the payload is still `{ request }` and the return is still the request or `void`, so the bodies did not change. |
+| Hook renames used here | `agent.create` → **`agent.create.before`**, `agent.session_open` → **`agent.open.before`**. Payload and result types are the same objects as before (`PluginHookRequests["agent.create.before"]` is the old `PluginBeforeRequests["agent.create"]`). |
+| Host support | The installed 0.15.0 `app.asar` contains `import { createLifecycleRegistration, pluginHookRegistry } from "@getpaseo/plugin/internal/lifecycle"` and `const registration = createLifecycleRegistration((name, handler) => this.register(name, handler));`, plus the literal `agent.create.before`. So `addHook` is live on the shipped host, not just in the typings — and the legacy `on` / `before` spellings still resolve through the same adapter. |
+| New hooks, not adopted | `worktree.create.before` / `worktree.create.after` (plugin-chosen worktree locations, the awaited `worktree.create.after` before workspace setup) and the `agent.*` / `workspace.*` renames the plugin does not use. None of them has a search-shaped purpose here — see §16.4. |
+| 0.15.0 host behaviour that touches injection | Daemon restarts keep terminal programs running, and agent recovery after a host restart is a new **opt-in** setting. Both reopen sessions, which is exactly the `agent.open.before` path the plugin already re-derives on every open — no change needed. Plugin screens keep their local state across host disconnections (#8105) — a benefit, not a requirement. |
+| `agent.turn_ended` `timeline` (always empty) | Not applicable — the plugin registers no turn hooks. |
+
+### 16.2 Migration performed (0.5.2 → 0.5.3)
+
+| Before (deprecated on 0.15.0) | After |
+| --- | --- |
+| `server.before("agent.create", async ({ request }) => …)` | `server.addHook("agent.create.before", async ({ request }) => …)` |
+| `server.before("agent.session_open", async ({ request }, { paseo }) => …)` | `server.addHook("agent.open.before", async ({ request }, { paseo }) => …)` |
+| comments and diagnostics naming the old hooks (`PluginBeforeRequests["agent.create"]`, "handled by the agent.create hook", …) | renamed to the 0.15.0 spellings (`PluginHookRequests["agent.create.before"]`, "…the agent.create.before hook"), so logs and docs match the host |
+
+The test doubles in `tests/agent-hooks.test.ts` now expose one `addHook`
+instead of `before` / `on`, and the registered-name assertions check
+`agent.create.before` / `agent.open.before`. No behaviour changed: the same
+settings read, the same gates, the same returned request.
+
+`paseo-plugin.json`: `requirements.paseo` `>=0.14.0` → `>=0.15.0`, because
+`addHook` does not exist on a 0.14.0 host. `package.json`: `@getpaseo/plugin`
+`^0.14.0` → `^0.15.0`, version `0.5.2` → `0.5.3` (deprecated-API replacement,
+no new capability → last digit), annotated tag `bunny-search@0.5.3`.
+
+### 16.3 Compatibility finding: injected MCP vs. OpenCode's shared service (0.15.0)
+
+**This is a host-level interaction introduced by 0.15.0 (#7435, "Reuse
+running OpenCode v2 services"), not a defect of the migration — but it breaks
+this plugin's core feature on the `opencode` provider whenever a local
+OpenCode v2 service is registered.** Reproduced on this machine, 2026-11-03,
+in the isolated 0.15.0 daemon of §16.5.
+
+Mechanism, read out of the installed `app.asar`:
+
+1. `requiresDedicatedV2Server(config, launch)` returns `true` as soon as
+   `Object.keys(config.mcpServers ?? {}).length > 0` — i.e. for **any**
+   agent this plugin injects into. Its own comment: *"Custom MCP is
+   location-scoped … so [it needs] isolation."*
+2. `V2Runtime.acquire()` only starts an isolated server when
+   `selectOpenCodeService()` returns `kind: "owned"`. Otherwise it calls
+   `assertSharedConfiguration(input, selection)`, which throws exactly the
+   observed error:
+   `Custom OpenCode MCP servers or process environment require an isolated server and cannot be used with a shared OpenCode service.`
+3. `selectOpenCodeService()` returns `owned` only when neither
+   `PASEO_OPENCODE_SERVER_URL` nor a discovery file is present. It otherwise
+   reads `$XDG_STATE_HOME/opencode/service.json` (default
+   `~/.local/state/opencode/service.json`) and, for a local host on a
+   compatible `2.x` service, returns `kind: "discovered"` → shared → throw.
+
+Observed on this machine (the file is present, `version 2.2.5`,
+`http://127.0.0.1:37999`, written by the user's own `opencode serve --service`;
+Paseo's own child is the separate `opencode serve --hostname 127.0.0.1 --port 0`):
+
+| Step | bunny-search | Result |
+| --- | --- | --- |
+| `paseo run --provider opencode` | enabled (`agent.create.before` logged `MCP injected`) | **fails**: `Failed to create agent: Custom OpenCode MCP servers … require an isolated server …` |
+| the same command | disabled | **succeeds** — agent created and running (control) |
+| `paseo send` to that agent after re-enabling | enabled (`agent.open.before` logged `injecting 'bunny-search' … MCP injected`) | **fails** with the same error, so *existing* agents are hit too, not just new ones |
+| the same `paseo send` after restarting the daemon with `XDG_STATE_HOME` pointed at an empty directory | enabled | **no error** — with discovery gone the host picks `owned` and starts its own server; the plugin logged `attaching bunny_web_search tool only: provider does not support MCP servers` |
+
+Scope and caveats:
+
+- **Only the `opencode` provider.** cline / kilo / qwen / claude / codex do
+  not go through `V2Runtime`. **session-manager is unaffected** (it injects
+  no MCP and registers no create hook).
+- The failure needs a *discovered* local OpenCode service; on a machine
+  without `service.json` (and without `PASEO_OPENCODE_SERVER_URL`) the path
+  is `owned` and injection works as before.
+- The plugin's own capability probe is **not** a reliable guard for this
+  condition: `capabilities.supportsMcpServers` came back `true` on the open
+  that injected and `false` on the later control run, with no plugin-side
+  change between them. The decision matrix (`server/session-open.ts`) is
+  correct; the input it is given varies.
+
+**Recommended fix (recorded, not implemented — §16.4 item 1):** treat
+"shared OpenCode service discovered" as "no MCP for this open", the way the
+`supportsMcpServers === false` branch already does, so the decision becomes
+`injectMcp: false, attachTool: true` and the agent keeps search through the
+native `bunny_web_search` tool instead of failing to open. The host's
+discovery file is readable from the plugin (same path, same version rule).
+
+**Immediate user workaround with the settings that already ship:** add
+`opencode` to `skipProviders`. Note the gate is deliberately absolute — it
+blocks *both* contributions (`injectMcp: false, attachTool: false`), so
+opencode agents then get **no search at all** rather than the native tool.
+
+### 16.4 Recommendations for improvement (recorded, not implemented)
+
+Ordered by value. Items 1–3 are the actionable ones; 4–6 carry over from
+§15.2 / §9 unchanged.
+
+1. **Skip MCP contribution for `opencode` while a shared OpenCode v2 service
+   is discoverable** (read `$XDG_STATE_HOME/opencode/service.json`, default
+   `~/.local/state/opencode/service.json`, with the host's `2.x` version
+   rule) and fall back to `bunny_web_search` instead. This turns the §16.3
+   hard failure into a graceful degradation and keeps search working on
+   affected hosts. Small, self-contained in `server/session-open.ts`
+   (a new input + a new `mcpBlockReason` branch) plus a settings-free
+   existence check — worth a second-digit bump only if it grows a setting.
+2. **Deep-link quick search** — pass `?q=` through `PluginScreenProps.params`
+   (available since 0.11, still unused) so a Command Center item or slash
+   command opens the screen with the query prefilled, and move the connection
+   status into an `addSidebarFooterItem` row with a Test button.
+3. **Registry readiness** — `name` / `icon` / `media` in `paseo-plugin.json`
+   plus an `OVERVIEW.md`, required only for a registry listing (§10.2 item 3).
+4. Optional response caching and per-project category presets (§9).
+5. More providers behind the same `SearchProvider` adapter — Tavily, SerpAPI
+   (§8) — each is one new object in the registry.
+6. `registerUsageSource` stays rejected: no in-scope backend exposes a quota
+   endpoint that could back `discover` / `fetch` (§10.2 item 4).
+
+**Not applicable in 0.15.0:** `worktree.create.before` / `worktree.create.after`
+let a plugin choose worktree locations, but neither has a search-shaped
+purpose — the MCP server and the native tool are contributed per agent, not
+per worktree.
+
+### 16.5 Verification (2026-11-03, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install` with `@getpaseo/plugin@^0.15.0` → `package.json` / `package-lock.json` record `^0.15.0`. |
+| `npm run typecheck` (`tsc -b`, three projects) against 0.15.0 | **exit 0** |
+| `npm test` (`pretest` rebuilds `dist/mcp-server.js`) | **10 suites / 133 tests pass**, 1 suite with the 2 `BUNNY_LIVE=1` tests skipped — unchanged from 0.5.2, now covering the `addHook` registration names. |
+| Deprecated-call scan | the plugin contains **no** `server.before(` / `server.on(` call any more (`grep` over `index.server.ts`, `server/`, `client/`, `shared/`, `tests/` → only historical prose in earlier §13–§15 records). |
+| Live daemon | **PASS** — installed from the working tree into an **isolated 0.15.0 daemon** (scratch home under `.tmp/`, own loopback port 6799, `pluginsEnabled: true`, production home untouched): status `running`, `[paseo] Plugin ready`, settings mirror written, **zero** `Unknown lifecycle hook` errors in the daemon log. |
+| Hooks actually fire | **PASS** — `agent.create.before` logged `[bunny-search] MCP injected: … dist/mcp-server.js` on a real agent creation, and `agent.open.before` logged the session-open decision (`injecting 'bunny-search' …`) on a real `paseo send`. |
+| Manifest floor | `>=0.15.0` accepted by the real 0.15.0 parser (the plugin loaded and reached `running`). |
+| Host-side finding | the OpenCode shared-service failure of §16.3 was reproduced and controlled in the same daemon (plugin on / plugin off / discovery removed). |

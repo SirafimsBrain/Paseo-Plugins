@@ -149,7 +149,7 @@ export const connectionStatus = defineRpc({
 
 /**
  * Reopens the agent's provider session (`agents.ref(id).reload()`), which reruns
- * `before("agent.session_open")` and re-contributes the search server/tool. The
+ * `addHook("agent.open.before")` and re-contributes the search server/tool. The
  * supported answer to an agent that lost its search tools after an idle runtime
  * release or an OpenCode location eviction, instead of recreating the agent.
  */

@@ -24,9 +24,16 @@ usage in the panel styles; when unset, no `fontFamily` is forced so the host's
 
 ## Compatibility
 
-Current: **verified against Paseo `0.14.0` (2026-10-30, SDK
+Current: **verified against Paseo `0.15.0` (2026-11-03, SDK
+`@getpaseo/plugin@^0.15.0`)** — compatible after a mandatory migration: the
+only lifecycle hook this plugin registers moved from the deprecated
+`server.on("agent.closed")` to `server.addHook("agent.close.after")`, shipped
+as `0.3.4`, with `requirements.paseo` `>=0.14.0` → `>=0.15.0` and the SDK pin
+`^0.14.0` → `^0.15.0` (§19).
+
+Earlier, **verified against Paseo `0.14.0` (2026-10-30, SDK
 `@getpaseo/plugin@^0.14.0`)** — compatible, and the two 0.13.0 deprecations
-this plugin carried are now **migrated** (the `client/react-native` UI entry
+this plugin carried were **migrated** (the `client/react-native` UI entry
 and the `addWorkspacePanel` `context` field), shipped as `0.2.3`; the manifest
 range moved `>=0.8.0` → `>=0.13.0` because the replacement import needs
 `client/ui`'s `ScrollView` / `useToast`, which exist only from 0.13.0 (§18).
@@ -707,3 +714,86 @@ to shell out and kill processes itself.
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | **both entries compile, no boundary errors, 0 warnings, `deprecatedHits: []`**; client bundle 49 677 chars, server 46 237 chars. |
 | Manifest floor | rejected for 0.13.0 and 0.13.2 with the host's own message (`requires Paseo >=0.14.0`), accepted for 0.14.0. |
 | Live daemon | **Not re-run for 0.3.3** — the isolated scratch home of §18.4 was removed after that pass; the new code is covered by the unit suites and the real host compiler above. |
+
+## 19. Paseo 0.15.0 — compatibility pass (2026-11-03)
+
+Audited against the stable `0.15.0` release (2026-11-03).
+Release notes: <https://github.com/getpaseo/paseo/releases/tag/v0.15.0>.
+The repository-wide inventory of what 0.15.0 adds and deprecates is in the
+root [README](../README.md#paseo-0150--new-and-deprecated-sdk-surface-2026-11-03);
+this section records what is specific to session-manager.
+
+**Result: compatible, but only after a mandatory migration — `server.on` is
+`@deprecated` in 0.15.0, so the plugin's single lifecycle hook moved to
+`server.addHook("agent.close.after")`. Shipped as `0.3.4`,
+`requirements.paseo` `>=0.14.0` → `>=0.15.0`, SDK pin `^0.14.0` → `^0.15.0`.**
+
+### 19.1 What 0.15.0 changed for this plugin
+
+| Check | Result |
+| --- | --- |
+| SDK diff `@getpaseo/plugin@0.14.0 → 0.15.0` | **Server-only.** `diff -rq` over the two unpacked npm tarballs reports exactly four changed files: `dist/server/index.d.ts`, `dist/server/lifecycle.d.ts`, `dist/server/lifecycle.js`, `package.json`. **`dist/client/` is byte-identical**, so `addWorkspacePanel` / `addSettingsScreen` / `addCommandCenterItem`, `useTabState` and the `client/ui` imports are untouched by construction. |
+| **Deprecated: `server.on(...)` (and `server.before(...)`)** | Both carry `/** @deprecated Use addHook with the renamed hook. Removed after 2027-04-30. */` on `PluginLifecycleRegistration`. They still work on 0.15.0 — the SDK adapter maps them through `legacyEvents` / `legacyRequests` — so the migration is deprecation-driven, not a breakage. |
+| Replacement: `server.addHook(name, handler)` | Type-safe and name-validated against `pluginHookRegistry` (throws `Unknown lifecycle hook: …` for anything else). Handlers are typed `(payload, context) => Promise<result>`, so the previously synchronous close handler became `async` — the host does not wait for this event (`waits: false`), the `async` is required by the type, and the body is unchanged. |
+| Hook rename used here | `agent.closed` → **`agent.close.after`**. Payload is the same object (`{ agent }`), so `event.agent.id` still works. |
+| Host support | The installed 0.15.0 `app.asar` builds the plugin `server` object with `createLifecycleRegistration(...)` from `@getpaseo/plugin/internal/lifecycle`, and contains the literal `agent.close.after` — `addHook` is live on the shipped host, and the legacy `on` spelling still resolves through the same adapter. |
+| Panel `context` / `client/react-native` (the 0.13.0 pair, migrated in 0.2.3) | Unaffected — `dist/client/` did not move, and neither deprecation mark changed. |
+| `agent.turn_ended` `timeline` (always empty) | Not applicable — this plugin registers no turn hooks. |
+| New hooks, not adopted | `worktree.create.before` / `worktree.create.after` (plugin-chosen worktree locations, the awaited `worktree.create.after` before workspace setup) — a worktree does not touch the provider session stores this plugin reads and deletes, so there is nothing to invalidate or re-scan there. See §19.3. |
+| 0.15.0 host behaviour | Daemon restarts keep terminal programs running and agent recovery after a host restart is a new **opt-in** setting; both reopen sessions, which only makes the `agent.close.after` cache invalidation fire more predictably, exactly as 0.14.0's idle-runtime release did (§18.3). Plugin screens keep their local state across host disconnections (#8105) — a benefit for this panel's `useTabState` filters. |
+| OpenCode shared-service finding (bunny-search §16.3) | **Not applicable.** This plugin injects no MCP servers and registers no create hook, so `requiresDedicatedV2Server` is never triggered on its behalf. |
+
+### 19.2 Migration performed (0.3.3 → 0.3.4)
+
+| Before (deprecated on 0.15.0) | After |
+| --- | --- |
+| `server.on("agent.closed", (event) => { … })` | `server.addHook("agent.close.after", async (event) => { … })` |
+| test double exposing `before()` / `on()` and asserting `onHooks.has("agent.closed")` | one `addHook()` entry point and `hooks.has("agent.close.after")` |
+
+The body is untouched: `invalidateListing()` plus one `console.log`. The
+`async` is there because `HookHandlers` returns `Promise<result>`; the host
+fires this event without awaiting (`pluginHookRegistry["agent.close.after"].waits
+=== false`), so behaviour is identical to the synchronous version.
+
+`paseo-plugin.json`: `requirements.paseo` `>=0.14.0` → `>=0.15.0`, because
+`addHook` does not exist on a 0.14.0 host. `package.json`: `@getpaseo/plugin`
+`^0.14.0` → `^0.15.0`, version `0.3.3` → `0.3.4` (deprecated-API replacement,
+no new capability → last digit), annotated tag `session-manager@0.3.4`.
+
+### 19.3 Recommendations for improvement (recorded, not implemented)
+
+1. **Invalidate the listing cache on `agent.archive.after` too.** Archiving
+   an agent (and `workspace.archive.after` for a workspace) changes what the
+   panel lists, but only `agent.close.after` drops the 30-second cache today,
+   so an archived entry can stay visible — with its stale "still running" /
+   "due for cleanup" hints — until the TTL ages out. The event family already
+   exists (`agent.archived` before the 0.15.0 rename); this is one more
+   `server.addHook("agent.archive.after", …)` next to the current one, calling
+   the same `invalidateListing()`. Small, no new settings → patch-level work.
+2. **Host-managed processes** (carried from §15.1): `spawnProcess` /
+   `terminateProcess` / `execCommand` from `@getpaseo/plugin/server` in the
+   provider adapters that shell out, for Windows `.cmd`/`.bat` handling and a
+   host-owned process tree on timeout. Still optional; `node:child_process`
+   remains legal in `server/`.
+3. **Extra sidebar entry points** (carried from §18.3): `addSidebarFooterItem`
+   and multi-row `SidebarRow` / `SidebarSeparator` for a status or count row.
+   New capability → second-digit bump.
+4. **`defineAgentTool` stays deliberately unused** — unchanged decision: it
+   would offer destructive delete operations to agent processes (§18.5).
+
+**Not applicable in 0.15.0:** `worktree.create.before` / `worktree.create.after`
+let a plugin choose worktree locations and run before workspace setup, but a
+worktree is a directory, not a session store — nothing this plugin lists or
+deletes lives there.
+
+### 19.4 Verification (2026-11-03, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install` with `@getpaseo/plugin@^0.15.0` → `package.json` / `package-lock.json` record `^0.15.0`. |
+| `npm run typecheck` (`tsc --noEmit`) against 0.15.0 | **exit 0** |
+| `npm test` | **9 suites / 74 tests pass** — unchanged from 0.3.3, `tests/hooks.test.ts` now asserting the `agent.close.after` registration name. |
+| Deprecated-call scan | the plugin contains **no** `server.on(` / `server.before(` call any more (only historical prose in earlier §16–§18 records). |
+| Live daemon | **PASS** — installed from the working tree into an **isolated 0.15.0 daemon** (scratch home under `.tmp/`, own loopback port 6799, `pluginsEnabled: true`, production home untouched): status `running`, `[paseo] Plugin ready`, **zero** `Unknown lifecycle hook` errors in the daemon log. |
+| Hook actually fires | **PASS** — `[session-manager] agent closed (<id>): listing cache invalidated` appeared on a real agent stop and again on the delete of that agent. |
+| Manifest floor | `>=0.15.0` accepted by the real 0.15.0 parser (the plugin loaded and reached `running`). |

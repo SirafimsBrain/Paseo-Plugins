@@ -1,5 +1,6 @@
 /**
- * Decision logic for the `before("agent.session_open")` hook (Paseo 0.14, 0.5.2).
+ * Decision logic for the session-open hook (`addHook("agent.open.before")`, the
+ * 0.15.0 spelling of `before("agent.session_open")`) — Paseo 0.14, 0.5.2.
  *
  * Two independent contributions can reach an agent on every session open, and they
  * have very different failure modes:
@@ -39,7 +40,7 @@ export interface SessionOpenInput {
   labels: Readonly<Record<string, string>>;
   /** `injectIntoAgents` setting — the single switch for "may bunny-search reach agents". */
   injectIntoAgents: boolean;
-  /** Name the MCP server is registered under (the `agent.create` hook's key). */
+  /** Name the MCP server is registered under (the `agent.create.before` hook's key). */
   serverName: string;
   /** `labelGateKey` setting — empty means no label gate. */
   labelGateKey: string;
@@ -90,10 +91,10 @@ export function labelGateAllows(
 }
 
 /**
- * Does the `agent.create` hook own the creation-time injection?
+ * Does the `agent.create.before` hook own the creation-time injection?
  *
  * It does whenever it can make the decision itself, which is exactly when no label
- * gate is configured: `PluginBeforeRequests["agent.create"]` carries only `config`
+ * gate is configured: `PluginHookRequests["agent.create.before"]` carries only `config`
  * and `env`, **no labels**, so a configured gate cannot be evaluated there. In that
  * case the create hook deliberately injects nothing and this hook takes over for
  * `reason: "create"` as well, where `request.labels` is available.
@@ -126,7 +127,7 @@ export function injectionGateBlockReason(
  * Whether the hook still has to ask the daemon for `supportsMcpServers`.
  *
  * Only when an MCP contribution is genuinely possible: the gate passes, creation is
- * not owned by the `agent.create` hook, and the saved configuration does not already
+ * not owned by the `agent.create.before` hook, and the saved configuration does not already
  * carry the server. Everything else is decided without touching the daemon, so a
  * gated-off or already-provisioned agent costs no extra round trip on open.
  */
@@ -175,7 +176,7 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
     return {
       injectMcp: false,
       attachTool: false,
-      why: "skipped: reason=create is handled by the agent.create hook",
+      why: "skipped: reason=create is handled by the agent.create.before hook",
     };
   }
 

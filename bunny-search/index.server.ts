@@ -37,10 +37,11 @@ import { searchInterfaceUrl } from "./server/ui-url";
  *    store; the MCP process, spawned by agent providers,
  *    cannot use the plugin API and reads the file instead).
  * 3. Injects the bunny-search MCP server into every agent created
- *    through Paseo via the `agent.create` before-hook, and re-contributes
+ *    through Paseo via the `agent.create.before` hook, and re-contributes
  *    it (or the attached `bunny_web_search` tool) on every
- *    `agent.session_open` — the path that also reaches agents created
- *    before injection was turned on.
+ *    `agent.open.before` — the path that also reaches agents created
+ *    before injection was turned on. Both are registered through
+ *    `server.addHook` (Paseo 0.15.0; `server.before` is deprecated).
  * 4. Serves the plugin RPC surface for the Paseo UI, including
  *    the connection test (real HTTP probe of the configured
  *    search service + live MCP handshake check) and the repair
@@ -123,15 +124,15 @@ export default function contribute(server: PluginServerContext) {
   // MCP injection (the plugin's reason to exist: agents get web search)
   // -------------------------------------------------------------------------
 
-  const removeCreateHook = server.before("agent.create", async ({ request }) => {
+  const removeCreateHook = server.addHook("agent.create.before", async ({ request }) => {
     // Async hooks are awaited by the host before the request proceeds,
     // so the mutation below is guaranteed to be applied to agent creation.
     const state = await settings.read().catch(() => null);
     if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
-    // `PluginBeforeRequests["agent.create"]` carries only `config` and `env` — no
-    // labels — so a configured label gate cannot be evaluated here. Defer the whole
-    // creation-time injection to `agent.session_open`, which reads `request.labels`
-    // (see server/session-open.ts: `createHookOwnsCreation`).
+    // `PluginHookRequests["agent.create.before"]` carries only `config` and `env` —
+    // no labels — so a configured label gate cannot be evaluated here. Defer the
+    // whole creation-time injection to `agent.open.before`, which reads
+    // `request.labels` (see server/session-open.ts: `createHookOwnsCreation`).
     if (state.values.labelGateKey.trim().length > 0) {
       console.log(
         `[bunny-search] label gate '${state.values.labelGateKey.trim()}' set: ` +
@@ -170,12 +171,12 @@ export default function contribute(server: PluginServerContext) {
   // -------------------------------------------------------------------------
   // Session-open contribution (Paseo 0.14, 0.5.2)
   //
-  // `agent.create` writes the agent's *saved* configuration once, at creation. This
-  // hook runs on every open — create, resume after the daemon restart or the 0.14.0
-  // idle-hour runtime release, refresh, import — and is the only place that can reach
-  // an agent created before bunny-search was installed or before `injectIntoAgents`
-  // was switched on (today such an agent keeps searching without a server until it is
-  // recreated).
+  // `agent.create.before` writes the agent's *saved* configuration once, at creation.
+  // This hook runs on every open — create, resume after the daemon restart, agent
+  // recovery, the 0.14.0 idle-hour runtime release, refresh, import — and is the only
+  // place that can reach an agent created before bunny-search was installed or before
+  // `injectIntoAgents` was switched on (today such an agent keeps searching without a
+  // server until it is recreated).
   //
   // The constraints below are the ones memory-flash 0.9.4 learned first in this same
   // repository: a name that collides with a *saved* server fails the session open, so
@@ -190,8 +191,8 @@ export default function contribute(server: PluginServerContext) {
 
   const webSearchTool = createWebSearchTool(readRuntimeSettings);
 
-  const removeSessionOpenHook = server.before(
-    "agent.session_open",
+  const removeSessionOpenHook = server.addHook(
+    "agent.open.before",
     async ({ request }, { paseo }) => {
       const state = await settings.read().catch(() => null);
       const values = state?.status === "ready" ? state.values : null;
@@ -323,7 +324,7 @@ export default function contribute(server: PluginServerContext) {
   // --- Repair: reopen the agent's session so the hooks above run again ----------
   // The supported answer to "this agent lost its search tools": `reload()` reopens
   // the provider session with its current configuration and reruns
-  // `agent.session_open`, which re-contributes the server or the attached tool.
+  // `agent.open.before`, which re-contributes the server or the attached tool.
   server.handle(agentReload, async (input, { paseo }) => {
     try {
       const result = await paseo.agents.ref(input.agentId).reload();

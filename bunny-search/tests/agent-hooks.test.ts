@@ -19,8 +19,12 @@ import { createWebSearchTool } from "../server/agent-tools";
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from "../server/mcp-tools";
 
 /**
- * 0.5.2 coverage: the `agent.session_open` contribution, the injection gate, the
+ * 0.5.2 coverage: the session-open contribution, the injection gate, the
  * attached `bunny_web_search` tool, the repair RPC and the MCP `instructions`.
+ *
+ * Since 0.5.3 both lifecycle hooks are registered through `server.addHook`
+ * (`agent.create.before` / `agent.open.before`): 0.15.0 deprecated
+ * `server.before` and renamed the hook names.
  *
  * The decision logic lives in `server/session-open.ts` and the record reader in
  * `server/agent-record.ts`, both pure/injectable, so most of the matrix below runs
@@ -166,8 +170,7 @@ describe("injection gate", () => {
     ).toBeNull();
   });
 
-  it("defers creation to this hook only while a label gate is configured", () => {
-    // `agent.create` carries no labels, so without a gate it still owns creation.
+  it("defers creation to this hook only while a label gate is configured", () => {     // `agent.create.before` carries no labels, so without a gate it still owns creation.
     expect(createHookOwnsCreation({ labelGateKey: "" })).toBe(true);
     expect(createHookOwnsCreation({ labelGateKey: "web-search" })).toBe(false);
   });
@@ -227,7 +230,7 @@ describe("decideSessionOpen", () => {
     });
   });
 
-  it("leaves creation to the agent.create hook when no label gate is set", () => {
+  it("leaves creation to the agent.create.before hook when no label gate is set", () => {
     const decision = decideSessionOpen(input({ reason: "create" }));
     expect(decision.injectMcp).toBe(false);
     expect(decision.attachTool).toBe(false);
@@ -297,7 +300,7 @@ interface FakeServer extends PluginServerContext {
   ): Promise<Record<string, unknown>>;
   setSettings(values: Record<string, unknown>): void;
   handlers: Map<string, (input: never, context: never) => unknown>;
-  beforeHooks: Map<string, (input: never, context: never) => unknown>;
+  hooks: Map<string, (input: never, context: never) => unknown>;
 }
 
 /** `paseo` stub for hook/RPC contexts; `supportsMcpServers` is configurable. */
@@ -320,8 +323,7 @@ function fakeContext(supportsMcpServers: boolean | null = true) {
 
 function createFakeServer(initial: Record<string, unknown>): FakeServer {
   const handlers = new Map<string, (input: never, context: never) => unknown>();
-  const beforeHooks = new Map<string, (input: never, context: never) => unknown>();
-  const onHooks = new Map<string, (input: never, context: never) => unknown>();
+  const hooks = new Map<string, (input: never, context: never) => unknown>();
   let settingsState: { status: "ready"; revision: string; values: Record<string, unknown> } = {
     status: "ready",
     revision: "1",
@@ -342,16 +344,10 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
     handle(contract: { name: string }, handler: (input: never, context: never) => unknown) {
       handlers.set(contract.name, handler);
     },
-    before(name: string, handler: (input: never, context: never) => unknown) {
-      beforeHooks.set(name, handler);
+    addHook(name: string, handler: (input: never, context: never) => unknown) {
+      hooks.set(name, handler);
       return () => {
-        beforeHooks.delete(name);
-      };
-    },
-    on(name: string, handler: (input: never, context: never) => unknown) {
-      onHooks.set(name, handler);
-      return () => {
-        onHooks.delete(name);
+        hooks.delete(name);
       };
     },
     registerProvider() {},
@@ -361,8 +357,8 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
       return (await handler(input as never, (context ?? fakeContext()) as never)) as T;
     },
     async runCreateHook(request: Record<string, unknown>): Promise<Record<string, unknown>> {
-      const hook = beforeHooks.get("agent.create");
-      if (!hook) throw new Error("agent.create hook not registered");
+      const hook = hooks.get("agent.create.before");
+      if (!hook) throw new Error("agent.create.before hook not registered");
       const result = await hook({ request } as never, fakeContext() as never);
       return (result ?? request) as Record<string, unknown>;
     },
@@ -370,8 +366,8 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
       request: Record<string, unknown>,
       context?: unknown,
     ): Promise<Record<string, unknown>> {
-      const hook = beforeHooks.get("agent.session_open");
-      if (!hook) throw new Error("agent.session_open hook not registered");
+      const hook = hooks.get("agent.open.before");
+      if (!hook) throw new Error("agent.open.before hook not registered");
       const result = await hook({ request } as never, (context ?? fakeContext()) as never);
       return (result ?? request) as Record<string, unknown>;
     },
@@ -379,8 +375,7 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
       settingsState = { status: "ready", revision: "2", values };
     },
     handlers,
-    beforeHooks,
-    onHooks,
+    hooks,
   };
   return server as unknown as FakeServer;
 }
@@ -427,7 +422,7 @@ function openRequest(overrides: Record<string, unknown> = {}): Record<string, un
 
 // ---------------------------------------------------------------------------
 
-describe("agent.create hook (injection gate it can evaluate)", () => {
+describe("agent.create.before hook (injection gate it can evaluate)", () => {
   it("writes the server into the saved configuration by default", async () => {
     const server = createFakeServer(defaults());
     const cleanup = contribute(server);
@@ -466,7 +461,7 @@ describe("agent.create hook (injection gate it can evaluate)", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("agent.session_open hook (contribution wiring)", () => {
+describe("agent.open.before hook (contribution wiring)", () => {
   it("contributes the launch-only server when the agent has none saved", async () => {
     writeAgentRecord(AGENT, { provider: "opencode" });
     const server = createFakeServer(defaults());
@@ -561,8 +556,8 @@ describe("agent.session_open hook (contribution wiring)", () => {
     writeAgentRecord(AGENT, { provider: "opencode" });
     const server = createFakeServer(defaults());
     const cleanup = contribute(server);
-    expect(server.beforeHooks.has("agent.create")).toBe(true);
-    expect(server.beforeHooks.has("agent.session_open")).toBe(true);
+    expect(server.hooks.has("agent.create.before")).toBe(true);
+    expect(server.hooks.has("agent.open.before")).toBe(true);
     await server.runSessionOpenHook(openRequest());
     cleanup();
     await expect(server.runSessionOpenHook(openRequest())).rejects.toThrow(/not registered/);

@@ -16,7 +16,7 @@ export const bunnySearchSettings = defineSettings({
   schema: z.object({
     /**
      * Inject the bunny-search MCP server into every agent created through
-     * Paseo (via the `agent.create` before-hook).
+     * Paseo (via the `agent.create.before` hook).
      */
     injectIntoAgents: z.boolean().default(true),
     /** Server name reported in the MCP `initialize` result. */
@@ -94,9 +94,9 @@ export const bunnySearchSettings = defineSettings({
      * receives the MCP server and the attached tool when its labels carry that key
      * with an opt-in value: anything except "off", "false", "no", "0" or empty.
      *
-     * Labels are not available to the `agent.create` hook (its request has only
+     * Labels are not available to the `agent.create.before` hook (its request has only
      * `config` and `env`), so with a gate configured the create-time injection is
-     * deferred to `agent.session_open`, where the labels are read.
+     * deferred to `agent.open.before`, where the labels are read.
      */
     labelGateKey: z.string().trim().max(60).default(""),
     /**

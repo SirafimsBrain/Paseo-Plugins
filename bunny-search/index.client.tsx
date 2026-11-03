@@ -61,7 +61,7 @@ export default function contribute(client: PluginClientContext) {
   });
 
   // Repair action (0.5.2): reopen the selected agent's provider session, which
-  // reruns `before("agent.session_open")` and re-contributes the MCP server or the
+  // reruns `addHook("agent.open.before")` and re-contributes the MCP server or the
   // attached `bunny_web_search` tool. The one-click answer to an agent that lost its
   // search tools after an idle runtime release or an OpenCode location eviction —
   // instead of asking the user to recreate the agent. A throw is surfaced by the

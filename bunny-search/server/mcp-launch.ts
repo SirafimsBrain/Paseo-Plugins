@@ -15,14 +15,14 @@ import { paseoHome } from "./paths";
  * nothing better exists.
  *
  * The same launch configuration is reused for two integration paths:
- * - injection into every Paseo-created agent (`agent.create` hook),
+ * - injection into every Paseo-created agent (`agent.create.before` hook),
  * - the live MCP handshake probe of the connection test.
  */
 
 /**
- * Key the plugin registers its MCP server under — in the `agent.create` hook (which
+ * Key the plugin registers its MCP server under — in the `agent.create.before` hook (which
  * writes it into the agent's saved configuration) and in
- * `before("agent.session_open")` (which merges it launch-only).
+ * `addHook("agent.open.before")` (which merges it launch-only).
  *
  * The two must agree: two different keys would spawn the server twice for one agent,
  * and a key the agent's saved configuration already carries aborts the session open

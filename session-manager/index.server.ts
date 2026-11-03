@@ -27,7 +27,9 @@ export default function contribute(server: PluginServerContext) {
   // runtimes after an hour and resumes them on the next prompt, so sessions now
   // close and reopen far more often — dropping the cache on every close keeps the
   // running flags honest instead of letting them age out (§18.3 item 1).
-  const removeClosedHook = server.on("agent.closed", (event) => {
+  // Registered through `server.addHook` — Paseo 0.15.0 renamed the event
+  // `agent.closed` → `agent.close.after` and deprecated `server.on` (§19).
+  const removeClosedHook = server.addHook("agent.close.after", async (event) => {
     invalidateListing();
     console.log(
       `[session-manager] agent closed (${event.agent.id}): listing cache invalidated`,

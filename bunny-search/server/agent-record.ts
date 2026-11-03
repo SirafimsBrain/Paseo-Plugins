@@ -7,7 +7,9 @@ import * as path from "node:path";
  *
  * ## Why this exists
  *
- * Paseo 0.14 lets a plugin contribute MCP servers in `before("agent.session_open")`,
+ * Paseo 0.14 lets a plugin contribute MCP servers in the session-open hook
+ * (`addHook("agent.open.before")`, Paseo 0.15.0 spelling; `before("agent.session_open")`
+ * before that),
  * but that map is merged with the agent's **saved** configuration at launch and a
  * name present in both is a hard failure:
  *

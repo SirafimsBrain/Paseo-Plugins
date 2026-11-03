@@ -89,6 +89,50 @@ installation. Updates: `paseo plugin update session-manager`.
   the tests build throwaway stores under the OS temp directory and never touch
   the real home stores.
 
+## Paseo 0.15.0 compatibility
+
+Verified against the **stable Paseo 0.15.0** release (2026-11-03).
+Full evidence: [`__doc.md`](./__doc.md) §19. **Compatible after a mandatory
+migration — shipped as `0.3.4`**, with `requirements.paseo` `>=0.14.0` →
+`>=0.15.0` and the SDK pin `^0.14.0` → `^0.15.0`.
+
+**Deprecated in 0.15.0 and used here — migrated:**
+
+| Deprecated (`@deprecated`, removal after **2027-04-30**) | Migration in 0.3.4 |
+| ---------- | ------------------ |
+| `server.on(...)` | `server.addHook("agent.close.after", async (event) => …)` — the 0.15.0 rename of `agent.closed`. Same payload (`{ agent }`), same body (`invalidateListing()` + one log line); the handler became `async` only because `HookHandlers` is typed to return a `Promise`. |
+| `server.before(...)` | not used by this plugin (it registers no request hooks), listed because it carries the same deprecation mark. |
+
+The legacy spelling still works on 0.15.0 — the SDK maps it through
+`legacyEvents` — so this is a deprecation-driven migration, not a breakage.
+`addHook` exists on the shipped host: the installed `app.asar` builds the
+plugin `server` object with `createLifecycleRegistration(...)` from
+`@getpaseo/plugin/internal/lifecycle`. Because `addHook` does not exist on a
+0.14.0 host, the manifest floor had to move with it.
+
+**Nothing else changed for this plugin.** The 0.14.0 → 0.15.0 SDK diff is
+server-only (`dist/server/lifecycle.*`, `dist/server/index.d.ts`,
+`package.json`); **`dist/client/` is byte-identical**, so the panel,
+settings screen, four Command Center items, `useTabState` filters and the
+`client/ui` imports are untouched by construction. The plugin is unaffected
+by the OpenCode shared-service finding in
+[bunny-search](../bunny-search/README.md) — it injects no MCP servers.
+
+**Recommendations for improvement — recorded, not implemented:**
+[`__doc.md`](./__doc.md) §19.3 — also drop the listing cache on
+`agent.archive.after` (an archived agent can otherwise stay in the cached
+listing with stale hints until the 30-second TTL ages out), move the provider
+adapters that shell out onto `spawnProcess` / `terminateProcess`, and add an
+`addSidebarFooterItem` status row.
+
+**Verification:** typecheck clean (`tsc --noEmit`) and vitest **9 suites / 74
+tests** green against `@getpaseo/plugin@^0.15.0`, no `server.on(` /
+`server.before(` call left in the plugin, and **live on the real 0.15.0
+daemon**: installed from the working tree into an isolated scratch home,
+`running` with `[paseo] Plugin ready`, zero `Unknown lifecycle hook` errors —
+and the hook proven to fire on a real agent stop and a real delete
+(`[session-manager] agent closed (<id>): listing cache invalidated`).
+
 ## Paseo 0.14.0 compatibility
 
 Verified against the **stable Paseo 0.14.0** release (2026-10-30).
@@ -105,10 +149,11 @@ SDK pin moved to `@getpaseo/plugin@^0.14.0`.
 
 **Nothing else deprecated reaches it.** 0.14.0 adds no new `@deprecated`
 marks (byte-identical to 0.13.0) and `dist/client/` did not move at all; the
-plugin still registers only `addWorkspacePanel` / `addSettingsScreen` /
+plugin registers `addWorkspacePanel` / `addSettingsScreen` /
 `addCommandCenterItem`, keeps its `localStorage` reads inside `client/web.ts`,
-and registers no lifecycle hooks, so the always-empty `agent.turn_ended`
-`timeline` cannot touch it.
+and — since 0.3.3 — exactly one lifecycle hook, which is a close event and not
+a turn event, so the always-empty `agent.turn_ended` `timeline` cannot touch
+it. (That hook is itself migrated in the 0.15.0 section below.)
 
 **One documentation discrepancy, recorded:** the deployed hooks page says
 `server.addHook("agent.open.before")` "is available from Paseo 0.14", but
