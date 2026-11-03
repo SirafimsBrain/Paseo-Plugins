@@ -20015,6 +20015,7 @@ var WRITE_ATTEMPTS = 3;
 var WRITE_RETRY_DELAY_MS = 25;
 var SCHEMA_VERSION = 1;
 var DEFAULT_CHANGE_BATCH = 200;
+var DEFAULT_ACTOR_ACTIVITY_LIMIT = 50;
 function paseoHome() {
   return process.env.PASEO_HOME ?? path.join(os.homedir(), ".paseo");
 }
@@ -20241,6 +20242,23 @@ var LuckPlannerStore = class {
   getNode(projectKey, id) {
     const row = this.db.prepare("SELECT * FROM nodes WHERE project_key = ? AND id = ?").get(projectKey, id);
     return row ? rowToNode(row) : null;
+  }
+  /**
+   * Audit rows **written by one actor**, newest first — the agent activity
+   * panel's query (0.40.8, `__doc.md` §10.11 item 4). The audit trail already
+   * names the actor on every row (agents through `LUCK_PLANNER_AGENT_ID`, the
+   * UI as `user`), so "what did this agent touch" needs no second table.
+   *
+   * Scoped by `projectKey` like every other read (ADR-2) and capped, because
+   * a long-lived agent can accumulate thousands of rows. Read-only: no fence,
+   * no transaction, nothing to audit.
+   */
+  listActorActivity(projectKey, actor, limit = DEFAULT_ACTOR_ACTIVITY_LIMIT) {
+    const capped = Math.max(1, Math.trunc(limit));
+    const rows = this.db.prepare(
+      "SELECT * FROM history WHERE project_key = ? AND actor = ? ORDER BY id DESC LIMIT ?"
+    ).all(projectKey, actor, capped);
+    return rows.map(rowToHistory);
   }
   /** Append-only audit trail of one entity, oldest first. */
   listHistory(projectKey, entityId) {
@@ -23762,7 +23780,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.39.8";
+var SERVER_VERSION = "0.40.8";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

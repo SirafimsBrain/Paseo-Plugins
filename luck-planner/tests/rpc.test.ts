@@ -7,6 +7,7 @@ import contribute from "../index.server";
 import { LuckPlannerStore } from "../server/store";
 import {
   UI_ACTOR,
+  agentActivity,
   agentMcpRegister,
   agentMcpStatus,
   agentMcpUnregister,
@@ -201,6 +202,7 @@ describe("RPC surface", () => {
           agentMcpStatus.name,
           agentMcpUnregister.name,
           agentReload.name,
+          agentActivity.name,
           bugReport.name,
           dashboardStatus.name,
           goalApprove.name,
@@ -917,6 +919,126 @@ describe("agent-reload (the refresh tools action)", () => {
         ok: false,
         error: "Paseo host client is unavailable.",
       });
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("agent-activity (0.40.8, §10.11 item 4)", () => {
+  /**
+   * The agent panel's read. The audit trail already names its actor, so the
+   * only things this contract adds are the slice (one agent, one project),
+   * the order (newest first) and the node resolution the panel would
+   * otherwise have to do row by row.
+   */
+  it("returns one agent's rows, newest first, resolved to their nodes", async () => {
+    const store = new LuckPlannerStore();
+    const { branch, leafA, leafB } = seedTree(store);
+    store.setStatus({ projectKey: P, id: leafA.id, status: "ready", actor: ACTOR });
+    store.updateNode({
+      projectKey: P,
+      id: leafB.id,
+      name: "prorate refunds (v2)",
+      actor: ACTOR,
+    });
+    // A node whose only rows belong to another actor must stay out of this
+    // agent's panel entirely.
+    const userLeaf = store.createNode({
+      projectKey: P,
+      parentId: branch.id,
+      kind: "leaf",
+      name: "typed by a human",
+      actor: UI_ACTOR,
+    });
+    store.close();
+
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        agentId: string;
+        entries: Array<{
+          entry: { action: string; entityId: string; actor: string };
+          node: Node | null;
+        }>;
+      }>(agentActivity.name, { projectKey: P, agentId: ACTOR });
+
+      expect(result.agentId).toBe(ACTOR);
+      const ids = result.entries.map((row) => row.entry.entityId);
+      expect(ids).not.toContain(userLeaf.id);
+      expect(ids).toContain(leafB.id);
+      expect(ids).toContain(leafA.id);
+      // Newest first: the leafB edit landed after the leafA status move.
+      expect(ids[0]).toBe(leafB.id);
+      expect(result.entries.every((row) => row.entry.actor === ACTOR)).toBe(true);
+      const leafRow = result.entries.find((row) => row.entry.entityId === leafA.id);
+      expect(leafRow?.entry.action).toBe("status");
+      expect(leafRow?.node?.status).toBe("ready");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("scopes by project and resolves non-node entities to null", async () => {
+    const store = new LuckPlannerStore();
+    const { leafA } = seedTree(store);
+    store.createBug({
+      projectKey: P,
+      title: "retry storm",
+      description: "queue backs up",
+      severity: "high",
+      nodeIds: [leafA.id],
+      actor: ACTOR,
+    });
+    const otherRoot = store.createNode({
+      projectKey: OTHER,
+      parentId: null,
+      kind: "root",
+      name: "Another project",
+      actor: ACTOR,
+    });
+    store.close();
+
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        entries: Array<{
+          entry: { entityId: string; entityType: string };
+          node: Node | null;
+        }>;
+      }>(agentActivity.name, { projectKey: P, agentId: ACTOR });
+
+      expect(result.entries.map((row) => row.entry.entityId)).not.toContain(otherRoot.id);
+      const bugRow = result.entries.find((row) => row.entry.entityType === "bug");
+      expect(bugRow?.node).toBeNull();
+      // The bug's `link` row points at the leaf and does resolve.
+      expect(
+        result.entries.some((row) => row.entry.entityId === leafA.id && row.node !== null),
+      ).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("caps the page at the requested limit", async () => {
+    const store = new LuckPlannerStore();
+    const { leafA } = seedTree(store);
+    for (const status of ["ready", "claimed", "in_progress"] as const) {
+      store.setStatus({ projectKey: P, id: leafA.id, status, actor: ACTOR });
+    }
+    store.close();
+
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{ entries: unknown[] }>(agentActivity.name, {
+        projectKey: P,
+        agentId: ACTOR,
+        limit: 2,
+      });
+      expect(result.entries).toHaveLength(2);
     } finally {
       cleanup();
     }

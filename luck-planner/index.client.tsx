@@ -1,4 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { LuckPlannerAgentPanel } from "./client/agent-panel";
 import { LuckPlannerPanel } from "./client/tree-panel";
 import { LuckPlannerSettingsScreen } from "./client/settings-screen";
 import {
@@ -45,9 +46,12 @@ import { LuckPlannerTimelineRow } from "./client/timeline-row";
  * - H2 (done): timeline renderer for the daemon-appended rows (goal approved,
  *   leaf done) — registered under the kind/version/schema the server builds
  *   (`shared/timeline.ts`)
+ * - 0.40.8: agent-scoped panel showing the audit rows *this* agent wrote
+ *   (`client/agent-panel.tsx`, `addAgentPanel` with `params.agentId`)
  */
 
 const PANEL_ID = "luck-planner";
+const AGENT_PANEL_ID = "luck-planner-agent-activity";
 
 export default function contribute(client: PluginClientContext) {
   client.addWorkspacePanel({
@@ -57,6 +61,18 @@ export default function contribute(client: PluginClientContext) {
     locations: ["workspace", "explorer"],
     Component: LuckPlannerPanel,
   } as any);
+
+  // 0.40.8 (§10.11 item 4): the same tree data, sliced by actor. An agent
+  // panel is opened for one agent and the host hands it `params.agentId`; the
+  // component reads the project key from its workspace and asks the server
+  // for the agent's audit rows. Registered separately from the workspace
+  // panel so it lives where the operator already is — the agent.
+  client.addAgentPanel({
+    id: AGENT_PANEL_ID,
+    title: "Luck Planner activity",
+    icon: "History",
+    Component: LuckPlannerAgentPanel,
+  });
 
   client.addSettingsScreen({
     id: "luck-planner-settings",
@@ -153,6 +169,19 @@ export default function contribute(client: PluginClientContext) {
   // an agent that lost its tools after an idle runtime release, an OpenCode
   // eviction or a settings change. A refused reload throws into the host's
   // error toast, so a failed repair is never silent.
+  // 0.40.8: the agent panel's entry point. An agent-context item opens the
+  // panel in the current agent, which is exactly the actor the panel lists.
+  client.addCommandCenterItem({
+    id: "luck-planner-agent-activity",
+    title: "Open this agent's luck-planner activity",
+    icon: "History",
+    keywords: ["luck", "planner", "agent", "activity", "audit", "tree"],
+    context: "agent",
+    onSelect({ openPanel }) {
+      openPanel(AGENT_PANEL_ID);
+    },
+  });
+
   client.addCommandCenterItem({
     id: "refresh-luck-planner-tools",
     title: "Refresh luck-planner tools on this agent",

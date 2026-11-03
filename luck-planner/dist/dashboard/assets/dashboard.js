@@ -381,6 +381,23 @@ var agentReload = defineRpc({
     error: external_exports.string().nullable()
   })
 });
+var agentActivity = defineRpc({
+  name: "luck-planner.agent-activity",
+  input: external_exports.object({
+    projectKey: projectKeySchema,
+    agentId: external_exports.string().min(1),
+    limit: external_exports.number().int().positive().max(200).optional()
+  }),
+  output: external_exports.object({
+    agentId: external_exports.string(),
+    entries: external_exports.array(
+      external_exports.object({
+        entry: historyEntrySchema,
+        node: nodeSchema.nullable()
+      })
+    )
+  })
+});
 var RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -396,7 +413,8 @@ var RPC_CONTRACT_NAMES = [
   agentMcpStatus.name,
   agentMcpRegister.name,
   agentMcpUnregister.name,
-  agentReload.name
+  agentReload.name,
+  agentActivity.name
 ];
 
 // shared/api.ts

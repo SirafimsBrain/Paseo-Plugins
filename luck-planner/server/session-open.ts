@@ -26,6 +26,13 @@
  * `agent.create.before` hook owns creation-time injection (stage D4: config-file cover
  * first, saved config otherwise), and by the time the first session opens the
  * record already reflects its decision — re-deriving here would only race it.
+ *
+ * 0.15.0 adds a third, host-level blocker (0.40.8, §10.11 item 1): an
+ * `opencode` agent carrying custom MCP servers is rejected outright while the
+ * host reuses a discovered OpenCode v2 service (`server/opencode-service.ts`).
+ * The probe answers that question for this open, and a shared service is
+ * treated exactly like a provider without MCP support — no server, native tool
+ * instead — so the agent still opens and still records facts.
  */
 
 import type { AgentRecordLookup } from "./agent-record";
@@ -45,6 +52,11 @@ export interface SessionOpenInput {
   lookup: AgentRecordLookup;
   /** `capabilities.supportsMcpServers`, or `null` when the snapshot was unavailable. */
   supportsMcpServers: boolean | null;
+  /**
+   * OpenCode shared-service gate (0.15.0). Absent means "no shared service",
+   * which is also every other provider's answer.
+   */
+  sharedOpenCodeService?: { shared: boolean; why: string };
 }
 
 export interface SessionOpenDecision {
@@ -77,6 +89,10 @@ export function needsCapabilityProbe(input: SessionOpenInput): boolean {
   if (input.reason === "create") return false;
   if (input.configCovered) return false;
   if (savedHasServer(input)) return false;
+  // A shared OpenCode service rules the contribution out on its own: the
+  // capability probe cannot change that answer, so it is not worth a round
+  // trip to the daemon.
+  if (input.sharedOpenCodeService?.shared === true) return false;
   return true;
 }
 
@@ -86,6 +102,10 @@ export function needsCapabilityProbe(input: SessionOpenInput): boolean {
  * silently doing nothing.
  */
 function mcpBlockReason(input: SessionOpenInput): string | null {
+  // Strongest fact first: it is the host, not the provider, that would fail.
+  if (input.sharedOpenCodeService?.shared === true) {
+    return `shared OpenCode service (${input.sharedOpenCodeService.why})`;
+  }
   if (input.supportsMcpServers === false) return "provider does not support MCP servers";
   if (input.supportsMcpServers === null) return "provider capabilities unknown";
   if (input.lookup.status === "missing") return "agent record not found on disk";
@@ -107,7 +127,11 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
 
   if (!input.injectIntoAgents) return skip("injectIntoAgents is off");
   if (input.purpose === "history") return skip("purpose is history");
-  if (input.reason === "create") {
+  // The create hook owns creation-time injection — *unless* the host gate
+  // stopped it (0.40.8): a shared OpenCode service made the create hook
+  // contribute nothing, so this open is the only chance to attach the native
+  // tool and the agent must not be left without a way to write.
+  if (input.reason === "create" && input.sharedOpenCodeService?.shared !== true) {
     return skip("reason=create is handled by the agent.create.before hook");
   }
   if (input.configCovered) {
@@ -127,7 +151,12 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
     ? `injecting '${input.serverName}': saved configuration has no such server (${describeLookup(input)})`
     : attachTool
       ? `attaching native luck_tree_upsert_leaf tool only: ${block}`
-      : `skipped: the agent already carries '${input.serverName}' in its saved configuration`;
+      : input.sharedOpenCodeService?.shared === true
+        ? // The saved entry keeps the host's rejection alive whatever this hook
+          // does — the name lives in the agent's own configuration.
+          `skipped: the agent already carries '${input.serverName}' in its saved configuration; ` +
+          `${block} — the host may still reject this open`
+        : `skipped: the agent already carries '${input.serverName}' in its saved configuration`;
 
   return { injectMcp, attachTool, why };
 }

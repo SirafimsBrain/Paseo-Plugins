@@ -177,3 +177,92 @@ describe("needsCapabilityProbe", () => {
     expect(needsCapabilityProbe(input({ lookup: FOUND_OTHER }))).toBe(true);
   });
 });
+
+describe("decideSessionOpen — OpenCode shared service (0.15.0, §10.11 item 1)", () => {
+  /**
+   * The host-level gate: where the daemon reuses a discovered OpenCode v2
+   * service, an agent carrying custom MCP servers cannot be opened at all, so
+   * the hook must contribute nothing over MCP and attach the native tool —
+   * the same answer a provider without MCP support gets.
+   */
+  const SHARED = {
+    shared: true,
+    why: "OpenCode 2.2.5 service discovered at http://127.0.0.1:37999",
+  };
+
+  it("attaches the native tool instead of the server", () => {
+    expect(decideSessionOpen(input({ sharedOpenCodeService: SHARED }))).toEqual({
+      injectMcp: false,
+      attachTool: true,
+      why:
+        "attaching native luck_tree_upsert_leaf tool only: shared OpenCode service " +
+        "(OpenCode 2.2.5 service discovered at http://127.0.0.1:37999)",
+    });
+  });
+
+  it("does not spend a capability probe on an answer the probe cannot change", () => {
+    expect(needsCapabilityProbe(input({ sharedOpenCodeService: SHARED }))).toBe(false);
+    expect(needsCapabilityProbe(input({ sharedOpenCodeService: { shared: false, why: "no file" } }))).toBe(true);
+  });
+
+  it("keeps the gate above the provider capability answer", () => {
+    const decision = decideSessionOpen(
+      input({ sharedOpenCodeService: SHARED, supportsMcpServers: true }),
+    );
+    expect(decision.injectMcp).toBe(false);
+    expect(decision.attachTool).toBe(true);
+    expect(decision.why).toContain("shared OpenCode service");
+  });
+
+  it("explains the unrepairable case: the saved config keeps the host's rejection alive", () => {
+    const decision = decideSessionOpen(
+      input({ sharedOpenCodeService: SHARED, lookup: FOUND_OURS }),
+    );
+    expect(decision.injectMcp).toBe(false);
+    expect(decision.attachTool).toBe(false);
+    expect(decision.why).toContain("already carries");
+    expect(decision.why).toContain("shared OpenCode service");
+    expect(decision.why).toContain("may still reject this open");
+  });
+
+  it("is inert when no shared service was discovered", () => {
+    expect(
+      decideSessionOpen(input({ sharedOpenCodeService: { shared: false, why: "no file" } }))
+        .injectMcp,
+    ).toBe(true);
+  });
+
+  it("still respects the settings gate and the config-file cover", () => {
+    expect(
+      decideSessionOpen(input({ sharedOpenCodeService: SHARED, injectIntoAgents: false })).why,
+    ).toBe("skipped: injectIntoAgents is off");
+    expect(
+      decideSessionOpen(input({ sharedOpenCodeService: SHARED, configCovered: true })).why,
+    ).toContain("config file already registers");
+  });
+});
+
+describe("decideSessionOpen — the create open behind the host gate (0.40.8)", () => {
+  /**
+   * Sequencing case found live: when the shared-service gate stops the create
+   * hook, `reason=create` is the *only* open a fresh agent gets before its
+   * first turn. Leaving it to "the create hook" would ship an agent with no
+   * way to write at all, so the native tool is attached here instead.
+   */
+  const SHARED = { shared: true, why: "OpenCode 2.2.5 service discovered" };
+
+  it("attaches the native tool on the create open when the gate stopped the create hook", () => {
+    const decision = decideSessionOpen(
+      input({ reason: "create", sharedOpenCodeService: SHARED }),
+    );
+    expect(decision.injectMcp).toBe(false);
+    expect(decision.attachTool).toBe(true);
+    expect(decision.why).toContain("shared OpenCode service");
+  });
+
+  it("still leaves the create open alone when no shared service was found", () => {
+    expect(decideSessionOpen(input({ reason: "create" })).why).toBe(
+      "skipped: reason=create is handled by the agent.create.before hook",
+    );
+  });
+});

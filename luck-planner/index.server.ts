@@ -19,6 +19,7 @@ import {
   agentMcpRegister,
   agentMcpStatus,
   agentMcpUnregister,
+  agentActivity,
   agentReload,
   bugReport,
   dashboardStatus,
@@ -54,6 +55,8 @@ import {
   needsCapabilityProbe,
 } from "./server/session-open";
 import { createUpsertLeafTool } from "./server/agent-tool";
+import { probeOpenCodeService } from "./server/opencode-service";
+import { normalizeProjectKey, seedProjectTree } from "./server/project-seed";
 import { ensureSkillInstalled } from "./server/skill";
 import { ChangeFeed, readChangesSince } from "./server/change-feed";
 import {
@@ -265,6 +268,20 @@ export default function contribute(server: PluginServerContext) {
         );
         return request;
       }
+      // 0.40.8 (§10.11 item 1): 0.15.0 lets the `opencode` provider reuse a
+      // running v2 service, and an agent whose config carries custom MCP
+      // servers is then *rejected* by the host — creation fails before the
+      // first turn. The session-open hook attaches the native
+      // `luck_tree_upsert_leaf` tool instead, so the tree stays writable.
+      const service = probeOpenCodeService({ provider: request.config.provider });
+      if (service.shared) {
+        console.log(
+          `[luck-planner] agent.create injection skipped for ${request.config.provider}: ${service.why} — ` +
+            `the host rejects custom MCP servers on a shared OpenCode service; ` +
+            `the native luck_tree_upsert_leaf tool is attached when the session opens`,
+        );
+        return request;
+      }
       const config = injectedMcpConfig({ serverName: values.mcpServerName });
       request.config.mcpServers = {
         ...(request.config.mcpServers ?? {}),
@@ -306,8 +323,18 @@ export default function contribute(server: PluginServerContext) {
     async ({ request }, context) => {
       rememberPaseo(context.paseo);
       const values = await readValues();
+      // Host-level gate (0.40.8, §10.11 item 1): decided before the daemon is
+      // asked anything, because no capability answer can make a shared
+      // OpenCode service accept custom MCP servers.
+      const service = probeOpenCodeService({ provider: request.provider });
+      // The audit actor rides the **session environment**, and 0.15.0 rejects a
+      // shared-service agent for a custom environment exactly as it does for a
+      // custom MCP server ("Custom OpenCode MCP servers or process environment
+      // …"). The stamp exists only for the spawned MCP server, so with no MCP
+      // contribution there is nothing to stamp — the native tool reads the
+      // actor from `context.agent.id` instead.
       let env = request.env;
-      if (values.injectIntoAgents) {
+      if (values.injectIntoAgents && !service.shared) {
         env = { ...env, ...sessionActorEnv(request.agentId) };
       }
 
@@ -320,6 +347,7 @@ export default function contribute(server: PluginServerContext) {
         configCovered: cover.covered,
         lookup: readSavedMcpServers(request.agentId),
         supportsMcpServers: null as boolean | null,
+        sharedOpenCodeService: { shared: service.shared, why: service.why },
       };
 
       // The daemon is only consulted when an MCP contribution is still
@@ -361,6 +389,81 @@ export default function contribute(server: PluginServerContext) {
         );
       }
       return { ...request, env, tools, mcpServers };
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Project seeding (0.40.8, §10.11 items 2/3): the store scopes every row by
+  // `projectKey` = the workspace's `projectRootPath`, and nothing exists for a
+  // project until its first write. 0.15.0 exposes the hooks that close the gap:
+  // `worktree.create.after` (awaited before workspace setup and agents start)
+  // and the two `*.after` events. Seeding is the store's own skeleton
+  // (`ensureSkeletonBranch`), guarded by an emptiness check — so a project
+  // bootstrapped by an agent and one seeded here are indistinguishable, and a
+  // hook can never throw into an agent creation.
+  //
+  // `worktree.create.after` answers with `{ path, branch, sourceCheckout }` and
+  // is the only hook that needs no daemon round trip: the path *is* the key of
+  // the workspace that will exist there. The two event hooks carry ids only, so
+  // they resolve `projectRootPath` through the SDK and seed nothing when the
+  // workspace cannot be read — guessing a key the panel never reads would only
+  // create invisible trees.
+  // -------------------------------------------------------------------------
+
+  const removeWorktreeSeedHook = server.addHook(
+    "worktree.create.after",
+    async ({ worktree }) => {
+      if (disposed) return;
+      const seeded = seedProjectTree(store, { projectKey: worktree.path });
+      if (seeded.created) {
+        console.log(
+          `[luck-planner] worktree.create.after ${worktree.branch}: ${seeded.why}`,
+        );
+      }
+    },
+  );
+
+  const removeWorkspaceSeedHook = server.addHook(
+    "workspace.create.after",
+    async ({ workspace }, context) => {
+      if (disposed) return;
+      const snapshot = await context.paseo.workspaces
+        .ref(workspace.id)
+        .refresh()
+        .catch(() => null);
+      const projectKey = normalizeProjectKey(
+        snapshot?.projectRootPath ?? workspace.cwd,
+      );
+      if (projectKey === null) return;
+      const seeded = seedProjectTree(store, { projectKey });
+      if (seeded.created) {
+        console.log(
+          `[luck-planner] workspace.create.after ${workspace.id}: ${seeded.why}`,
+        );
+      }
+    },
+  );
+
+  // An agent created in a workspace that predates this release (or the
+  // plugin) is the case the event hooks exist for: `workspace.create.after`
+  // never fires for it, so the first creation there is what makes the project
+  // visible in the dashboard and the panel.
+  const removeAgentSeedHook = server.addHook(
+    "agent.create.after",
+    async ({ agent }, context) => {
+      if (disposed || agent.workspaceId === null) return;
+      const snapshot = await context.paseo.workspaces
+        .ref(agent.workspaceId)
+        .refresh()
+        .catch(() => null);
+      const projectKey = normalizeProjectKey(snapshot?.projectRootPath ?? null);
+      if (projectKey === null) return;
+      const seeded = seedProjectTree(store, { projectKey });
+      if (seeded.created) {
+        console.log(
+          `[luck-planner] agent.create.after ${agent.id}: ${seeded.why}`,
+        );
+      }
     },
   );
 
@@ -629,6 +732,23 @@ export default function contribute(server: PluginServerContext) {
     return store.stats(input.projectKey);
   });
 
+  // 0.40.8 (§10.11 item 4): the agent panel's read. Audit rows are already
+  // stamped with their actor, so this is the existing trail sliced by it; the
+  // node resolution happens here, once per row, instead of in the panel.
+  handle(agentActivity, (input) => {
+    throwIfDisposed();
+    const entries = store
+      .listActorActivity(input.projectKey, input.agentId, input.limit)
+      .map((entry) => ({
+        entry,
+        node:
+          entry.entityType === "node"
+            ? store.getNode(input.projectKey, entry.entityId)
+            : null,
+      }));
+    return { agentId: input.agentId, entries };
+  });
+
   // Stage F2: the panel button and the ⌘K "Open dashboard" action ask where the
   // dashboard is. The answer comes from the live endpoint (bound port + active
   // token), not from the settings — a busy port may have fallen back and the
@@ -672,6 +792,9 @@ export default function contribute(server: PluginServerContext) {
     disposed = true;
     removeCreateHook();
     removeSessionHook();
+    removeWorktreeSeedHook();
+    removeWorkspaceSeedHook();
+    removeAgentSeedHook();
     unsubscribeSettings();
     // The timeline feed reads the audit table: gone before the store it
     // reads is closed, so a reload never polls a dead handle.

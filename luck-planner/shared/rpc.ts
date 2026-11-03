@@ -417,6 +417,35 @@ export const agentReload = defineRpc({
   }),
 });
 
+/**
+ * `luck-planner.agent-activity`: the audit rows one agent wrote in this
+ * project (0.40.8, §10.11 item 4).
+ *
+ * The agent panel reads it: the audit trail already carries the actor on
+ * every row, so "what did this agent touch" is one indexed read over the
+ * same table the change feed polls. Each row carries the node it points at
+ * when the entity is a node (bugs and goals are not rendered as tree rows),
+ * so the panel can show a name and a status without a second round trip per
+ * row. Read-only.
+ */
+export const agentActivity = defineRpc({
+  name: "luck-planner.agent-activity",
+  input: z.object({
+    projectKey: projectKeySchema,
+    agentId: z.string().min(1),
+    limit: z.number().int().positive().max(200).optional(),
+  }),
+  output: z.object({
+    agentId: z.string(),
+    entries: z.array(
+      z.object({
+        entry: historyEntrySchema,
+        node: nodeSchema.nullable(),
+      }),
+    ),
+  }),
+});
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -433,4 +462,5 @@ export const RPC_CONTRACT_NAMES = [
   agentMcpRegister.name,
   agentMcpUnregister.name,
   agentReload.name,
+  agentActivity.name,
 ] as const;

@@ -140,6 +140,12 @@ export const SCHEMA_VERSION = 1;
 export const DEFAULT_CHANGE_BATCH = 200;
 
 /**
+ * Rows read per request by the agent activity query (0.40.8). One panel
+ * shows the latest page; an agent's whole history is not a listing.
+ */
+export const DEFAULT_ACTOR_ACTIVITY_LIMIT = 50;
+
+/**
  * Resolves the default database location: `$PASEO_HOME/plugins/
  * luck-planner/luck-planner.db`, falling back to `~/.paseo` (the same
  * convention memory-flash and bunny-search use for plugin data).
@@ -717,6 +723,30 @@ export class LuckPlannerStore {
       .prepare("SELECT * FROM nodes WHERE project_key = ? AND id = ?")
       .get(projectKey, id) as NodeRow | undefined;
     return row ? rowToNode(row) : null;
+  }
+
+  /**
+   * Audit rows **written by one actor**, newest first — the agent activity
+   * panel's query (0.40.8, `__doc.md` §10.11 item 4). The audit trail already
+   * names the actor on every row (agents through `LUCK_PLANNER_AGENT_ID`, the
+   * UI as `user`), so "what did this agent touch" needs no second table.
+   *
+   * Scoped by `projectKey` like every other read (ADR-2) and capped, because
+   * a long-lived agent can accumulate thousands of rows. Read-only: no fence,
+   * no transaction, nothing to audit.
+   */
+  listActorActivity(
+    projectKey: string,
+    actor: string,
+    limit = DEFAULT_ACTOR_ACTIVITY_LIMIT,
+  ): HistoryEntry[] {
+    const capped = Math.max(1, Math.trunc(limit));
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM history WHERE project_key = ? AND actor = ? ORDER BY id DESC LIMIT ?",
+      )
+      .all(projectKey, actor, capped) as unknown as HistoryRow[];
+    return rows.map(rowToHistory);
   }
 
   /** Append-only audit trail of one entity, oldest first. */

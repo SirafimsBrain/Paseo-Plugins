@@ -458,6 +458,9 @@ Verified by `tests/growth.test.ts` (13 tests):
 | Dashboard HTTP server | daemon subprocess, started by the plugin lifecycle | F1 ✅ |
 | "Open dashboard" (panel button + ⌘K screen) | `navigation.openBrowser` → `openExternalUrl` fallback; `dashboard-status` RPC for the URL | F2 ✅ |
 | Agent timeline rows (goal approved, leaf done) | `paseo.agents.ref(id).timeline.append` | H2 ✅ |
+| Agent-scoped activity panel (the audit rows of one agent) | `addAgentPanel` + `luck-planner.agent-activity` (`store.listActorActivity`) | 0.40.8 |
+| Project seeding on worktree / workspace / agent creation | `server.addHook("worktree.create.after" / "workspace.create.after" / "agent.create.after")` | 0.40.8 |
+| OpenCode shared-service guard (no MCP and no env on a reused service) | `server/opencode-service.ts` → `decideSessionOpen` | 0.40.8 |
 
 Client rules enforced at every UI stage: colors only from `theme.colors`, padding from
 `layout.compact`, host typography via `use-host-typography`, React Native primitives only, and
@@ -1999,11 +2002,12 @@ English only (project rule).
 
 ## 10. Compatibility
 
-**Current state (2026-11-03): `requirements.paseo` is `>=0.15.0` and the SDK
-pin is `@getpaseo/plugin@^0.15.0`** — the lifecycle hooks are registered
-through `server.addHook`, which does not exist on a 0.14.0 host. The
-0.15.0 pass is §10.10 and it is the one to read first; §10.5–§10.9 keep the
-evidence of the earlier passes as it stood then.
+**Current state (2026-11-03, version 0.40.8): `requirements.paseo` is
+`>=0.15.0` and the SDK pin is `@getpaseo/plugin@^0.15.0`** — the lifecycle
+hooks are registered through `server.addHook`, which does not exist on a
+0.14.0 host. Read §10.10 (the 0.15.0 pass) and §10.11 (the release that
+implemented its recommendations) first; §10.5–§10.9 keep the evidence of the
+earlier passes as it stood then.
 
 Verified on 2026-10-22 in the plugin's development environment with
 `@getpaseo/plugin@0.12.0` (at that time the manifest required Paseo
@@ -2605,6 +2609,13 @@ opening, so an existing agent cannot be continued either. The plugin's own
 `capabilities.supportsMcpServers` probe is not a guard here: the probe answers
 the provider's capability, not the host's service topology.
 
+**Superseded in 0.40.8:** the analysis below is what the 0.39.8 pass
+measured. Implementing the guard proved the rule is *broader* than custom MCP
+servers — a custom session **environment** triggers the same rejection, and
+this plugin stamps one for its audit actor. §10.11.1 has the corrected rule,
+the three-way measurement and the shipped fix; this section stays as the
+record of what was known first.
+
 **Workaround available today:** the D4 config-file registration
 (settings screen → Agent config files → OpenCode). The create hook then logs
 `agent.create injection skipped for opencode: config-file registration active
@@ -2614,7 +2625,7 @@ config file. That path is *reasoned from the code, not verified in this pass* �
 verifying it means writing the user's real `~/.config/opencode/opencode.json`,
 which the pass did not do.
 
-#### 10.10.5 Recommendations for improvement (recorded, not implemented)
+#### 10.10.5 Recommendations for improvement (recorded here, implemented in 0.40.8 — §10.11)
 
 Ordered by value; items 1–3 are new in this pass, items 4–5 carry over.
 
@@ -2674,3 +2685,92 @@ timeline rows are derived from the audit trail, not from turn payloads.
 | Manifest floor | `>=0.15.0` accepted by the real 0.15.0 host (the plugin loaded and reached `running`) |
 | Host-side finding | reproduced and controlled in the same daemon: creation **fails** with the shared-service message while injection is on and a local OpenCode service is discoverable, and **succeeds with the injection applied** once `XDG_STATE_HOME` points at an empty directory (§10.10.4) |
 | Cleanup | the agent created for the hook check was deleted, the scratch daemon stopped and the scratch home (`.tmp/`) removed — the production daemon and its data were never touched |
+### 10.11 Version 0.40.8 — implementing §10.10.5 (2026-11-03)
+
+All five recommendations of §10.10.5 are implemented. They add capability, so
+this is a second-digit release: `0.39.8 → 0.40.8`, annotated tag
+`luck-planner@0.40.8`. `requirements.paseo` stays `>=0.15.0` — every API used
+here (`server.addHook`, `worktree.create.after`, `workspace.create.after`,
+`agent.create.after`, `addAgentPanel`) exists in 0.15.0.
+
+**1. The shared OpenCode service guard** (`server/opencode-service.ts`,
+`server/session-open.ts`, `index.server.ts`). The probe mirrors the host's
+discovery rule: only the `opencode` provider, `PASEO_OPENCODE_SERVER_URL` when
+set, otherwise `$XDG_STATE_HOME/opencode/service.json` (default
+`~/.local/state/opencode/service.json`); a `2.x` document marks a shared
+service, and a document that names a clearly non-local URL is excluded. Two
+deliberate fail-safe choices: an unreadable document is *not* treated as
+shared (so a corrupt file cannot silently strip MCP from every agent), and a
+readable `2.x` document counts even when its URL field is spelled in a way the
+plugin does not know (fail-closed keeps the agent usable). The answer is fed
+into `decideSessionOpen`, which treats it exactly like a provider without MCP
+support: `injectMcp: false, attachTool: true`, and `needsCapabilityProbe`
+short-circuits so the daemon is not asked a question it cannot change.
+
+**2. Seeding on worktree creation** (`server/project-seed.ts`,
+`index.server.ts`). `worktree.create.after` is the only awaited hook here, so
+it does one synchronous store call and no SDK round trip: the worktree path
+*is* the project key of the workspace that will exist there. The seed is
+`ensureSkeletonBranch` behind an emptiness check — idempotent, never throws
+into a creation, and indistinguishable from a skeleton an agent bootstrapped.
+
+**3. Seeding on workspace and agent creation** (`index.server.ts`).
+`workspace.create.after` and `agent.create.after` carry ids only, so they
+resolve `projectRootPath` through the SDK (`workspaces.ref(id).refresh()`) and
+seed nothing when the workspace cannot be read — guessing a key the panel never
+reads would only create invisible trees. The agent hook is the one that
+actually fires for workspaces that predate this release.
+
+**4. The agent-scoped panel** (`client/agent-panel.tsx`, `index.client.tsx`,
+`shared/rpc.ts`, `server/store.ts`). `addAgentPanel` plus a Command Center item
+("Open this agent's luck-planner activity", agent context) puts the panel where
+the operator already is. The data is the existing audit trail sliced by actor —
+`store.listActorActivity` is one indexed page over `history` — exposed as
+`luck-planner.agent-activity`, which resolves each row's node on the server so
+the panel needs no second round trip per row. The panel reads the agent from
+`params.agentId`, never from the `@deprecated` `agentId` prop.
+
+**5. Registry readiness** (`paseo-plugin.json`, `OVERVIEW.md`). `name`,
+`media: ["hierarchy.png"]` and a shipped overview; the fields require Paseo
+0.11.0 and are inert at runtime.
+
+#### 10.11.1 The finding that changed the fix: the environment, not only MCP
+
+§10.10.4 recorded the host rejecting custom **MCP servers**. Implementing the
+guard showed the rule is broader: with the create hook contributing *nothing*,
+agent creation still failed on the same host, and the only contribution left was
+`LUCK_PLANNER_AGENT_ID` in the **session environment** (`sessionActorEnv`,
+stamped by the open hook). The host's own message names both channels —
+`Custom OpenCode MCP servers or process environment require an isolated server`.
+Measured on the same isolated 0.15.0 daemon, same working tree:
+
+| Plugin state | Result |
+| --- | --- |
+| disabled | agent created |
+| enabled, create hook gated, env still stamped | **rejected** with the shared-service error |
+| enabled, create hook gated, env not stamped | **created**, and the open hook logged the native tool attachment |
+
+So the guard covers both channels: with a shared service detected the open hook
+does not stamp the actor environment either. Nothing is lost by that — the
+environment exists only for the spawned MCP server, and the native tool reads
+its actor from `context.agent.id`.
+
+One sequencing consequence, found by the same live run: `reason: "create"` used
+to skip the open hook because the create hook owned injection. With the guard
+the create hook contributes nothing, so the create open is the **only** open a
+fresh agent gets before its first turn; the matrix now attaches the native tool
+there instead of leaving the agent without any way to write.
+
+#### 10.11.2 Verification (2026-11-03, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (root + `dashboard/tsconfig.json`) | exit 0 |
+| `npm test` (`pretest` re-bundles `dist/`) | **43 suites / 722 tests pass** — from 687: the new `tests/opencode-service.test.ts` (17) and `tests/project-seed.test.ts` (10), the shared-service rows in `tests/session-open.test.ts` (8) and the `agent-activity` rows in `tests/rpc.test.ts` (3) |
+| Published MCP entry (rebuilt bundle) | `initialize` → `{ name: luck-planner, version: 0.40.8 }`, `instructions` present, `tools/list` → **14 tools** |
+| Live daemon | **PASS** — installed from the working tree into an isolated 0.15.0 daemon (scratch home, port 6792) and reloaded cleanly, so the real host compiled both entries including the new `addAgentPanel` registration |
+| Guard, end to end | **PASS** — on a host with a discovered OpenCode `2.2.5` service the same command that failed in §10.10.4 now **creates the agent**, logging `agent.create injection skipped for opencode: OpenCode 2.2.5 service discovered …` and `session_open <id> (create/interactive): attaching native luck_tree_upsert_leaf tool only: shared OpenCode service (…)` |
+| Seeding, `workspace.create.after` | **PASS** — `[luck-planner] workspace.create.after <id>: seeded root → trunk → 'General' for <path>` on a fresh workspace |
+| Seeding, `worktree.create.after` | **PASS** — `[luck-planner] worktree.create.after eager-rhino: seeded root → trunk → 'General' for …/worktrees/<id>/eager-rhino`, before the workspace and the agent started |
+| Seeding, in the database | **PASS** — three projects (`luck-planner`, the probe repo, the worktree), each with root → `Trunk` → `General`, and **9** `create` audit rows, all with actor `paseo` |
+| Cleanup | the agents created for the checks were removed with the scratch home; the daemon was stopped and `.tmp/` deleted — the production daemon and its data were never touched |
