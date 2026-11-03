@@ -75,10 +75,8 @@ function createFakeServer(): FakeServer {
     ) {
       handlers.set(contract.name, handler);
     },
-    before() {
-      return () => {};
-    },
-    on() {
+    /** Paseo 0.15.0's only lifecycle registration; `before` / `on` are deprecated. */
+    addHook() {
       return () => {};
     },
     registerProvider() {},

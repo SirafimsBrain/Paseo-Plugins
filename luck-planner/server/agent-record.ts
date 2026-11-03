@@ -9,7 +9,8 @@ import * as path from "node:path";
  *
  * ## Why this exists
  *
- * Paseo 0.14 lets a plugin contribute MCP servers in `before("agent.session_open")`,
+ * Paseo 0.14 lets a plugin contribute MCP servers in the `agent.open.before`
+ * hook (`before("agent.session_open")` before 0.15.0),
  * but that map is merged with the agent's **saved** configuration at launch and a
  * name present in both is a hard failure:
  *
@@ -27,7 +28,7 @@ import * as path from "node:path";
  * $PASEO_HOME/agents/<workspace-slug>/<agentId>.json   # top-level `config.mcpServers`
  * ```
  *
- * This matters doubly for luck-planner: the `agent.create` hook (stage D4) writes
+ * This matters doubly for luck-planner: the `agent.create.before` hook (stage D4) writes
  * the server into the saved config of every agent it covers, so on the next open
  * the record *does* carry the name — and the session-open contribution must skip
  * instead of colliding with the plugin's own earlier injection.

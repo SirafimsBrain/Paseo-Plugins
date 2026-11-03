@@ -833,14 +833,16 @@ function createWiringServer(): WiringServer {
     handle(contract: { name: string }, handler: (input: never, context: never) => unknown) {
       handlers.set(contract.name, handler);
     },
-    before(name: string, handler: (args: never, context: never) => unknown) {
+    /**
+     * `server.addHook` (Paseo 0.15.0): the only lifecycle registration the
+     * server entry uses — `server.before` / `server.on` are deprecated and
+     * deliberately absent, so a regression to them fails here.
+     */
+    addHook(name: string, handler: (args: never, context: never) => unknown) {
       hooks.set(name, handler);
       return () => {
         hooks.delete(name);
       };
-    },
-    on() {
-      return () => {};
     },
     registerProvider() {},
     registerUsageSource() {},
@@ -850,8 +852,8 @@ function createWiringServer(): WiringServer {
       return (await handler(input as never, context as never)) as T;
     },
     async openSession(agentId: string, paseo: unknown): Promise<void> {
-      const hook = hooks.get("agent.session_open");
-      if (!hook) throw new Error("agent.session_open hook was not registered");
+      const hook = hooks.get("agent.open.before");
+      if (!hook) throw new Error("agent.open.before hook was not registered");
       await hook(
         {
           request: {

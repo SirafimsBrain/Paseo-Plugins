@@ -52,12 +52,12 @@ export const MCP_SERVER_KEY = "luck-planner";
 
 /**
  * The `mcpServers` entry injected into every Paseo-created agent
- * (`agent.create` before-hook, stage D3).
+ * (`agent.create.before` hook, stage D3).
  *
  * Env semantics verified against the installed daemon (`app.asar`): the
  * stdio transport is spawned with `env: { ...sessionEnv, ...config.env }`,
  * i.e. the session environment (which carries `LUCK_PLANNER_AGENT_ID` from
- * the `agent.session_open` hook) is the base and this map only adds to it.
+ * the `agent.open.before` hook) is the base and this map only adds to it.
  * `PASEO_HOME` is forwarded when set so a non-default daemon home survives
  * even a provider that passes `config.env` through on its own.
  */
@@ -80,9 +80,9 @@ export function injectedMcpConfig(options: {
 
 /**
  * Session environment that identifies the agent to the MCP server
- * (`agent.session_open` before-hook, stage D3): the spawned server reads it
+ * (`agent.open.before` hook, stage D3): the spawned server reads it
  * as `LUCK_PLANNER_AGENT_ID` and stamps every audit row it writes with the
- * agent that called the tool. `agent.create` cannot carry it — the agent id
+ * agent that called the tool. `agent.create.before` cannot carry it — the agent id
  * does not exist yet when the create request is intercepted.
  */
 export function sessionActorEnv(agentId: string): Record<string, string> {
@@ -126,7 +126,7 @@ export function isExecutableFile(candidate: string): boolean {
  * The install directory holds a per-revision uuid
  * (`plugins/<id>/<uuid>/checkout/<plugin>`) which the daemon deletes on
  * every plugin update. A path that goes into an agent's config is baked in
- * at `agent.create` time and re-used on every later turn, so the first
+ * at `agent.create.before` time and re-used on every later turn, so the first
  * plugin update after an agent was created deletes the entry out from under
  * it: the spawn then fails with ENOENT and the agent reports
  * `Connection closed` on every turn, with nothing wrong in the agent itself
@@ -195,7 +195,7 @@ function resolveBundleSource(): string {
  * The copy is written to a temporary name and renamed over the target, so a
  * server spawned mid-write reads either the old file or the new one, never a
  * half-written one. It is refreshed on every resolution, which happens on
- * plugin load and on every `agent.create` — so the entry is current by the
+ * plugin load and on every `agent.create.before` — so the entry is current by the
  * time an agent actually needs it, whatever order the daemon installs in.
  */
 function publishMcpEntry(source: string): string | null {

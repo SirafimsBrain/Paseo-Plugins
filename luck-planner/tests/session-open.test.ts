@@ -87,7 +87,7 @@ describe("decideSessionOpen — gates and config ownership", () => {
     expect(decision.injectMcp).toBe(false);
     expect(decision.attachTool).toBe(false);
     expect(decision.why).toBe(
-      "skipped: reason=create is handled by the agent.create hook",
+      "skipped: reason=create is handled by the agent.create.before hook",
     );
   });
 

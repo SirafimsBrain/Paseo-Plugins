@@ -148,7 +148,7 @@ export default function contribute(client: PluginClientContext) {
 
   // "Refresh luck-planner tools on this agent" (0.35.1, §10.8 item 3): the
   // new `agents.ref(id).reload()` reopens the agent's session, rerunning
-  // `agent.session_open` so the launch-only MCP server or the native
+  // `agent.open.before` so the launch-only MCP server or the native
   // `luck_tree_upsert_leaf` fallback is re-derived — the one-click answer to
   // an agent that lost its tools after an idle runtime release, an OpenCode
   // eviction or a settings change. A refused reload throws into the host's

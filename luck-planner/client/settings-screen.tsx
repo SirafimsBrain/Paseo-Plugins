@@ -31,7 +31,7 @@ import {
  * server runs, its port (0 = auto), its access token (regenerate), and
  * audit-history retention (0 = keep forever). Every save goes through
  * `settings.save` — the host persists the doc, so values survive daemon
- * restarts, and the server re-reads them live (`agent.create` per creation,
+ * restarts, and the server re-reads them live (`agent.create.before` per creation,
  * retention and the dashboard endpoint on `subscribe`), so no daemon restart
  * is needed — a plugin reload suffices.
  *

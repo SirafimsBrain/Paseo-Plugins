@@ -4,7 +4,7 @@ import { defineSettings } from "@getpaseo/plugin";
 /**
  * Plugin settings (host-scoped, edited in Paseo Settings → Plugins →
  * Luck Planner from stage E4). The server registers the definition and
- * reads it live (the `agent.create` hook re-reads per creation, history
+ * reads it live (the `agent.create.before` hook re-reads per creation, history
  * retention and the dashboard endpoint re-apply on `settings.subscribe`),
  * so a change takes effect without a daemon restart — only a plugin reload.
  * Defaults cover every field, so `schema.parse({})` is a complete settings
@@ -17,7 +17,7 @@ export const luckPlannerSettings = defineSettings({
   schema: z.object({
     /**
      * Inject the luck-planner MCP server into every agent created through
-     * Paseo (via the `agent.create` before-hook). Agents created outside
+     * Paseo (via the `agent.create.before` hook). Agents created outside
      * Paseo use the MCP config in their own tool.
      */
     injectIntoAgents: z.boolean().default(true),

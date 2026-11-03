@@ -1,6 +1,6 @@
 /**
- * Decision logic for the `before("agent.session_open")` hook (0.35.1,
- * recommendation §10.8 item 1).
+ * Decision logic for the `agent.open.before` hook (0.35.1, recommendation
+ * §10.8 item 1; `before("agent.session_open")` before 0.15.0 renamed it).
  *
  * Two independent contributions can reach an agent on every session open:
  *
@@ -23,7 +23,7 @@
  * below is pure so the whole matrix is unit-testable without a daemon.
  *
  * What is deliberately **not** here: `reason: "create"` never contributes. The
- * `agent.create` hook owns creation-time injection (stage D4: config-file cover
+ * `agent.create.before` hook owns creation-time injection (stage D4: config-file cover
  * first, saved config otherwise), and by the time the first session opens the
  * record already reflects its decision — re-deriving here would only race it.
  */
@@ -37,7 +37,7 @@ export interface SessionOpenInput {
   purpose: string;
   /** `injectIntoAgents` setting — the single switch for "may luck-planner reach agents". */
   injectIntoAgents: boolean;
-  /** Config key the server is registered under (the `agent.create` hook's key). */
+  /** Config key the server is registered under (the `agent.create.before` hook's key). */
   serverName: string;
   /** The agent's own config file already carries a current registration (stage D4). */
   configCovered: boolean;
@@ -108,7 +108,7 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
   if (!input.injectIntoAgents) return skip("injectIntoAgents is off");
   if (input.purpose === "history") return skip("purpose is history");
   if (input.reason === "create") {
-    return skip("reason=create is handled by the agent.create hook");
+    return skip("reason=create is handled by the agent.create.before hook");
   }
   if (input.configCovered) {
     return skip("the agent's config file already registers the server (D4)");

@@ -70,10 +70,11 @@ import { growthProgress } from "./shared/growth";
  *
  * Contributions by stage (PLAN.md):
  * - D2 (done): publish the stdio MCP bundle at its revision-independent path
- * - D3 (done): inject the MCP server into created agents (`agent.create`),
- *   stamp the per-agent audit actor onto the session env
- *   (`agent.session_open`), auto-install the skill into existing skills
- *   directories, host-scoped settings (`injectIntoAgents`, `mcpServerName`)
+ * - D3 (done): inject the MCP server into created agents
+ *   (`agent.create.before`), stamp the per-agent audit actor onto the
+ *   session env (`agent.open.before`), auto-install the skill into
+ *   existing skills directories, host-scoped settings (`injectIntoAgents`,
+ *   `mcpServerName`)
  * - E1 (done): plugin RPC handlers (`shared/rpc.ts`) over one shared store
  * - E3 (done): goal-create + bug-report RPCs behind the ⌘K items and slash
  *   commands
@@ -230,12 +231,15 @@ export default function contribute(server: PluginServerContext) {
 
   // -------------------------------------------------------------------------
   // MCP injection (ADR-3): every Paseo-created agent gets the bundled stdio
-  // server. Async `before` hooks are awaited by the host before the request
-  // proceeds, so the mutation below is applied to agent creation.
+  // server. Request hooks are awaited by the host before the request
+  // proceeds, so the mutation below is applied to agent creation. Registered
+  // through `server.addHook` — since 0.15.0 the `server.before` spelling is
+  // `@deprecated` (removal after 2027-04-30) and `agent.create` is now
+  // `agent.create.before`.
   // -------------------------------------------------------------------------
 
-  const removeCreateHook = server.before(
-    "agent.create",
+  const removeCreateHook = server.addHook(
+    "agent.create.before",
     async ({ request }, context) => {
       rememberPaseo(context.paseo);
       const values = await readValues();
@@ -286,7 +290,10 @@ export default function contribute(server: PluginServerContext) {
   // on every open — the path that reaches agents created before
   // `injectIntoAgents` was on and survives OpenCode/Kilo's per-directory
   // eviction — falling back to the native `luck_tree_upsert_leaf` tool for
-  // providers without MCP support. The decision is pure (server/session-open.ts);
+  // providers without MCP support. The hook is `agent.open.before` on
+  // 0.15.0 (registered through `server.addHook`; the deprecated spelling is
+  // `server.before("agent.session_open")`). The decision is pure
+  // (server/session-open.ts);
   // a collision with the agent's saved configuration aborts the open, so the
   // saved set is read from the daemon's agent record and every unknown state
   // fails safe to *skip the MCP map* (the native tool cannot collide).
@@ -294,8 +301,8 @@ export default function contribute(server: PluginServerContext) {
 
   const upsertLeafTool = createUpsertLeafTool(store);
 
-  const removeSessionHook = server.before(
-    "agent.session_open",
+  const removeSessionHook = server.addHook(
+    "agent.open.before",
     async ({ request }, context) => {
       rememberPaseo(context.paseo);
       const values = await readValues();
@@ -495,7 +502,7 @@ export default function contribute(server: PluginServerContext) {
   // 0.35.1 (§10.8 item 3): "Refresh luck-planner tools on this agent" — the
   // supported answer to an agent that lost its tools: `reload()` reopens the
   // provider session with its current configuration and reruns
-  // `agent.session_open`, which re-derives the MCP contribution or attaches
+  // `agent.open.before`, which re-derives the MCP contribution or attaches
   // the native fallback. A refused reload surfaces as `{ ok: false, error }`,
   // which the Command Center item throws into the host's error toast.
   handle(agentReload, async (input, context) => {

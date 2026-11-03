@@ -2,7 +2,7 @@
  * Direct MCP registration in the agents' own config files (stage D4).
  *
  * Why this exists. Paseo injects the MCP server into an agent through the
- * `agent.create` hook, i.e. it lands in the *session* payload. Two provider
+ * `agent.create.before` hook, i.e. it lands in the *session* payload. Two provider
  * behaviours make that fragile:
  *
  * 1. **OpenCode and Kilo** keep their session registrations in memory, per

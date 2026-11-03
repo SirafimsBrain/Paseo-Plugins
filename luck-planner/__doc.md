@@ -71,7 +71,7 @@ Every mutation records **who, when, what, and with what result** — a mandatory
 | --- | --- | --- |
 | **ADR-1** | The dashboard (2D and 3D) is a **separate web app** (React + TypeScript) served by the plugin's HTTP server on `127.0.0.1` and opened in Paseo's **workspace browser** (`navigation.openBrowser`), falling back to `openExternalUrl`. The native React Native panel is the everywhere-working overview layer. | Plugin client code is React Native: DOM, canvas, WebGL, `react-native-svg` and DOM libraries are **compile errors** (plugin reference → Cross-platform rules; the scaffold tsconfig omits DOM). React Flow / Cytoscape / Three.js cannot be embedded in a panel. Precedents in this repo: bunny-search opens its web UI in a Paseo browser tab; memory-flash runs an HTTP server in the daemon subprocess. The workspace browser is Electron Chromium, so WebGL is available for 3D. |
 | **ADR-2** | Storage is **one SQLite file** `$PASEO_HOME/plugins/luck-planner/luck-planner.db` (`node:sqlite`, Node ≥ 24.20), WAL, 5 s busy timeout + write-retry, FTS5 (`porter unicode61`), `meta.schema_version` with forward migrations. All rows are scoped by `project_key` (canonical workspace/project path). | Direct requirement ("use SQLite", "FTS5 and strengthened search, the memory-flash example"). One file with `project_key` is simpler than a file per project and repeats memory-flash's proven layout. The memory-flash 0.3.2 lesson (parallel writers: busy timeout + retry) is carried over from day one, not after losing writes. |
-| **ADR-3** | Agent access is a **bundled stdio MCP server** (`dist/mcp-server.js`, esbuild), injected into every agent via `server.before("agent.create")` plus `paseo-plugin.json` `mcp.entry` (revision-independent publication, as in memory-flash 0.7.x). Agents read/write the tree with `luck_tree_*` tools. | The point of the plugin is that coding agents maintain the tree. Plugin RPCs are not reachable from agent processes; MCP is the only channel. Proven mechanics from memory-flash and bunny-search. |
+| **ADR-3** | Agent access is a **bundled stdio MCP server** (`dist/mcp-server.js`, esbuild), injected into every agent via `server.addHook("agent.create.before")` (formerly `server.before("agent.create")`) plus `paseo-plugin.json` `mcp.entry` (revision-independent publication, as in memory-flash 0.7.x). Agents read/write the tree with `luck_tree_*` tools. | The point of the plugin is that coding agents maintain the tree. Plugin RPCs are not reachable from agent processes; MCP is the only channel. Proven mechanics from memory-flash and bunny-search. |
 | **ADR-4** | **2D — React Flow**; **3D — @react-three/fiber + drei + d3-hierarchy** (last implementation block). Both views share **one data layer** (same JSON API + graph-model adapter + same details panel), with a 2D/3D toggle in the toolbar. | Matches both requirement drafts; a shared data layer prevents logic drift and makes 3D a renderer swap, not a second dashboard. |
 | **ADR-5** | The tree is an **adjacency list** (`parent_id`) with kind enum (`root`,`trunk`,`branch`,`subbranch`,`leaf`); no materialized path. The dashboard builds the tree in memory from one query. | Cheap moves without path recomputation; thousands of nodes do not need materialized paths; layout happens in the dashboard. |
 | **ADR-6** | Leaves are a **state machine**: `draft → ready → claimed → in_progress → (blocked) → done`, plus terminal `cancelled` / `superseded`. Every transition increments `revision` and appends an audit row (`actor`, `action`, `revision`, `result`, `at`). | The state machine plus revisions are the heart of plan/fact. The audit log is written from the first CRUD stage (B3) — no exceptions. |
@@ -443,7 +443,7 @@ Verified by `tests/growth.test.ts` (13 tests):
   revision rule: the bump is recorded in `history`, the returned record carries that final
   revision, and the subject may be given a fresh record afterwards.
 
-## 6. Paseo integration surface (SDK 0.11.x)
+## 6. Paseo integration surface (SDK 0.15.0)
 
 | Contribution | Where | Stage |
 | --- | --- | --- |
@@ -451,7 +451,7 @@ Verified by `tests/growth.test.ts` (13 tests):
 | Command Center items + slash commands | `addCommandCenterItem`, `addSlashCommand` | E3 |
 | Settings screen (`injectIntoAgents`, `mcpServerName`, `httpEnabled`, HTTP port, token, retention) | `defineSettings` / settings screen | E4 + F1 |
 | Plugin RPCs (`tree.get`, `node.detail`, `node.setStatus`, `goal.approve`, …) | `defineRpc` + `server.handle` | E1 |
-| MCP injection into agents | `server.before("agent.create")` + `agent.session_open` | D3 ✅ |
+| MCP injection into agents | `server.addHook("agent.create.before")` + `agent.open.before` (0.15.0 names; `server.before` is deprecated) | D3 ✅ |
 | Settings (`injectIntoAgents`, `mcpServerName`) | `defineSettings` / `server.registerSettings` (values); settings screen | D3 ✅ / E4 |
 | Skill for coding agents (`SKILL.md` protocol + installer) | `server/skill.ts`, auto-install on plugin load | D3 ✅ |
 | Bundled stdio MCP server (`dist/mcp-server.js`) | `paseo-plugin.json` `mcp.entry` + `server/mcp-server.ts`, spawned by agents | D2 ✅ |
@@ -630,7 +630,7 @@ gets a real actor, and agents get a written protocol for keeping the tree. Verif
 `tests/d3-injection.test.ts` (6), `tests/skill.test.ts` (7), the `serverName` case in
 `tests/mcp-server-e2e.test.ts`, and a live acceptance run on the daemon:
 
-- **`agent.create` before-hook** (`index.server.ts`) — registers
+- **`agent.create.before` hook** (`index.server.ts`, registered through `server.addHook` since 0.15.0) — registers
   `config.mcpServers["luck-planner"] = injectedMcpConfig({ serverName })` when the
   `injectIntoAgents` setting (default `true`) allows it. The entry is
   `{ type: "stdio", command, args, env, alwaysLoad: true }`: `command`/`args` come from
@@ -641,7 +641,7 @@ gets a real actor, and agents get a written protocol for keeping the tree. Verif
   (`luck-planner_luck_tree_*`), which `dispatchMcpTool` normalizes with
   `/^luck[-_]planner_/`. The hook logs `MCP injected: <command> <args>` into
   `paseo plugin logs luck-planner`, which is how the injection is confirmed live.
-- **`agent.session_open` before-hook — the audit actor** — `agent.create` cannot carry the
+- **`agent.open.before` hook — the audit actor** — `agent.create.before` cannot carry the
   actor: the agent id does not exist yet when the create request is intercepted. The
   session-open request does (`request.agentId`) and exposes `request.env`, so the hook sets
   `LUCK_PLANNER_AGENT_ID=<agentId>`. Env semantics were verified against the installed
@@ -1402,8 +1402,8 @@ HTTP API and the store all benefit at once.
 
 ### Agent config registrations (stage D4 — `server/agent-mcp-config.ts`, `shared/rpc.ts`, `index.server.ts`, `client/settings-screen.tsx`)
 
-Paseo injects the plugin's MCP server into an agent through the `agent.create`
-hook, i.e. it lands in the **session** payload. Two provider behaviours make
+Paseo injects the plugin's MCP server into an agent through the
+`agent.create.before` hook, i.e. it lands in the **session** payload. Two provider behaviours make
 that fragile, and stage D4 answers both by registering the server in the
 agents' *own* config files:
 
@@ -1999,9 +1999,15 @@ English only (project rule).
 
 ## 10. Compatibility
 
+**Current state (2026-11-03): `requirements.paseo` is `>=0.15.0` and the SDK
+pin is `@getpaseo/plugin@^0.15.0`** — the lifecycle hooks are registered
+through `server.addHook`, which does not exist on a 0.14.0 host. The
+0.15.0 pass is §10.10 and it is the one to read first; §10.5–§10.9 keep the
+evidence of the earlier passes as it stood then.
+
 Verified on 2026-10-22 in the plugin's development environment with
-`@getpaseo/plugin@0.12.0` (the manifest requires Paseo `>= 0.11.0`; the
-0.12.0 conformance pass is §10.5):
+`@getpaseo/plugin@0.12.0` (at that time the manifest required Paseo
+`>= 0.11.0`; the 0.12.0 conformance pass is §10.5):
 
 - `npm run typecheck` — clean, in both configurations (the root one and
   `dashboard/tsconfig.json`, which the root excludes).
@@ -2488,3 +2494,183 @@ build command `npm ci` now verifies clean, the bundle was rebuilt (the
 handshake reports, so it moves with the release), and the full suite
 re-passes: 41 suites / 678 tests. Patch release: `0.35.1 → 0.35.2`,
 annotated tag `luck-planner@0.35.2`.
+### 10.10 Paseo 0.15.0 compatibility pass (2026-11-03)
+
+Audited against the stable **0.15.0** release (2026-11-03) — release notes:
+<https://github.com/getpaseo/paseo/releases/tag/v0.15.0>. The
+repository-wide inventory of what 0.15.0 adds and deprecates is in the root
+[README](../README.md#paseo-0150--new-and-deprecated-sdk-surface-2026-11-03);
+this section records what is specific to luck-planner.
+
+**Result: compatible, but only after a mandatory migration — `server.before`
+and `server.on` are `@deprecated` in 0.15.0, so both of this plugin's hooks
+moved to `server.addHook`. Shipped as `0.39.8`, `requirements.paseo`
+`>=0.14.0` → `>=0.15.0`, SDK pin `^0.14.0` → `^0.15.0`.** One host-side
+interaction introduced by 0.15.0 makes an `opencode` agent with an injected
+MCP server uncreatable while a local OpenCode service is registered; it was
+reproduced and controlled here, and is recorded in §10.10.4 with a proposed
+plugin-side fix. Improvement recommendations are §10.10.5.
+
+#### 10.10.1 What 0.15.0 changed
+
+`diff -rq` over the two unpacked `@getpaseo/plugin` tarballs reports exactly
+four changed paths: `dist/server/index.d.ts`, `dist/server/lifecycle.d.ts`,
+`dist/server/lifecycle.js` and `package.json`. **`dist/client/` is
+byte-identical to 0.14.0** (`diff -rq` reports nothing there), so every client
+registration in this plugin — the workspace panel, the settings screen, the
+dashboard screen, the Command Center items, the slash commands and the
+timeline renderer — is untouched by construction. `package.json` adds the
+export path `./internal/lifecycle` (what the host imports) and moves its
+`@getpaseo/client` / `@getpaseo/protocol` peer and dev dependencies to 0.15.0.
+
+| New in 0.15.0 | Relevant here? |
+| --- | --- |
+| `server.addHook(name, handler)` on `PluginLifecycleRegistration` | **Yes — this is the migration.** Type-safe, name-validated against `pluginHookRegistry`; the handler still receives `{ request }` for request hooks and still returns the request or `void`, so hook bodies did not move. |
+| `PluginHooks` / `PluginHookEvents` / `PluginHookRequests` / `PluginHookPayload` / `PluginHookResult` | Type-level only; nothing to adopt. |
+| `worktree.create.before` / `worktree.create.after` (plugin-chosen worktree locations, the awaited after-hook that runs before workspace setup and agents start) | Not adopted — recommendation §10.10.5 item 2. |
+| Host behaviour: terminal programs survive daemon restarts and supported updates; opt-in agent recovery; `.worktreeinclude` copies ignored files into new worktrees; plugin screens keep their local state across host disconnections; discarded messages no longer return after rewinding a plugin conversation; redundant plugin streaming snapshots are released | **Neutral to beneficial.** Agent recovery and restart resumes reopen sessions — exactly the `agent.open.before` path that already re-derives the audit actor and the MCP contribution — so no change was needed. The panel already persists its state through `useTabState`, so the new screen-state retention only reinforces it. |
+| Host behaviour: the OpenCode provider reuses a running v2 service (#7435) | **Yes — a real risk for this plugin.** §10.10.4. |
+
+#### 10.10.2 The deprecated surface, and what this plugin used
+
+| Deprecated on 0.15.0 (removal date) | Used here before the pass | Resolution |
+| --- | --- | --- |
+| `server.on(event, handler)` → `addHook(<renamed event>)` (2027-04-30) | **No** — the plugin registers no event hooks | — |
+| `server.before(request, handler)` → `addHook(<renamed request>)` (2027-04-30) | **Yes, twice**: `agent.create` and `agent.session_open` | Migrated (§10.10.3) |
+| `agent.turn_ended`'s `timeline` (always empty) | No — no turn hooks | — |
+| `@getpaseo/plugin/client/react-native` entry (2027-04-20), `SettingsGroup`, `addSurface`, `addSidebarItem`, `openSurface`, `PluginSidebarContribution`, the deprecated `context` field on panel props, the deprecated `agentId` panel prop | **No** — `client/` imports from `client/ui` (`SettingsSection`, `ExternalLink`), and the registrations are `addScreen` / `addSidebarHeaderItem` / `addWorkspacePanel` *without* a `context` field / `addSettingsScreen` / `addCommandCenterItem` / `addSlashCommand` / `addTimelineRenderer` | Nothing to migrate; `client/` is byte-identical anyway |
+
+The `context` fields that remain in `index.client.tsx` (six Command Center
+items, two slash commands) are **not** deprecations: on
+`addCommandCenterItem` / `addSlashCommand` the field is a required union
+discriminant that selects the handler's context type, not the deprecated
+panel-registration option.
+
+#### 10.10.3 The migration performed (0.39.7 → 0.39.8)
+
+| Before (deprecated on 0.15.0) | After |
+| --- | --- |
+| `server.before("agent.create", async ({ request }, context) => …)` | `server.addHook("agent.create.before", async ({ request }, context) => …)` |
+| `server.before("agent.session_open", async ({ request }, context) => …)` | `server.addHook("agent.open.before", async ({ request }, context) => …)` |
+| comments and runtime diagnostics naming the old hooks (`agent.create before-hook`, `agent.session_open before-hook`, the `skip("reason=create is handled by the agent.create hook")` reason, …) | renamed to the 0.15.0 spellings (`agent.create.before` hook, `agent.open.before` hook, `… handled by the agent.create.before hook`), so the log lines an operator reads match the host's own vocabulary |
+
+The test doubles changed with the registrations: `tests/timeline.test.ts`
+keeps a hooks map but exposes **`addHook` only** (a regression to
+`server.before` / `server.on` now fails, as it should), and its session-open
+driver looks the hook up as `agent.open.before`; `tests/rpc.test.ts` and
+`tests/http-lifecycle.test.ts` provide `addHook` in their fake server
+contexts. `tests/session-open.test.ts` asserts the renamed `reason=create`
+message. No behaviour changed: the same settings read, the same gates, the
+same returned request, and the same console lines apart from the hook names.
+
+Version and floor: this replaces a deprecated API without adding a
+capability, so it is a **patch** release — `0.39.7 → 0.39.8`, annotated tag
+`luck-planner@0.39.8`. `paseo-plugin.json` moves `requirements.paseo`
+`>=0.14.0` → `>=0.15.0`, because `server.addHook` does not exist on a 0.14.0
+host (0.14.0's `PluginLifecycleRegistration` declares only `on` and `before`,
+and 0.14.0's `dist/server/lifecycle.js` is an empty module). `package.json`
+moves the pin to `@getpaseo/plugin@^0.15.0`, and the lockfile with it.
+
+#### 10.10.4 Compatibility finding: injected MCP vs. OpenCode's shared service (0.15.0)
+
+**A host-level interaction introduced by 0.15.0 (#7435, "Reuse running
+OpenCode v2 services") — not a defect of the migration, but it hits exactly
+the agents this plugin injects into.** The mechanism is documented against
+the host code in [bunny-search §16.3](../bunny-search/__doc.md#163-compatibility-finding-injected-mcp-vs-opencodes-shared-service-0150);
+it was reproduced for luck-planner here, 2026-11-03, in the isolated 0.15.0
+daemon of §10.10.6.
+
+`requiresDedicatedV2Server()` is true for any agent whose Paseo config carries
+`mcpServers` — which is every agent created while `injectIntoAgents` is on and
+no config-file registration covers the provider. When a local OpenCode service
+is discoverable (`$XDG_STATE_HOME/opencode/service.json`, default
+`~/.local/state/opencode/service.json`, compatible `2.x`), the host reuses it
+instead of owning a process, and then refuses the agent:
+
+```text
+$ paseo run "…" --provider opencode      # injectIntoAgents on (the default)
+Error: Failed to create agent: Custom OpenCode MCP servers or process
+environment require an isolated server and cannot be used with a shared
+OpenCode service.
+
+$ XDG_STATE_HOME=<empty dir> …           # discovery gone → an owned server
+AGENT ID                              STATUS   PROVIDER  …
+b70ce521-dd7c-4f91-8bcf-043de0283d88  running  opencode  …
+[luck-planner] MCP injected: …/plugins/luck-planner/mcp-server.js (entry exists; …)
+```
+
+Scope, as measured: **`opencode` only** (the other providers do not go through
+`V2Runtime`), it needs a *discovered* service, and it affects both creation and
+opening, so an existing agent cannot be continued either. The plugin's own
+`capabilities.supportsMcpServers` probe is not a guard here: the probe answers
+the provider's capability, not the host's service topology.
+
+**Workaround available today:** the D4 config-file registration
+(settings screen → Agent config files → OpenCode). The create hook then logs
+`agent.create injection skipped for opencode: config-file registration active
+at …` and leaves Paseo's own config without `mcpServers`, so the host keeps
+using the shared service while OpenCode still reads the server from its own
+config file. That path is *reasoned from the code, not verified in this pass* —
+verifying it means writing the user's real `~/.config/opencode/opencode.json`,
+which the pass did not do.
+
+#### 10.10.5 Recommendations for improvement (recorded, not implemented)
+
+Ordered by value; items 1–3 are new in this pass, items 4–5 carry over.
+
+1. **Treat a discovered OpenCode v2 service as "no MCP for this open".** Read
+   the host's discovery file (`$XDG_STATE_HOME/opencode/service.json`, default
+   `~/.local/state/opencode/service.json`, same `2.x` version rule) for the
+   `opencode` provider and feed the answer into `decideSessionOpen` as one more
+   input; the matrix then returns `injectMcp: false, attachTool: true`, and the
+   agent keeps the tree through the native `luck_tree_upsert_leaf` tool instead
+   of failing to open. The fallback already exists (0.35.1), so the cost is one
+   input, one branch and its tests in `server/session-open.ts` — no new
+   setting, no new dependency. This is the recommendation with the largest
+   user-visible effect, because `injectIntoAgents` is on by default.
+2. **Seed the tree when a worktree is created** (`worktree.create.after`,
+   awaited before workspace setup and agents start). The store is scoped by
+   `projectKey`, so a new worktree starts with an empty tree and the first
+   agent has to build the skeleton through the bootstrap path of
+   `luck_tree_upsert_leaf`; the hook could create the root → trunk → `General`
+   skeleton (root name from `sourceCheckout`, branch name from `branch`) and
+   write one audit row, so the dashboard, the panel and
+   `luck_tree_get_context` show the same minimal tree from the first second.
+   `worktree.create.before` is *not* useful for this plugin: its payload is a
+   location and creation-options request (`path`, `branch`, `slug`, refs) with
+   no project identity in it.
+3. **Record arriving work on `workspace.create.after` / `agent.create.after`.**
+   `workspace.create.after` hands over `{ id, projectId, cwd, name }`; the
+   plugin could register the project key it derives from that `cwd` and, once
+   the skeleton exists, write the same audit rows it writes for a manual
+   record. Today a project appears in the tree only after an agent's first
+   write, which is why a fresh dashboard can look like a broken dashboard.
+4. **Agent-scoped panel** (`addAgentPanel` with `params.agentId`): a second
+   panel showing the records *this* agent touched — its bees, the leaves it
+   wrote, the incidents it reported. The workspace panel already loads that
+   data, so the cost is a filtered view and one registration. Carried over
+   from §10.8, which shipped the other five items.
+5. **Registry readiness** — `name` / `icon` / `media` in `paseo-plugin.json`
+   plus an `OVERVIEW.md`, needed only to publish a listing. Packaging work,
+   not functionality.
+
+**Not applicable in 0.15.0:** `server.addHook`'s event hooks. The plugin
+registers no `agent.turn.*`, `agent.permission.*` or `agent.close.*` hook and
+needs none — its tree writes come from the agent through MCP, and its two
+timeline rows are derived from the audit trail, not from turn payloads.
+
+#### 10.10.6 Verification (2026-11-03, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install` with `@getpaseo/plugin@^0.15.0` → `package.json` and `package-lock.json` record `0.15.0`; the lockfile stays complete, so the manifest's `npm ci` build step still verifies. |
+| `npm run typecheck` (root + `dashboard/tsconfig.json`) against 0.15.0 | **exit 0** |
+| `npm test` (`pretest` re-bundles `dist/`) | **41 suites / 687 tests pass** — the same suites, now covering the `addHook` registration names and the renamed `reason=create` message |
+| Deprecated-call scan | no `server.before(` / `server.on(` call left in `index.server.ts`, `server/`, `client/` or `shared/` (`server/http-server.ts`'s `server.on("error")` is Node's `http.Server`, not the plugin API) |
+| Live daemon | **PASS** — installed **from the working tree** into an **isolated 0.15.0 daemon** (`daemonVersion: 0.15.0`, scratch home under `.tmp/`, own loopback port 6791, `pluginsEnabled: true`, production home untouched): status `running`, `[paseo] Plugin ready`, **15 plugin RPCs + 3 settings methods** registered, **zero** `Unknown lifecycle hook` errors in the daemon log. Because `addHook` throws on an unknown name at registration time, reaching `ready` is itself the proof that the host accepts both new hook names. |
+| Hooks actually fire | **PASS** — `agent.create.before` logged `[luck-planner] MCP injected: …/dist/mcp-server.js (entry exists; stable path …)` on a real agent creation, and `agent.open.before` logged `[luck-planner] session_open <agentId> (create/interactive): skipped: reason=create is handled by the agent.create.before hook` in the same run. |
+| Published MCP entry | **PASS** — `initialize` answered `{ name: luck-planner, version: 0.39.8 }`, `protocolVersion` `2024-11-05`, `instructions` present; `tools/list` returned **14 tools**. |
+| Dashboard endpoint | **PASS** — after the documented 8899 fallback the endpoint answered `{"ok":true,"server":"luck-planner","version":"0.39.8"}` on `/health`, and `/api/tree` answered `200` with the token and **`401` without it**. |
+| Manifest floor | `>=0.15.0` accepted by the real 0.15.0 host (the plugin loaded and reached `running`) |
+| Host-side finding | reproduced and controlled in the same daemon: creation **fails** with the shared-service message while injection is on and a local OpenCode service is discoverable, and **succeeds with the injection applied** once `XDG_STATE_HOME` points at an empty directory (§10.10.4) |
+| Cleanup | the agent created for the hook check was deleted, the scratch daemon stopped and the scratch home (`.tmp/`) removed — the production daemon and its data were never touched |

@@ -392,10 +392,8 @@ function fakeServer(values: SettingsValues): PluginServerContext {
       };
     },
     handle() {},
-    before() {
-      return () => {};
-    },
-    on() {
+    /** Paseo 0.15.0's only lifecycle registration; `before` / `on` are deprecated. */
+    addHook() {
       return () => {};
     },
     registerProvider() {},
@@ -431,10 +429,8 @@ function capturingServer(values: SettingsValues): CapturingServer {
     ) {
       handlers.set(contract.name, handler);
     },
-    before() {
-      return () => {};
-    },
-    on() {
+    /** Paseo 0.15.0's only lifecycle registration; `before` / `on` are deprecated. */
+    addHook() {
       return () => {};
     },
     registerProvider() {},

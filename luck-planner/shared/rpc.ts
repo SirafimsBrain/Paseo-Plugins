@@ -400,7 +400,7 @@ export const agentMcpUnregister = defineRpc({
 
 /**
  * `luck-planner.agent-reload`: reopen the agent's provider session so the
- * plugin's `agent.session_open` hook runs again and re-derives the MCP
+ * plugin's `agent.open.before` hook runs again and re-derives the MCP
  * server or the native fallback tool (0.35.1, recommendation §10.8 item 3).
  * The one-click answer to an agent that lost its luck-planner tools after
  * an idle runtime release, an OpenCode location eviction or a settings
