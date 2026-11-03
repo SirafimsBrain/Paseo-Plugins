@@ -153,6 +153,78 @@ describe("agent.close.after hook", () => {
 
 // ---------------------------------------------------------------------------
 
+describe("archive hooks (0.3.5)", () => {
+  it("registers both archive hooks and removes them with the cleanup", () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    expect(server.hooks.has("agent.archive.after")).toBe(true);
+    expect(server.hooks.has("workspace.archive.after")).toBe(true);
+    cleanup();
+    expect(server.hooks.has("agent.archive.after")).toBe(false);
+    expect(server.hooks.has("workspace.archive.after")).toBe(false);
+  });
+
+  it("drops the listing cache when an agent is archived", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    const hook = server.hooks.get("agent.archive.after");
+    expect(hook).toBeDefined();
+
+    await listAgentSessions(); // prime
+    await listAgentSessions(); // warm: no second scan
+    expect(listSpy).toHaveBeenCalledTimes(1);
+
+    await hook!(
+      {
+        agent: {
+          id: "agent-1",
+          workspaceId: "ws",
+          parentAgentId: null,
+          provider: "opencode",
+          cwd: "/tmp/x",
+          title: null,
+        },
+        archivedAt: "2026-11-03T12:00:00.000Z",
+      } as never,
+      fakeContext() as never,
+    );
+
+    await listAgentSessions();
+    expect(listSpy).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+
+  it("drops the listing cache when a workspace is archived", async () => {
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    const hook = server.hooks.get("workspace.archive.after");
+    expect(hook).toBeDefined();
+
+    await listAgentSessions(); // prime
+    await listAgentSessions(); // warm: no second scan
+    expect(listSpy).toHaveBeenCalledTimes(1);
+
+    await hook!(
+      {
+        workspace: {
+          id: "ws",
+          projectId: "project-1",
+          cwd: "/tmp/x",
+          name: "test workspace",
+          archivedAt: "2026-11-03T12:00:00.000Z",
+        },
+      } as never,
+      fakeContext() as never,
+    );
+
+    await listAgentSessions();
+    expect(listSpy).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe("session-manager.refresh RPC", () => {
   it("reopens the agent session and invalidates the listing cache", async () => {
     const server = createFakeServer();

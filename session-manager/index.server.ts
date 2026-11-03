@@ -36,6 +36,31 @@ export default function contribute(server: PluginServerContext) {
     );
   });
 
+  // A close is not the only event that changes what the panel lists: archiving an
+  // agent (or its workspace) removes it from the provider listing while its cached
+  // entry — and the stale "still running" / "due for cleanup" hints derived from it
+  // — keep being served for up to the TTL. Both archive events therefore drop the
+  // cache as well (§19.3 item 1, shipped in 0.3.5).
+  const removeAgentArchivedHook = server.addHook(
+    "agent.archive.after",
+    async (event) => {
+      invalidateListing();
+      console.log(
+        `[session-manager] agent archived (${event.agent.id}): listing cache invalidated`,
+      );
+    },
+  );
+
+  const removeWorkspaceArchivedHook = server.addHook(
+    "workspace.archive.after",
+    async (event) => {
+      invalidateListing();
+      console.log(
+        `[session-manager] workspace archived (${event.workspace.id}): listing cache invalidated`,
+      );
+    },
+  );
+
   // --- Refresh: reopen the session so its runtime state is recomputed ----------
   // `reload()` reruns `agent.session_open`; invalidating here means the next list
   // reads the recomputed state rather than the cached snapshot (§18.3 item 3).
@@ -59,5 +84,7 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     removeClosedHook();
+    removeAgentArchivedHook();
+    removeWorkspaceArchivedHook();
   };
 }

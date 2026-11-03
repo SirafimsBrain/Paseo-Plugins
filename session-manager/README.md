@@ -115,12 +115,20 @@ settings screen, four Command Center items, `useTabState` filters and the
 by the OpenCode shared-service finding in
 [bunny-search](../bunny-search/README.md) — it injects no MCP servers.
 
-**Recommendations for improvement — recorded, not implemented:**
-[`__doc.md`](./__doc.md) §19.3 — also drop the listing cache on
-`agent.archive.after` (an archived agent can otherwise stay in the cached
-listing with stale hints until the 30-second TTL ages out), move the provider
-adapters that shell out onto `spawnProcess` / `terminateProcess`, and add an
-`addSidebarFooterItem` status row.
+**Recommendation 1 of §19.3 is implemented — shipped as `0.3.5`:** the listing
+cache is now dropped on archiving too. `agent.archive.after` and
+`workspace.archive.after` are registered next to the close hook and call the
+same `invalidateListing()`, so an archived agent or workspace stops being
+served from the 30-second cache with its stale "still running" / "due for
+cleanup" hints. Existing functionality hardened → patch bump; the floor and
+the SDK pin do not move. Also verified live on an isolated 0.15.0 daemon
+(`paseo workspace archive` → `workspace archived (…): listing cache
+invalidated`, `paseo archive <agent>` → `agent archived (…): listing cache
+invalidated`); details and evidence table in [`__doc.md`](./__doc.md) §19.5.
+
+**Still recorded, not implemented:** [`__doc.md`](./__doc.md) §19.3 — move the
+provider adapters that shell out onto `spawnProcess` / `terminateProcess`, and
+add an `addSidebarFooterItem` status row.
 
 **Verification:** typecheck clean (`tsc --noEmit`) and vitest **9 suites / 74
 tests** green against `@getpaseo/plugin@^0.15.0`, no `server.on(` /

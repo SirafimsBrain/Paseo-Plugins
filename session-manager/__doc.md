@@ -691,16 +691,14 @@ fires this event without awaiting (`pluginHookRegistry["agent.close.after"].wait
 `^0.14.0` → `^0.15.0`, version `0.3.3` → `0.3.4` (deprecated-API replacement,
 no new capability → last digit), annotated tag `session-manager@0.3.4`.
 
-### 19.3 Recommendations for improvement (recorded, not implemented)
+### 19.3 Recommendations for improvement (item 1 shipped in 0.3.5, rest recorded)
 
-1. **Invalidate the listing cache on `agent.archive.after` too.** Archiving
-   an agent (and `workspace.archive.after` for a workspace) changes what the
-   panel lists, but only `agent.close.after` drops the 30-second cache today,
-   so an archived entry can stay visible — with its stale "still running" /
-   "due for cleanup" hints — until the TTL ages out. The event family already
-   exists (`agent.archived` before the 0.15.0 rename); this is one more
-   `server.addHook("agent.archive.after", …)` next to the current one, calling
-   the same `invalidateListing()`. Small, no new settings → patch-level work.
+1. **Invalidate the listing cache on the archive events too — implemented in
+   0.3.5 (§19.5).** Archiving an agent (and `workspace.archive.after` for a
+   workspace) changes what the panel lists, but only `agent.close.after` dropped
+   the 30-second cache, so an archived entry could stay visible — with its stale
+   "still running" / "due for cleanup" hints — until the TTL aged out. Both
+   events now call the same `invalidateListing()`; no new settings, patch-level.
 2. **Host-managed processes** (carried from §15.1): `spawnProcess` /
    `terminateProcess` / `execCommand` from `@getpaseo/plugin/server` in the
    provider adapters that shell out, for Windows `.cmd`/`.bat` handling and a
@@ -717,7 +715,7 @@ let a plugin choose worktree locations and run before workspace setup, but a
 worktree is a directory, not a session store — nothing this plugin lists or
 deletes lives there.
 
-### 19.4 Verification (2026-11-03, this machine)
+### 19.4 Verification of 0.3.4 (2026-11-03, this machine)
 
 | Check | Result |
 | --- | --- |
@@ -728,3 +726,35 @@ deletes lives there.
 | Live daemon | **PASS** — installed from the working tree into an **isolated 0.15.0 daemon** (scratch home under `.tmp/`, own loopback port 6799, `pluginsEnabled: true`, production home untouched): status `running`, `[paseo] Plugin ready`, **zero** `Unknown lifecycle hook` errors in the daemon log. |
 | Hook actually fires | **PASS** — `[session-manager] agent closed (<id>): listing cache invalidated` appeared on a real agent stop and again on the delete of that agent. |
 | Manifest floor | `>=0.15.0` accepted by the real 0.15.0 parser (the plugin loaded and reached `running`). |
+
+### 19.5 Version 0.3.5 — the archive-hook recommendation (2026-11-03)
+
+Implements §19.3 item 1: the listing cache is now dropped on archiving as well
+as on closing, so an archived agent or workspace stops being served from the
+30-second listing cache together with the "still running" / "due for cleanup"
+hints that were derived from it. Existing functionality hardened, no new
+capability → patch bump `0.3.4` → `0.3.5`, annotated tag
+`session-manager@0.3.5`. The manifest floor and the SDK pin do not move: both
+hooks exist since 0.15.0, which `requirements.paseo` `>=0.15.0` already requires.
+
+| Hook | Payload field used | Body |
+| --- | --- | --- |
+| `agent.close.after` (0.3.4) | `event.agent.id` | `invalidateListing()` + one log line |
+| `agent.archive.after` (new) | `event.agent.id` | same |
+| `workspace.archive.after` (new) | `event.workspace.id` | same |
+
+All three registrations are collected and removed by the cleanup function
+`contribute()` returns, so a reload unregisters them exactly as before. The
+cache is global rather than per provider on this path (`invalidateListing()`
+without an argument), because an archive does not tell the plugin which
+provider store changed.
+
+Verification (2026-11-03, this machine):
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) | **exit 0** |
+| `npm test` | **9 suites / 77 tests pass** (+3: registration/cleanup of both hooks, and one behavioural cache-drop assertion per archive hook) |
+| Live, isolated 0.15.0 daemon (scratch home, own loopback port, `pluginsEnabled: true`, production home untouched) | plugin `running`, `[paseo] Plugin ready`, no `Unknown lifecycle hook` — the new hook names are accepted by the shipped host |
+| `paseo workspace archive <id>` on that daemon | `[session-manager] workspace archived (wks_…): listing cache invalidated` |
+| `paseo archive <agent-id>` on that daemon | `[session-manager] agent archived (…): listing cache invalidated` — followed by `agent closed (…): listing cache invalidated` from the existing hook, both in the daemon log |
