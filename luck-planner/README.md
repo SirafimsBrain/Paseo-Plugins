@@ -34,7 +34,7 @@ The MCP server is injected into every agent created through Paseo (configurable 
 
 | Tool | What it does |
 | ---- | ------------ |
-| `luck_tree_get_context` | The "where am I / what is around" call. Without a node id: the project overview (roots and their first-level children). With one: the full path root → … → node, its children, its sibling leaves, the bees touching it, its blocking bugs and its growth progress. |
+| `luck_tree_get_context` | The "where am I / what is around" call. Without a node id: the project overview (roots and their first-level children; `depth` 1–3 descends further). With one: the full path root → … → node, its children, its sibling leaves, the bees touching it, its blocking bugs and its growth progress. Three optional fields keep the answer cheap: `sections` picks the blocks to return (an empty list = the node alone), `limit` caps every listing, and a cut list reports the dropped count under `truncated`. |
 | `luck_tree_search` | FTS5 full-text search over the tree, with optional kind and status filters and an `includeArchived` switch. |
 | `luck_tree_upsert_leaf` | Records a planned or confirmed fact. With a leaf id it updates that leaf (any mutable field plus an optional status transition in the same call); without one it creates a leaf under a parent. The very first leaf of a fresh project bootstraps the skeleton root → trunk → branch. |
 | `luck_tree_upsert_node` | Shapes the structure: creates a node of any kind (root → trunk → branch → side branch) or renames an existing one — this is how the auto-created skeleton gets its real names and how a project with several areas gets a branch per area. |

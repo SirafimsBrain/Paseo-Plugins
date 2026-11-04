@@ -22795,9 +22795,21 @@ function ftsQuery(raw) {
 }
 
 // shared/tools.ts
+var contextSectionSchema = external_exports.enum([
+  "path",
+  "children",
+  "siblings",
+  "bees",
+  "blockingBugs",
+  "growth"
+]);
+var CONTEXT_SECTIONS = contextSectionSchema.options;
 var getContextInputSchema = external_exports.object({
   projectKey: projectKeySchema,
-  nodeId: idSchema.optional()
+  nodeId: idSchema.optional(),
+  sections: external_exports.array(contextSectionSchema).optional(),
+  depth: external_exports.number().int().min(1).max(3).optional(),
+  limit: external_exports.number().int().positive().max(200).optional()
 });
 var searchInputSchema = external_exports.object({
   projectKey: projectKeySchema,
@@ -22952,7 +22964,23 @@ var MCP_TOOLS = [
       type: "object",
       properties: {
         projectKey: PROJECT_KEY,
-        nodeId: str("Node to open. Omit for the project overview.")
+        nodeId: str("Node to open. Omit for the project overview."),
+        sections: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [...CONTEXT_SECTIONS]
+          },
+          description: "Which blocks of a node answer to return. Omit for all of them; [] returns only the node and its parentId. Ignored without nodeId."
+        },
+        depth: {
+          type: "number",
+          description: "Overview only: levels to descend below each root, 1\u20133 (default 1 = roots and their first level)."
+        },
+        limit: {
+          type: "number",
+          description: "Cap every listing (roots, children, siblings, bees, blocking bugs) at 1\u2013200 entries; unlimited by default. When a list is cut, `truncated` reports how many entries were dropped."
+        }
       },
       required: ["projectKey"]
     }
@@ -23572,16 +23600,19 @@ function dispatchMcpTool(name, args, context) {
   }
 }
 function dispatchGetContext(store, value) {
+  const limit = value.limit;
   if (value.nodeId === void 0) {
-    const roots = store.listChildren(value.projectKey, null);
-    return text({
+    const depth = value.depth ?? 1;
+    const roots = capList(store.listChildren(value.projectKey, null), limit);
+    const answer2 = {
       mode: "overview",
       projectKey: value.projectKey,
-      roots: roots.map((root) => ({
-        ...nodeSummary(root),
-        children: store.listChildren(value.projectKey, root.id).map(nodeSummary)
-      }))
-    });
+      roots: roots.items.map(
+        (root) => overviewEntry(store, value.projectKey, root, depth, limit)
+      )
+    };
+    if (roots.dropped > 0) answer2.truncated = { roots: roots.dropped };
+    return text(answer2);
   }
   const node2 = store.getNode(value.projectKey, value.nodeId);
   if (!node2) {
@@ -23589,28 +23620,68 @@ function dispatchGetContext(store, value) {
       `node ${value.nodeId} not found in project ${value.projectKey}`
     );
   }
-  const path2 = store.getNodePath(value.projectKey, node2.id).map(nodeSummary);
-  const children = store.listChildren(value.projectKey, node2.id).map(nodeSummary);
-  const siblings = node2.parentId === null ? [] : store.listChildren(value.projectKey, node2.parentId).filter((sibling) => sibling.id !== node2.id).map(nodeSummary);
-  const bees = store.listBeesForNode(value.projectKey, node2.id);
-  const blockingBugs = store.listBlockingBugs(value.projectKey, node2.id);
-  const growth = store.getGrowthProgress(
-    value.projectKey,
-    "node",
-    node2.id
-  );
-  return text({
+  const wanted = value.sections === void 0 ? null : new Set(value.sections);
+  const wants = (section) => wanted === null || wanted.has(section);
+  const answer = {
     mode: "node",
     projectKey: value.projectKey,
     node: nodeSummary(node2),
-    parentId: node2.parentId,
-    path: path2,
-    children,
-    siblings,
-    bees,
-    blockingBugs,
-    growth
-  });
+    parentId: node2.parentId
+  };
+  const truncated = {};
+  const keep = (section, items) => {
+    if (!wants(section)) return void 0;
+    const capped = capList(items, limit);
+    if (capped.dropped > 0) truncated[section] = capped.dropped;
+    return capped.items;
+  };
+  const path2 = keep(
+    "path",
+    store.getNodePath(value.projectKey, node2.id).map(nodeSummary)
+  );
+  if (path2 !== void 0) answer.path = path2;
+  const children = keep(
+    "children",
+    store.listChildren(value.projectKey, node2.id).map(nodeSummary)
+  );
+  if (children !== void 0) answer.children = children;
+  if (wants("siblings")) {
+    const all = node2.parentId === null ? [] : store.listChildren(value.projectKey, node2.parentId).filter((sibling) => sibling.id !== node2.id).map(nodeSummary);
+    const siblings = keep("siblings", all);
+    if (siblings !== void 0) answer.siblings = siblings;
+  }
+  if (wants("bees")) {
+    const bees = keep("bees", store.listBeesForNode(value.projectKey, node2.id));
+    if (bees !== void 0) answer.bees = bees;
+  }
+  if (wants("blockingBugs")) {
+    const blockingBugs = keep(
+      "blockingBugs",
+      store.listBlockingBugs(value.projectKey, node2.id)
+    );
+    if (blockingBugs !== void 0) answer.blockingBugs = blockingBugs;
+  }
+  if (wants("growth")) {
+    answer.growth = store.getGrowthProgress(value.projectKey, "node", node2.id);
+  }
+  if (Object.keys(truncated).length > 0) answer.truncated = truncated;
+  return text(answer);
+}
+function overviewEntry(store, projectKey, node2, levels, limit) {
+  const entry = nodeSummary(node2);
+  if (levels <= 0) return entry;
+  const children = capList(store.listChildren(projectKey, node2.id), limit);
+  if (children.dropped > 0) entry.omittedChildren = children.dropped;
+  entry.children = children.items.map(
+    (child) => levels === 1 ? nodeSummary(child) : overviewEntry(store, projectKey, child, levels - 1, limit)
+  );
+  return entry;
+}
+function capList(items, limit) {
+  if (limit === void 0 || items.length <= limit) {
+    return { items: [...items], dropped: 0 };
+  }
+  return { items: items.slice(0, limit), dropped: items.length - limit };
 }
 function dispatchUpsertLeaf(store, value, actor) {
   if (value.leafId !== void 0) {
@@ -23780,7 +23851,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.40.9";
+var SERVER_VERSION = "0.41.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

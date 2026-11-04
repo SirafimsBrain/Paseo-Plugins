@@ -1,9 +1,9 @@
 import type { Node, NodeKind } from "../shared/tree";
-import type { GrowthProgress } from "./store";
 import type {
   AddBeeInput,
   ApproveGoalInput,
   ArchiveNodeInput,
+  ContextSection,
   FindBugsInput,
   FindGoalsInput,
   GetContextInput,
@@ -17,6 +17,7 @@ import type {
   UpsertNodeInput,
 } from "../shared/tools";
 import {
+  CONTEXT_SECTIONS,
   addBeeInputSchema,
   approveGoalInputSchema,
   archiveNodeInputSchema,
@@ -150,6 +151,29 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       properties: {
         projectKey: PROJECT_KEY,
         nodeId: str("Node to open. Omit for the project overview."),
+        sections: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [...CONTEXT_SECTIONS],
+          },
+          description:
+            "Which blocks of a node answer to return. Omit for all of them; " +
+            "[] returns only the node and its parentId. Ignored without nodeId.",
+        },
+        depth: {
+          type: "number",
+          description:
+            "Overview only: levels to descend below each root, 1–3 " +
+            "(default 1 = roots and their first level).",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Cap every listing (roots, children, siblings, bees, blocking " +
+            "bugs) at 1–200 entries; unlimited by default. When a list is cut, " +
+            "`truncated` reports how many entries were dropped.",
+        },
       },
       required: ["projectKey"],
     },
@@ -905,18 +929,21 @@ function dispatchGetContext(
   store: LuckPlannerStore,
   value: GetContextInput,
 ): ToolResult {
+  const limit = value.limit;
   if (value.nodeId === undefined) {
-    const roots = store.listChildren(value.projectKey, null);
-    return text({
+    // `depth` only means something for the overview: 1 is the classic
+    // "roots and their first level", each extra level descends one more.
+    const depth = value.depth ?? 1;
+    const roots = capList(store.listChildren(value.projectKey, null), limit);
+    const answer: Record<string, unknown> = {
       mode: "overview",
       projectKey: value.projectKey,
-      roots: roots.map((root) => ({
-        ...nodeSummary(root),
-        children: store
-          .listChildren(value.projectKey, root.id)
-          .map(nodeSummary),
-      })),
-    });
+      roots: roots.items.map((root) =>
+        overviewEntry(store, value.projectKey, root, depth, limit),
+      ),
+    };
+    if (roots.dropped > 0) answer.truncated = { roots: roots.dropped };
+    return text(answer);
   }
 
   const node = store.getNode(value.projectKey, value.nodeId);
@@ -925,36 +952,105 @@ function dispatchGetContext(
       `node ${value.nodeId} not found in project ${value.projectKey}`,
     );
   }
-  const path = store.getNodePath(value.projectKey, node.id).map(nodeSummary);
-  const children = store
-    .listChildren(value.projectKey, node.id)
-    .map(nodeSummary);
-  const siblings =
-    node.parentId === null
-      ? []
-      : store
-          .listChildren(value.projectKey, node.parentId)
-          .filter((sibling) => sibling.id !== node.id)
-          .map(nodeSummary);
-  const bees = store.listBeesForNode(value.projectKey, node.id);
-  const blockingBugs = store.listBlockingBugs(value.projectKey, node.id);
-  const growth: GrowthProgress | null = store.getGrowthProgress(
-    value.projectKey,
-    "node",
-    node.id,
-  );
-  return text({
+  // A missing `sections` keeps the pre-L1 answer byte for byte; an explicit
+  // list (including an empty one) selects blocks, so the omitted keys are
+  // exactly the sections the caller did not ask for.
+  const wanted =
+    value.sections === undefined ? null : new Set(value.sections);
+  const wants = (section: ContextSection): boolean =>
+    wanted === null || wanted.has(section);
+
+  const answer: Record<string, unknown> = {
     mode: "node",
     projectKey: value.projectKey,
     node: nodeSummary(node),
     parentId: node.parentId,
-    path,
-    children,
-    siblings,
-    bees,
-    blockingBugs,
-    growth,
-  });
+  };
+  const truncated: Record<string, number> = {};
+  const keep = <T>(
+    section: ContextSection,
+    items: readonly T[],
+  ): T[] | undefined => {
+    if (!wants(section)) return undefined;
+    const capped = capList(items, limit);
+    if (capped.dropped > 0) truncated[section] = capped.dropped;
+    return capped.items;
+  };
+
+  const path = keep(
+    "path",
+    store.getNodePath(value.projectKey, node.id).map(nodeSummary),
+  );
+  if (path !== undefined) answer.path = path;
+
+  const children = keep(
+    "children",
+    store.listChildren(value.projectKey, node.id).map(nodeSummary),
+  );
+  if (children !== undefined) answer.children = children;
+
+  if (wants("siblings")) {
+    const all =
+      node.parentId === null
+        ? []
+        : store
+            .listChildren(value.projectKey, node.parentId)
+            .filter((sibling) => sibling.id !== node.id)
+            .map(nodeSummary);
+    const siblings = keep("siblings", all);
+    if (siblings !== undefined) answer.siblings = siblings;
+  }
+
+  if (wants("bees")) {
+    const bees = keep("bees", store.listBeesForNode(value.projectKey, node.id));
+    if (bees !== undefined) answer.bees = bees;
+  }
+
+  if (wants("blockingBugs")) {
+    const blockingBugs = keep(
+      "blockingBugs",
+      store.listBlockingBugs(value.projectKey, node.id),
+    );
+    if (blockingBugs !== undefined) answer.blockingBugs = blockingBugs;
+  }
+
+  if (wants("growth")) {
+    answer.growth = store.getGrowthProgress(value.projectKey, "node", node.id);
+  }
+
+  if (Object.keys(truncated).length > 0) answer.truncated = truncated;
+  return text(answer);
+}
+
+/** One overview node: a summary, plus `children` while `levels` allows. */
+function overviewEntry(
+  store: LuckPlannerStore,
+  projectKey: string,
+  node: Node,
+  levels: number,
+  limit: number | undefined,
+): Record<string, unknown> {
+  const entry = nodeSummary(node);
+  if (levels <= 0) return entry;
+  const children = capList(store.listChildren(projectKey, node.id), limit);
+  if (children.dropped > 0) entry.omittedChildren = children.dropped;
+  entry.children = children.items.map((child) =>
+    levels === 1
+      ? nodeSummary(child)
+      : overviewEntry(store, projectKey, child, levels - 1, limit),
+  );
+  return entry;
+}
+
+/** Caps a listing at `limit`, reporting how many entries were dropped. */
+function capList<T>(
+  items: readonly T[],
+  limit: number | undefined,
+): { items: T[]; dropped: number } {
+  if (limit === undefined || items.length <= limit) {
+    return { items: [...items], dropped: 0 };
+  }
+  return { items: items.slice(0, limit), dropped: items.length - limit };
 }
 
 /** Upsert semantics: create under parentId, or update leafId in place. */

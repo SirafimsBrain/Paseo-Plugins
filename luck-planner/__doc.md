@@ -476,7 +476,7 @@ transport-independent on purpose: the stdio server of stage D2 and
 
 | Tool | Behaviour |
 | --- | --- |
-| `luck_tree_get_context` | Orientation call. Without `nodeId`: overview — roots and their first level (`store.listChildren`). With `nodeId`: path root → … → node (`store.getNodePath`), children, sibling leaves, bees touching the node, blocking bugs and growth progress — the agent "descends one level" in one call instead of probing with searches. |
+| `luck_tree_get_context` | Orientation call. Without `nodeId`: overview — roots and their first level (`store.listChildren`). With `nodeId`: path root → … → node (`store.getNodePath`), children, sibling leaves, bees touching the node, blocking bugs and growth progress — the agent "descends one level" in one call instead of probing with searches. **Stage L1** adds three optional narrowing fields (see below): `sections`, `depth`, `limit`. |
 | `luck_tree_search` | FTS5 search within one project (bm25 ranking, `key=value` filters inside free text, optional kinds/statuses arrays, archived excluded by default). |
 | `luck_tree_upsert_leaf` | Create a leaf under `parentId` (`name` required, status defaults to `draft`) or update `leafId` in place: any of name/description/version/payload plus an optional status transition in the same call. Stating the current status is a tolerated no-op; a real transition runs the state machine and its audit row; an illegal transition comes back as a readable `invalid status transition …` error that writes nothing. Editing a non-leaf or an unknown/foreign id is rejected with the node kind named. |
 | `luck_tree_upsert_node` | The **structure** of a project: create a node of any kind (`root` → `trunk` → `branch` → `subbranch` → `leaf`, the store validates the parent/child kinds) or update an existing one (name, description, version, payload, status). Added in stage D5 — the leaf-level tool alone left an agent unable to shape anything above the leaf, and the live test pass showed exactly that. |
@@ -487,6 +487,23 @@ transport-independent on purpose: the stdio server of stage D2 and
 | `luck_tree_set_goal` | Pre-approval goal management only: `create` (draft; `formalText` + `plan` required), `update` (draft/proposed edits), `propose` (draft → proposed). **Deliberately no `approve` action** — ADR-7: the store refuses `approved` from any path but the native panel/RPC. `create`/`propose` responses carry a note telling the agent a human approves; a repeated `propose` is a readable no-op error, not a second transition. |
 | `luck_tree_update_growth` | Upsert of one subject's progress record: an explicit `growthId` wins; otherwise the record is resolved by subject — updated when one exists (error when neither `steps` nor `status` is given), or a fresh one is attached (`steps` required). Step shape and status transitions are validated by the store. |
 | `luck_tree_history` | Append-only audit trail of any entity (node/bee/bug/goal/growth), oldest first; an unknown id returns an empty list rather than an error. |
+
+**Bounded `get_context` (stage L1, 0.41.0).** The orientation answer used to be all-or-nothing:
+  a leaf with forty siblings and a dozen bees handed the agent every one of them. Three fields
+  now narrow it, all optional so a call without them answers byte for byte as before
+  (`tests/mcp-tools.test.ts` pins both halves):
+
+- `sections: ContextSection[]` — the blocks of a **node** answer, named by their response keys
+  (`path`, `children`, `siblings`, `bees`, `blockingBugs`, `growth`). Omitted = all; `[]` = the
+  node and its `parentId` only. Ignored in the overview.
+- `depth: 1…3` — overview only: how many levels to descend below each root; `1` is the classic
+  roots + first level, so nested `children` arrays appear only when asked for.
+- `limit: 1…200` — caps every listing (roots, children, siblings, bees, blocking bugs). A cut
+  list reports its dropped count under `truncated` (`{ siblings: 2 }`), and a cut overview node
+  reports `omittedChildren`; a list that fits stays silent, so the key never appears by accident.
+
+The names are the response keys on purpose: asking `sections: ["blockingBugs"]` returns exactly
+  one block under the name the agent already knows, with no lookup table to consult.
 
 Conventions:
 

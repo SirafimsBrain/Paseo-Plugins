@@ -248,6 +248,178 @@ describe("luck_tree_get_context", () => {
     });
     expectError(result, /not found in project/);
   });
+
+  // Stage L1: sections/depth/limit narrow the answer. Every addition is
+  // optional, so the calls above stay the compatibility baseline — these
+  // tests pin both halves: the new shapes and "no new keys unless asked".
+  it("descends one level per `depth` in the overview", () => {
+    const store = openStore();
+    seedTree(store);
+
+    const flat = payload<{
+      roots: Array<{ name: string; children: Array<Record<string, unknown>> }>;
+    }>(call(store, "luck_tree_get_context", { projectKey: P, depth: 1 }));
+    expect(flat.roots[0].children[0].name).toBe("Platform");
+    expect(flat.roots[0].children[0]).not.toHaveProperty("children");
+
+    const deep = payload<{
+      roots: Array<{
+        children: Array<{ name: string; children: Array<{ name: string }> }>;
+      }>;
+    }>(call(store, "luck_tree_get_context", { projectKey: P, depth: 2 }));
+    expect(deep.roots[0].children[0].name).toBe("Platform");
+    expect(deep.roots[0].children[0].children[0].name).toBe("billing");
+  });
+
+  it("caps overview listings with `limit` and reports what it dropped", () => {
+    const store = openStore();
+    const { root } = seedTree(store);
+    store.createNode({
+      projectKey: P,
+      parentId: root.id,
+      kind: "trunk",
+      name: "Runtime",
+      actor: ACTOR,
+    });
+
+    const result = payload<{
+      roots: Array<{
+        children: Array<{ name: string }>;
+        omittedChildren?: number;
+      }>;
+    }>(call(store, "luck_tree_get_context", { projectKey: P, limit: 1 }));
+    expect(result.roots[0].children.map((child) => child.name)).toEqual([
+      "Platform",
+    ]);
+    expect(result.roots[0].omittedChildren).toBe(1);
+  });
+
+  it("returns only the requested `sections` of a node", () => {
+    const store = openStore();
+    const { leafA } = seedTree(store);
+    store.createBug({
+      projectKey: P,
+      title: "webhook 500s",
+      severity: "high",
+      nodeIds: [leafA.id],
+      actor: ACTOR,
+    });
+
+    const result = payload<Record<string, unknown>>(
+      call(store, "luck_tree_get_context", {
+        projectKey: P,
+        nodeId: leafA.id,
+        sections: ["blockingBugs"],
+      }),
+    );
+    expect(result.mode).toBe("node");
+    expect(result.parentId).toBeTruthy();
+    expect((result.blockingBugs as Array<{ title: string }>)[0].title).toBe(
+      "webhook 500s",
+    );
+    for (const key of ["path", "children", "siblings", "bees", "growth"]) {
+      expect(result).not.toHaveProperty(key);
+    }
+  });
+
+  it("treats an empty `sections` list as \"the node only\"", () => {
+    const store = openStore();
+    const { leafA } = seedTree(store);
+    const result = payload<Record<string, unknown>>(
+      call(store, "luck_tree_get_context", {
+        projectKey: P,
+        nodeId: leafA.id,
+        sections: [],
+      }),
+    );
+    expect(result.node).toMatchObject({ id: leafA.id });
+    expect(Object.keys(result).sort()).toEqual([
+      "mode",
+      "node",
+      "parentId",
+      "projectKey",
+    ]);
+  });
+
+  it("caps node listings with `limit` and reports what it dropped", () => {
+    const store = openStore();
+    const { branch, leafA, leafB } = seedTree(store);
+    for (const name of ["retry receipts", "retry invoices"]) {
+      store.createNode({
+        projectKey: P,
+        parentId: branch.id,
+        kind: "leaf",
+        name,
+        actor: ACTOR,
+      });
+    }
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafA.id,
+      targetLeafId: leafB.id,
+      impact: "refund proration depends on retry outcome",
+      actor: ACTOR,
+    });
+
+    const result = payload<{
+      siblings: Array<{ id: string }>;
+      bees: Array<{ id: string }>;
+      truncated?: Record<string, number>;
+    }>(
+      call(store, "luck_tree_get_context", {
+        projectKey: P,
+        nodeId: leafA.id,
+        sections: ["siblings", "bees"],
+        limit: 2,
+      }),
+    );
+    expect(result.siblings).toHaveLength(2);
+    expect(result.bees).toHaveLength(1);
+    // Only the cut list is reported: a list that fits stays silent.
+    expect(result.truncated).toEqual({ siblings: 1 });
+  });
+
+  it("keeps the full answer when nothing is narrowed", () => {
+    const store = openStore();
+    const { leafA } = seedTree(store);
+    const result = payload<Record<string, unknown>>(
+      call(store, "luck_tree_get_context", { projectKey: P, nodeId: leafA.id }),
+    );
+    expect(Object.keys(result).sort()).toEqual([
+      "bees",
+      "blockingBugs",
+      "children",
+      "growth",
+      "mode",
+      "node",
+      "parentId",
+      "path",
+      "projectKey",
+      "siblings",
+    ]);
+    expect(result.truncated).toBeUndefined();
+  });
+
+  it("rejects an unknown section and out-of-range depth/limit", () => {
+    const store = openStore();
+    const { leafA } = seedTree(store);
+    expectError(
+      call(store, "luck_tree_get_context", {
+        projectKey: P,
+        nodeId: leafA.id,
+        sections: ["nope"],
+      }),
+      /Invalid input: sections\.0/,
+    );
+    expectError(
+      call(store, "luck_tree_get_context", { projectKey: P, depth: 0 }),
+      /Invalid input: depth/,
+    );
+    expectError(
+      call(store, "luck_tree_get_context", { projectKey: P, limit: 0 }),
+      /Invalid input: limit/,
+    );
+  });
 });
 
 describe("luck_tree_search", () => {

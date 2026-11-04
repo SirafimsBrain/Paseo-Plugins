@@ -89,6 +89,9 @@ luck_tree_get_context { "projectKey": "/abs/path/to/project" }
 - **With \`nodeId\`** — the path root → … → that node, its children, sibling
   leaves, bees touching it, blocking bugs, and growth progress: you "descend
   one level" in a single call.
+- **Keep the answer cheap on big nodes** — \`sections: ["blockingBugs"]\`
+  returns one block, \`limit: 10\` caps every list (a cut list reports the
+  dropped count under \`truncated\`), and \`depth: 2\` descends below the roots.
 
 Before creating anything, **search first** — with different wordings, 2–4
 calls per task (one query is a guess):

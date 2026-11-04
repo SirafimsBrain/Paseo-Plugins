@@ -46,16 +46,45 @@ export const MCP_TOOL_NAMES = [
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
 
 /**
+ * Optional blocks of a node-mode `luck_tree_get_context` answer. The names
+ * are the response keys, so `sections: ["blockingBugs"]` asks for exactly
+ * one block and the answer omits the rest — on a large node the full answer
+ * is mostly irrelevant to the agent asking, and context is the budget that
+ * matters. `node` and `parentId` are always present.
+ */
+export const contextSectionSchema = z.enum([
+  "path",
+  "children",
+  "siblings",
+  "bees",
+  "blockingBugs",
+  "growth",
+]);
+export type ContextSection = z.infer<typeof contextSectionSchema>;
+export const CONTEXT_SECTIONS = contextSectionSchema.options;
+
+/**
  * `luck_tree_get_context`: the "where am I / what is around" call. Without
  * `nodeId` it answers with the project overview — roots and their first
  * level of children — so an agent starting a session can pick a trunk to
  * descend into. With `nodeId` it answers with the full path
  * root → … → node, the node's children, its sibling leaves, the bees
  * touching it, its blocking bugs and its growth progress.
+ *
+ * Three optional fields narrow that answer (stage L1, additive — a call
+ * without them answers exactly as before):
+ *
+ * - `sections` picks blocks of a node answer (ignored for the overview);
+ * - `depth` descends below each root in the overview (1 = the classic
+ *   roots + first level);
+ * - `limit` caps every listing and reports what it dropped.
  */
 export const getContextInputSchema = z.object({
   projectKey: projectKeySchema,
   nodeId: idSchema.optional(),
+  sections: z.array(contextSectionSchema).optional(),
+  depth: z.number().int().min(1).max(3).optional(),
+  limit: z.number().int().positive().max(200).optional(),
 });
 export type GetContextInput = z.infer<typeof getContextInputSchema>;
 
