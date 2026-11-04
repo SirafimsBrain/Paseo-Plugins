@@ -1,19 +1,19 @@
 # Luck Planner
 
-Project planning tree for coding agents on [Paseo](https://paseo.sh/): a tech-stack root, module branches, fact leaves with statuses, influence links, blocking incidents, approved high goals and growth rates — with a 2D diagram and a 3D scene that read the same data.
+Project planning tree for coding agents on [Paseo](https://paseo.sh/): a tech-stack root, module branches, fact leaves with statuses, influence links, blocking incidents, approved high goals and growth rates — with a plain card board and a 2D diagram that read the same data. (The 3D dashboard is **suspended** — see ["3D — suspended"](#3d--suspended).)
 
 Coding agents keep their plan in their own context window, and a chat log is a poor place to look up *what do we already know about this module*. Luck Planner gives a project one durable tree: the agents write it through MCP tools, a human reviews and approves it in the panel and the dashboard, and every write is audited.
 
 ## What it does
 
 - **The tree** — five levels: the tech-stack **root**, the **trunks** (platforms), the **branches** (modules), the **side branches** and the **leaves** (the facts: a planned or confirmed piece of work). Every leaf carries a status (`draft → ready → claimed → in_progress → done`, plus `blocked`, `cancelled`, `superseded`), a version, a revision and an append-only history. The store refuses a status transition the state machine does not allow, so an agent cannot skip a step by accident.
-- **Influence links (bees)** — a directed link between two leaves saying "this depends on that". In the 3D scene the bees fly along the arcs between the two leaves.
+- **Influence links (bees)** — a directed link between two leaves saying "this depends on that".
 - **Incidents (bugs)** — a problem with a severity, optionally attached to the leaves it blocks. A blocking incident (`open` or `investigating`) is visible everywhere its leaves are.
 - **High goals** — a formal task with a plan, created and proposed by an agent and **approved by a human**. There is deliberately no MCP action that approves a goal: the approval gate is the human's call through the panel. An approved goal materializes as a branch of the tree, and the plan's steps become the goal's growth record.
-- **Growth** — the steps of a node or a goal and their state, rolled up over the subtree. The same number paints the heat map in 2D and the glow rings in 3D: one computation, two views, never two different answers.
+- **Growth** — the steps of a node or a goal and their state, rolled up over the subtree. The same number paints the 2D heat map: one computation, one answer.
 - **MCP tools** — eleven read/write tools, available to every agent in the workspace (see below).
 - **Registration in the agents' own config files** — the plugin can register its MCP server directly in the config of OpenCode, Kilo, Cline, Cursor, Qwen Code and Codex CLI, one button per agent in the settings. That matters because a session-injected server is fragile: OpenCode and Kilo keep session registrations in memory and drop them when an idle directory is evicted, and the terminal agents ignore session-delivered MCP servers altogether. A config-file entry survives the eviction and is the only way in for the latter.
-- **The dashboard** — a read-only web app on the loopback interface: a 2D diagram with search, filters and a details panel, and a 3D WebGL scene of the same tree (see "The dashboard").
+- **The dashboard** — a read-only web app on the loopback interface: a plain card board (the default), a 2D diagram with search, filters and a details panel (see "The dashboard"). The 3D scene is suspended.
 - **The native panel** — the tree, the filters and the details inside Paseo's workspace panel, with timeline rows for the two facts worth an audit line: a goal that crossed the approval gate, and a leaf that reached `done`.
 - **Live updates** — the dashboard and the panel refresh themselves when the tree changes (an SSE stream in the dashboard, a polling RPC in the panel), so a second agent's write shows up without a reload.
 - **An agent skill** — `luck-planner` teaches agents *when* to write the tree, not just which tool to call. It is a protocol, not a description: read the context before the work, write the leaf when the fact changes, never manage the tree by hand.
@@ -57,9 +57,11 @@ The dashboard is a standalone web app the plugin serves over loopback HTTP (`htt
 
 **2D — the diagram.** The tree is laid out **upwards** — the root at the bottom, the trunk rising, the branches fanning out above it, the way a human reads a tree — with the goal frames drawn behind the subtree a goal materialized, the bee links as coloured edges, the incident badges on the blocking leaves and the growth bars under the nodes. Clicking a node fills the details panel with its version, revision, status, incidents, influence links, children and history; the edges around the selection and the leaves sharing an incident with it are emphasized. The toolbar search runs a full-text query, clears whatever would hide the best hit and flies the camera to it; the kind, status and version filters narrow the diagram, and the **Growth heat** layer repaints the same tree by the rolled-up growth ratio. The details panel is **resizable** — pull its left edge to give it more room, and the width is remembered for the next visit.
 
-**3D — the scene.** The same payload in a WebGL scene: the tree becomes a radial cone (depth is height, siblings fan around the trunk axis), the leaves are billboarded sprites, the bees fly along curved arcs between the leaves, the blocking incidents pulse above the leaves they block, an approved goal floats as a ring over its subtree and the growth glows as rings in the growth layer. A click picks a node and fills the **same** details panel the 2D diagram fills; the selection shows the nodes sharing an incident with it and draws its influence links as curves; a search flies the camera to the node it found. The 2D/3D choice is remembered in the URL and in the tab, so a copied link opens in the diagram the sender was looking at.
+### 3D — suspended
 
-The 3D view needs a real WebGL context. A tab without one (a workspace browser started with `--disable-webgl`, a phone client, a blocked driver) keeps the 2D diagram and says why in the status line — it never shows a black viewport. The 3D scene is a separate lazy bundle, so the 2D dashboard stays small and the WebGL libraries are only downloaded when 3D is actually opened.
+**The 3D dashboard is stopped.** Development of the 3D scene is suspended (state: *stopped*, from 0.40.9) because the plugin has **no resources for it** and the effort goes to the two main branches: the **plain** board and the **2D** diagram.
+
+The toolbar keeps its third button so the switch still reads Plain / 2D / 3D, but the **3D button is disabled** and its tooltip states the reason; a link or tab that still says `?view=3d` opens the plain board and the status line says why. Nothing was deleted: the scene, the WebGL probe policy and the lazy `dashboard-3d.js` bundle stay in the source and in the build, so resuming is a one-flag change (`THREE_VIEW_SUSPENDED` in `dashboard/src/webgl.ts`) rather than a rewrite. While the flag is set, the dashboard does not even probe for a WebGL context and the scene chunk is never downloaded.
 
 **Browser cache after an update.** After `paseo plugin update luck-planner` (or `paseo plugin reload`), hard-reload any open dashboard tab so the browser picks up the new `dist/dashboard` assets instead of the cached ones: `Ctrl + F5` / `Ctrl + Shift + R` (Linux/Windows) or `Cmd + Shift + R` (macOS). The MCP server and the native panel update immediately on plugin reload; only the dashboard tab needs the hard reload.
 
@@ -109,7 +111,7 @@ npm test
 - [`__doc.md`](./__doc.md) — the technical documentation: the domain model, the architectural decisions, every stage of the plan and the reasoning behind them.
 - [`PLAN.md`](./PLAN.md) — the stage plan (in Russian, the working language of this repository).
 
-The source is split by boundary: `shared/` (types and schemas, client/server neutral), `server/` (the store, the MCP server, the HTTP server, the timeline), `client/` (the panel, the settings screen, the slash commands, the dashboard screen), `dashboard/` (the web app: the pure adapter in `graph.ts`, the 3D layout in `tree-3d.ts`, the 3D overlay in `overlay-3d.ts`, the 3D interaction in `pick-3d.ts` and the scene in `dashboard-3d.tsx`).
+The source is split by boundary: `shared/` (types and schemas, client/server neutral), `server/` (the store, the MCP server, the HTTP server, the timeline), `client/` (the panel, the settings screen, the slash commands, the dashboard screen), `dashboard/` (the web app: the pure adapter in `graph.ts`, the plain board in `plain.ts`, and — suspended, kept unused — the 3D layout in `tree-3d.ts`, the 3D overlay in `overlay-3d.ts`, the 3D interaction in `pick-3d.ts` and the scene in `dashboard-3d.tsx`).
 
 ## Paseo 0.15.0 compatibility
 
@@ -164,9 +166,7 @@ Verified against the **stable Paseo 0.12.0** release (2026-10-22) with the plugi
 
 ## Known limitations
 
-- The 3D view needs WebGL; without it the tab stays on the 2D diagram and says why.
-- Collapsing a branch is a 2D-canvas concern: the 3D scene always shows the whole tree (the filters narrow it in both views).
-- The 3D scene picks the node nearest along the click ray, using a sphere around each node — a very thin branch tube is picked at its junction, not along its whole length.
+- The 3D dashboard is **suspended** (see ["3D — suspended"](#3d--suspended)): the code stays in the repository and in the build, the toolbar's 3D button is disabled, and any `?view=3d` link opens the plain board. There is no supported way to open the scene.
 - The dashboard is designed for a desktop-sized tab; the native panel is the mobile-friendly surface.
 - The dashboard is served on the **daemon host's** loopback interface, so it opens on the machine that runs the daemon. With a remote daemon, the native panel still works (it speaks to the daemon over the host connection), but the dashboard URL points at the desktop's own loopback and the tab stays empty. The MCP tools and the panel are unaffected.
 
@@ -176,4 +176,4 @@ MIT. See [LICENSE](../LICENSE).
 
 ## Plain view (default)
 
-The dashboard opens on the **Plain** view: a card board (zones PLAN / ACTIVE / DONE) built from the same `/api/tree` payload as the 2D and 3D diagrams. Clicking a card opens a modal with the full record (node, goal, or incident). The 2D and 3D views remain available in the toolbar and are remembered per tab.
+The dashboard opens on the **Plain** view: a card board (zones PLAN / ACTIVE / DONE) built from the same `/api/tree` payload as the 2D diagram. Clicking a card opens a modal with the full record (node, goal, or incident). The 2D view remains available in the toolbar and the choice is remembered per tab; the 3D button is disabled (suspended).

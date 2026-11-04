@@ -13,10 +13,11 @@ it.
 Two surfaces show the same data. The **workspace panel** is the outline: filters,
 full-text search, counters, and a details view with status moves and the audit
 history of each record. The **dashboard** runs on the daemon host's loopback and
-offers three views of the same tree: a plain card board, an interactive 2D
-diagram, and an optional 3D scene that renders bees as arcs and incidents as
-pulsing markers. A fourth surface lists, for one agent, the audit rows that
-agent wrote.
+offers two views of the same tree: a plain card board (the default) and an
+interactive 2D diagram. A third, 3D view exists in the source but is
+**suspended**: its development is stopped for lack of resources while the plain
+and 2D views are the focus, and the toolbar's 3D button is disabled. A fourth
+surface lists, for one agent, the audit rows that agent wrote.
 
 Agents reach the tree through a bundled MCP server: `luck_tree_get_context`,
 `luck_tree_search`, `luck_tree_upsert_node`, `luck_tree_upsert_leaf`,
@@ -79,6 +80,7 @@ rest of its conversation does.
 
 The dashboard is read-only and bound to the host's loopback interface, so it
 opens on the machine that runs the daemon; a remote daemon still works through
-the native panel. The 3D view needs WebGL and falls back to the 2D diagram
-without it. The dashboard is designed for a desktop-sized tab; the native panel
-is the mobile-friendly surface.
+the native panel. The 3D view is suspended: its code stays in the repository,
+its toolbar button is disabled, and the plain board and the 2D diagram are the
+supported views. The dashboard is designed for a desktop-sized tab; the native
+panel is the mobile-friendly surface.

@@ -17,6 +17,15 @@
  * board** (the default view, DOM-only) instead of the 2D diagram — the
  * answer to "the scene cannot render" is now the view that cannot fail.
  *
+ * **Stage 0.40.9 suspends the 3D dashboard.** Development of the scene is
+ * stopped: the plugin has no resources for it and the effort goes to the two
+ * main branches, the **plain** board and the **2D** diagram. The flag
+ * {@link THREE_VIEW_SUSPENDED} is the whole switch — the toolbar disables its
+ * 3D button, `planViewSwitch` refuses the view with a written reason, and the
+ * scene code (`dashboard-3d.tsx`, `tree-3d.ts`, `overlay-3d.ts`, `pick-3d.ts`,
+ * `components/ThreeView.tsx`) stays in the repository, unused and undownloaded,
+ * so resuming is one `false`.
+ *
  * Client/server neutral: plain types and strings, no Node, no React.
  */
 
@@ -65,6 +74,31 @@ export function threeFailedStatus(detail: string): string {
 /** Toolbar tooltip for the 3D button when WebGL is available. */
 export const THREE_BUTTON_HINT =
   "3D view: the project tree as a WebGL scene — drag to orbit, scroll to zoom. Bees fly along influence links, blocking bugs pulse, approved goals float above their subtree.";
+
+/**
+ * **The 3D dashboard is suspended** (0.40.9). Development of the 3D scene is
+ * stopped: there are no resources for it, and the effort goes to the two main
+ * branches — the **plain** board and the **2D** diagram.
+ *
+ * Nothing was deleted. The scene modules, the lazy `dashboard-3d.js` entry and
+ * the `ThreeView` loader stay in the source and in the build (the chunk is only
+ * fetched when the view mounts, and it no longer does), and every gate below
+ * keeps pointing at the flag, so resuming is this one value: `false` restores
+ * the WebGL probe, the enabled button and the scene as they were.
+ */
+export const THREE_VIEW_SUSPENDED: boolean = true;
+
+/**
+ * Status line when a 3D view is asked for while suspended (a hand-edited
+ * `?view=3d`, a link from a tab that remembers 3D). The tab keeps the plain
+ * board — the default view — and says why, exactly like the WebGL fallback.
+ */
+export const THREE_SUSPENDED_HINT =
+  "The 3D view is suspended: development of the 3D dashboard is stopped — there are no resources for it and the effort goes to the plain and 2D views. Showing the plain board.";
+
+/** Tooltip of the disabled 3D button — the state is never colour-only. */
+export const THREE_BUTTON_SUSPENDED_HINT =
+  "3D is suspended: development of the 3D dashboard is stopped — no resources; the plain and 2D views come first.";
 
 /**
  * Default factory for a real tab; `null` outside a DOM (server-side tests).
@@ -145,16 +179,23 @@ export interface ViewSwitchPlan {
  * Resolves a request from the toolbar's Plain/2D/3D switch.
  *
  * - `plain` and `2d` always win, silently: both cannot fail (DOM-only).
- * - `3d` needs {@link WebGLSupport.ok}; without it the tab stays on the
- *   plain board and the caller installs {@link WEBGL_UNAVAILABLE_HINT} —
- *   the acceptance case for `--disable-webgl` (PLAN.md I1, fallback
- *   retargeted to the default view by stage K1).
+ * - `3d` is **suspended** ({@link THREE_VIEW_SUSPENDED}): every request — the
+ *   button is disabled, but a URL or a stored choice can still name it —
+ *   resolves to the plain board with {@link THREE_SUSPENDED_HINT}. This is the
+ *   only place that decides it, so no path into the scene exists.
+ * - `3d` after the suspension is lifted needs {@link WebGLSupport.ok}; without
+ *   it the tab stays on the plain board and the caller installs
+ *   {@link WEBGL_UNAVAILABLE_HINT} — the acceptance case for `--disable-webgl`
+ *   (PLAN.md I1, fallback retargeted to the default view by stage K1).
  */
 export function planViewSwitch(
   webgl: WebGLSupport,
   target: DashboardView,
 ): ViewSwitchPlan {
   if (target === "3d") {
+    if (THREE_VIEW_SUSPENDED) {
+      return { view: "plain", status: THREE_SUSPENDED_HINT };
+    }
     return webgl.ok
       ? { view: "3d", status: null }
       : { view: "plain", status: WEBGL_UNAVAILABLE_HINT };

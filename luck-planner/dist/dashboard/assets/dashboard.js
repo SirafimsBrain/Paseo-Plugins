@@ -1047,6 +1047,9 @@ function threeFailedStatus(detail) {
   return `The 3D view could not start: ${detail}`;
 }
 var THREE_BUTTON_HINT = "3D view: the project tree as a WebGL scene \u2014 drag to orbit, scroll to zoom. Bees fly along influence links, blocking bugs pulse, approved goals float above their subtree.";
+var THREE_VIEW_SUSPENDED = true;
+var THREE_SUSPENDED_HINT = "The 3D view is suspended: development of the 3D dashboard is stopped \u2014 there are no resources for it and the effort goes to the plain and 2D views. Showing the plain board.";
+var THREE_BUTTON_SUSPENDED_HINT = "3D is suspended: development of the 3D dashboard is stopped \u2014 no resources; the plain and 2D views come first.";
 function browserCanvas() {
   const scope = globalThis;
   const document2 = scope.document;
@@ -1087,6 +1090,9 @@ function detectWebGL(createCanvas = browserCanvas) {
 }
 function planViewSwitch(webgl, target) {
   if (target === "3d") {
+    if (THREE_VIEW_SUSPENDED) {
+      return { view: "plain", status: THREE_SUSPENDED_HINT };
+    }
     return webgl.ok ? { view: "3d", status: null } : { view: "plain", status: WEBGL_UNAVAILABLE_HINT };
   }
   return { view: target, status: null };
@@ -11685,7 +11691,8 @@ function Toolbar(props) {
             type: "button",
             className: props.view === "3d" ? "lp-view-button lp-view-button-active" : "lp-view-button",
             "aria-pressed": props.view === "3d",
-            title: props.webglOk ? THREE_BUTTON_HINT : WEBGL_UNAVAILABLE_HINT,
+            disabled: THREE_VIEW_SUSPENDED,
+            title: THREE_VIEW_SUSPENDED ? THREE_BUTTON_SUSPENDED_HINT : props.webglOk ? THREE_BUTTON_HINT : WEBGL_UNAVAILABLE_HINT,
             onClick: () => props.onViewChange("3d"),
             children: "3D"
           }
@@ -11796,7 +11803,10 @@ function App() {
   const [focus, setFocus] = (0, import_react12.useState)(null);
   const focusSeq = (0, import_react12.useRef)(0);
   const [layer, setLayer] = (0, import_react12.useState)("status");
-  const webgl = (0, import_react12.useMemo)(() => detectWebGL(), []);
+  const webgl = (0, import_react12.useMemo)(
+    () => THREE_VIEW_SUSPENDED ? { ok: false, reason: THREE_BUTTON_SUSPENDED_HINT } : detectWebGL(),
+    []
+  );
   const storage = (0, import_react12.useMemo)(() => safeStorage(), []);
   const [view, setView] = (0, import_react12.useState)(() => {
     const wanted = initialView(window.location.search, storage);
@@ -11998,8 +12008,8 @@ function App() {
     [tree, collapsedIds, filters, layer]
   );
   const scene3dModel = (0, import_react12.useMemo)(
-    () => tree === null ? null : buildScene3D(tree.nodes, { filter: filters }),
-    [tree, filters]
+    () => tree === null || view !== "3d" ? null : buildScene3D(tree.nodes, { filter: filters }),
+    [tree, filters, view]
   );
   const scene3dOverlay = (0, import_react12.useMemo)(
     () => tree === null || scene3dModel === null ? null : buildSceneOverlay(tree, scene3dModel, { layer }),
@@ -12111,17 +12121,22 @@ function App() {
               emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
               emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the board again." : void 0
             }
-          ) : view === "3d" ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
-            ThreeView,
-            {
-              webgl,
-              model: scene3dModel,
-              overlay: scene3dOverlay,
-              fitKey: scene3dFitKey,
-              interaction: scene3dInteraction,
-              onSelectNode: setSelectedId,
-              onSceneState
-            }
+          ) : view === "3d" ? (
+            // Suspended in 0.40.9 (`THREE_VIEW_SUSPENDED`): kept, unreachable —
+            // `planViewSwitch` never answers `3d`, so the lazy chunk is never
+            // requested and this branch never mounts a renderer.
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+              ThreeView,
+              {
+                webgl,
+                model: scene3dModel,
+                overlay: scene3dOverlay,
+                fitKey: scene3dFitKey,
+                interaction: scene3dInteraction,
+                onSelectNode: setSelectedId,
+                onSceneState
+              }
+            )
           ) : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
             Canvas,
             {

@@ -1,6 +1,12 @@
 /**
  * The 3D scene (PLAN.md stages I1–I4).
  *
+ * **Suspended since 0.40.9.** Development of the 3D dashboard is stopped — no
+ * resources, and the effort goes to the plain board and the 2D diagram. The
+ * module is kept (and still built as the lazy `dashboard-3d.js` entry) but
+ * nothing mounts it: the 3D button is disabled and `planViewSwitch` refuses
+ * `3d` while `THREE_VIEW_SUSPENDED` is set, so the chunk is never fetched.
+ *
  * The scene is a **renderer**, never a decision maker: the layout arrives
  * ready-made from the eager chunk (`dashboard/src/tree-3d.ts`), the links
  * arrive ready-made from `dashboard/src/overlay-3d.ts`, and the interaction

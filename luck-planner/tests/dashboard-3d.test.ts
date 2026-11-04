@@ -14,7 +14,8 @@
  *    `getContext`, and that the probe context is released (browsers cap live
  *    contexts).
  * 2. `planViewSwitch`: the `--disable-webgl` acceptance — the request for 3D
- *    is *refused* with a written explanation, never a black viewport.
+ *    is *refused* with a written explanation, never a black viewport; and the
+ *    0.40.9 suspension, where 3D is refused even on a healthy probe.
  * 3. The built artifacts: `dashboard-3d.js` exists, the main chunk reaches it
  *    through exactly one dynamic `import()`, and no three/drei marker leaks
  *    into the file `index.html` loads eagerly.
@@ -29,6 +30,9 @@ import { describe, expect, it } from "vitest";
 import {
   detectWebGL,
   planViewSwitch,
+  THREE_BUTTON_SUSPENDED_HINT,
+  THREE_SUSPENDED_HINT,
+  THREE_VIEW_SUSPENDED,
   WEBGL_UNAVAILABLE_HINT,
   type WebGLCanvasLike,
 } from "../dashboard/src/webgl";
@@ -128,20 +132,57 @@ const OK = { ok: true, reason: null } as const;
 const BLOCKED = { ok: false, reason: "the browser offered no WebGL context" } as const;
 
 describe("planViewSwitch", () => {
-  it("opens 3D when the probe passed", () => {
-    expect(planViewSwitch(OK, "3d")).toEqual({ view: "3d", status: null });
+  it("refuses 3D while the 3D dashboard is suspended, even on a healthy probe", () => {
+    // 0.40.9: development of the 3D dashboard is stopped (no resources; the
+    // plain and 2D views come first). The policy is the one gate, so a link
+    // with `?view=3d` in it — the button itself is disabled, but the URL and
+    // the stored choice still exist — lands on the default board.
+    expect(THREE_VIEW_SUSPENDED).toBe(true);
+    const plan = planViewSwitch(OK, "3d");
+    expect(plan).toEqual({ view: "plain", status: THREE_SUSPENDED_HINT });
+    expect(plan.status).toContain("suspended");
+    expect(plan.status).toContain("plain");
   });
 
-  it("refuses 3D without WebGL and explains it in words", () => {
-    // The I1 acceptance case, retargeted by K1: launched with
-    // `--disable-webgl`, pressing 3D must keep the plain board (the default
-    // view, DOM-only) and put the reason in the status line — never a
-    // silent no-op and never colour-only.
+  it("keeps the fallback for the day the suspension is lifted", () => {
+    // The `--disable-webgl` branch stays coded behind the flag: the hint and
+    // the constant are still exported, so resuming is one `false` rather than
+    // a re-implementation.
+    expect(WEBGL_UNAVAILABLE_HINT).toContain("WebGL");
+    expect(planViewSwitch(BLOCKED, "3d").view).toBe("plain");
+  });
+
+  it("disables the toolbar's 3D button and explains it in the tooltip", () => {
+    // The button reports no request at all, and the reason is text, never a
+    // silent or colour-only inactive control.
+    const toolbar = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Toolbar.tsx"),
+      "utf8",
+    );
+    expect(toolbar).toContain("disabled={THREE_VIEW_SUSPENDED}");
+    expect(toolbar).toContain("THREE_BUTTON_SUSPENDED_HINT");
+    expect(THREE_BUTTON_SUSPENDED_HINT).toContain("suspended");
+  });
+
+  it("refuses 3D the same way in a tab without WebGL", () => {
+    // The I1 acceptance case (launched with `--disable-webgl`) now reaches the
+    // same answer for a stronger reason: the suspension is stated in words,
+    // and the view that cannot fail stays on screen.
     const plan = planViewSwitch(BLOCKED, "3d");
     expect(plan.view).toBe("plain");
-    expect(plan.status).toBe(WEBGL_UNAVAILABLE_HINT);
-    expect(plan.status).toContain("WebGL");
-    expect(plan.status).toContain("plain board");
+    expect(plan.status).toBe(THREE_SUSPENDED_HINT);
+    expect(plan.status).not.toBe(WEBGL_UNAVAILABLE_HINT);
+  });
+
+  it("never probes WebGL while the scene is suspended", () => {
+    // A suspended view must not allocate anything: `app.tsx` answers the probe
+    // from the flag instead of calling `detectWebGL()`.
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("THREE_VIEW_SUSPENDED");
+    expect(app).toContain(": detectWebGL(),");
   });
 
   it("returns to the views that cannot fail, silently", () => {

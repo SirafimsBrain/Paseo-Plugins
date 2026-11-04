@@ -1,6 +1,12 @@
 /**
  * The 3D viewport of the dashboard (PLAN.md stages I1, I2, I3, I4).
  *
+ * **Suspended since 0.40.9.** Development of the 3D dashboard is stopped — no
+ * resources, and the effort goes to the plain board and the 2D diagram. The
+ * component is kept whole and unused: the toolbar's 3D button is disabled and
+ * `planViewSwitch` never answers `3d` while `THREE_VIEW_SUSPENDED` is set, so
+ * this file is never mounted and its lazy chunk is never downloaded.
+ *
  * A deliberately small component: it owns the container cell, pulls the lazy
  * `dashboard-3d.js` chunk on mount (the WebGL probe has already passed —
  * `app.tsx` refuses the view otherwise, see `planViewSwitch`), mounts the

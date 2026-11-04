@@ -20,6 +20,13 @@
  * **K1** adds the plain board as a third view and puts its button **before**
  * 2D/3D (ADR-10: the card board is the default). The layer switch is a
  * property of the diagrams, so it hides itself while Plain is on.
+ *
+ * **0.40.9 suspends the 3D dashboard**: the button stays in the row — the
+ * switch keeps naming its three views — but it is `disabled`, and its tooltip
+ * says why (development stopped, no resources, the plain and 2D views come
+ * first). A disabled button is the honest surface for a suspended feature: the
+ * request never leaves the toolbar, so the policy in `planViewSwitch` only has
+ * to answer the URLs and stored choices that still name `3d`.
  */
 import { useState } from "react";
 import type { ChangeEvent, FormEvent, ReactElement } from "react";
@@ -30,6 +37,8 @@ import { GRAPH_LAYER_LABELS, GRAPH_LAYERS, type GraphLayer } from "../graph";
 import { KIND_LABELS, STATUS_LABELS } from "../colors";
 import {
   THREE_BUTTON_HINT,
+  THREE_BUTTON_SUSPENDED_HINT,
+  THREE_VIEW_SUSPENDED,
   WEBGL_UNAVAILABLE_HINT,
   type DashboardView,
 } from "../webgl";
@@ -247,9 +256,17 @@ export function Toolbar(props: ToolbarProps): ReactElement {
                 : "lp-view-button"
             }
             aria-pressed={props.view === "3d"}
-            // Kept enabled on purpose: pressing it with WebGL disabled is
-            // what surfaces the explanation in the status line (I1).
-            title={props.webglOk ? THREE_BUTTON_HINT : WEBGL_UNAVAILABLE_HINT}
+            // 0.40.9: the 3D dashboard is suspended, so the button reports no
+            // request at all. The tooltip carries the reason; the WebGL hint
+            // is what the button says the moment the suspension is lifted.
+            disabled={THREE_VIEW_SUSPENDED}
+            title={
+              THREE_VIEW_SUSPENDED
+                ? THREE_BUTTON_SUSPENDED_HINT
+                : props.webglOk
+                  ? THREE_BUTTON_HINT
+                  : WEBGL_UNAVAILABLE_HINT
+            }
             onClick={() => props.onViewChange("3d")}
           >
             3D

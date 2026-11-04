@@ -1873,6 +1873,72 @@ view is remembered in the URL and the storage, the filters reach the layout,
 and the HTML overlays wait for the first frame. `typecheck` (both configs) and
 the full suite: 31 files, 536 tests, green.
 
+### The 3D dashboard is suspended (0.40.9 — `dashboard/src/webgl.ts`, `dashboard/src/components/Toolbar.tsx`, `dashboard/src/app.tsx`, docs)
+
+**Decision.** The 3D dashboard and the code that displays it are moved to the
+state **suspended / "stopped"**. Development of the scene is not continued: the
+plugin has no resources for it, and the effort is focused on the two main
+branches — the **plain** card board and the **2D** diagram. The decision covers
+the whole block-I surface: the radial layout (`tree-3d.ts`), the overlay
+(`overlay-3d.ts`), the picking/interaction (`pick-3d.ts`), the scene
+(`dashboard-3d.tsx`), its loader (`components/ThreeView.tsx`) and the WebGL
+probe policy (`webgl.ts`).
+
+**Where the switch lives.** One constant, `THREE_VIEW_SUSPENDED` in
+`dashboard/src/webgl.ts`, typed `boolean` on purpose (not a literal `true`) so
+flipping it back is a one-line change that compiles and needs no other edit.
+The module was already the single policy point for the view (`planViewSwitch`),
+so the suspension lands there instead of scattering checks through the app.
+
+**What changed, and why each piece.**
+
+- **The toolbar button is `disabled`.** `Toolbar.tsx` renders the third button
+  with `disabled={THREE_VIEW_SUSPENDED}` — the request never leaves the
+  toolbar — and its tooltip becomes `THREE_BUTTON_SUSPENDED_HINT`, which states
+  the reason in words (the repo's rule: a state is never colour-only). The
+  button stays in the row so the switch still reads Plain / 2D / 3D, and the
+  existing `:disabled` styling (55 % opacity, `not-allowed` cursor) already
+  makes it read as inactive; the `onViewChange("3d")` binding and the
+  Plain-before-2D-before-3D order are kept, so both source-contract tests still
+  pin the same shape.
+- **`planViewSwitch` refuses `3d` before it looks at WebGL.** Every remaining
+  way into the view — a hand-edited `?view=3d`, a stored preference, a copied
+  link — resolves to the **plain** board with `THREE_SUSPENDED_HINT` in the
+  status line. The WebGL branch (`WEBGL_UNAVAILABLE_HINT`, the I1 acceptance)
+  is kept behind the flag and still exported, so lifting the suspension
+  restores it without re-deriving the policy.
+- **The app stops probing.** `app.tsx` answers `webgl` from the flag instead of
+  calling `detectWebGL()`, so a suspended dashboard allocates no WebGL context
+  at all. The scene's data path is gated the same way: `scene3dModel` is built
+  only while `view === "3d"` (which the policy never produces), so the radial
+  layout, the overlay, the picking candidates and the interaction are not
+  computed for a view that is not on screen — a 5 000-node tree pays nothing
+  for the suspended scene. The `view === "3d"` render branch was **not**
+  deleted: with the flag off it is the same code I2–I4 shipped.
+- **Nothing was deleted and nothing was unbundled.** `scripts/bundle.mjs` still
+  emits `dashboard-3d.js` as a second entry, the scene modules stay in
+  `dashboard/src/`, and the dependency set (`three`, `@react-three/fiber`,
+  `@react-three/drei`) is unchanged. The chunk is lazy and is now never
+  fetched, so the first load is the same size as before minus nothing; removing
+  it would also remove the resume path.
+- **Documentation** carries the state, the reason and how to resume: the README
+  (`### 3D — suspended`), `OVERVIEW.md`, `PLAN.md` (block I) and this section.
+
+**Resuming.** Set `THREE_VIEW_SUSPENDED = false`: the probe runs again, the
+button becomes enabled, `planViewSwitch` answers `3d` when the probe passes, and
+`scene3dModel` is built for the mounted scene. Nothing else in the source
+needs to change.
+
+**Tests.** `tests/dashboard-3d.test.ts`: `THREE_VIEW_SUSPENDED === true`; a
+healthy probe still resolves `3d` to `{ view: "plain", status:
+THREE_SUSPENDED_HINT }` with the reason in words; a tab without WebGL gets the
+same answer (the suspension outranks the probe) while the I1 hint stays
+exported behind the flag; `app.tsx` reaches `detectWebGL()` only through the
+flag; `Toolbar.tsx` carries `disabled={THREE_VIEW_SUSPENDED}` and the
+suspension tooltip. The existing contracts — the lazy chunk exists, exactly one
+dynamic `import()`, no three marker in the eager chunk, the Plain/2D/3D order,
+`planViewSwitch(webgl, target)` in the app — are unchanged and still green.
+
 
 ## 7. Roadmap (stage map)
 
@@ -1880,7 +1946,9 @@ One stage = one commit, ending green (`npm run typecheck`, `vitest run`); each f
 stage bumps the MINOR version and is marked with an annotated `luck-planner@<version>` tag
 pushed to origin (project rule). Docs-only stages do not bump.
 
-**Status: blocks G, H and I are complete.** Stages A1–F2 are
+**Status: blocks G and H are complete; block I (the 3D dashboard) is complete but
+suspended since 0.40.9** — development is stopped (no resources; the effort goes to the
+plain and 2D views), see "The 3D dashboard is suspended" above. Stages A1–F2 are
 complete and released as tagged versions up to `luck-planner@0.18.0`; blocks **B (storage)**,
 **C (domain semantics)**, **D (agent access)**, **E (UI transport)** and **F (HTTP
 transport)** are closed. G1 (0.19.0) scaffolded the dashboard web app, G2 (0.20.0) added the
@@ -1955,7 +2023,7 @@ memory-flash itself is not touched — it already ships that solution.
 | F | F1–F2 | 0.17.0–0.18.0 | read-only dashboard HTTP server ✅ (0.17.0), "Open dashboard" action ✅ (0.18.0) |
 | G | G1–G5 | 0.19.0–0.23.0 | scaffold ✅ (0.19.0), adapter + layout ✅ (0.20.0), custom nodes + edges ✅ (0.21.0), interaction ✅ (0.22.0), growth layer ✅ (0.23.0) |
 | H | H1–H2 | 0.24.0–0.25.0 | live data ✅ (0.24.0), agent timeline rows ✅ (0.25.0) |
-| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle ✅ (0.29.0) |
+| I | I1–I4 | 0.26.0–0.29.0 | 3D tree (react-three-fiber) — **last block**: WebGL spike ✅ (0.26.0), layout + geometry ✅ (0.27.0), link/incident/goal/growth overlays + frame budget ✅ (0.28.0), interaction + toggle ✅ (0.29.0) — **suspended in 0.40.9**: development stopped (no resources; the plain and 2D views come first) |
 
 | J | J1–J2 | — | README.md + root README link ✅ (J1, 0.29.0), final e2e acceptance on a live daemon ✅ (J2, 0.29.1–0.29.4 — three defects the live install exposed, all now pinned by tests) |
 
@@ -1986,7 +2054,7 @@ from):
 
 | Risk | Mitigation |
 | --- | --- |
-| WebGL unavailable in the workspace browser on some client | Spike I1 before writing the scene; fall back to 2D with an explanation |
+| WebGL unavailable in the workspace browser on some client | Spike I1 before writing the scene; fall back to the plain board with an explanation — currently moot: the 3D dashboard is suspended (0.40.9) and nothing opens it |
 | React Flow degrades above ~1000 nodes | Collapse/expand by default (G2), filters, synthetic-canvas measurement in the G2 acceptance |
 | 3D bundle bloats the first chunk | Separate lazy entry `dashboard-3d.js` (I1), loaded only on toggle |
 | 3D overlay animation drops frames on big trees | Per-frame work is O(links) with preallocated vectors (I3); the large sets are instanced and positioned once, only one material uniform moves; I4 picking keeps the 10k meshes out of the raycast path (one ray/sphere test per click) and the idle billboard loop rewrites nothing |

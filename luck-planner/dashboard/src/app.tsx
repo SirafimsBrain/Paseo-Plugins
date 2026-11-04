@@ -109,7 +109,10 @@ import {
 import {
   detectWebGL,
   planViewSwitch,
+  THREE_BUTTON_SUSPENDED_HINT,
+  THREE_VIEW_SUSPENDED,
   type DashboardView,
+  type WebGLSupport,
 } from "./webgl";
 import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./theme";
 import { Canvas } from "./components/Canvas";
@@ -267,9 +270,19 @@ export function App(): ReactElement {
   // context); every 3D request goes through `planViewSwitch`.
   //
   // I4: the view is a *preference* — the URL names it (`?view=3d`), the tab
-  // remembers it (localStorage), and the 2D diagram is the default. A tab
-  // that asks for 3D without WebGL stays on 2D and says why.
-  const webgl = useMemo(() => detectWebGL(), []);
+  // remembers it (localStorage).
+  //
+  // 0.40.9: the 3D dashboard is suspended (`THREE_VIEW_SUSPENDED`), so the tab
+  // does not even probe for a WebGL context — the probe is 3D code too, and a
+  // suspended view must not allocate anything. `planViewSwitch` turns every 3D
+  // request into the plain board with the suspension reason.
+  const webgl: WebGLSupport = useMemo(
+    () =>
+      THREE_VIEW_SUSPENDED
+        ? { ok: false, reason: THREE_BUTTON_SUSPENDED_HINT }
+        : detectWebGL(),
+    [],
+  );
   const storage = useMemo(() => safeStorage(), []);
   const [view, setView] = useState<DashboardView>(() => {
     const wanted = initialView(window.location.search, storage);
@@ -562,9 +575,18 @@ export function App(): ReactElement {
   // I2 3D layout: the same payload, a radial projection. Rebuilt when the
   // tree changes and when the toolbar filters narrow it (I4: both views show
   // the same nodes) — the collapse state stays a 2D-canvas concern.
+  //
+  // 0.40.9: the 3D dashboard is suspended, so the layout is built only while
+  // the scene is actually on screen. `planViewSwitch` never produces `3d`, so
+  // in practice this stays `null` and a suspended dashboard pays nothing for
+  // the scene it does not show; flipping `THREE_VIEW_SUSPENDED` restores the
+  // path without touching this code.
   const scene3dModel = useMemo(
-    () => (tree === null ? null : buildScene3D(tree.nodes, { filter: filters })),
-    [tree, filters],
+    () =>
+      tree === null || view !== "3d"
+        ? null
+        : buildScene3D(tree.nodes, { filter: filters }),
+    [tree, filters, view],
   );
 
   // I3 3D overlays: bees, blocking incidents, goal rings and — in the growth
@@ -721,6 +743,9 @@ export function App(): ReactElement {
             }
           />
         ) : view === "3d" ? (
+          // Suspended in 0.40.9 (`THREE_VIEW_SUSPENDED`): kept, unreachable —
+          // `planViewSwitch` never answers `3d`, so the lazy chunk is never
+          // requested and this branch never mounts a renderer.
           <ThreeView
             webgl={webgl}
             model={scene3dModel}
