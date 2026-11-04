@@ -444,7 +444,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 | L1 | 0.41.0 | `get_context` v2: `sections` / `depth` / `limit` | ✅ |
 | L2 | 0.42.0 | Экспорт проекта: JSON-конверт + zip (`fflate`), MCP-тул + скачивание из дашборда | ✅ |
 | L3 | 0.43.0 | Снимок БД: `VACUUM INTO` + zip в `backups/`, кнопка в настройках | ✅ |
-| L4 | 0.44.0 | Восстановление БД: закрытие/подмена/переоткрытие стора, автоснимок, guard схемы | план |
+| L4 | 0.44.0 | Восстановление БД: закрытие/подмена/переоткрытие стора, автоснимок, guard схемы | ✅ |
 | L5 | 0.45.0 | Импорт дерева: remap id, `dryRun`, валидация иерархии | план |
 | L6 | 0.46.0 | Циклы bees: детектор, маркировка в 2D, поле в `get_context`/`node.detail` | план |
 | L7 | 0.47.0 | Темы v2: каталог в отдельной директории, пользовательские темы, `/api/themes`, подсказка appearance из хоста | план |
@@ -476,6 +476,14 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - `client/settings-screen.tsx`: секция *Backups (stage L3)* — строка результата (путь, размер, узлы/проекты) + `SettingsAction` «Save snapshot», `formatBytes`.
 - Приёмка (тестами): `tests/snapshot.test.ts` (12: путь `backups/` по умолчанию, счётчики включая архивные, архив = один `*.db` энтри, который открывается свежим SQLite и проходит `integrity_check`, копия не содержит записей после снимка, откат `journal_mode` не `wal`, отсутствие временных файлов, суффикс `-2` перед всем расширением, явный/относительный `dir`, пустая БД, отказы `inspectSnapshot` на не-БД/без `meta`/без таблицы, отказы `snapshotInto`); `tests/rpc.test.ts` (+2: контракт пишет файл рядом с БД и возвращает счётчики, заблокированный каталог → `{ ok: false, error }`); список контрактов в `tests/rpc.test.ts` обновлён. `typecheck` (оба конфига) + `vitest run` зелёные (45 файлов, 765 тестов).
 
+**L4. Восстановление БД** ✅ → `0.44.0`
+- `server/restore.ts` (новый): `readRestoreSource(file, dbPath)` — абсолютный путь, файл существует, `.db.zip` распаковывается (ровно один `*.db` энтри, иначе ошибка называет количество), распакованная копия/копия `.db` пишется рядом с БД как `.<restore-…>.db`, `inspectSnapshot` (integrity + таблицы) и **guard схемы** (`schemaVersion > SCHEMA_VERSION` → отказ до подмены, пока старая БД цела); исходный файл только читается; `cleanup()` убирает временную копию. `replaceDatabase(dbPath, source, reopen)` — старый файл → `<db>.before-restore-<stamp>-<random>`, удаление `-wal`/`-shm` (старый лог не должен приклеиться к восстановленной БД), копия → `dbPath`, `reopen()`; при его падении старый файл возвращается, `reopen()` повторяется, ошибка говорит «previous data kept»; после успеха старый файл удаляется.
+- `server/snapshot.ts`: `snapshotFileName(at, label?)` + `SnapshotRequest.label` — автоснимок называется `luck-planner-pre-restore-<stamp>.db.zip`.
+- `index.server.ts`: `store`, `dashboard`, `timelineFeed` стали `let`; обработчик `db-restore` — верификация → автоснимок (best-effort, ошибка → `backupError`) → stop/dispose/close → `replaceDatabase` с `reopen = () => store = new LuckPlannerStore({dbPath})` → пересоздание `DashboardEndpoint` и фида → `applySettings(readValues())` (сокет возвращается на тот же порт); `timelineFeed` собирается фабрикой `openTimelineFeed()`.
+- `shared/rpc.ts`: контракт `luck-planner.db-restore` (`file` → `{ ok, error, file, backup, backupError, schemaVersion, counts }`) + в `RPC_CONTRACT_NAMES`.
+- `client/settings-screen.tsx`: секция *Restore (stage L4)* — путь, кнопка «последний снимок сессии», **двойное подтверждение** (первое нажатие просит, второе заменяет), предупреждение про перезагрузку агентов.
+- Приёмка (тестами): `tests/restore.test.ts` (10: данные возвращаются и записи после снимка исчезают, приём и `.db.zip`, и распакованного `.db`, удаление старого `-wal`/`-shm`, откат на старую БД при падении reopen, отказы на относительный/отсутствующий путь, архив с 0/2 БД, не-БД, схема новее плагина, исходный файл не меняется, имя `pre-restore`); `tests/rpc.test.ts` (+2: сквозной restore через RPC переоткрывает стор и снапшотит старое состояние, плохой файл → `{ ok: false }` и данные целы); список контрактов обновлён. `typecheck` (оба конфига) + `vitest run` зелёные (46 файлов, 777 тестов).
+
 ## 5. Порядок версий и тегов
 
 | Этап | Версия | Этап | Версия |
@@ -489,7 +497,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 | | | J2 | 0.29.1–0.29.4 (приёмка, три бага) |
 | | | K1 ✅ / K2 ✅ | 0.33.0 / 0.34.0 (plain-вид), 0.34.1 (фикс модалки) |
 | | | K3 | — (документация; визуальные корректировки 0.34.x) |
-| L1–L3 ✅ | 0.41.0–0.43.0 | L4–L11 | 0.44.0–0.51.0 (план) |
+| L1–L4 ✅ | 0.41.0–0.44.0 | L5–L11 | 0.45.0–0.51.0 (план) |
 
 Каждый бамп — анонсированный тег `luck-planner@<версия>` на коммите с этой версией, отправка в origin (правило проекта). Слово «release» в задаче не используется — major-бамп не планируется. Блок J — финализация без бампа версии: J1 меняет только документацию, J2 — приёмку. Блок K: K1/K2 — minor-бампы за новую функциональность, K3 — документация без бампа, каждая визуальная корректировка — patch-бамп `0.34.x`.
 

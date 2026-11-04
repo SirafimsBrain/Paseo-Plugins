@@ -23,6 +23,7 @@ import {
   agentReload,
   bugReport,
   dashboardStatus,
+  dbRestore,
   dbSnapshot,
   goalApprove,
   goalCreate,
@@ -58,6 +59,7 @@ import {
 import { createUpsertLeafTool } from "./server/agent-tool";
 import { probeOpenCodeService } from "./server/opencode-service";
 import { snapshotDatabase } from "./server/snapshot";
+import { readRestoreSource, replaceDatabase } from "./server/restore";
 import { normalizeProjectKey, seedProjectTree } from "./server/project-seed";
 import { ensureSkillInstalled } from "./server/skill";
 import { ChangeFeed, readChangesSince } from "./server/change-feed";
@@ -99,7 +101,13 @@ import { growthProgress } from "./shared/growth";
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(luckPlannerSettings);
 
-  const store = new LuckPlannerStore();
+  // `let`, not `const`: stage L4 replaces the database file under the daemon
+  // and reopens the store (`db-restore`), so every closure below reads the
+  // current handle. The two long-lived consumers that capture it — the
+  // dashboard endpoint and the timeline feed — are rebuilt on that path too.
+  let store = new LuckPlannerStore();
+  /** Directory of the database; the store handle is swapped by a restore. */
+  const dbPath = store.dbPath;
   let disposed = false;
 
   // Publish the bundle at its revision-independent path on every plugin
@@ -162,7 +170,7 @@ export default function contribute(server: PluginServerContext) {
   // endpoint owns the socket and serialises restarts, so a port typed one
   // digit at a time causes one apply, not four (see the class docs).
   // -------------------------------------------------------------------------
-  const dashboard = new DashboardEndpoint({
+  let dashboard = new DashboardEndpoint({
     store,
     log: (message) => console.log(message),
     logError: (message) => console.error(message),
@@ -213,26 +221,35 @@ export default function contribute(server: PluginServerContext) {
     if (candidate && paseoHandle === null) paseoHandle = candidate;
   };
 
-  const timelineFeed = new ChangeFeed({
-    store,
-    onChange: (change) => {
-      void notifyTimelineChange(change, {
-        store,
-        // Resolved per batch: the handle may only arrive mid-run.
-        sink: paseoHandle === null ? null : timelineSink(paseoHandle),
-        log: (message) => console.log(message),
-        logError: (message) => console.error(`[luck-planner] ${message}`),
-      }).catch((cause) => {
-        console.error(
-          `[luck-planner] timeline notify failed: ${
-            cause instanceof Error ? cause.message : String(cause)
-          }`,
-        );
-      });
-    },
-    onError: (message) => console.error(`[luck-planner] ${message}`),
-  });
-  timelineFeed.start();
+  /**
+   * Builds the timeline feed over the current store. A factory rather than a
+   * literal because a restore swaps the store and the old feed would keep
+   * polling a closed handle.
+   */
+  const openTimelineFeed = (): ChangeFeed => {
+    const feed = new ChangeFeed({
+      store,
+      onChange: (change) => {
+        void notifyTimelineChange(change, {
+          store,
+          // Resolved per batch: the handle may only arrive mid-run.
+          sink: paseoHandle === null ? null : timelineSink(paseoHandle),
+          log: (message) => console.log(message),
+          logError: (message) => console.error(`[luck-planner] ${message}`),
+        }).catch((cause) => {
+          console.error(
+            `[luck-planner] timeline notify failed: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+          );
+        });
+      },
+      onError: (message) => console.error(`[luck-planner] ${message}`),
+    });
+    feed.start();
+    return feed;
+  };
+  let timelineFeed = openTimelineFeed();
 
   // -------------------------------------------------------------------------
   // MCP injection (ADR-3): every Paseo-created agent gets the bundled stdio
@@ -823,6 +840,88 @@ export default function contribute(server: PluginServerContext) {
         schemaVersion: 0,
         counts: null,
       };
+    }
+  });
+
+  // Stage L4: put a snapshot back. The destructive half of the backup pair,
+  // so it is one RPC with a readable failure for every step, and the order is
+  // the safety: verify the file, snapshot what is there now, close the store,
+  // swap, reopen, and only then rebuild the consumers that captured the old
+  // handle. A reopen failure rolls the previous file back (see
+  // `server/restore.ts`), which is why this can be offered without a
+  // "point of no return" dialog — the automatic `pre-restore` snapshot is the
+  // second net, and it survives even a successful restore.
+  handle(dbRestore, async (input) => {
+    throwIfDisposed();
+    const reload = await readValues();
+    let source: ReturnType<typeof readRestoreSource> | null = null;
+    let backupFile: string | null = null;
+    let backupError: string | null = null;
+    try {
+      source = readRestoreSource(input.file, dbPath);
+
+      // Auto-snapshot *before* anything is touched. It is best-effort on
+      // purpose: the classic reason to restore is a database that no longer
+      // reads, and refusing the recovery because the courtesy copy failed
+      // would lock the user out of their own backup. The failure is reported.
+      try {
+        const backup = snapshotDatabase(store, { label: "pre-restore" });
+        backupFile = backup.file;
+        console.log(
+          `[luck-planner] pre-restore snapshot: ${backup.file} (${backup.bytes} bytes)`,
+        );
+      } catch (cause) {
+        backupError = cause instanceof Error ? cause.message : String(cause);
+        console.error(`[luck-planner] pre-restore snapshot failed: ${backupError}`);
+      }
+
+      // Everything that captured the old handle goes down before the file
+      // changes: the feed would otherwise poll a closed database, and the
+      // HTTP socket would serve a stale one.
+      timelineFeed.stop();
+      await dashboard.dispose();
+      store.close();
+
+      replaceDatabase(dbPath, source, () => {
+        store = new LuckPlannerStore({ dbPath });
+      });
+
+      dashboard = new DashboardEndpoint({
+        store,
+        log: (message) => console.log(message),
+        logError: (message) => console.error(message),
+      });
+      timelineFeed = openTimelineFeed();
+      applySettings(reload);
+
+      const outcome = {
+        ok: true,
+        error: null,
+        file: dbPath,
+        backup: backupFile,
+        backupError,
+        schemaVersion: source.schemaVersion,
+        counts: source.counts,
+      };
+      console.log(
+        `[luck-planner] database restored from ${source.origin} ` +
+          `(${source.counts.nodes} nodes in ${source.counts.projects} projects)`,
+      );
+      return outcome;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[luck-planner] database restore failed: ${message}`);
+      return {
+        ok: false,
+        error: message,
+        file: null,
+        backup: backupFile,
+        backupError,
+        schemaVersion: 0,
+        counts: null,
+      };
+    } finally {
+      source?.cleanup();
     }
   });
 

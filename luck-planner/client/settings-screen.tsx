@@ -21,6 +21,7 @@ import {
   agentMcpRegister,
   agentMcpStatus,
   agentMcpUnregister,
+  dbRestore,
   dbSnapshot,
   type AgentMcpTargetId,
 } from "../shared/rpc";
@@ -77,12 +78,66 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
                 `${result.counts.nodes} nodes in ${result.counts.projects} projects.`
             : result.error ?? "Snapshot failed.",
         );
+        // The most likely restore source is the snapshot just taken: offer it. 
+        if (result.ok && result.file) setLastSnapshot(result.file);
       })
       .catch((cause: unknown) => {
         setSnapshotMessage(cause instanceof Error ? cause.message : String(cause));
       })
       .finally(() => setSnapshotBusy(false));
   }, [snapshotRpc]);
+
+  // Stage L4: the way back. The screen never restores on one press: the first
+  // press asks for confirmation, the second does it, and the server snapshots
+  // the current database before anything is replaced — so a wrong restore is
+  // one more restore away instead of a lost tree.
+  const restoreRpc = useRpc(dbRestore);
+  const [restorePath, setRestorePath] = useState("");
+  const [restorePending, setRestorePending] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState("");
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [lastSnapshot, setLastSnapshot] = useState("");
+
+  const pickRestorePath = useCallback((value: string) => {
+    setRestorePath(value);
+    // A different file invalidates the pending confirmation: the prompt must
+    // reappear for the file that is actually about to be restored.
+    setRestorePending(false);
+    setRestoreMessage("");
+  }, []);
+
+  const runRestore = useCallback(() => {
+    if (restorePath.trim() === "") {
+      setRestoreMessage("Enter the absolute path of a snapshot first.");
+      return;
+    }
+    if (!restorePending) {
+      setRestorePending(true);
+      setRestoreMessage(
+        `Press again to replace the database with ${restorePath.trim()} — ` +
+          "the current one is snapshotted first.",
+      );
+      return;
+    }
+    setRestorePending(false);
+    setRestoreBusy(true);
+    void restoreRpc({ file: restorePath.trim() })
+      .then((result: any) => {
+        setRestoreMessage(
+          result.ok
+            ? `Restored. ${result.counts.nodes} nodes in ${result.counts.projects} projects.` +
+                (result.backup
+                  ? ` Previous state: ${result.backup}`
+                  : ` No automatic snapshot (${result.backupError ?? "unknown reason"}).`) +
+                " Reload the plugin or refresh agent sessions so running agents reconnect."
+            : result.error ?? "Restore failed.",
+        );
+      })
+      .catch((cause: unknown) => {
+        setRestoreMessage(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => setRestoreBusy(false));
+  }, [restorePath, restorePending, restoreRpc]);
 
   const agentStatusRpc = useRpc(agentMcpStatus);
   const agentRegisterRpc = useRpc(agentMcpRegister);
@@ -301,9 +356,59 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
           <SettingsAction
             label="Snapshot now"
             actionLabel={snapshotBusy ? "Saving…" : "Save snapshot"}
-            hint="One file per click, named by date and time. Restoring a snapshot is the next stage."
+            hint="One file per click, named by date and time, never overwriting an older one."
             onPress={runSnapshot}
             disabled={snapshotBusy}
+          />
+        </SettingsSection>
+        <SettingsSection title="Restore (stage L4)">
+          <SettingsRow
+            label="Snapshot file"
+            hint="Absolute path of a .db.zip in backups/ — or an extracted .db. The file is verified (integrity, schema) and the current database is snapshotted before the swap."
+          >
+            <Text selectable style={{ color: fg, fontSize: font(11) }} numberOfLines={3}>
+              {restorePath.trim() !== "" ? restorePath.trim() : "(no file selected)"}
+            </Text>
+          </SettingsRow>
+          <SettingsInput
+            label="Path to a snapshot"
+            hint="Paste the path printed above by Save snapshot."
+            initialValue=""
+            onChangeText={(text: string) => pickRestorePath(text)}
+          />
+          <SettingsRow
+            label="Last snapshot of this session"
+            hint="Press to use it as the restore source."
+          >
+            <Pressable
+              onPress={() => pickRestorePath(lastSnapshot)}
+              disabled={lastSnapshot === ""}
+              style={styles.agentButton}
+            >
+              <Text
+                style={{ color: lastSnapshot === "" ? fg : accent, fontSize: font(12) }}
+                numberOfLines={2}
+              >
+                {lastSnapshot === "" ? "(none yet)" : lastSnapshot}
+              </Text>
+            </Pressable>
+          </SettingsRow>
+          <SettingsRow
+            label="Restore database"
+            hint="Replaces every project with the snapshot. Running agents keep their own connection to the old file, so reload the plugin (or refresh each agent) afterwards."
+          >
+            <Text style={{ color: restorePending ? danger : fg, fontSize: font(11) }} numberOfLines={4}>
+              {restoreMessage !== "" ? restoreMessage : " "}
+            </Text>
+          </SettingsRow>
+          <SettingsAction
+            label="Restore database"
+            actionLabel={
+              restoreBusy ? "Restoring…" : restorePending ? "Confirm restore" : "Restore"
+            }
+            hint="Two presses: the first asks, the second replaces."
+            onPress={runRestore}
+            disabled={restoreBusy}
           />
         </SettingsSection>
         <SettingsSection title="History">

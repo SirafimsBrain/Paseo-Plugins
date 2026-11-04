@@ -593,7 +593,7 @@ colour alone). The view-model (`groupByParent`, `filterSections`,
 
 ### Plugin RPC surface (stage E1 — `shared/rpc.ts`, `index.server.ts`)
 
-Seventeen `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
+Eighteen `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
 Center items (E3) and the settings screen (E4) all go through them. The server
 registers the handlers over one shared `LuckPlannerStore` (closed on plugin
 cleanup); `tests/rpc.test.ts` (23 tests, fake `PluginServerContext` against a
@@ -655,7 +655,50 @@ answer because a path the user cannot find is not a backup.
   trap, and the per-project artifact already exists (L2). It also runs on an
   explicit request only — a timer would turn "a backup" into "a directory
   nobody reads", and the criteria for automatic archiving are their own stage
-  (L11). Restoring a snapshot is stage L4.
+  (L11).
+
+### Database restore (stage L4 — `server/restore.ts`, `index.server.ts`, `shared/rpc.ts`)
+
+The way back: `luck-planner.db-restore` takes the absolute path of a `.db.zip`
+(or a `.db` the user extracted by hand) and replaces the database under the
+running daemon. It is the only handler that changes the store itself, so the
+order below **is** the safety:
+
+1. **Verify, in a copy.** `readRestoreSource` copies the chosen file next to
+   the database (`.<restore-…>.db`), unzips it when it is an archive (exactly
+   one `*.db` entry, otherwise the error says how many it found), and runs the
+   same `inspectSnapshot` gate as a fresh snapshot: `integrity_check` = `ok`,
+   `meta` and the counted tables present. A schema version **newer** than
+   `SCHEMA_VERSION` is refused here, while the old database is still intact —
+   opening it would only fail after the swap. The user's file is only ever read:
+   a restore that consumes its own source is one nobody dares to try twice.
+2. **Snapshot what is there now.** `snapshotDatabase(store, { label:
+   "pre-restore" })` writes `luck-planner-pre-restore-<stamp>.db.zip` before
+   anything is touched. Deliberately **best-effort**: the classic reason to
+   restore is a database that no longer reads, and blocking the recovery
+   because the courtesy copy failed would lock the user out of their own
+   backup. A failure is reported as `backupError` instead.
+3. **Take the consumers down.** The timeline feed stops, the dashboard endpoint
+   is disposed (awaited, so its socket is really closed) and the store is
+   closed: every one of them captured the old handle at `contribute` time.
+4. **Swap, then prove it opens.** `replaceDatabase` renames the current file to
+   `<db>.before-restore-<stamp>-<random>`, **deletes `-wal`/`-shm`** (a log
+   belongs to the file it was written for; letting it follow the restored file
+   resurrects the state the user just removed), renames the verified copy into
+   place and calls `reopen`, which constructs a new `LuckPlannerStore` — the
+   migrations run there, so an older snapshot is upgraded on restore. If that
+   open throws, the previous file is renamed back and reopened, and the error
+   says the old data was kept. Only after a successful open is the previous
+   file removed; the `pre-restore` snapshot is what the user keeps.
+5. **Rebuild what captured the handle.** A new `DashboardEndpoint` (its socket
+   comes back on the same port through `applySettings`) and a new timeline feed
+   over the reopened store, so no handler is left polling a closed database.
+
+**Other processes cannot be fixed from here.** Agent MCP servers hold their own
+connections to the same file (ADR-2); renaming a file under them leaves those
+handles on the previous inode, which is why the settings screen tells the user
+to reload the plugin or refresh agent sessions after a restore, and why the
+handler takes no "point of no return" dialog but does take two presses.
 
 ### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
 

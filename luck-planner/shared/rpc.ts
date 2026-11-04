@@ -490,6 +490,38 @@ export const dbSnapshot = defineRpc({
   }),
 });
 
+/**
+ * `luck-planner.db-restore`: replace the database with a snapshot
+ * (stage L4).
+ *
+ * The destructive half of the backup pair, so the answer carries everything
+ * the settings screen must show: the file it restored, the automatic
+ * `pre-restore` snapshot taken first (or why that failed), and the counts the
+ * new database holds. Every refusal — a missing file, an archive that does
+ * not hold one database, an integrity-check failure, a schema newer than the
+ * plugin — comes back as `{ ok: false, error }`, because a restore that throws
+ * across the RPC boundary tells the user nothing.
+ */
+export const dbRestore = defineRpc({
+  name: "luck-planner.db-restore",
+  input: z.object({
+    /** Absolute path of a `.db.zip` (or an extracted `.db`). */
+    file: z.string().min(1),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable(),
+    /** The database that is now open, `null` on failure. */
+    file: z.string().nullable(),
+    /** The `pre-restore` snapshot, `null` when it failed or did not run. */
+    backup: z.string().nullable(),
+    /** Why the automatic snapshot failed; null when it was written. */
+    backupError: z.string().nullable(),
+    schemaVersion: z.number().int().nonnegative(),
+    counts: snapshotCountsSchema.nullable(),
+  }),
+});
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -508,4 +540,5 @@ export const RPC_CONTRACT_NAMES = [
   agentReload.name,
   agentActivity.name,
   dbSnapshot.name,
+  dbRestore.name,
 ] as const;

@@ -424,6 +424,25 @@ var dbSnapshot = defineRpc({
     counts: snapshotCountsSchema.nullable()
   })
 });
+var dbRestore = defineRpc({
+  name: "luck-planner.db-restore",
+  input: external_exports.object({
+    /** Absolute path of a `.db.zip` (or an extracted `.db`). */
+    file: external_exports.string().min(1)
+  }),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    error: external_exports.string().nullable(),
+    /** The database that is now open, `null` on failure. */
+    file: external_exports.string().nullable(),
+    /** The `pre-restore` snapshot, `null` when it failed or did not run. */
+    backup: external_exports.string().nullable(),
+    /** Why the automatic snapshot failed; null when it was written. */
+    backupError: external_exports.string().nullable(),
+    schemaVersion: external_exports.number().int().nonnegative(),
+    counts: snapshotCountsSchema.nullable()
+  })
+});
 var RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -441,7 +460,8 @@ var RPC_CONTRACT_NAMES = [
   agentMcpUnregister.name,
   agentReload.name,
   agentActivity.name,
-  dbSnapshot.name
+  dbSnapshot.name,
+  dbRestore.name
 ];
 
 // shared/api.ts

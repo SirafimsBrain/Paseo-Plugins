@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import contribute from "../index.server";
 import { LuckPlannerStore, defaultDbPath } from "../server/store";
+import { snapshotDatabase } from "../server/snapshot";
 import {
   UI_ACTOR,
   agentActivity,
@@ -14,6 +15,7 @@ import {
   agentReload,
   bugReport,
   dashboardStatus,
+  dbRestore,
   dbSnapshot,
   goalApprove,
   goalCreate,
@@ -206,6 +208,7 @@ describe("RPC surface", () => {
           agentActivity.name,
           bugReport.name,
           dashboardStatus.name,
+          dbRestore.name,
           dbSnapshot.name,
           goalApprove.name,
           goalCreate.name,
@@ -281,6 +284,85 @@ describe("db snapshot (stage L3)", () => {
       expect(result.error).toBeTruthy();
       expect(result.file).toBeNull();
       expect(result.counts).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("db restore (stage L4)", () => {
+  it("replaces the data, reopens the store and keeps the old state in a snapshot", async () => {
+    const store = new LuckPlannerStore();
+    seedTree(store);
+    // The snapshot of the five-node tree, then a write the restore must undo.
+    const file = snapshotDatabase(store, { at: Date.UTC(2026, 10, 4, 14, 30) }).file;
+    store.createNode({
+      projectKey: P,
+      parentId: null,
+      kind: "root",
+      name: "written after the snapshot",
+      actor: ACTOR,
+    });
+    store.close();
+
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        ok: boolean;
+        error: string | null;
+        file: string | null;
+        backup: string | null;
+        backupError: string | null;
+        counts: { nodes: number } | null;
+      }>(dbRestore.name, { file });
+
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeNull();
+      expect(result.counts?.nodes).toBe(5);
+      // The automatic net: the state that was replaced survives as its own
+      // snapshot, so a wrong restore is one more restore away.
+      expect(result.backup).toMatch(/pre-restore-\d{8}-\d{6}\.db\.zip$/);
+      expect(result.backupError).toBeNull();
+      expect(existsSync(result.backup!)).toBe(true);
+
+      // The reopened store is what every handler now reads: the extra root is
+      // gone, so the swap really happened and the old handle is not in use.
+      const tree = await server.call<{ roots: Array<{ node: { name: string } }> }>(
+        treeGet.name,
+        { projectKey: P },
+      );
+      expect(tree.roots.map((root) => root.node.name)).not.toContain(
+        "written after the snapshot",
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("answers a readable error and leaves the data alone for a bad file", async () => {
+    const store = new LuckPlannerStore();
+    seedTree(store);
+    store.close();
+
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        ok: boolean;
+        error: string | null;
+        backup: string | null;
+      }>(dbRestore.name, { file: path.join(tmpdir(), "no-such-snapshot.zip") });
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/no such file/);
+      // Nothing was snapshotted because nothing was touched.
+      expect(result.backup).toBeNull();
+
+      const tree = await server.call<{ roots: Array<{ node: { name: string } }> }>(
+        treeGet.name,
+        { projectKey: P },
+      );
+      expect(tree.roots).toHaveLength(1);
     } finally {
       cleanup();
     }

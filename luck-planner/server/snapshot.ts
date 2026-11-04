@@ -88,6 +88,12 @@ export interface SnapshotRequest {
    * Defaults to now; tests pass a fixed value so names and bytes are stable.
    */
   readonly at?: number;
+  /**
+   * Optional tag between the prefix and the stamp (`pre-restore`), so an
+   * automatic snapshot taken before a restore does not look like a manual one
+   * in a directory listing.
+   */
+  readonly label?: string;
 }
 
 /** What the settings screen (and the log) gets back. */
@@ -106,13 +112,14 @@ export interface SnapshotResult {
 }
 
 /**
- * `luck-planner-YYYYMMDD-HHmmss.db.zip`.
+ * `luck-planner[-<label>]-YYYYMMDD-HHmmss.db.zip`.
  *
  * No project slug: a snapshot covers the whole installation, and a name that
  * named a project would suggest it could be restored into one.
  */
-export function snapshotFileName(at: number): string {
-  return `${SNAPSHOT_PREFIX}-${exportStamp(at)}${SNAPSHOT_FILE_EXTENSION}`;
+export function snapshotFileName(at: number, label?: string): string {
+  const tag = label === undefined ? "" : `${label}-`;
+  return `${SNAPSHOT_PREFIX}-${tag}${exportStamp(at)}${SNAPSHOT_FILE_EXTENSION}`;
 }
 
 /** Name of the database entry inside the archive (`…-20261104-132055.db`). */
@@ -146,7 +153,11 @@ export function snapshotDatabase(
   mkdirSync(dir, { recursive: true });
 
   // `freeName` already answers an absolute path inside `dir`.
-  const file = freeName(dir, snapshotFileName(at), SNAPSHOT_FILE_EXTENSION);
+  const file = freeName(
+    dir,
+    snapshotFileName(at, request.label),
+    SNAPSHOT_FILE_EXTENSION,
+  );
   const temporary = path.join(
     dir,
     `.snapshot-${process.pid}-${randomUUID().slice(0, 8)}${SNAPSHOT_ENTRY_EXTENSION}`,
