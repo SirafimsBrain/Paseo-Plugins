@@ -443,7 +443,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 |------|--------|-----------|--------|
 | L1 | 0.41.0 | `get_context` v2: `sections` / `depth` / `limit` | ✅ |
 | L2 | 0.42.0 | Экспорт проекта: JSON-конверт + zip (`fflate`), MCP-тул + скачивание из дашборда | ✅ |
-| L3 | 0.43.0 | Снимок БД: `VACUUM INTO` + zip в `backups/`, кнопка в настройках | план |
+| L3 | 0.43.0 | Снимок БД: `VACUUM INTO` + zip в `backups/`, кнопка в настройках | ✅ |
 | L4 | 0.44.0 | Восстановление БД: закрытие/подмена/переоткрытие стора, автоснимок, guard схемы | план |
 | L5 | 0.45.0 | Импорт дерева: remap id, `dryRun`, валидация иерархии | план |
 | L6 | 0.46.0 | Циклы bees: детектор, маркировка в 2D, поле в `get_context`/`node.detail` | план |
@@ -468,6 +468,14 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - Зависимость: `fflate` в `devDependencies` (чистый JS, бандлится esbuild — установка плагина остаётся без runtime-зависимостей).
 - Приёмка (тестами): `tests/export.test.ts` (13: полнота конверта, архивные узлы, `includeHistory:false`, round-trip, отказы парсера с именами полей, настоящий zip с одним JSON-entry, побайтовый детерминизм, имена/слаг, `backups/` по умолчанию, суффикс `-2`, абсолютный путь, отказ на относительном/занятом/пустом); `tests/http-server.test.ts` (+2: 200 с `application/zip` + `attachment` + расшифровка обратно в документ, `history=0`, 401 без токена, 400 без проекта и для пустого); `tests/mcp-tools.test.ts` (+3: файл и счётчики, `backups/` по умолчанию, отказы); `tests/dashboard-build.test.ts` (+1 исходный контракт ссылки); списки инструментов в `mcp-tools`/`mcp-server-e2e`/`readme` и модулей `shared/` обновлены. `typecheck` (оба конфига) + `vitest run` зелёные (44 файла, 751 тест).
 
+**L3. Снимок БД** ✅ → `0.43.0`
+- `server/snapshot.ts` (новый): `snapshotDatabase(store, {dir?, at?})` — `VACUUM INTO` во временный `.db` в каталоге бэкапа, проверка копии, zip одним энтри (mtime прибит к DOS-эпохе), запись `luck-planner-YYYYMMDD-HHmmss.db.zip`; временный файл (и `-wal`/`-shm`) удаляется в `finally`; `inspectSnapshot(file)` — read-only открытие, `PRAGMA integrity_check` = `ok`, наличие `meta` и всех считаемых таблиц, `schema_version` и счётчики **из копии**; `snapshotFileName`/`snapshotEntryName`; `SNAPSHOT_FILE_EXTENSION = ".db.zip"`; относительный `dir` отклоняется.
+- `server/store.ts`: `snapshotInto(file)` — абсолютный путь, отказ на существующем файле (SQLite сам не отказывает для пустого файла), выполняется через `write()` (retry fence), но без транзакции — `VACUUM` внутри транзакции запрещён.
+- `server/export.ts`: `freeName` экспортирован и получил параметр составного расширения — коллизия в одну секунду даёт `…-152055-2.db.zip`, а не `…-152055.db-2.zip`.
+- `shared/rpc.ts`: `snapshotCountsSchema` + контракт `luck-planner.db-snapshot` (единственный без `projectKey` — снимок всеинсталляционный) и в `RPC_CONTRACT_NAMES`; `index.server.ts` — обработчик с `{ ok, file, bytes, dbBytes, schemaVersion, counts }` и `{ ok: false, error }` вместо исключения.
+- `client/settings-screen.tsx`: секция *Backups (stage L3)* — строка результата (путь, размер, узлы/проекты) + `SettingsAction` «Save snapshot», `formatBytes`.
+- Приёмка (тестами): `tests/snapshot.test.ts` (12: путь `backups/` по умолчанию, счётчики включая архивные, архив = один `*.db` энтри, который открывается свежим SQLite и проходит `integrity_check`, копия не содержит записей после снимка, откат `journal_mode` не `wal`, отсутствие временных файлов, суффикс `-2` перед всем расширением, явный/относительный `dir`, пустая БД, отказы `inspectSnapshot` на не-БД/без `meta`/без таблицы, отказы `snapshotInto`); `tests/rpc.test.ts` (+2: контракт пишет файл рядом с БД и возвращает счётчики, заблокированный каталог → `{ ok: false, error }`); список контрактов в `tests/rpc.test.ts` обновлён. `typecheck` (оба конфига) + `vitest run` зелёные (45 файлов, 765 тестов).
+
 ## 5. Порядок версий и тегов
 
 | Этап | Версия | Этап | Версия |
@@ -481,7 +489,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 | | | J2 | 0.29.1–0.29.4 (приёмка, три бага) |
 | | | K1 ✅ / K2 ✅ | 0.33.0 / 0.34.0 (plain-вид), 0.34.1 (фикс модалки) |
 | | | K3 | — (документация; визуальные корректировки 0.34.x) |
-| L1 ✅ / L2 ✅ | 0.41.0 / 0.42.0 | L3–L11 | 0.43.0–0.51.0 (план) |
+| L1–L3 ✅ | 0.41.0–0.43.0 | L4–L11 | 0.44.0–0.51.0 (план) |
 
 Каждый бамп — анонсированный тег `luck-planner@<версия>` на коммите с этой версией, отправка в origin (правило проекта). Слово «release» в задаче не используется — major-бамп не планируется. Блок J — финализация без бампа версии: J1 меняет только документацию, J2 — приёмку. Блок K: K1/K2 — minor-бампы за новую функциональность, K3 — документация без бампа, каждая визуальная корректировка — patch-бамп `0.34.x`.
 

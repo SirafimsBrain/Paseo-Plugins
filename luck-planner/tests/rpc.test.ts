@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import contribute from "../index.server";
-import { LuckPlannerStore } from "../server/store";
+import { LuckPlannerStore, defaultDbPath } from "../server/store";
 import {
   UI_ACTOR,
   agentActivity,
@@ -14,6 +14,7 @@ import {
   agentReload,
   bugReport,
   dashboardStatus,
+  dbSnapshot,
   goalApprove,
   goalCreate,
   growthGet,
@@ -205,6 +206,7 @@ describe("RPC surface", () => {
           agentActivity.name,
           bugReport.name,
           dashboardStatus.name,
+          dbSnapshot.name,
           goalApprove.name,
           goalCreate.name,
           growthGet.name,
@@ -216,6 +218,69 @@ describe("RPC surface", () => {
           treeSearch.name,
         ].sort(),
       );
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("db snapshot (stage L3)", () => {
+  it("writes one snapshot beside the database and reports what it holds", async () => {
+    const store = new LuckPlannerStore();
+    seedTree(store);
+    store.close();
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        ok: boolean;
+        error: string | null;
+        file: string | null;
+        bytes: number;
+        dbBytes: number;
+        schemaVersion: number;
+        counts: { nodes: number; projects: number; history: number } | null;
+      }>(dbSnapshot.name, {});
+
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeNull();
+      // The settings button exists so the user can find the file: the handler
+      // answers an absolute path in `backups/`, not just "saved".
+      expect(result.file).toMatch(/backups\/luck-planner-\d{8}-\d{6}\.db\.zip$/);
+      expect(existsSync(result.file!)).toBe(true);
+      expect(result.bytes).toBeGreaterThan(0);
+      expect(result.dbBytes).toBeGreaterThan(0);
+      expect(result.schemaVersion).toBeGreaterThan(0);
+      expect(result.counts?.nodes).toBeGreaterThan(0);
+      expect(result.counts?.projects).toBe(1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("answers a readable error instead of throwing when the directory is blocked", async () => {
+    const store = new LuckPlannerStore();
+    seedTree(store);
+    store.close();
+    // A *file* where `backups/` should be: `mkdirSync` fails, and the settings
+    // screen must see `{ ok: false, error }` rather than an RPC exception.
+    writeFileSync(
+      path.join(path.dirname(defaultDbPath()), "backups"),
+      "not a directory\n",
+    );
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const result = await server.call<{
+        ok: boolean;
+        error: string | null;
+        file: string | null;
+        counts: unknown;
+      }>(dbSnapshot.name, {});
+      expect(result.ok).toBe(false);
+      expect(result.error).toBeTruthy();
+      expect(result.file).toBeNull();
+      expect(result.counts).toBeNull();
     } finally {
       cleanup();
     }

@@ -22109,6 +22109,30 @@ var LuckPlannerStore = class {
     this.requireGoalRow(projectKey, subjectId);
   }
   /**
+   * Writes a consistent copy of the whole database to `file` (stage L3).
+   *
+   * `VACUUM INTO` is the only correct way to copy a live WAL database: it
+   * reads one committed snapshot in a single read transaction and writes a
+   * fresh file — no `-wal` frame to lose, no torn page to capture. A plain
+   * `cp` of the `.db` misses everything still in the log.
+   *
+   * Runs through {@link write} for the retry fence (a concurrent writer can
+   * hold the lock while the vacuum reads), but **not** in a transaction:
+   * SQLite refuses `VACUUM` inside one. The target must not exist yet — that
+   * is also how the caller detects a stale temporary file.
+   */
+  snapshotInto(file2) {
+    if (!path.isAbsolute(file2)) {
+      throw new Error(`snapshot path must be absolute: ${file2}`);
+    }
+    if (fs.existsSync(file2)) {
+      throw new Error(`refusing to overwrite an existing file: ${file2}`);
+    }
+    this.write(() => {
+      this.db.prepare("VACUUM INTO ?").run(file2);
+    });
+  }
+  /**
    * Idempotent: plugin cleanup can run more than once (disable, reload,
    * removal), and a second close must not throw.
    */
@@ -23780,7 +23804,8 @@ function writeExportFile(store, request) {
     mkdirSync(dir, { recursive: true });
     file2 = freeName(
       dir,
-      exportFileName(request.projectKey, document.exportedAt)
+      exportFileName(request.projectKey, document.exportedAt),
+      EXPORT_FILE_EXTENSION
     );
   }
   const parent = path2.dirname(file2);
@@ -23791,10 +23816,10 @@ function writeExportFile(store, request) {
   writeFileSync(file2, bytes);
   return { file: file2, bytes: bytes.byteLength, document };
 }
-function freeName(dir, name) {
+function freeName(dir, name, compoundExtension) {
   const candidate = path2.join(dir, name);
   if (!existsSync(candidate)) return candidate;
-  const extension = name.endsWith(EXPORT_FILE_EXTENSION) ? EXPORT_FILE_EXTENSION : path2.extname(name);
+  const extension = name.endsWith(compoundExtension) ? compoundExtension : path2.extname(name);
   const stem = name.slice(0, name.length - extension.length);
   for (let index = 2; index < 1e3; index += 1) {
     const next = path2.join(dir, `${stem}-${index}${extension}`);
@@ -24821,7 +24846,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.42.0";
+var SERVER_VERSION = "0.43.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

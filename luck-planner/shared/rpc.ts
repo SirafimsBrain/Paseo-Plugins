@@ -446,6 +446,50 @@ export const agentActivity = defineRpc({
   }),
 });
 
+/**
+ * Row counts a snapshot reports (stage L3).
+ *
+ * Declared here rather than in `server/snapshot.ts` because the settings
+ * screen reads them through the RPC, and one schema must describe both ends.
+ */
+export const snapshotCountsSchema = z.object({
+  projects: z.number().int().nonnegative(),
+  nodes: z.number().int().nonnegative(),
+  archivedNodes: z.number().int().nonnegative(),
+  bees: z.number().int().nonnegative(),
+  bugs: z.number().int().nonnegative(),
+  bugAttachments: z.number().int().nonnegative(),
+  goals: z.number().int().nonnegative(),
+  growth: z.number().int().nonnegative(),
+  history: z.number().int().nonnegative(),
+});
+
+/**
+ * `luck-planner.db-snapshot`: copy the whole database into `backups/`
+ * (stage L3).
+ *
+ * Deliberately **not** scoped by `projectKey`: a snapshot covers the whole
+ * installation, which is the point — a per-project copy is the export (L2),
+ * and a backup that silently skipped the other projects would be a trap.
+ * Writes a file, so it runs on an explicit request only (the settings button),
+ * never on a timer; automatic archiving is stage L11.
+ */
+export const dbSnapshot = defineRpc({
+  name: "luck-planner.db-snapshot",
+  input: z.object({}).optional(),
+  output: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable(),
+    /** Absolute path of the archive, `null` when the snapshot failed. */
+    file: z.string().nullable(),
+    /** Size of the archive and of the database inside it. */
+    bytes: z.number().int().nonnegative(),
+    dbBytes: z.number().int().nonnegative(),
+    schemaVersion: z.number().int().nonnegative(),
+    counts: snapshotCountsSchema.nullable(),
+  }),
+});
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -463,4 +507,5 @@ export const RPC_CONTRACT_NAMES = [
   agentMcpUnregister.name,
   agentReload.name,
   agentActivity.name,
+  dbSnapshot.name,
 ] as const;

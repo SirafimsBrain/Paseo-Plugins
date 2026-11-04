@@ -21,6 +21,7 @@ import {
   agentMcpRegister,
   agentMcpStatus,
   agentMcpUnregister,
+  dbSnapshot,
   type AgentMcpTargetId,
 } from "../shared/rpc";
 
@@ -58,6 +59,30 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
     padding: compact ? 8 : 12,
     gap: compact ? 6 : 8,
   };
+
+  // Stage L3: one button, one snapshot. The server does the work (`VACUUM
+  // INTO`, integrity check, zip) and answers the path; this screen only shows
+  // it, because a path the user cannot read is not a backup they can find.
+  const snapshotRpc = useRpc(dbSnapshot);
+  const [snapshotMessage, setSnapshotMessage] = useState("");
+  const [snapshotBusy, setSnapshotBusy] = useState(false);
+
+  const runSnapshot = useCallback(() => {
+    setSnapshotBusy(true);
+    void snapshotRpc({})
+      .then((result: any) => {
+        setSnapshotMessage(
+          result.ok && result.file
+            ? `Saved ${result.file} — ${formatBytes(result.bytes)}, ` +
+                `${result.counts.nodes} nodes in ${result.counts.projects} projects.`
+            : result.error ?? "Snapshot failed.",
+        );
+      })
+      .catch((cause: unknown) => {
+        setSnapshotMessage(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => setSnapshotBusy(false));
+  }, [snapshotRpc]);
 
   const agentStatusRpc = useRpc(agentMcpStatus);
   const agentRegisterRpc = useRpc(agentMcpRegister);
@@ -264,6 +289,23 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
             disabled={agentBusy}
           />
         </SettingsSection>
+        <SettingsSection title="Backups (stage L3)">
+          <SettingsRow
+            label="Database snapshot"
+            hint="Copies the whole database — every project, not just this one — into backups/ beside the database. It is a consistent SQLite snapshot taken with VACUUM INTO, integrity-checked and zipped; nothing is overwritten."
+          >
+            <Text style={{ color: fg, fontSize: font(11) }} numberOfLines={3}>
+              {snapshotMessage !== "" ? snapshotMessage : " "}
+            </Text>
+          </SettingsRow>
+          <SettingsAction
+            label="Snapshot now"
+            actionLabel={snapshotBusy ? "Saving…" : "Save snapshot"}
+            hint="One file per click, named by date and time. Restoring a snapshot is the next stage."
+            onPress={runSnapshot}
+            disabled={snapshotBusy}
+          />
+        </SettingsSection>
         <SettingsSection title="History">
           <SettingsInput
             label="History retention (days)"
@@ -293,6 +335,13 @@ const styles = StyleSheet.create({
   agentRowActions: { flexDirection: "row", gap: 12, alignItems: "center" },
   agentButton: { paddingVertical: 2 },
 });
+
+/** `12.3 kB` / `1.4 MB` — a size a person can read at a glance. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 /** One agent's registration state, as the section shows it. */
 interface AgentRow {

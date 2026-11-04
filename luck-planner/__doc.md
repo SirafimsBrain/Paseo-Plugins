@@ -593,7 +593,7 @@ colour alone). The view-model (`groupByParent`, `filterSections`,
 
 ### Plugin RPC surface (stage E1 — `shared/rpc.ts`, `index.server.ts`)
 
-Eleven `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
+Seventeen `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
 Center items (E3) and the settings screen (E4) all go through them. The server
 registers the handlers over one shared `LuckPlannerStore` (closed on plugin
 cleanup); `tests/rpc.test.ts` (23 tests, fake `PluginServerContext` against a
@@ -615,6 +615,47 @@ temp-directory database) covers the surface:
 - **Scoping**: every contract carries `projectKey`; the suite asserts foreign
   projects come back empty and unknown nodes fail with a readable
   `not found in project` message.
+
+### Database snapshot (stage L3 — `server/snapshot.ts`, `server/store.ts`, `shared/rpc.ts`, `client/settings-screen.tsx`)
+
+Stage L2 exports **one project** as a portable document; this backs up the
+**installation** — every project, every table — in the format the store itself
+reads. Settings → *Backups (stage L3)* → **Save snapshot** calls the
+`luck-planner.db-snapshot` RPC, which writes
+`backups/luck-planner-YYYYMMDD-HHmmss.db.zip` beside the database and answers
+`{ ok, file, bytes, dbBytes, schemaVersion, counts }` — the path is part of the
+answer because a path the user cannot find is not a backup.
+
+- **`VACUUM INTO`, never `cp`.** The database runs in WAL mode and several
+  processes write it (ADR-2), so a file copy misses the just-committed `-wal`
+  frame and can capture a torn page. `VACUUM INTO` reads one consistent
+  snapshot in a single read transaction and writes a fresh, defragmented
+  database with no `-wal` next to it. `store.snapshotInto(file)` wraps it in the
+  store's lock-retry fence but **not** in a transaction — SQLite refuses
+  `VACUUM` inside one.
+- **Verified before it is zipped.** `inspectSnapshot(file)` reopens the copy
+  read-only, requires `PRAGMA integrity_check` to answer `ok`, requires the
+  `meta` table and every counted table, then reads `schema_version` and the row
+  counts **from the copy**. The counts on the settings screen (`nodes` in
+  `projects`) are therefore evidence about the file, not about the intent.
+  L4's restore reuses the same function on a file the user picked.
+- **Temp file in `finally`.** The uncompressed `.db` is written inside the
+  backup directory under a `.snapshot-<pid>-<random>.db` name and removed even
+  when the zip or the write fails, so a failed snapshot leaves nothing behind
+  and the directory only ever holds finished archives (a test asserts the
+  directory contains exactly one file after a snapshot).
+- **Never overwrites, and the suffix goes first.** `store.snapshotInto`
+  refuses a path that already exists: SQLite itself only refuses a *non-empty*
+  target and would happily write into a zero-length file. A second snapshot in
+  the same second resolves as `…-152055-2.db.zip` (the same `freeName` the
+  project export uses, with its two-part `.db.zip` extension), and a relative
+  directory is refused because the daemon's working directory is not the user's.
+- **Why not project-scoped, and why no timer.** A snapshot deliberately carries
+  no `projectKey`: a backup that silently skipped the other projects would be a
+  trap, and the per-project artifact already exists (L2). It also runs on an
+  explicit request only — a timer would turn "a backup" into "a directory
+  nobody reads", and the criteria for automatic archiving are their own stage
+  (L11). Restoring a snapshot is stage L4.
 
 ### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
 

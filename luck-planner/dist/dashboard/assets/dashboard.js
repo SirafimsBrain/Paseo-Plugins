@@ -398,6 +398,32 @@ var agentActivity = defineRpc({
     )
   })
 });
+var snapshotCountsSchema = external_exports.object({
+  projects: external_exports.number().int().nonnegative(),
+  nodes: external_exports.number().int().nonnegative(),
+  archivedNodes: external_exports.number().int().nonnegative(),
+  bees: external_exports.number().int().nonnegative(),
+  bugs: external_exports.number().int().nonnegative(),
+  bugAttachments: external_exports.number().int().nonnegative(),
+  goals: external_exports.number().int().nonnegative(),
+  growth: external_exports.number().int().nonnegative(),
+  history: external_exports.number().int().nonnegative()
+});
+var dbSnapshot = defineRpc({
+  name: "luck-planner.db-snapshot",
+  input: external_exports.object({}).optional(),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    error: external_exports.string().nullable(),
+    /** Absolute path of the archive, `null` when the snapshot failed. */
+    file: external_exports.string().nullable(),
+    /** Size of the archive and of the database inside it. */
+    bytes: external_exports.number().int().nonnegative(),
+    dbBytes: external_exports.number().int().nonnegative(),
+    schemaVersion: external_exports.number().int().nonnegative(),
+    counts: snapshotCountsSchema.nullable()
+  })
+});
 var RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -414,7 +440,8 @@ var RPC_CONTRACT_NAMES = [
   agentMcpRegister.name,
   agentMcpUnregister.name,
   agentReload.name,
-  agentActivity.name
+  agentActivity.name,
+  dbSnapshot.name
 ];
 
 // shared/api.ts

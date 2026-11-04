@@ -23,6 +23,7 @@ import {
   agentReload,
   bugReport,
   dashboardStatus,
+  dbSnapshot,
   goalApprove,
   goalCreate,
   growthGet,
@@ -56,6 +57,7 @@ import {
 } from "./server/session-open";
 import { createUpsertLeafTool } from "./server/agent-tool";
 import { probeOpenCodeService } from "./server/opencode-service";
+import { snapshotDatabase } from "./server/snapshot";
 import { normalizeProjectKey, seedProjectTree } from "./server/project-seed";
 import { ensureSkillInstalled } from "./server/skill";
 import { ChangeFeed, readChangesSince } from "./server/change-feed";
@@ -782,6 +784,46 @@ export default function contribute(server: PluginServerContext) {
       watermark: batch.watermark,
       changes: batch.changes.filter((entry) => entry.projectKey === input.projectKey),
     };
+  });
+
+  // Stage L3: the settings button asks for one snapshot of the whole database.
+  // On an explicit request only — a timer would turn "a backup" into "a
+  // directory of backups nobody reads", and the criteria for automatic
+  // archiving are a separate stage (L11). `VACUUM INTO` + integrity check live
+  // in `server/snapshot.ts`; this handler only turns a failure into the
+  // `{ ok: false, error }` shape the settings screen renders, so one bad
+  // filesystem never takes the settings screen down.
+  handle(dbSnapshot, () => {
+    throwIfDisposed();
+    try {
+      const result = snapshotDatabase(store);
+      console.log(
+        `[luck-planner] database snapshot: ${result.file} ` +
+          `(${result.bytes} bytes, ${result.counts.nodes} nodes, ` +
+          `${result.counts.projects} projects)`,
+      );
+      return {
+        ok: true,
+        error: null,
+        file: result.file,
+        bytes: result.bytes,
+        dbBytes: result.dbBytes,
+        schemaVersion: result.schemaVersion,
+        counts: result.counts,
+      };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[luck-planner] database snapshot failed: ${message}`);
+      return {
+        ok: false,
+        error: message,
+        file: null,
+        bytes: 0,
+        dbBytes: 0,
+        schemaVersion: 0,
+        counts: null,
+      };
+    }
   });
 
   function throwIfDisposed(): void {

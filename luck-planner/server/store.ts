@@ -2944,6 +2944,34 @@ export class LuckPlannerStore {
   }
 
   /**
+   * Writes a consistent copy of the whole database to `file` (stage L3).
+   *
+   * `VACUUM INTO` is the only correct way to copy a live WAL database: it
+   * reads one committed snapshot in a single read transaction and writes a
+   * fresh file — no `-wal` frame to lose, no torn page to capture. A plain
+   * `cp` of the `.db` misses everything still in the log.
+   *
+   * Runs through {@link write} for the retry fence (a concurrent writer can
+   * hold the lock while the vacuum reads), but **not** in a transaction:
+   * SQLite refuses `VACUUM` inside one. The target must not exist yet — that
+   * is also how the caller detects a stale temporary file.
+   */
+  snapshotInto(file: string): void {
+    if (!path.isAbsolute(file)) {
+      throw new Error(`snapshot path must be absolute: ${file}`);
+    }
+    if (fs.existsSync(file)) {
+      // `VACUUM INTO` refuses a non-empty target but happily writes into a
+      // zero-length one (SQLite reads that as "an empty database"). The store
+      // says no before either case: nothing here may overwrite a file.
+      throw new Error(`refusing to overwrite an existing file: ${file}`);
+    }
+    this.write(() => {
+      this.db.prepare("VACUUM INTO ?").run(file);
+    });
+  }
+
+  /**
    * Idempotent: plugin cleanup can run more than once (disable, reload,
    * removal), and a second close must not throw.
    */

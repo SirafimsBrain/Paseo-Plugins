@@ -165,6 +165,7 @@ export function writeExportFile(
     file = freeName(
       dir,
       exportFileName(request.projectKey, document.exportedAt),
+      EXPORT_FILE_EXTENSION,
     );
   }
 
@@ -182,13 +183,18 @@ export function writeExportFile(
  * The suffix goes before the **whole** extension: an archive is
  * `<stamp>.json.zip`, and `path.extname` would produce the misleading
  * `<stamp>.json-2.zip` — a file that still opens, under a name that reads as
- * if the *JSON* were the second one.
+ * if the *JSON* were the second one. `compoundExtension` is what makes a
+ * two-part suffix (`…-2.db.zip` for stage L3) resolve the same way.
  */
-function freeName(dir: string, name: string): string {
+export function freeName(
+  dir: string,
+  name: string,
+  compoundExtension: string,
+): string {
   const candidate = path.join(dir, name);
   if (!existsSync(candidate)) return candidate;
-  const extension = name.endsWith(EXPORT_FILE_EXTENSION)
-    ? EXPORT_FILE_EXTENSION
+  const extension = name.endsWith(compoundExtension)
+    ? compoundExtension
     : path.extname(name);
   const stem = name.slice(0, name.length - extension.length);
   for (let index = 2; index < 1000; index += 1) {
