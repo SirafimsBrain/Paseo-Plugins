@@ -33,6 +33,7 @@ import {
   stats,
   treeChanges,
   treeGet,
+  treeImport,
   treeSearch,
   type AgentMcpTargetId,
 } from "./shared/rpc";
@@ -60,6 +61,7 @@ import { createUpsertLeafTool } from "./server/agent-tool";
 import { probeOpenCodeService } from "./server/opencode-service";
 import { snapshotDatabase } from "./server/snapshot";
 import { readRestoreSource, replaceDatabase } from "./server/restore";
+import { runImport } from "./server/import";
 import { normalizeProjectKey, seedProjectTree } from "./server/project-seed";
 import { ensureSkillInstalled } from "./server/skill";
 import { ChangeFeed, readChangesSince } from "./server/change-feed";
@@ -839,6 +841,63 @@ export default function contribute(server: PluginServerContext) {
         dbBytes: 0,
         schemaVersion: 0,
         counts: null,
+      };
+    }
+  });
+
+  // Stage L5: bring one exported project back. Two-step on purpose: the
+  // screen's first press asks for `dryRun`, which reads the file, validates
+  // the hierarchy and the target, and answers the counts; the second press
+  // writes. Every refusal — a missing file, a zip with two JSON entries, a
+  // second root, a leaf whose parent is a branch — comes back as
+  // `{ ok: false, error }`, because a thrown error across the RPC boundary
+  // tells the user nothing. `store.importProject` runs the whole write in one
+  // transaction, so a failure half-way leaves no fragments behind.
+  handle(treeImport, (input) => {
+    throwIfDisposed();
+    try {
+      const report = runImport(store, {
+        file: input.file,
+        ...(input.projectKey === undefined
+          ? {}
+          : { projectKey: input.projectKey }),
+        ...(input.includeArchived === undefined
+          ? {}
+          : { includeArchived: input.includeArchived }),
+        ...(input.includeHistory === undefined
+          ? {}
+          : { includeHistory: input.includeHistory }),
+        dryRun: input.dryRun ?? true,
+        actor: UI_ACTOR,
+      });
+      console.log(
+        `[luck-planner] import ${report.dryRun ? "dry run" : "written"}: ` +
+          `${report.summary} into ${report.projectKey} from ${report.file}`,
+      );
+      return {
+        ok: true,
+        error: null,
+        dryRun: report.dryRun,
+        file: report.file,
+        projectKey: report.projectKey,
+        source: report.source,
+        counts: report.counts,
+        warnings: [...report.warnings],
+        summary: report.summary,
+      };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[luck-planner] import failed: ${message}`);
+      return {
+        ok: false,
+        error: message,
+        dryRun: input.dryRun ?? true,
+        file: null,
+        projectKey: null,
+        source: null,
+        counts: null,
+        warnings: [],
+        summary: "",
       };
     }
   });

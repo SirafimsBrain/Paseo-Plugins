@@ -831,10 +831,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path5) {
-  if (!path5)
+function getElementAtPath(obj, path6) {
+  if (!path6)
     return obj;
-  return path5.reduce((acc, key) => acc?.[key], obj);
+  return path6.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1174,11 +1174,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path5, issues) {
+function prefixIssues(path6, issues) {
   return issues.map((iss) => {
     var _a4;
     (_a4 = iss).path ?? (_a4.path = []);
-    iss.path.unshift(path5);
+    iss.path.unshift(path6);
     return iss;
   });
 }
@@ -1191,9 +1191,9 @@ function sizeCaps(defChecks) {
     const d = ch._zod.def;
     if (!/_(length|size)$|_equals$/.test(d.check))
       break;
-    const max = d.maximum ?? d.length ?? d.size;
-    if (max >= 0)
-      caps.push([max, ch]);
+    const max2 = d.maximum ?? d.length ?? d.size;
+    if (max2 >= 0)
+      caps.push([max2, ch]);
   }
   return caps;
 }
@@ -1640,16 +1640,16 @@ function flattenError(error63, mapper = (issue2) => issue2.message) {
 }
 function formatError(error63, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error64, path5 = []) => {
+  const processError = (error64, path6 = []) => {
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path5, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1688,17 +1688,17 @@ function formatError(error63, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error63, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error64, path5 = []) => {
+  const processError = (error64, path6 = []) => {
     var _a4;
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path5, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1737,8 +1737,8 @@ function treeifyError(error63, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path5) {
+  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path6) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -3382,8 +3382,8 @@ function capSize(inst, size) {
   inst._zod.parse = (payload, ctx) => {
     const n = size(payload.value);
     if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
-      for (const [max, ch] of sizeCaps(inst._zod.def.checks)) {
-        if (n > max && ch._zod.def.when(payload)) {
+      for (const [max2, ch] of sizeCaps(inst._zod.def.checks)) {
+        if (n > max2 && ch._zod.def.when(payload)) {
           const start = payload.issues.length;
           ch._zod.check(payload);
           payload.issues[start].continue = false;
@@ -13177,9 +13177,9 @@ function generateChecks(doc, ctx, schema, accessor) {
         break;
       }
       case "max_length": {
-        const max = numericOperand(def.maximum, "max_length");
-        const len = codePointLengthVar(doc, ctx, currentAccessor, `${currentAccessor}.length > ${max}`);
-        doc.write(`if (${len} > ${max}) return INVALID;`);
+        const max2 = numericOperand(def.maximum, "max_length");
+        const len = codePointLengthVar(doc, ctx, currentAccessor, `${currentAccessor}.length > ${max2}`);
+        doc.write(`if (${len} > ${max2}) return INVALID;`);
         break;
       }
       case "length_equals": {
@@ -13997,8 +13997,8 @@ function generateNullableCheck(doc, ctx, schema, accessor, buildsValue = true) {
   return outputVar;
 }
 function generateSizeGate(doc, schema, size) {
-  for (const [max, check2] of sizeCaps(schema._zod.def.checks)) {
-    doc.write(`if (${size} > ${numericOperand(max, check2._zod.def.check)}) return INVALID;`);
+  for (const [max2, check2] of sizeCaps(schema._zod.def.checks)) {
+    doc.write(`if (${size} > ${numericOperand(max2, check2._zod.def.check)}) return INVALID;`);
   }
 }
 function generateArrayCheck(doc, ctx, schema, accessor, buildsValue = true) {
@@ -18876,13 +18876,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path5 = ref.slice(1).split("/").filter(Boolean);
-  if (path5.length === 0) {
+  const path6 = ref.slice(1).split("/").filter(Boolean);
+  if (path6.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path5[0] === defsKey) {
-    const key = path5[1] === void 0 ? void 0 : decodeJSONPointerSegment(path5[1]);
+  if (path6[0] === defsKey) {
+    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -20341,17 +20341,17 @@ var LuckPlannerStore = class {
    * Read-only.
    */
   getNodePath(projectKey, id) {
-    const path5 = [];
+    const path6 = [];
     const seen = /* @__PURE__ */ new Set();
     let currentId = id;
     while (currentId !== null && !seen.has(currentId)) {
       seen.add(currentId);
       const node2 = this.getNode(projectKey, currentId);
       if (!node2) break;
-      path5.unshift(node2);
+      path6.unshift(node2);
       currentId = node2.parentId;
     }
-    return path5;
+    return path6;
   }
   /**
    * Every node of one project, oldest first — the single read the dashboard
@@ -22108,6 +22108,281 @@ var LuckPlannerStore = class {
     }
     this.requireGoalRow(projectKey, subjectId);
   }
+  // -------------------------------------------------------------------------
+  // Import (stage L5) — a validated project plan lands in one transaction
+  // -------------------------------------------------------------------------
+  /**
+   * Refuses a target project that already holds a live tree.
+   *
+   * One project holds one tree (several roots are stage L10), and an imported
+   * project brings its own root: merging would produce two, which nothing in
+   * the model — goals, the dashboard graph, the roll-ups — is ready for. The
+   * check runs inside the import transaction (`BEGIN IMMEDIATE` serializes
+   * writers), so two agents importing into the same key cannot both pass it.
+   */
+  assertEmptyProject(projectKey) {
+    const project = requireText(projectKey, "project key");
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS live FROM nodes
+          WHERE project_key = ? AND archived_at IS NULL`
+    ).get(project);
+    const live = Number(row.live);
+    if (live > 0) {
+      throw new Error(
+        `project ${project} already has ${live} live node(s) \u2014 an import needs an empty project, because a project holds one tree`
+      );
+    }
+  }
+  /**
+   * Writes a planned project: the rows of a validated export, already
+   * remapped by `shared/import.ts`, in **one** transaction.
+   *
+   * The store's usual create paths are the wrong tool here and this method
+   * deliberately does not use them: they mint their own ids (remapping twice),
+   * stamp their own timestamps (an import would rewrite the project's history
+   * as "now") and validate one reference at a time (the plan already verified
+   * the whole graph). What they *do* share is the discipline — one transaction
+   * behind the write fence, and an audit row for every entity, appended for
+   * anything the file's own trail does not cover.
+   */
+  importProject(input2) {
+    const projectKey = requireText(input2.projectKey, "project key");
+    const actor = requireText(input2.actor, "actor");
+    if (input2.nodes.length === 0) {
+      throw new Error("an import needs at least one node");
+    }
+    return this.write(
+      () => this.transaction(() => {
+        this.assertEmptyProject(projectKey);
+        const children = /* @__PURE__ */ new Map();
+        for (const node2 of input2.nodes) {
+          const siblings = children.get(node2.parentId) ?? [];
+          siblings.push(node2);
+          children.set(node2.parentId, siblings);
+        }
+        const ordered = [];
+        const walk = [...children.get(null) ?? []];
+        while (walk.length > 0) {
+          const node2 = walk.shift();
+          ordered.push(node2);
+          walk.push(...children.get(node2.id) ?? []);
+        }
+        if (ordered.length !== input2.nodes.length) {
+          throw new Error(
+            "the plan has no writable hierarchy: a node is not reachable from the root"
+          );
+        }
+        const nodeStmt = this.db.prepare(
+          `INSERT INTO nodes
+             (id, project_key, parent_id, kind, name, description, status,
+              version, revision, payload, created_at, updated_at, created_by,
+              updated_by, archived_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        for (const node2 of ordered) {
+          nodeStmt.run(
+            node2.id,
+            projectKey,
+            node2.parentId,
+            node2.kind,
+            node2.name,
+            node2.description,
+            node2.status,
+            node2.version,
+            node2.revision,
+            JSON.stringify(node2.payload),
+            node2.createdAt,
+            node2.updatedAt,
+            node2.createdBy,
+            node2.updatedBy,
+            node2.archivedAt
+          );
+        }
+        const beeStmt = this.db.prepare(
+          `INSERT INTO bees
+             (id, project_key, source_leaf_id, target_leaf_id, status, revision,
+              impact, created_at, updated_at, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        for (const bee of input2.bees) {
+          beeStmt.run(
+            bee.id,
+            projectKey,
+            bee.sourceLeafId,
+            bee.targetLeafId,
+            bee.status,
+            bee.revision,
+            bee.impact,
+            bee.createdAt,
+            bee.updatedAt,
+            bee.createdBy,
+            bee.updatedBy
+          );
+        }
+        const bugStmt = this.db.prepare(
+          `INSERT INTO bugs
+             (id, project_key, title, description, severity, status, revision,
+              created_at, updated_at, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        for (const bug of input2.bugs) {
+          bugStmt.run(
+            bug.id,
+            projectKey,
+            bug.title,
+            bug.description,
+            bug.severity,
+            bug.status,
+            bug.revision,
+            bug.createdAt,
+            bug.updatedAt,
+            bug.createdBy,
+            bug.updatedBy
+          );
+        }
+        const attachmentStmt = this.db.prepare(
+          "INSERT INTO bug_nodes (bug_id, node_id) VALUES (?, ?)"
+        );
+        for (const attachment of input2.bugAttachments) {
+          attachmentStmt.run(attachment.bugId, attachment.nodeId);
+        }
+        const goalStmt = this.db.prepare(
+          `INSERT INTO goals
+             (id, project_key, formal_text, plan_json, status, revision,
+              materialized_node_id, created_at, updated_at, created_by,
+              updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        for (const goal of input2.goals) {
+          goalStmt.run(
+            goal.id,
+            projectKey,
+            goal.formalText,
+            JSON.stringify(goal.plan),
+            goal.status,
+            goal.revision,
+            goal.materializedNodeId,
+            goal.createdAt,
+            goal.updatedAt,
+            goal.createdBy,
+            goal.updatedBy
+          );
+        }
+        const growthStmt = this.db.prepare(
+          `INSERT INTO growth
+             (id, project_key, subject_type, subject_id, steps_json, status,
+              revision, created_at, updated_at, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        for (const record2 of input2.growth) {
+          growthStmt.run(
+            record2.id,
+            projectKey,
+            record2.subjectType,
+            record2.subjectId,
+            JSON.stringify(record2.steps),
+            record2.status,
+            record2.revision,
+            record2.createdAt,
+            record2.updatedAt,
+            record2.createdBy,
+            record2.updatedBy
+          );
+        }
+        const historyStmt = this.db.prepare(
+          `INSERT INTO history
+             (project_key, entity_type, entity_id, action, revision, actor,
+              result, at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        const covered = /* @__PURE__ */ new Set();
+        let historyRows = 0;
+        for (const row of input2.history) {
+          historyStmt.run(
+            projectKey,
+            row.entityType,
+            row.entityId,
+            row.action,
+            row.revision,
+            row.actor,
+            row.result,
+            row.at
+          );
+          covered.add(`${row.entityType}:${row.entityId}`);
+          historyRows += 1;
+        }
+        const now = Date.now();
+        const append = (entityType, entityId, action, revision, result) => {
+          if (covered.has(`${entityType}:${entityId}`)) return;
+          this.appendHistory(
+            projectKey,
+            entityType,
+            entityId,
+            action,
+            revision,
+            actor,
+            result,
+            now
+          );
+          covered.add(`${entityType}:${entityId}`);
+          historyRows += 1;
+        };
+        for (const node2 of input2.nodes) {
+          append(
+            "node",
+            node2.id,
+            "create",
+            node2.revision,
+            `imported ${node2.kind} "${node2.name}"`
+          );
+        }
+        for (const bee of input2.bees) {
+          append(
+            "bee",
+            bee.id,
+            "link",
+            bee.revision,
+            `imported bee ${bee.sourceLeafId} \u2192 ${bee.targetLeafId}`
+          );
+        }
+        for (const bug of input2.bugs) {
+          append(
+            "bug",
+            bug.id,
+            "create",
+            bug.revision,
+            `imported bug "${bug.title}"`
+          );
+        }
+        for (const goal of input2.goals) {
+          append(
+            "goal",
+            goal.id,
+            "create",
+            goal.revision,
+            `imported goal "${goal.formalText.slice(0, 80)}"`
+          );
+        }
+        for (const record2 of input2.growth) {
+          append(
+            "growth",
+            record2.id,
+            "create",
+            record2.revision,
+            `imported growth for ${record2.subjectType} ${record2.subjectId}`
+          );
+        }
+        return {
+          nodes: input2.nodes.length,
+          bees: input2.bees.length,
+          bugs: input2.bugs.length,
+          goals: input2.goals.length,
+          growth: input2.growth.length,
+          history: historyRows
+        };
+      })
+    );
+  }
   /**
    * Writes a consistent copy of the whole database to `file` (stage L3).
    *
@@ -22969,6 +23244,13 @@ var exportInputSchema = external_exports.object({
   includeHistory: external_exports.boolean().optional(),
   path: external_exports.string().min(1).optional()
 });
+var importInputSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  file: external_exports.string().min(1),
+  includeArchived: external_exports.boolean().optional(),
+  includeHistory: external_exports.boolean().optional(),
+  dryRun: external_exports.boolean().optional()
+});
 
 // shared/export.ts
 var EXPORT_FORMAT = "luck-planner-export";
@@ -23010,6 +23292,20 @@ function countArchived(nodes) {
 function serializeExport(doc) {
   return `${JSON.stringify(doc, null, 2)}
 `;
+}
+function parseExport(text2) {
+  let raw;
+  try {
+    raw = JSON.parse(text2);
+  } catch (cause) {
+    throw new Error(
+      `not a JSON document: ${cause instanceof Error ? cause.message : String(cause)}`
+    );
+  }
+  const parsed = exportDocumentSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  const issues = parsed.error.issues.map((issue2) => `${issue2.path.map(String).join(".") || "(root)"}: ${issue2.message}`).join("; ");
+  throw new Error(`not a luck-planner export: ${issues}`);
 }
 function exportStamp(at) {
   const date5 = new Date(at);
@@ -23201,7 +23497,25 @@ for (i = 0; i < 32; ++i)
   fdt[i] = 5;
 var i;
 var flm = /* @__PURE__ */ hMap(flt, 9, 0);
+var flrm = /* @__PURE__ */ hMap(flt, 9, 1);
 var fdm = /* @__PURE__ */ hMap(fdt, 5, 0);
+var fdrm = /* @__PURE__ */ hMap(fdt, 5, 1);
+var max = function(a) {
+  var m = a[0];
+  for (var i = 1; i < a.length; ++i) {
+    if (a[i] > m)
+      m = a[i];
+  }
+  return m;
+};
+var bits = function(d, p, m) {
+  var o = p / 8 | 0;
+  return (d[o] | d[o + 1] << 8) >> (p & 7) & m;
+};
+var bits16 = function(d, p) {
+  var o = p / 8 | 0;
+  return (d[o] | d[o + 1] << 8 | d[o + 2] << 16) >> (p & 7);
+};
 var shft = function(p) {
   return (p + 7) / 8 | 0;
 };
@@ -23238,6 +23552,147 @@ var err = function(ind, msg, nt) {
   if (!nt)
     throw e;
   return e;
+};
+var inflt = function(dat, st, buf, dict) {
+  var sl = dat.length, dl = dict ? dict.length : 0;
+  if (!sl || st.f && !st.l)
+    return buf || new u8(0);
+  var noBuf = !buf;
+  var resize = noBuf || st.i != 2;
+  var noSt = st.i;
+  if (noBuf)
+    buf = new u8(sl * 3);
+  var cbuf = function(l2) {
+    var bl = buf.length;
+    if (l2 > bl) {
+      var nbuf = new u8(Math.max(bl * 2, l2));
+      nbuf.set(buf);
+      buf = nbuf;
+    }
+  };
+  var final = st.f || 0, pos = st.p || 0, bt = st.b || 0, lm = st.l, dm = st.d, lbt = st.m, dbt = st.n;
+  var tbts = sl * 8;
+  do {
+    if (!lm) {
+      final = bits(dat, pos, 1);
+      var type = bits(dat, pos + 1, 3);
+      pos += 3;
+      if (!type) {
+        var s = shft(pos) + 4, l = dat[s - 4] | dat[s - 3] << 8, t = s + l;
+        if (t > sl) {
+          if (noSt)
+            err(0);
+          break;
+        }
+        if (resize)
+          cbuf(bt + l);
+        buf.set(dat.subarray(s, t), bt);
+        st.b = bt += l, st.p = pos = t * 8, st.f = final;
+        continue;
+      } else if (type == 1)
+        lm = flrm, dm = fdrm, lbt = 9, dbt = 5;
+      else if (type == 2) {
+        var hLit = bits(dat, pos, 31) + 257, hcLen = bits(dat, pos + 10, 15) + 4;
+        var tl = hLit + bits(dat, pos + 5, 31) + 1;
+        pos += 14;
+        var ldt = new u8(tl);
+        var clt = new u8(19);
+        for (var i = 0; i < hcLen; ++i) {
+          clt[clim[i]] = bits(dat, pos + i * 3, 7);
+        }
+        pos += hcLen * 3;
+        var clb = max(clt), clbmsk = (1 << clb) - 1;
+        var clm = hMap(clt, clb, 1);
+        for (var i = 0; i < tl; ) {
+          var r = clm[bits(dat, pos, clbmsk)];
+          pos += r & 15;
+          var s = r >> 4;
+          if (s < 16) {
+            ldt[i++] = s;
+          } else {
+            var c = 0, n = 0;
+            if (s == 16)
+              n = 3 + bits(dat, pos, 3), pos += 2, c = ldt[i - 1];
+            else if (s == 17)
+              n = 3 + bits(dat, pos, 7), pos += 3;
+            else if (s == 18)
+              n = 11 + bits(dat, pos, 127), pos += 7;
+            while (n--)
+              ldt[i++] = c;
+          }
+        }
+        var lt = ldt.subarray(0, hLit), dt = ldt.subarray(hLit);
+        lbt = max(lt);
+        dbt = max(dt);
+        lm = hMap(lt, lbt, 1);
+        dm = hMap(dt, dbt, 1);
+      } else
+        err(1);
+      if (pos > tbts) {
+        if (noSt)
+          err(0);
+        break;
+      }
+    }
+    if (resize)
+      cbuf(bt + 131072);
+    var lms = (1 << lbt) - 1, dms = (1 << dbt) - 1;
+    var lpos = pos;
+    for (; ; lpos = pos) {
+      var c = lm[bits16(dat, pos) & lms], sym = c >> 4;
+      pos += c & 15;
+      if (pos > tbts) {
+        if (noSt)
+          err(0);
+        break;
+      }
+      if (!c)
+        err(2);
+      if (sym < 256)
+        buf[bt++] = sym;
+      else if (sym == 256) {
+        lpos = pos, lm = null;
+        break;
+      } else {
+        var add = sym - 254;
+        if (sym > 264) {
+          var i = sym - 257, b = fleb[i];
+          add = bits(dat, pos, (1 << b) - 1) + fl[i];
+          pos += b;
+        }
+        var d = dm[bits16(dat, pos) & dms], dsym = d >> 4;
+        if (!d)
+          err(3);
+        pos += d & 15;
+        var dt = fd[dsym];
+        if (dsym > 3) {
+          var b = fdeb[dsym];
+          dt += bits16(dat, pos) & (1 << b) - 1, pos += b;
+        }
+        if (pos > tbts) {
+          if (noSt)
+            err(0);
+          break;
+        }
+        if (resize)
+          cbuf(bt + 131072);
+        var end = bt + add;
+        if (bt < dt) {
+          var shift = dl - dt, dend = Math.min(dt, end);
+          if (shift + bt < 0)
+            err(3);
+          for (; bt < dend; ++bt)
+            buf[bt] = dict[shift + bt];
+        }
+        for (; bt < end; ++bt)
+          buf[bt] = buf[bt - dt];
+      }
+    }
+    st.l = lm, st.p = lpos, st.b = bt, st.f = final;
+    if (lm)
+      final = 1, st.m = lbt, st.d = dm, st.n = dbt;
+  } while (!final);
+  return bt != buf.length && noBuf ? slc(buf, 0, bt) : buf.subarray(0, bt);
 };
 var wbits = function(d, p, v) {
   v <<= p & 7;
@@ -23586,12 +24041,24 @@ var mrg = function(a, b) {
     o[k] = b[k];
   return o;
 };
+var b2 = function(d, b) {
+  return d[b] | d[b + 1] << 8;
+};
+var b4 = function(d, b) {
+  return (d[b] | d[b + 1] << 8 | d[b + 2] << 16 | d[b + 3] << 24) >>> 0;
+};
+var b8 = function(d, b) {
+  return b4(d, b) + b4(d, b + 4) * 4294967296;
+};
 var wbytes = function(d, b, v) {
   for (; v; ++b)
     d[b] = v, v >>>= 8;
 };
 function deflateSync(data, opts) {
   return dopt(data, opts || {}, 0, 0);
+}
+function inflateSync(data, opts) {
+  return inflt(data, { i: 2 }, opts && opts.out, opts && opts.dictionary);
 }
 var fltn = function(d, p, t, o) {
   for (var k in d) {
@@ -23614,6 +24081,22 @@ try {
   tds = 1;
 } catch (e) {
 }
+var dutf8 = function(d) {
+  for (var r = "", i = 0; ; ) {
+    var c = d[i++];
+    var eb = (c > 127) + (c > 223) + (c > 239);
+    if (i + eb > d.length)
+      return { s: r, r: slc(d, i - 1) };
+    if (!eb)
+      r += String.fromCharCode(c);
+    else if (eb == 3) {
+      c = ((c & 15) << 18 | (d[i++] & 63) << 12 | (d[i++] & 63) << 6 | d[i++] & 63) - 65536, r += String.fromCharCode(55296 | c >> 10, 56320 | c & 1023);
+    } else if (eb & 1)
+      r += String.fromCharCode((c & 31) << 6 | d[i++] & 63);
+    else
+      r += String.fromCharCode((c & 15) << 12 | (d[i++] & 63) << 6 | d[i++] & 63);
+  }
+};
 function strToU8(str2, latin1) {
   if (latin1) {
     var ar_1 = new u8(str2.length);
@@ -23647,6 +24130,48 @@ function strToU8(str2, latin1) {
   }
   return slc(ar, 0, ai);
 }
+function strFromU8(dat, latin1) {
+  if (latin1) {
+    var r = "";
+    for (var i = 0; i < dat.length; i += 16384)
+      r += String.fromCharCode.apply(null, dat.subarray(i, i + 16384));
+    return r;
+  } else if (td) {
+    return td.decode(dat);
+  } else {
+    var _a4 = dutf8(dat), s = _a4.s, r = _a4.r;
+    if (r.length)
+      err(8);
+    return s;
+  }
+}
+var slzh = function(d, b) {
+  return b + 30 + b2(d, b + 26) + b2(d, b + 28);
+};
+var zh = function(d, b, z2) {
+  var fnl = b2(d, b + 28), efl = b2(d, b + 30), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl;
+  var _a4 = z64hs(d, es, efl, z2, b4(d, b + 20), b4(d, b + 24), b4(d, b + 42)), sc = _a4[0], su = _a4[1], off = _a4[2];
+  return [b2(d, b + 10), sc, su, fn, es + efl + b2(d, b + 32), off];
+};
+var z64hs = function(d, b, l, z2, sc, su, off) {
+  var nsc = sc == 4294967295, nsu = su == 4294967295, noff = off == 4294967295, e = b + l;
+  var nf = nsc + nsu + noff;
+  if (z2 && nf) {
+    for (; b + 4 < e; b += 4 + b2(d, b + 2)) {
+      if (b2(d, b) == 1) {
+        return [
+          nsc ? b8(d, b + 4 + 8 * nsu) : sc,
+          nsu ? b8(d, b + 4) : su,
+          noff ? b8(d, b + 4 + 8 * (nsu + nsc)) : off,
+          1
+        ];
+      }
+    }
+    if (z2 < 2)
+      err(13);
+  }
+  return [sc, su, off, 0];
+};
 var exfl = function(ex) {
   var le = 0;
   if (ex) {
@@ -23748,6 +24273,47 @@ function zipSync(data, opts) {
   wzf(out, o, files.length, cdl, oe);
   return out;
 }
+function unzipSync(data, opts) {
+  var files = {};
+  var e = data.length - 22;
+  for (; b4(data, e) != 101010256; --e) {
+    if (!e || data.length - e > 65558)
+      err(13);
+  }
+  ;
+  var c = b2(data, e + 8);
+  if (!c)
+    return {};
+  var o = b4(data, e + 16);
+  var z2 = b4(data, e - 20) == 117853008;
+  if (z2) {
+    var ze = b4(data, e - 12);
+    z2 = b4(data, ze) == 101075792;
+    if (z2) {
+      c = b4(data, ze + 32);
+      o = b4(data, ze + 48);
+    }
+  }
+  var fltr = opts && opts.filter;
+  for (var i = 0; i < c; ++i) {
+    var _a4 = zh(data, o, z2), c_2 = _a4[0], sc = _a4[1], su = _a4[2], fn = _a4[3], no = _a4[4], off = _a4[5], b = slzh(data, off);
+    o = no;
+    if (!fltr || fltr({
+      name: fn,
+      size: sc,
+      originalSize: su,
+      compression: c_2
+    })) {
+      if (!c_2)
+        files[fn] = slc(data, b, b + sc);
+      else if (c_2 == 8)
+        files[fn] = inflateSync(data.subarray(b, b + sc), { out: new u8(su) });
+      else
+        err(14, "unknown compression type " + c_2);
+    }
+  }
+  return files;
+}
 
 // server/export.ts
 function buildExportDocument(store, request) {
@@ -23828,17 +24394,449 @@ function freeName(dir, name, compoundExtension) {
   throw new Error(`no free file name for ${candidate}`);
 }
 
+// server/import.ts
+import { existsSync as existsSync2, readFileSync, statSync as statSync2 } from "node:fs";
+import path3 from "node:path";
+
+// shared/import.ts
+var IMPORT_ISSUE_LIMIT = 8;
+function defaultNewId() {
+  return crypto.randomUUID();
+}
+function planImport(doc, options = {}) {
+  const projectKey = options.projectKey ?? doc.projectKey;
+  const includeArchived = options.includeArchived ?? true;
+  const includeHistory = options.includeHistory ?? true;
+  const newId = options.newId ?? defaultNewId;
+  const issues = validateTree(doc);
+  if (issues.length > 0) throw new Error(rejection(issues));
+  const goals = doc.goals;
+  const kept = includeArchived ? new Set(doc.nodes.map((node2) => node2.id)) : new Set(
+    doc.nodes.filter((node2) => node2.archivedAt === null).map((node2) => node2.id)
+  );
+  const isKept = (id) => kept.has(id);
+  const warnings = [];
+  let dropped = 0;
+  const nodes = [];
+  for (const node2 of doc.nodes) {
+    if (!isKept(node2.id)) {
+      dropped += 1;
+      continue;
+    }
+    nodes.push(node2);
+  }
+  if (nodes.length === 0) {
+    throw new Error(
+      includeArchived ? "nothing to import: the file holds no nodes" : "nothing to import: the file holds no live nodes (every node is archived)"
+    );
+  }
+  const bees = [];
+  for (const bee of doc.bees) {
+    if (!isKept(bee.sourceLeafId) || !isKept(bee.targetLeafId)) {
+      dropped += 1;
+      warnings.push(
+        `dropped bee ${bee.sourceLeafId} \u2192 ${bee.targetLeafId}: an archived leaf is not imported`
+      );
+      continue;
+    }
+    bees.push(bee);
+  }
+  const bugs = doc.bugs;
+  const keptBugs = new Set(bugs.map((bug) => bug.id));
+  const bugAttachments = [];
+  for (const attachment of doc.bugAttachments) {
+    if (!keptBugs.has(attachment.bugId) || !isKept(attachment.nodeId)) {
+      dropped += 1;
+      warnings.push(
+        `dropped attachment of bug ${attachment.bugId} to ${attachment.nodeId}: an archived leaf is not imported`
+      );
+      continue;
+    }
+    bugAttachments.push(attachment);
+  }
+  const remappedGoals = goals.map((goal) => {
+    if (goal.materializedNodeId === null || isKept(goal.materializedNodeId)) {
+      return goal;
+    }
+    dropped += 1;
+    warnings.push(
+      `goal ${goal.id} lost its materialized subtree: the node was archived`
+    );
+    return { ...goal, materializedNodeId: null };
+  });
+  const goalIdSet = new Set(goals.map((goal) => goal.id));
+  const growth = [];
+  for (const record2 of doc.growth) {
+    const alive = record2.subjectType === "goal" ? goalIdSet.has(record2.subjectId) : isKept(record2.subjectId);
+    if (!alive) {
+      dropped += 1;
+      warnings.push(
+        `dropped growth ${record2.id}: its ${record2.subjectType} is not imported`
+      );
+      continue;
+    }
+    growth.push(record2);
+  }
+  const history = [];
+  if (includeHistory && doc.history !== void 0) {
+    const keptEntities = {
+      nodes: new Set(nodes.map((node2) => node2.id)),
+      bees: new Set(bees.map((bee) => bee.id)),
+      bugs: new Set(bugs.map((bug) => bug.id)),
+      goals: new Set(remappedGoals.map((goal) => goal.id)),
+      growth: new Set(growth.map((record2) => record2.id))
+    };
+    for (const entry of doc.history) {
+      if (!entityIsKept(entry.entityType, entry.entityId, keptEntities)) {
+        dropped += 1;
+        continue;
+      }
+      history.push({
+        entityType: entry.entityType,
+        entityId: entry.entityId,
+        action: entry.action,
+        revision: entry.revision,
+        actor: entry.actor,
+        result: entry.result,
+        at: entry.at
+      });
+    }
+    if (doc.history.length > history.length) {
+      warnings.push(
+        `dropped ${doc.history.length - history.length} audit rows of entities that are not imported`
+      );
+    }
+  }
+  const nodeIds = /* @__PURE__ */ new Map();
+  for (const node2 of nodes) nodeIds.set(node2.id, newId());
+  const beeIds = /* @__PURE__ */ new Map();
+  for (const bee of bees) beeIds.set(bee.id, newId());
+  const bugIds = /* @__PURE__ */ new Map();
+  for (const bug of bugs) bugIds.set(bug.id, newId());
+  const goalIds = /* @__PURE__ */ new Map();
+  for (const goal of remappedGoals) goalIds.set(goal.id, newId());
+  const growthIdsNew = /* @__PURE__ */ new Map();
+  for (const record2 of growth) growthIdsNew.set(record2.id, newId());
+  const idOf = (map2, id, what) => {
+    const mapped = map2.get(id);
+    if (mapped === void 0) throw new Error(`unmapped ${what} ${id}`);
+    return mapped;
+  };
+  const newNode = (id) => idOf(nodeIds, id, "node");
+  const plannedNodes = nodes.map((node2) => ({
+    ...node2,
+    id: newNode(node2.id),
+    parentId: node2.parentId === null ? null : newNode(node2.parentId),
+    projectKey
+  }));
+  const plannedBees = bees.map((bee) => ({
+    ...bee,
+    id: idOf(beeIds, bee.id, "bee"),
+    sourceLeafId: newNode(bee.sourceLeafId),
+    targetLeafId: newNode(bee.targetLeafId),
+    projectKey
+  }));
+  const plannedBugs = bugs.map((bug) => ({
+    ...bug,
+    id: idOf(bugIds, bug.id, "bug"),
+    projectKey
+  }));
+  const plannedAttachments = bugAttachments.map((attachment) => ({
+    bugId: idOf(bugIds, attachment.bugId, "bug"),
+    nodeId: newNode(attachment.nodeId)
+  }));
+  const plannedGoals = remappedGoals.map((goal) => ({
+    ...goal,
+    id: idOf(goalIds, goal.id, "goal"),
+    materializedNodeId: goal.materializedNodeId === null ? null : newNode(goal.materializedNodeId),
+    projectKey
+  }));
+  const plannedGrowth = growth.map((record2) => ({
+    ...record2,
+    id: idOf(growthIdsNew, record2.id, "growth"),
+    subjectId: record2.subjectType === "goal" ? idOf(goalIds, record2.subjectId, "goal") : newNode(record2.subjectId),
+    projectKey
+  }));
+  const plannedHistory = history.map((entry) => ({
+    ...entry,
+    entityId: remapEntityId(entry.entityType, entry.entityId, {
+      node: nodeIds,
+      bee: beeIds,
+      bug: bugIds,
+      goal: goalIds,
+      growth: growthIdsNew
+    })
+  }));
+  return {
+    source: {
+      projectKey: doc.projectKey,
+      pluginVersion: doc.pluginVersion,
+      exportedAt: doc.exportedAt,
+      schemaVersion: doc.schemaVersion
+    },
+    projectKey,
+    nodes: plannedNodes,
+    bees: plannedBees,
+    bugs: plannedBugs,
+    bugAttachments: plannedAttachments,
+    goals: plannedGoals,
+    growth: plannedGrowth,
+    history: plannedHistory,
+    counts: {
+      nodes: plannedNodes.length,
+      archivedNodes: plannedNodes.reduce(
+        (total, node2) => node2.archivedAt === null ? total : total + 1,
+        0
+      ),
+      bees: plannedBees.length,
+      bugs: plannedBugs.length,
+      bugAttachments: plannedAttachments.length,
+      goals: plannedGoals.length,
+      growth: plannedGrowth.length,
+      history: plannedHistory.length,
+      dropped
+    },
+    warnings
+  };
+}
+function describeImport(plan) {
+  const { counts } = plan;
+  const parts = [
+    `${counts.nodes} nodes`,
+    `${counts.bees} bees`,
+    `${counts.bugs} bugs`,
+    `${counts.goals} goals`,
+    `${counts.growth} growth records`
+  ];
+  if (counts.history > 0) parts.push(`${counts.history} audit rows`);
+  if (counts.archivedNodes > 0) parts.push(`${counts.archivedNodes} archived`);
+  return parts.join(", ");
+}
+function validateTree(doc) {
+  const issues = [];
+  const nodes = doc.nodes;
+  const byId = /* @__PURE__ */ new Map();
+  for (const node2 of nodes) {
+    if (byId.has(node2.id)) issues.push(`duplicate node id ${node2.id}`);
+    else byId.set(node2.id, node2);
+  }
+  const roots = nodes.filter((node2) => node2.kind === "root");
+  if (roots.length !== 1) {
+    issues.push(
+      `the tree needs exactly one root, the file has ${roots.length}`
+    );
+  }
+  for (const node2 of nodes) {
+    if (node2.kind === "root") {
+      if (node2.parentId !== null) {
+        issues.push(`root ${node2.id} has a parent (${node2.parentId})`);
+      }
+      continue;
+    }
+    if (node2.parentId === null) {
+      issues.push(`${node2.kind} ${node2.id} has no parent`);
+      continue;
+    }
+    const parent = byId.get(node2.parentId);
+    if (parent === void 0) {
+      issues.push(
+        `${node2.id} points at parent ${node2.parentId}, which is not in the file`
+      );
+      continue;
+    }
+    if (!canHaveChild(parent.kind, node2.kind)) {
+      issues.push(
+        `a ${node2.kind} cannot be a child of a ${parent.kind} (${parent.id} \u2192 ${node2.id})`
+      );
+    }
+    if (parent.archivedAt !== null && node2.archivedAt === null) {
+      issues.push(`live node ${node2.id} sits under archived ${parent.id}`);
+    }
+  }
+  for (const node2 of nodes) {
+    const seen = /* @__PURE__ */ new Set();
+    let cursor = node2;
+    while (cursor !== void 0 && cursor.parentId !== null) {
+      if (seen.has(cursor.id)) {
+        issues.push(`the parents of ${node2.id} form a cycle`);
+        break;
+      }
+      seen.add(cursor.id);
+      cursor = byId.get(cursor.parentId);
+    }
+  }
+  const requireLeaf = (id, what) => {
+    const node2 = byId.get(id);
+    if (node2 === void 0) {
+      issues.push(`${what} points at ${id}, which is not in the file`);
+      return;
+    }
+    if (node2.kind !== "leaf") {
+      issues.push(`${what} points at a ${node2.kind} (${id}); leaves only`);
+    }
+  };
+  const pairs = /* @__PURE__ */ new Set();
+  for (const bee of doc.bees) {
+    requireLeaf(bee.sourceLeafId, `bee ${bee.id} (source)`);
+    requireLeaf(bee.targetLeafId, `bee ${bee.id} (target)`);
+    const pair = `${bee.sourceLeafId}\u2192${bee.targetLeafId}`;
+    if (pairs.has(pair)) {
+      issues.push(`two bees for the same pair of leaves (${pair})`);
+    }
+    pairs.add(pair);
+  }
+  const bugIds = new Set(doc.bugs.map((bug) => bug.id));
+  const attached = /* @__PURE__ */ new Set();
+  for (const attachment of doc.bugAttachments) {
+    if (!bugIds.has(attachment.bugId)) {
+      issues.push(
+        `attachment points at bug ${attachment.bugId}, which is not in the file`
+      );
+    }
+    requireLeaf(attachment.nodeId, `bug ${attachment.bugId}`);
+    const key = `${attachment.bugId}:${attachment.nodeId}`;
+    if (attached.has(key)) {
+      issues.push(
+        `bug ${attachment.bugId} is attached to ${attachment.nodeId} twice`
+      );
+    }
+    attached.add(key);
+  }
+  const goalIds = new Set(doc.goals.map((goal) => goal.id));
+  for (const goal of doc.goals) {
+    const subjectId = goal.materializedNodeId;
+    if (subjectId === null) continue;
+    if (!byId.has(subjectId)) {
+      issues.push(
+        `goal ${goal.id} points at subtree ${subjectId}, which is not in the file`
+      );
+    }
+  }
+  for (const record2 of doc.growth) {
+    const exists = record2.subjectType === "goal" ? goalIds.has(record2.subjectId) : byId.has(record2.subjectId);
+    if (!exists) {
+      issues.push(
+        `growth ${record2.id} points at ${record2.subjectType} ${record2.subjectId}, which is not in the file`
+      );
+    }
+  }
+  return issues;
+}
+function rejection(issues) {
+  const shown = issues.slice(0, IMPORT_ISSUE_LIMIT);
+  const rest = issues.length - shown.length;
+  return `import rejected: ${shown.join("; ")}` + (rest > 0 ? `; and ${rest} more problem${rest === 1 ? "" : "s"}` : "");
+}
+function entityIsKept(type, id, kept) {
+  switch (type) {
+    case "node":
+      return kept.nodes.has(id);
+    case "bee":
+      return kept.bees.has(id);
+    case "bug":
+      return kept.bugs.has(id);
+    case "goal":
+      return kept.goals.has(id);
+    case "growth":
+      return kept.growth.has(id);
+    default:
+      return false;
+  }
+}
+function remapEntityId(type, id, maps) {
+  const map2 = type === "node" ? maps.node : type === "bee" ? maps.bee : type === "bug" ? maps.bug : type === "goal" ? maps.goal : type === "growth" ? maps.growth : void 0;
+  return map2?.get(id) ?? id;
+}
+
+// server/import.ts
+var EMPTY_WRITE = {
+  nodes: 0,
+  bees: 0,
+  bugs: 0,
+  goals: 0,
+  growth: 0,
+  history: 0
+};
+function readImportDocument(file2) {
+  if (!path3.isAbsolute(file2)) {
+    throw new Error(`import path must be absolute: ${file2}`);
+  }
+  if (!existsSync2(file2)) {
+    throw new Error(`import file not found: ${file2}`);
+  }
+  if (statSync2(file2).isDirectory()) {
+    throw new Error(`import path is a directory: ${file2}`);
+  }
+  if (file2.toLowerCase().endsWith(".zip")) {
+    let entries;
+    try {
+      entries = unzipSync(new Uint8Array(readFileSync(file2)));
+    } catch (cause) {
+      throw new Error(
+        `not a readable zip archive (${file2}): ${cause instanceof Error ? cause.message : String(cause)}`
+      );
+    }
+    const json2 = Object.keys(entries).filter(
+      (name) => name.toLowerCase().endsWith(".json")
+    );
+    if (json2.length !== 1) {
+      throw new Error(
+        `the archive must hold exactly one .json entry, it holds ${json2.length}: ${file2}`
+      );
+    }
+    return parseExport(strFromU8(entries[json2[0]]));
+  }
+  return parseExport(readFileSync(file2, "utf8"));
+}
+function planImportFile(store, request) {
+  const document = readImportDocument(request.file);
+  const options = {
+    ...request.projectKey === void 0 ? {} : { projectKey: request.projectKey },
+    ...request.includeArchived === void 0 ? {} : { includeArchived: request.includeArchived },
+    ...request.includeHistory === void 0 ? {} : { includeHistory: request.includeHistory },
+    ...request.newId === void 0 ? {} : { newId: request.newId }
+  };
+  const plan = planImport(document, options);
+  store.assertEmptyProject(plan.projectKey);
+  return { ...plan, file: request.file };
+}
+function runImport(store, request) {
+  const plan = planImportFile(store, request);
+  const dryRun = request.dryRun === true;
+  const written = dryRun ? EMPTY_WRITE : store.importProject({
+    projectKey: plan.projectKey,
+    actor: request.actor ?? "import",
+    nodes: plan.nodes,
+    bees: plan.bees,
+    bugs: plan.bugs,
+    bugAttachments: plan.bugAttachments,
+    goals: plan.goals,
+    growth: plan.growth,
+    history: plan.history
+  });
+  return {
+    file: plan.file,
+    dryRun,
+    projectKey: plan.projectKey,
+    source: plan.source,
+    counts: plan.counts,
+    warnings: plan.warnings,
+    summary: describeImport(plan),
+    written
+  };
+}
+
 // server/plugin-paths.ts
 import * as fs2 from "node:fs";
-import * as path4 from "node:path";
+import * as path5 from "node:path";
 
 // server/module-dir.ts
-import * as path3 from "node:path";
+import * as path4 from "node:path";
 import { fileURLToPath } from "node:url";
 function moduleDirectory() {
   const meta3 = import.meta;
   if (typeof meta3.url === "string" && meta3.url.length > 0) {
-    return path3.dirname(fileURLToPath(meta3.url));
+    return path4.dirname(fileURLToPath(meta3.url));
   }
   return typeof __dirname === "string" ? __dirname : process.cwd();
 }
@@ -23848,7 +24846,7 @@ var PLUGIN_ID = "luck-planner";
 function configuredPluginRoot() {
   try {
     const raw = JSON.parse(
-      fs2.readFileSync(path4.join(paseoHome(), "config.json"), "utf8")
+      fs2.readFileSync(path5.join(paseoHome(), "config.json"), "utf8")
     );
     const entry = raw.plugins?.[PLUGIN_ID];
     if (entry && typeof entry.path === "string" && entry.path.length > 0) {
@@ -23860,17 +24858,17 @@ function configuredPluginRoot() {
 }
 function candidateRoots() {
   const roots = [];
-  roots.push(path4.join(moduleDirectory(), ".."));
+  roots.push(path5.join(moduleDirectory(), ".."));
   const configured = configuredPluginRoot();
   if (configured !== null) roots.push(configured);
   return roots;
 }
 function resolveManifestPath() {
-  const candidates = candidateRoots().map((root) => path4.join(root, "package.json"));
+  const candidates = candidateRoots().map((root) => path5.join(root, "package.json"));
   for (const candidate of candidates) {
     if (fs2.existsSync(candidate)) return candidate;
   }
-  return candidates[0] ?? path4.join(process.cwd(), "package.json");
+  return candidates[0] ?? path5.join(process.cwd(), "package.json");
 }
 function resolvePluginVersion() {
   try {
@@ -24307,6 +25305,34 @@ var MCP_TOOLS = [
       },
       required: ["projectKey"]
     }
+  },
+  {
+    name: "luck_tree_import",
+    title: "Import a project",
+    description: "Read a `.json.zip` export written by `luck_tree_export` (or an extracted `.json`) and rebuild that project in this database: the tree with every parent edge rebuilt on fresh ids, influence bees, incidents with their leaf attachments, goals (with their materialized subtree), growth records and the audit trail. Every reference is verified before a row is written \u2014 one root, parents present, kinds allowed under their parent, bees and bugs on leaves \u2014 and a refused import leaves the database untouched. The target project must be empty (a project holds one tree). `dryRun` defaults to true: the first call reports the counts and writes nothing, so set `dryRun: false` to actually import.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        file: {
+          type: "string",
+          description: "Absolute path of the export archive or of an extracted .json."
+        },
+        dryRun: {
+          type: "boolean",
+          description: "Validate and report without writing (default true). Pass false to import."
+        },
+        includeArchived: {
+          type: "boolean",
+          description: "Carry soft-deleted nodes (default true). False imports only live rows and the links that stay valid."
+        },
+        includeHistory: {
+          type: "boolean",
+          description: "Carry the audit trail when the file holds one (default true)."
+        }
+      },
+      required: ["projectKey", "file"]
+    }
   }
 ];
 function text(result) {
@@ -24550,6 +25576,11 @@ function dispatchMcpTool(name, args, context) {
         if (!parsed.success) return invalidInput(parsed.error.issues);
         return dispatchExport(store, parsed.data);
       }
+      case "luck_tree_import": {
+        const parsed = importInputSchema.safeParse(input2);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        return dispatchImport(store, parsed.data, actor);
+      }
       case "luck_tree_history": {
         const parsed = historyInputSchema.safeParse(input2);
         if (!parsed.success) return invalidInput(parsed.error.issues);
@@ -24594,6 +25625,26 @@ function dispatchExport(store, value) {
     counts: exportCounts(written.document)
   });
 }
+function dispatchImport(store, value, actor) {
+  const report = runImport(store, {
+    file: value.file,
+    projectKey: value.projectKey,
+    ...value.includeArchived === void 0 ? {} : { includeArchived: value.includeArchived },
+    ...value.includeHistory === void 0 ? {} : { includeHistory: value.includeHistory },
+    dryRun: value.dryRun ?? true,
+    actor
+  });
+  return text({
+    dryRun: report.dryRun,
+    imported: !report.dryRun,
+    file: report.file,
+    projectKey: report.projectKey,
+    source: report.source,
+    counts: report.counts,
+    warnings: report.warnings,
+    ...report.dryRun ? { hint: "nothing was written; call again with dryRun: false to import" } : {}
+  });
+}
 function dispatchGetContext(store, value) {
   const limit = value.limit;
   if (value.nodeId === void 0) {
@@ -24630,11 +25681,11 @@ function dispatchGetContext(store, value) {
     if (capped.dropped > 0) truncated[section] = capped.dropped;
     return capped.items;
   };
-  const path5 = keep(
+  const path6 = keep(
     "path",
     store.getNodePath(value.projectKey, node2.id).map(nodeSummary)
   );
-  if (path5 !== void 0) answer.path = path5;
+  if (path6 !== void 0) answer.path = path6;
   const children = keep(
     "children",
     store.listChildren(value.projectKey, node2.id).map(nodeSummary)
@@ -24846,7 +25897,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.44.0";
+var SERVER_VERSION = "0.45.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

@@ -129,6 +129,7 @@ describe("MCP tool surface", () => {
       "luck_tree_update_growth",
       "luck_tree_history",
       "luck_tree_export",
+      "luck_tree_import",
     ]);
     for (const tool of MCP_TOOLS) {
       expect(tool.inputSchema.type).toBe("object");
@@ -1401,6 +1402,95 @@ describe("luck_tree_export", () => {
     expectError(
       call(store, "luck_tree_export", { projectKey: P, path: taken }),
       /refusing to overwrite/,
+    );
+  });
+});
+
+describe("luck_tree_import", () => {
+  interface Imported {
+    dryRun: boolean;
+    imported: boolean;
+    projectKey: string;
+    counts: { nodes: number; bees: number; bugs: number; goals: number };
+    warnings: string[];
+    hint?: string;
+  }
+
+  it("is a dry run unless the agent says otherwise", () => {
+    const store = openStore();
+    const { leafA, leafB } = seedTree(store);
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafA.id,
+      targetLeafId: leafB.id,
+      actor: ACTOR,
+    });
+    const file = path.join(tempDir(), "tree.json.zip");
+    payload(call(store, "luck_tree_export", { projectKey: P, path: file }));
+
+    const dry = payload<Imported>(
+      call(store, "luck_tree_import", { projectKey: OTHER, file }),
+    );
+    expect(dry.dryRun).toBe(true);
+    expect(dry.imported).toBe(false);
+    expect(dry.counts.nodes).toBe(5);
+    expect(dry.counts.bees).toBe(1);
+    expect(dry.hint).toMatch(/dryRun: false/);
+    expect(store.listNodes(OTHER, { includeArchived: true })).toHaveLength(0);
+
+    const written = payload<Imported>(
+      call(store, "luck_tree_import", { projectKey: OTHER, file, dryRun: false }),
+    );
+    expect(written.dryRun).toBe(false);
+    expect(written.imported).toBe(true);
+    expect(written.hint).toBeUndefined();
+    expect(written.counts).toEqual(dry.counts);
+    expect(store.listNodes(OTHER).map((node) => node.name).sort()).toEqual(
+      store.listNodes(P).map((node) => node.name).sort(),
+    );
+  });
+
+  it("explains a refusal instead of throwing", () => {
+    const store = openStore();
+    seedTree(store);
+    expectError(
+      call(store, "luck_tree_import", {
+        projectKey: OTHER,
+        file: path.join(tmpdir(), "absent.json.zip"),
+      }),
+      /not found/,
+    );
+    expectError(
+      call(store, "luck_tree_import", { projectKey: OTHER, file: "relative.json.zip" }),
+      /must be absolute/,
+    );
+    // The tool has no target default: a write names its project.
+    expectError(call(store, "luck_tree_import", { file: "x.json.zip" }), /projectKey/);
+  });
+
+  it("can leave the archived past behind", () => {
+    const store = openStore();
+    const { leafA } = seedTree(store);
+    store.archiveNode({ projectKey: P, id: leafA.id, actor: ACTOR });
+    const file = path.join(tempDir(), "tree.json.zip");
+    payload(call(store, "luck_tree_export", { projectKey: P, path: file }));
+
+    const withPast = payload<Imported>(
+      call(store, "luck_tree_import", { projectKey: OTHER, file, dryRun: false }),
+    );
+    expect(withPast.counts.nodes).toBe(5);
+
+    const liveOnly = payload<Imported>(
+      call(store, "luck_tree_import", {
+        projectKey: "/projects/third",
+        file,
+        dryRun: false,
+        includeArchived: false,
+      }),
+    );
+    expect(liveOnly.counts.nodes).toBe(4);
+    expect(store.listNodes("/projects/third").map((node) => node.name)).not.toContain(
+      "retry failed charges",
     );
   });
 });

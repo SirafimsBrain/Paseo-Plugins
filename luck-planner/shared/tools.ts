@@ -43,6 +43,7 @@ export const MCP_TOOL_NAMES = [
   "luck_tree_update_growth",
   "luck_tree_history",
   "luck_tree_export",
+  "luck_tree_import",
 ] as const;
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
 
@@ -317,3 +318,29 @@ export const exportInputSchema = z.object({
   path: z.string().min(1).optional(),
 });
 export type ExportInput = z.infer<typeof exportInputSchema>;
+
+/**
+ * `luck_tree_import` (stage L5): the way back from an export.
+ *
+ * - `file` must be absolute: the agent writes into the user's filesystem, and
+ *   a relative path would resolve against an agent working directory nobody
+ *   chose.
+ * - `projectKey` is required, like every other write tool: an agent that is
+ *   about to add a whole tree names where it goes instead of inheriting the
+ *   file's key by accident.
+ * - `dryRun` defaults to **true** here, unlike the RPC: an agent asking to
+ *   import is about to add a whole tree it has never seen, so the first call
+ *   answers `would this work, and how big is it` for free, and the write needs
+ *   an explicit `dryRun: false`.
+ * - `includeArchived` (default true) is the policy the export deliberately did
+ *   not decide: a tree-only copy skips soft-deleted nodes and the rows that
+ *   hang off them, and says so in `warnings`.
+ */
+export const importInputSchema = z.object({
+  projectKey: projectKeySchema,
+  file: z.string().min(1),
+  includeArchived: z.boolean().optional(),
+  includeHistory: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+});
+export type ImportInput = z.infer<typeof importInputSchema>;

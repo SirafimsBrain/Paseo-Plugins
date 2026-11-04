@@ -52,6 +52,7 @@ import {
   type GrowthStep,
   type GrowthSubjectType,
 } from "../shared/growth";
+import type { ImportedHistoryRow } from "../shared/import";
 import {
   LEAF_STATUSES,
   LEAF_TRANSITIONS,
@@ -442,6 +443,37 @@ export interface DeleteGrowthInput {
   projectKey: string;
   id: string;
   actor: string;
+}
+
+/**
+ * `importProject` input: the rows of a plan from `shared/import.ts` (stage
+ * L5). Already validated and remapped — the store writes them as they are and
+ * adds no ids, timestamps or parent lookups of its own.
+ */
+export interface ImportProjectInput {
+  /** Target project; must hold no live tree yet. */
+  projectKey: string;
+  /** Actor recorded on every audit row the import adds. */
+  actor: string;
+  nodes: readonly Node[];
+  bees: readonly Bee[];
+  bugs: readonly Bug[];
+  bugAttachments: readonly BugNode[];
+  goals: readonly Goal[];
+  growth: readonly Growth[];
+  /** The file's own trail; rows missing from it get one `create` row each. */
+  history: readonly ImportedHistoryRow[];
+}
+
+/** What {@link LuckPlannerStore.importProject} wrote. */
+export interface ImportProjectResult {
+  nodes: number;
+  bees: number;
+  bugs: number;
+  goals: number;
+  growth: number;
+  /** Audit rows in the project afterwards (the file's ones plus the added). */
+  history: number;
 }
 
 /**
@@ -2941,6 +2973,311 @@ export class LuckPlannerStore {
       return;
     }
     this.requireGoalRow(projectKey, subjectId);
+  }
+
+  // -------------------------------------------------------------------------
+  // Import (stage L5) — a validated project plan lands in one transaction
+  // -------------------------------------------------------------------------
+
+  /**
+   * Refuses a target project that already holds a live tree.
+   *
+   * One project holds one tree (several roots are stage L10), and an imported
+   * project brings its own root: merging would produce two, which nothing in
+   * the model — goals, the dashboard graph, the roll-ups — is ready for. The
+   * check runs inside the import transaction (`BEGIN IMMEDIATE` serializes
+   * writers), so two agents importing into the same key cannot both pass it.
+   */
+  assertEmptyProject(projectKey: string): void {
+    const project = requireText(projectKey, "project key");
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS live FROM nodes
+          WHERE project_key = ? AND archived_at IS NULL`,
+      )
+      .get(project) as { live: number };
+    const live = Number(row.live);
+    if (live > 0) {
+      throw new Error(
+        `project ${project} already has ${live} live node(s) — an import needs an empty project, because a project holds one tree`,
+      );
+    }
+  }
+
+  /**
+   * Writes a planned project: the rows of a validated export, already
+   * remapped by `shared/import.ts`, in **one** transaction.
+   *
+   * The store's usual create paths are the wrong tool here and this method
+   * deliberately does not use them: they mint their own ids (remapping twice),
+   * stamp their own timestamps (an import would rewrite the project's history
+   * as "now") and validate one reference at a time (the plan already verified
+   * the whole graph). What they *do* share is the discipline — one transaction
+   * behind the write fence, and an audit row for every entity, appended for
+   * anything the file's own trail does not cover.
+   */
+  importProject(input: ImportProjectInput): ImportProjectResult {
+    const projectKey = requireText(input.projectKey, "project key");
+    const actor = requireText(input.actor, "actor");
+    if (input.nodes.length === 0) {
+      throw new Error("an import needs at least one node");
+    }
+
+    return this.write(() =>
+      this.transaction(() => {
+        this.assertEmptyProject(projectKey);
+
+        // `node:sqlite` enforces the foreign keys the DDL declares, so a node
+        // cannot be inserted before its parent. The plan is already known to be
+        // a tree (one root, no cycles), so one top-down walk produces a valid
+        // insert order — document order among siblings is preserved.
+        const children = new Map<string | null, Node[]>();
+        for (const node of input.nodes) {
+          const siblings = children.get(node.parentId) ?? [];
+          siblings.push(node);
+          children.set(node.parentId, siblings);
+        }
+        const ordered: Node[] = [];
+        const walk = [...(children.get(null) ?? [])];
+        while (walk.length > 0) {
+          const node = walk.shift() as Node;
+          ordered.push(node);
+          walk.push(...(children.get(node.id) ?? []));
+        }
+        if (ordered.length !== input.nodes.length) {
+          throw new Error(
+            "the plan has no writable hierarchy: a node is not reachable from the root",
+          );
+        }
+
+        const nodeStmt = this.db.prepare(
+          `INSERT INTO nodes
+             (id, project_key, parent_id, kind, name, description, status,
+              version, revision, payload, created_at, updated_at, created_by,
+              updated_by, archived_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const node of ordered) {
+          nodeStmt.run(
+            node.id,
+            projectKey,
+            node.parentId,
+            node.kind,
+            node.name,
+            node.description,
+            node.status,
+            node.version,
+            node.revision,
+            JSON.stringify(node.payload),
+            node.createdAt,
+            node.updatedAt,
+            node.createdBy,
+            node.updatedBy,
+            node.archivedAt,
+          );
+        }
+
+        const beeStmt = this.db.prepare(
+          `INSERT INTO bees
+             (id, project_key, source_leaf_id, target_leaf_id, status, revision,
+              impact, created_at, updated_at, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const bee of input.bees) {
+          beeStmt.run(
+            bee.id,
+            projectKey,
+            bee.sourceLeafId,
+            bee.targetLeafId,
+            bee.status,
+            bee.revision,
+            bee.impact,
+            bee.createdAt,
+            bee.updatedAt,
+            bee.createdBy,
+            bee.updatedBy,
+          );
+        }
+
+        const bugStmt = this.db.prepare(
+          `INSERT INTO bugs
+             (id, project_key, title, description, severity, status, revision,
+              created_at, updated_at, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const bug of input.bugs) {
+          bugStmt.run(
+            bug.id,
+            projectKey,
+            bug.title,
+            bug.description,
+            bug.severity,
+            bug.status,
+            bug.revision,
+            bug.createdAt,
+            bug.updatedAt,
+            bug.createdBy,
+            bug.updatedBy,
+          );
+        }
+
+        const attachmentStmt = this.db.prepare(
+          "INSERT INTO bug_nodes (bug_id, node_id) VALUES (?, ?)",
+        );
+        for (const attachment of input.bugAttachments) {
+          attachmentStmt.run(attachment.bugId, attachment.nodeId);
+        }
+
+        const goalStmt = this.db.prepare(
+          `INSERT INTO goals
+             (id, project_key, formal_text, plan_json, status, revision,
+              materialized_node_id, created_at, updated_at, created_by,
+              updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const goal of input.goals) {
+          goalStmt.run(
+            goal.id,
+            projectKey,
+            goal.formalText,
+            JSON.stringify(goal.plan),
+            goal.status,
+            goal.revision,
+            goal.materializedNodeId,
+            goal.createdAt,
+            goal.updatedAt,
+            goal.createdBy,
+            goal.updatedBy,
+          );
+        }
+
+        const growthStmt = this.db.prepare(
+          `INSERT INTO growth
+             (id, project_key, subject_type, subject_id, steps_json, status,
+              revision, created_at, updated_at, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const record of input.growth) {
+          growthStmt.run(
+            record.id,
+            projectKey,
+            record.subjectType,
+            record.subjectId,
+            JSON.stringify(record.steps),
+            record.status,
+            record.revision,
+            record.createdAt,
+            record.updatedAt,
+            record.createdBy,
+            record.updatedBy,
+          );
+        }
+
+        // The trail travels with the file — row ids are the store's to mint.
+        const historyStmt = this.db.prepare(
+          `INSERT INTO history
+             (project_key, entity_type, entity_id, action, revision, actor,
+              result, at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        const covered = new Set<string>();
+        let historyRows = 0;
+        for (const row of input.history) {
+          historyStmt.run(
+            projectKey,
+            row.entityType,
+            row.entityId,
+            row.action,
+            row.revision,
+            row.actor,
+            row.result,
+            row.at,
+          );
+          covered.add(`${row.entityType}:${row.entityId}`);
+          historyRows += 1;
+        }
+
+        // An exported tree-only copy carries no trail; the audit rule still
+        // holds, so every entity the file did not explain gets one `create`
+        // row naming the importer.
+        const now = Date.now();
+        const append = (
+          entityType: HistoryEntityType,
+          entityId: string,
+          action: HistoryAction,
+          revision: number,
+          result: string,
+        ): void => {
+          if (covered.has(`${entityType}:${entityId}`)) return;
+          this.appendHistory(
+            projectKey,
+            entityType,
+            entityId,
+            action,
+            revision,
+            actor,
+            result,
+            now,
+          );
+          covered.add(`${entityType}:${entityId}`);
+          historyRows += 1;
+        };
+        for (const node of input.nodes) {
+          append(
+            "node",
+            node.id,
+            "create",
+            node.revision,
+            `imported ${node.kind} "${node.name}"`,
+          );
+        }
+        for (const bee of input.bees) {
+          append(
+            "bee",
+            bee.id,
+            "link",
+            bee.revision,
+            `imported bee ${bee.sourceLeafId} → ${bee.targetLeafId}`,
+          );
+        }
+        for (const bug of input.bugs) {
+          append(
+            "bug",
+            bug.id,
+            "create",
+            bug.revision,
+            `imported bug "${bug.title}"`,
+          );
+        }
+        for (const goal of input.goals) {
+          append(
+            "goal",
+            goal.id,
+            "create",
+            goal.revision,
+            `imported goal "${goal.formalText.slice(0, 80)}"`,
+          );
+        }
+        for (const record of input.growth) {
+          append(
+            "growth",
+            record.id,
+            "create",
+            record.revision,
+            `imported growth for ${record.subjectType} ${record.subjectId}`,
+          );
+        }
+
+        return {
+          nodes: input.nodes.length,
+          bees: input.bees.length,
+          bugs: input.bugs.length,
+          goals: input.goals.length,
+          growth: input.growth.length,
+          history: historyRows,
+        };
+      }),
+    );
   }
 
   /**

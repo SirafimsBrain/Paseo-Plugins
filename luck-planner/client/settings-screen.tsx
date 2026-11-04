@@ -23,6 +23,7 @@ import {
   agentMcpUnregister,
   dbRestore,
   dbSnapshot,
+  treeImport,
   type AgentMcpTargetId,
 } from "../shared/rpc";
 
@@ -138,6 +139,72 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
       })
       .finally(() => setRestoreBusy(false));
   }, [restorePath, restorePending, restoreRpc]);
+
+  // Stage L5: an export comes back through this screen rather than the
+  // dashboard tab — the tab cannot read an arbitrary path, and the archive
+  // lives wherever the user keeps files. Two presses, like the restore: the
+  // first is a **dry run** (the server reads the file, validates the hierarchy
+  // and the target project, and answers the counts), the second imports
+  // exactly what the first described. A file that would be refused is refused
+  // before it exists in the database, which is the whole point of the flag.
+  const importRpc = useRpc(treeImport);
+  const [importPath, setImportPath] = useState("");
+  const [importPending, setImportPending] = useState("");
+  const [importMessage, setImportMessage] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+
+  const pickImportPath = useCallback((value: string) => {
+    setImportPath(value);
+    // Another file invalidates the pending plan: the confirmation must describe
+    // what is about to be written, not what was checked a minute ago.
+    setImportPending("");
+    setImportMessage("");
+  }, []);
+
+  const runImportAction = useCallback(
+    (dryRun: boolean) => {
+      const file = importPath.trim();
+      if (file === "") {
+        setImportMessage("Enter the absolute path of an export first.");
+        return;
+      }
+      setImportBusy(true);
+      void importRpc({ file, dryRun })
+        .then((result: any) => {
+          if (!result.ok) {
+            setImportPending("");
+            setImportMessage(result.error ?? "Import failed.");
+            return;
+          }
+          const warnings: string =
+            result.warnings.length > 0
+              ? ` Skipped: ${result.warnings.slice(0, 2).join("; ")}` +
+                (result.warnings.length > 2
+                  ? ` and ${result.warnings.length - 2} more.`
+                  : ".")
+              : "";
+          if (result.dryRun) {
+            setImportPending(result.summary);
+            setImportMessage(
+              `Ready to import ${result.summary} into ${result.projectKey}.` +
+                warnings +
+                " Press Import to write it; the project must be empty.",
+            );
+            return;
+          }
+          setImportPending("");
+          setImportMessage(
+            `Imported ${result.summary} into ${result.projectKey}.` + warnings,
+          );
+        })
+        .catch((cause: unknown) => {
+          setImportPending("");
+          setImportMessage(cause instanceof Error ? cause.message : String(cause));
+        })
+        .finally(() => setImportBusy(false));
+    },
+    [importPath, importRpc],
+  );
 
   const agentStatusRpc = useRpc(agentMcpStatus);
   const agentRegisterRpc = useRpc(agentMcpRegister);
@@ -409,6 +476,50 @@ export function LuckPlannerSettingsScreen({ theme, layout }: PluginSurfaceProps)
             hint="Two presses: the first asks, the second replaces."
             onPress={runRestore}
             disabled={restoreBusy}
+          />
+        </SettingsSection>
+        <SettingsSection title="Import (stage L5)">
+          <SettingsInput
+            label="Path to an export"
+            hint="Absolute path of a .json.zip an agent or the dashboard wrote (or an extracted .json). The file is only read — an import never consumes its source."
+            initialValue=""
+            onChangeText={(text: string) => pickImportPath(text)}
+          />
+          <SettingsRow
+            label="Bring a project back"
+            hint="Rebuilds that project with new ids: tree, bees, incidents, goals, growth and the audit trail. The target project must be empty (a project holds one tree)."
+          >
+            <Text
+              style={{
+                color: importPending !== "" ? accent : fg,
+                fontSize: font(11),
+              }}
+              numberOfLines={5}
+            >
+              {importMessage !== "" ? importMessage : " "}
+            </Text>
+          </SettingsRow>
+          <SettingsAction
+            label="Check the file"
+            actionLabel={importBusy ? "Reading…" : "Dry run"}
+            hint="Reads and validates without writing: one root, every parent present, kinds allowed under their parent, bees and bugs on leaves."
+            onPress={() => runImportAction(true)}
+            disabled={importBusy}
+          />
+          <SettingsAction
+            label="Import the project"
+            actionLabel={
+              importBusy
+                ? "Importing…"
+                : importPending !== ""
+                  ? "Confirm import"
+                  : "Import"
+            }
+            hint="Two presses: the first checks the file, the second writes it. Nothing lands if any check fails."
+            // No pending plan means this press is the check: the write only
+            // ever follows a dry run of the same file.
+            onPress={() => runImportAction(importPending === "")}
+            disabled={importBusy}
           />
         </SettingsSection>
         <SettingsSection title="History">

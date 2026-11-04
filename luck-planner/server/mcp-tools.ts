@@ -9,6 +9,7 @@ import type {
   FindGoalsInput,
   GetContextInput,
   HistoryInput,
+  ImportInput,
   MoveNodeInput,
   ReportBugInput,
   SearchInput,
@@ -27,6 +28,7 @@ import {
   findGoalsInputSchema,
   getContextInputSchema,
   historyInputSchema,
+  importInputSchema,
   moveNodeInputSchema,
   reportBugInputSchema,
   searchInputSchema,
@@ -37,6 +39,7 @@ import {
 } from "../shared/tools";
 import { exportCounts } from "../shared/export";
 import { writeExportFile } from "./export";
+import { runImport } from "./import";
 import { resolvePluginVersion } from "./plugin-paths";
 import type { LuckPlannerStore } from "./store";
 
@@ -625,6 +628,49 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       required: ["projectKey"],
     },
   },
+  {
+    name: "luck_tree_import",
+    title: "Import a project",
+    description:
+      "Read a `.json.zip` export written by `luck_tree_export` (or an " +
+      "extracted `.json`) and rebuild that project in this database: the tree " +
+      "with every parent edge rebuilt on fresh ids, influence bees, incidents " +
+      "with their leaf attachments, goals (with their materialized subtree), " +
+      "growth records and the audit trail. Every reference is verified before " +
+      "a row is written — one root, parents present, kinds allowed under their " +
+      "parent, bees and bugs on leaves — and a refused import leaves the " +
+      "database untouched. The target project must be empty (a project holds " +
+      "one tree). " +
+      "`dryRun` defaults to true: the first call reports the counts and writes " +
+      "nothing, so set `dryRun: false` to actually import.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        file: {
+          type: "string",
+          description:
+            "Absolute path of the export archive or of an extracted .json.",
+        },
+        dryRun: {
+          type: "boolean",
+          description:
+            "Validate and report without writing (default true). Pass false to import.",
+        },
+        includeArchived: {
+          type: "boolean",
+          description:
+            "Carry soft-deleted nodes (default true). False imports only live rows and the links that stay valid.",
+        },
+        includeHistory: {
+          type: "boolean",
+          description:
+            "Carry the audit trail when the file holds one (default true).",
+        },
+      },
+      required: ["projectKey", "file"],
+    },
+  },
 ];
 
 export type ToolResult = {
@@ -934,6 +980,12 @@ export function dispatchMcpTool(
         return dispatchExport(store, parsed.data);
       }
 
+      case "luck_tree_import": {
+        const parsed = importInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        return dispatchImport(store, parsed.data, actor);
+      }
+
       case "luck_tree_history": {
         const parsed = historyInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues);
@@ -990,6 +1042,44 @@ function dispatchExport(
     projectKey: value.projectKey,
     exportedAt: written.document.exportedAt,
     counts: exportCounts(written.document),
+  });
+}
+
+/**
+ * Import: plan always, write only when the caller said `dryRun: false`.
+ *
+ * The default is the read-only half on purpose — a tool call that adds a whole
+ * tree is worth one extra round trip, and the dry run's counts are the
+ * argument for the second call.
+ */
+function dispatchImport(
+  store: LuckPlannerStore,
+  value: ImportInput,
+  actor: string,
+): ToolResult {
+  const report = runImport(store, {
+    file: value.file,
+    projectKey: value.projectKey,
+    ...(value.includeArchived === undefined
+      ? {}
+      : { includeArchived: value.includeArchived }),
+    ...(value.includeHistory === undefined
+      ? {}
+      : { includeHistory: value.includeHistory }),
+    dryRun: value.dryRun ?? true,
+    actor,
+  });
+  return text({
+    dryRun: report.dryRun,
+    imported: !report.dryRun,
+    file: report.file,
+    projectKey: report.projectKey,
+    source: report.source,
+    counts: report.counts,
+    warnings: report.warnings,
+    ...(report.dryRun
+      ? { hint: "nothing was written; call again with dryRun: false to import" }
+      : {}),
   });
 }
 

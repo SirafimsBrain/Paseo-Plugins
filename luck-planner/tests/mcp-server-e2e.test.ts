@@ -240,6 +240,7 @@ describe("MCP server end-to-end (real process)", () => {
         "luck_tree_update_growth",
         "luck_tree_history",
         "luck_tree_export",
+        "luck_tree_import",
       ]);
 
       // Round trip: create a draft, propose it, read the audit trail.

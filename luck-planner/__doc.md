@@ -593,7 +593,7 @@ colour alone). The view-model (`groupByParent`, `filterSections`,
 
 ### Plugin RPC surface (stage E1 — `shared/rpc.ts`, `index.server.ts`)
 
-Eighteen `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
+Nineteen `luck-planner.*` contracts for the Paseo UI: the native panel (E2), Command
 Center items (E3) and the settings screen (E4) all go through them. The server
 registers the handlers over one shared `LuckPlannerStore` (closed on plugin
 cleanup); `tests/rpc.test.ts` (23 tests, fake `PluginServerContext` against a
@@ -699,6 +699,83 @@ connections to the same file (ADR-2); renaming a file under them leaves those
 handles on the previous inode, which is why the settings screen tells the user
 to reload the plugin or refresh agent sessions after a restore, and why the
 handler takes no "point of no return" dialog but does take two presses.
+
+### Project import (stage L5 — `shared/import.ts`, `server/import.ts`, `server/store.ts`)
+
+The other half of the export. `luck_tree_import` (agents) and
+`luck-planner.tree-import` (settings screen) call the same
+`runImport(store, request)` in `server/import.ts`, which does four things in a
+fixed order: read the file (`readImportDocument`), plan it
+(`shared/import.ts`), refuse an occupied target (`store.assertEmptyProject`),
+and — unless `dryRun` — write it (`store.importProject`).
+
+**Why import is not "restore".** Stage L4 replaces the whole database; import
+brings one project into a database that is otherwise healthy. The two therefore
+sit at different altitudes: restore is the answer to a broken file, import is
+the answer to *this project belongs here too* (a new machine, a second
+checkout, a copy for a comparison). It also means import may not assume an
+empty database — only an empty **project**.
+
+**Ids are remapped; everything else is copied.** Node ids are primary keys of
+one table shared by every project, so two copies of one tree would collide.
+`planImport` builds a map per entity (node, bee, bug, goal, growth) and rewrites
+every reference through it — `parentId`, bee ends, bug attachments, a goal's
+`materializedNodeId`, a growth subject, and each audit row's `entityId`. What
+is *not* touched: `createdAt`/`updatedAt`, `revision`, `description`, `payload`,
+`version`, `createdBy`, `archivedAt`. An import is a copy of a project, not a
+session of edits; rewriting the timestamps would falsify the timeline the
+dashboard draws and every "created 3 days ago" in the panel.
+
+Consequence worth knowing: siblings are ordered by `created_at, id`, and a
+fresh id cannot reproduce the old tie-break. Two nodes created in the same
+millisecond may therefore swap places after an import. The shape is preserved;
+the incidental order of a tie is not (and was never a stored attribute).
+
+**Validation before any write** (`validateTree`, pure): duplicate node ids;
+exactly one root; every parent present; `canHaveChild` for every edge; no
+parent chain that loops (a cycle would hang every store walk); no live node
+under an archived parent; bees and bug attachments pointing at **leaves** that
+exist; a goal's subtree and a growth subject resolving inside the file.
+Archived *ends* of a bee or an attachment are legal — `archiveNode` leaves
+links in place, so a faithful export of an old project contains them. Problems
+are collected, not thrown one by one, and the message lists up to
+`IMPORT_ISSUE_LIMIT` (8) before summarising the rest: a hand-edited file
+usually repeats one mistake, and seeing it three times names the cause better
+than seeing it once.
+
+**One tree per project.** `assertEmptyProject` refuses a target with live nodes,
+inside the write transaction (`BEGIN IMMEDIATE` serialises writers, so two
+agents cannot both pass it). Merging would need a second root, which nothing in
+the model is ready for — several roots are stage L10. Archived-only targets are
+accepted: a project whose tree was archived is empty as far as the live
+model is concerned.
+
+**The write** (`store.importProject`) deliberately does not go through
+`createNode`/`createBee`/…: those mint their own ids (remapping twice), stamp
+their own timestamps and validate one reference at a time. It inserts the
+planned rows directly, in one transaction behind the write fence, and orders
+nodes parent-first because `node:sqlite` enforces the foreign keys the DDL
+declares — a depth-first walk from the single root (document order among
+siblings kept) is the insert order. Rows the file did not explain still get an
+audit row: when the archive was written with `includeHistory: false`, every
+node, bee, bug, goal and growth record gets one `create`/`link` row naming the
+importer, so the "every mutation appends a row" rule holds for an imported
+tree too.
+
+**The archived policy.** `includeArchived` (default `true`) decides what a
+tree-only copy means. With `false`, archived nodes are skipped — and with them
+every row that loses an end: bees, bug attachments, growth records whose node
+gone, a goal whose materialized subtree was archived (its pointer becomes
+`null`), and the audit rows of dropped entities. Every skip is reported in
+`warnings`; nothing disappears silently.
+
+**Two-step in both surfaces.** The MCP tool defaults to `dryRun: true` and its
+answer carries a `hint` telling the agent to call again with `dryRun: false`;
+the settings screen's first press is a dry run and the second writes the file
+the first described. The dry run is a full run minus the write — it reads,
+unpacks, validates and checks the target — so "would this work" is answered
+before a row exists. The RPC turns every failure into `{ ok: false, error }`;
+the tool turns it into `isError` with the same message.
 
 ### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
 

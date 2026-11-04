@@ -522,6 +522,69 @@ export const dbRestore = defineRpc({
   }),
 });
 
+/** Counts of a planned import (`luck-planner.tree-import`, stage L5). */
+export const importCountsSchema = z.object({
+  nodes: z.number().int().nonnegative(),
+  archivedNodes: z.number().int().nonnegative(),
+  bees: z.number().int().nonnegative(),
+  bugs: z.number().int().nonnegative(),
+  bugAttachments: z.number().int().nonnegative(),
+  goals: z.number().int().nonnegative(),
+  growth: z.number().int().nonnegative(),
+  history: z.number().int().nonnegative(),
+  dropped: z.number().int().nonnegative(),
+});
+
+/**
+ * `luck-planner.tree-import`: bring one exported project back (stage L5).
+ *
+ * The counterpart of the export, and deliberately two-step: with `dryRun` the
+ * handler reads the file, validates the hierarchy and the target project, and
+ * answers the same counts — without writing. The settings screen asks for a
+ * dry run on the first press and imports on the second, so the user sees the
+ * size of what they are about to add before it exists.
+ *
+ * `projectKey` is optional: an export carries the project it came from, and
+ * the common case is putting it back there (on a new machine, in a database
+ * that does not hold it yet). The target must be empty — a project holds one
+ * tree (several roots are stage L10) — and that refusal arrives as
+ * `{ ok: false, error }` like every other one.
+ */
+export const treeImport = defineRpc({
+  name: "luck-planner.tree-import",
+  input: z.object({
+    /** Absolute path of a `.json.zip` export (or an extracted `.json`). */
+    file: z.string().min(1),
+    projectKey: z.string().min(1).optional(),
+    includeArchived: z.boolean().optional(),
+    includeHistory: z.boolean().optional(),
+    /** Validate and answer counts without writing. */
+    dryRun: z.boolean().optional(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable(),
+    dryRun: z.boolean(),
+    /** The file that was read, `null` on failure. */
+    file: z.string().nullable(),
+    /** Project written into (or that would be), `null` on failure. */
+    projectKey: z.string().nullable(),
+    source: z
+      .object({
+        projectKey: z.string(),
+        pluginVersion: z.string(),
+        exportedAt: z.number().int().nonnegative(),
+        schemaVersion: z.number().int().nonnegative(),
+      })
+      .nullable(),
+    counts: importCountsSchema.nullable(),
+    /** What the archived policy skipped, in words. */
+    warnings: z.array(z.string()),
+    /** `12 nodes, 3 bees, 1 goal` — what the screen prints. */
+    summary: z.string(),
+  }),
+});
+
 export const RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -541,4 +604,5 @@ export const RPC_CONTRACT_NAMES = [
   agentActivity.name,
   dbSnapshot.name,
   dbRestore.name,
+  treeImport.name,
 ] as const;

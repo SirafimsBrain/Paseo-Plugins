@@ -443,6 +443,49 @@ var dbRestore = defineRpc({
     counts: snapshotCountsSchema.nullable()
   })
 });
+var importCountsSchema = external_exports.object({
+  nodes: external_exports.number().int().nonnegative(),
+  archivedNodes: external_exports.number().int().nonnegative(),
+  bees: external_exports.number().int().nonnegative(),
+  bugs: external_exports.number().int().nonnegative(),
+  bugAttachments: external_exports.number().int().nonnegative(),
+  goals: external_exports.number().int().nonnegative(),
+  growth: external_exports.number().int().nonnegative(),
+  history: external_exports.number().int().nonnegative(),
+  dropped: external_exports.number().int().nonnegative()
+});
+var treeImport = defineRpc({
+  name: "luck-planner.tree-import",
+  input: external_exports.object({
+    /** Absolute path of a `.json.zip` export (or an extracted `.json`). */
+    file: external_exports.string().min(1),
+    projectKey: external_exports.string().min(1).optional(),
+    includeArchived: external_exports.boolean().optional(),
+    includeHistory: external_exports.boolean().optional(),
+    /** Validate and answer counts without writing. */
+    dryRun: external_exports.boolean().optional()
+  }),
+  output: external_exports.object({
+    ok: external_exports.boolean(),
+    error: external_exports.string().nullable(),
+    dryRun: external_exports.boolean(),
+    /** The file that was read, `null` on failure. */
+    file: external_exports.string().nullable(),
+    /** Project written into (or that would be), `null` on failure. */
+    projectKey: external_exports.string().nullable(),
+    source: external_exports.object({
+      projectKey: external_exports.string(),
+      pluginVersion: external_exports.string(),
+      exportedAt: external_exports.number().int().nonnegative(),
+      schemaVersion: external_exports.number().int().nonnegative()
+    }).nullable(),
+    counts: importCountsSchema.nullable(),
+    /** What the archived policy skipped, in words. */
+    warnings: external_exports.array(external_exports.string()),
+    /** `12 nodes, 3 bees, 1 goal` — what the screen prints. */
+    summary: external_exports.string()
+  })
+});
 var RPC_CONTRACT_NAMES = [
   treeGet.name,
   treeSearch.name,
@@ -461,7 +504,8 @@ var RPC_CONTRACT_NAMES = [
   agentReload.name,
   agentActivity.name,
   dbSnapshot.name,
-  dbRestore.name
+  dbRestore.name,
+  treeImport.name
 ];
 
 // shared/api.ts

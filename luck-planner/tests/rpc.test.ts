@@ -6,6 +6,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import contribute from "../index.server";
 import { LuckPlannerStore, defaultDbPath } from "../server/store";
 import { snapshotDatabase } from "../server/snapshot";
+import { writeExportFile } from "../server/export";
 import {
   UI_ACTOR,
   agentActivity,
@@ -25,6 +26,7 @@ import {
   stats,
   treeChanges,
   treeGet,
+  treeImport,
   treeSearch,
 } from "../shared/rpc";
 import type { Goal, GoalStep } from "../shared/goals";
@@ -218,6 +220,7 @@ describe("RPC surface", () => {
           stats.name,
           treeChanges.name,
           treeGet.name,
+          treeImport.name,
           treeSearch.name,
         ].sort(),
       );
@@ -1186,6 +1189,128 @@ describe("agent-activity (0.40.8, §10.11 item 4)", () => {
         limit: 2,
       });
       expect(result.entries).toHaveLength(2);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+/**
+ * Stage L5: the settings screen's import section. The dry run is the whole
+ * point of the pair — the screen asks first, then writes what it was told — so
+ * the tests pin that a dry run changes nothing and a real one changes exactly
+ * what the dry run announced.
+ */
+describe("tree import (stage L5)", () => {
+  interface ImportAnswer {
+    ok: boolean;
+    error: string | null;
+    dryRun: boolean;
+    projectKey: string | null;
+    file: string | null;
+    counts: {
+      nodes: number;
+      bees: number;
+      bugs: number;
+      goals: number;
+      growth: number;
+      history: number;
+    } | null;
+    warnings: string[];
+    summary: string;
+  }
+
+  it("answers a dry run without writing, then imports what it announced", async () => {
+    const store = new LuckPlannerStore();
+    const { leafA, leafB } = seedTree(store);
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafA.id,
+      targetLeafId: leafB.id,
+      actor: ACTOR,
+    });
+    const exported = writeExportFile(store, {
+      projectKey: P,
+      pluginVersion: "0.45.0",
+      exportedAt: Date.UTC(2026, 10, 4, 15, 0),
+    });
+    store.close();
+
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const dry = await server.call<ImportAnswer>(treeImport.name, {
+        file: exported.file,
+        projectKey: OTHER,
+        dryRun: true,
+      });
+      expect(dry.ok).toBe(true);
+      expect(dry.dryRun).toBe(true);
+      expect(dry.counts?.nodes).toBe(5);
+      expect(dry.counts?.bees).toBe(1);
+      expect(dry.projectKey).toBe(OTHER);
+      expect(dry.summary).toMatch(/5 nodes, 1 bees/);
+
+      // Nothing landed: the target is still unknown to the tree handler.
+      const empty = await server.call<{ roots: unknown[] }>(treeGet.name, {
+        projectKey: OTHER,
+      });
+      expect(empty.roots).toHaveLength(0);
+
+      const written = await server.call<ImportAnswer>(treeImport.name, {
+        file: exported.file,
+        projectKey: OTHER,
+        dryRun: false,
+      });
+      expect(written.ok).toBe(true);
+      expect(written.dryRun).toBe(false);
+      expect(written.counts).toEqual(dry.counts);
+
+      const tree = await server.call<{
+        roots: Array<{ node: Node; children: Node[] }>;
+      }>(treeGet.name, { projectKey: OTHER });
+      expect(tree.roots).toHaveLength(1);
+      expect(tree.roots[0]?.node.name).toBe("Tech stack");
+      expect(tree.roots[0]?.children[0]?.name).toBe("Platform");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("answers a refused import with { ok: false } and touches nothing", async () => {
+    const store = new LuckPlannerStore();
+    seedTree(store);
+    const exported = writeExportFile(store, {
+      projectKey: P,
+      pluginVersion: "0.45.0",
+      exportedAt: Date.UTC(2026, 10, 4, 15, 0),
+    });
+    store.close();
+
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      // P already holds a tree: an import there would need a second root.
+      const occupied = await server.call<ImportAnswer>(treeImport.name, {
+        file: exported.file,
+        projectKey: P,
+      });
+      expect(occupied.ok).toBe(false);
+      expect(occupied.error).toMatch(/already has \d+ live node/);
+      expect(occupied.counts).toBeNull();
+
+      const missing = await server.call<ImportAnswer>(treeImport.name, {
+        file: path.join(tmpdir(), "definitely-not-here.json.zip"),
+        projectKey: OTHER,
+      });
+      expect(missing.ok).toBe(false);
+      expect(missing.error).toMatch(/not found/);
+
+      const tree = await server.call<{ roots: Array<{ node: Node }> }>(
+        treeGet.name,
+        { projectKey: P },
+      );
+      expect(tree.roots).toHaveLength(1);
     } finally {
       cleanup();
     }

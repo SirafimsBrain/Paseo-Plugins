@@ -394,6 +394,7 @@ describe("shared/ import boundaries", () => {
         "export.ts",
         "goals.ts",
         "growth.ts",
+        "import.ts",
         "links.ts",
         "panel.ts",
         "rpc.ts",
