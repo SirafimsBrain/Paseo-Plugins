@@ -48,6 +48,7 @@ The MCP server is injected into every agent created through Paseo (configurable 
 | `luck_tree_set_goal` | Manages a high goal **before** the approval gate: `create` a draft, `update` a draft or proposed plan, or `propose` it for human review. There is no `approve` action — approval is the human's. |
 | `luck_tree_update_growth` | Upserts the progress record of one subject (a node or a goal): the steps, their state and the record's own status. |
 | `luck_tree_history` | The append-only audit trail of one entity: who changed what, when and from which revision. |
+| `luck_tree_export` | Writes one project to a portable `.json.zip`: the tree (archived nodes flagged, not dropped), bees, incidents with attachments, goals, growth and — by default — the audit trail. Omit `path` and the archive lands in the plugin's `backups/` directory under a date-stamped name. |
 
 Every call carries a `projectKey`, and the store scopes every read and write by it — a tool call can never reach across a project boundary. `actor` is optional and falls back to the id the MCP server was launched with, so the audit trail is never empty.
 
@@ -56,6 +57,12 @@ Every call carries a `projectKey`, and the store scopes every read and write by 
 The dashboard is a standalone web app the plugin serves over loopback HTTP (`http://127.0.0.1:8899` by default, the port is configurable) and opens in Paseo's own browser — from the workspace panel's **Open dashboard** button or from the ⌘K item. The access token travels in the query string, because a browser navigation cannot attach an `Authorization` header; with no token configured the plugin generates a random one per plugin session.
 
 **2D — the diagram.** The tree is laid out **upwards** — the root at the bottom, the trunk rising, the branches fanning out above it, the way a human reads a tree — with the goal frames drawn behind the subtree a goal materialized, the bee links as coloured edges, the incident badges on the blocking leaves and the growth bars under the nodes. Clicking a node fills the details panel with its version, revision, status, incidents, influence links, children and history; the edges around the selection and the leaves sharing an incident with it are emphasized. The toolbar search runs a full-text query, clears whatever would hide the best hit and flies the camera to it; the kind, status and version filters narrow the diagram, and the **Growth heat** layer repaints the same tree by the rolled-up growth ratio. The details panel is **resizable** — pull its left edge to give it more room, and the width is remembered for the next visit.
+
+### Export — a project as a `.json.zip`
+
+The toolbar's **Export** control downloads the whole project as one archive: the tree (archived nodes included and flagged, not dropped), the influence bees, the incidents with their leaf attachments, the goals, the growth records and — by default — the append-only audit trail. It is a plain link to `/api/export?token=…&project=…`, so the browser saves the file under a date-stamped name (`luck-planner-<project>-YYYYMMDD-HHmmss.json.zip`) instead of streaming it through the page; add `&history=0` for a tree-only copy. The document is versioned, carries the original row ids and is compressed — a project of a few thousand leaves is mostly prose, and prose is what deflate is for.
+
+Agents have the same export as a tool: `luck_tree_export` writes the archive where asked (an absolute `path`) or, by default, into `$PASEO_HOME/plugins/luck-planner/backups/` beside the database, and answers with the path, the size and the counts. Nothing is ever overwritten: an existing path is refused and a second export within the same second gets a `-2` suffix. A project with no nodes is an error, not an empty backup — that is almost always a mistyped `projectKey`. Import is the next stage (the envelope already carries what it needs); today the archive is for sharing, inspection and a copy you can read with `unzip` and `jq`.
 
 ### 3D — suspended
 
@@ -95,7 +102,7 @@ The settings screen has one more section, **Agent config files**: it shows wheth
 
 One SQLite database at `$PASEO_HOME/plugins/luck-planner/luck-planner.db` (falling back to `~/.paseo`). It holds the tree, the links, the incidents, the goals, the growth records and the append-only history, and it survives plugin updates: the plugin's *code* is versioned under `~/.paseo/plugins/luck-planner/<revision>/`, the *data* sits next to those directories.
 
-The dashboard is read-only: it serves the tree, the statistics and the node details, and it never writes. Everything that changes the tree goes through the MCP tools or the panel, so every write carries an actor and lands in the audit trail.
+The dashboard is read-only: it serves the tree, the statistics, the node details and the export download, and it never writes. Everything that changes the tree goes through the MCP tools or the panel, so every write carries an actor and lands in the audit trail. Exports written by `luck_tree_export` land in `$PASEO_HOME/plugins/luck-planner/backups/` unless the caller names an absolute path — next to the database, so they survive plugin updates.
 
 ## Development
 

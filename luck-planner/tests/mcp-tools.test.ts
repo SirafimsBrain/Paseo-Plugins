@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -128,6 +128,7 @@ describe("MCP tool surface", () => {
       "luck_tree_set_goal",
       "luck_tree_update_growth",
       "luck_tree_history",
+      "luck_tree_export",
     ]);
     for (const tool of MCP_TOOLS) {
       expect(tool.inputSchema.type).toBe("object");
@@ -1349,5 +1350,57 @@ describe("luck_tree_history", () => {
       }),
     );
     expect(result.entries).toEqual([]);
+  });
+});
+
+describe("luck_tree_export", () => {
+  it("writes the archive where asked and reports where it landed", () => {
+    const store = openStore();
+    seedTree(store);
+    const file = path.join(tempDir(), "tree.json.zip");
+    const result = payload<{
+      created: boolean;
+      file: string;
+      bytes: number;
+      exportedAt: number;
+      counts: { nodes: number; archivedNodes: number; history: number | null };
+    }>(call(store, "luck_tree_export", { projectKey: P, path: file }));
+
+    expect(result.created).toBe(true);
+    expect(result.file).toBe(file);
+    expect(existsSync(file)).toBe(true);
+    expect(result.bytes).toBeGreaterThan(0);
+    expect(result.counts.nodes).toBe(5);
+    expect(result.counts.archivedNodes).toBe(0);
+    expect(result.counts.history).toBeGreaterThan(0);
+  });
+
+  it("lands in the plugin's backups/ directory by default", () => {
+    const store = openStore();
+    seedTree(store);
+    const result = payload<{ file: string }>(
+      call(store, "luck_tree_export", { projectKey: P, includeHistory: false }),
+    );
+    expect(result.file).toContain(`${path.sep}backups${path.sep}`);
+    expect(path.basename(result.file)).toMatch(/\.json\.zip$/);
+  });
+
+  it("refuses an empty project, a relative path and a taken file", () => {
+    const store = openStore();
+    seedTree(store);
+    expectError(
+      call(store, "luck_tree_export", { projectKey: OTHER }),
+      /has no nodes to export/,
+    );
+    expectError(
+      call(store, "luck_tree_export", { projectKey: P, path: "relative.json.zip" }),
+      /must be absolute/,
+    );
+    const taken = path.join(tempDir(), "taken.json.zip");
+    writeFileSync(taken, "x");
+    expectError(
+      call(store, "luck_tree_export", { projectKey: P, path: taken }),
+      /refusing to overwrite/,
+    );
   });
 });

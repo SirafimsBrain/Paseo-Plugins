@@ -57,6 +57,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
 import {
   changesTouchNode,
+  exportUrl,
   type NodeResponse,
   type StatsResponse,
   type TreeResponse,
@@ -261,6 +262,17 @@ export function App(): ReactElement {
   });
   const [focus, setFocus] = useState<FocusRequest | null>(null);
   const focusSeq = useRef(0);
+
+  // L2: the toolbar's download link. Built from the same two parameters the
+  // rest of the tab uses, so a tab without a project renders it disabled
+  // instead of pointing at an endpoint that would answer 400.
+  const exportHref = useMemo(
+    () =>
+      params.token.length > 0 && params.projectKey.length > 0
+        ? exportUrl(params.token, params.projectKey)
+        : "",
+    [params.projectKey, params.token],
+  );
 
   // G5 growth layer: `status` is the G3/G4 view, `growth` tints the tree.
   const [layer, setLayer] = useState<GraphLayer>("status");
@@ -717,6 +729,7 @@ export function App(): ReactElement {
         view={view}
         onViewChange={onViewChange}
         webglOk={webgl.ok}
+        exportHref={exportHref}
       />
       <div
         className={view === "plain" ? "lp-body lp-body-plain" : "lp-body"}

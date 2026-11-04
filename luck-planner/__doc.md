@@ -468,7 +468,7 @@ the DOM-grep audit (`document.|window.|className=|onClick=` over `client/`) must
 
 ### MCP tools (stage D1 — `shared/tools.ts` + `server/mcp-tools.ts`)
 
-Eight `luck_tree_*` tools, declared in `MCP_TOOLS` (JSON Schema for the future `tools/list`)
+Fifteen `luck_tree_*` tools, declared in `MCP_TOOLS` (JSON Schema for the future `tools/list`)
 and dispatched by `dispatchMcpTool(name, args, { store, defaultActor })`. The dispatch layer is
 transport-independent on purpose: the stdio server of stage D2 and
 `tests/mcp-tools.test.ts` (32 tests) call the same function — the memory-flash
@@ -487,6 +487,7 @@ transport-independent on purpose: the stdio server of stage D2 and
 | `luck_tree_set_goal` | Pre-approval goal management only: `create` (draft; `formalText` + `plan` required), `update` (draft/proposed edits), `propose` (draft → proposed). **Deliberately no `approve` action** — ADR-7: the store refuses `approved` from any path but the native panel/RPC. `create`/`propose` responses carry a note telling the agent a human approves; a repeated `propose` is a readable no-op error, not a second transition. |
 | `luck_tree_update_growth` | Upsert of one subject's progress record: an explicit `growthId` wins; otherwise the record is resolved by subject — updated when one exists (error when neither `steps` nor `status` is given), or a fresh one is attached (`steps` required). Step shape and status transitions are validated by the store. |
 | `luck_tree_history` | Append-only audit trail of any entity (node/bee/bug/goal/growth), oldest first; an unknown id returns an empty list rather than an error. |
+| `luck_tree_export` | One project as a portable `.json.zip` (stage L2): the tree with archived nodes flagged, bees, incidents and their attachments, goals, growth and the audit trail unless `includeHistory: false`. `path` must be absolute; omitted, the archive lands in `backups/` beside the database under a date-stamped name. Empty project, relative path and an existing file are readable errors. |
 
 **Bounded `get_context` (stage L1, 0.41.0).** The orientation answer used to be all-or-nothing:
   a leaf with forty siblings and a dozen bees handed the agent every one of them. Three fields
@@ -728,8 +729,47 @@ agent MCP servers use (ADR-2).
 | `GET /api/node/:id?project=<key>` | token | the `node-detail` RPC shape (path, children, bees, bugs, blocking bugs, history, growth) |
 | `GET /api/search?project=<key>&q=&kind=&status=&limit=&includeArchived=` | token | the `tree-search` RPC shape (`matches`, `results[]`) |
 | `GET /api/stats?project=<key>` | token | the `stats` RPC shape |
+| `GET /api/export?project=<key>&history=` | token | the project as a `.json.zip` download (`Content-Disposition: attachment`); `history=0` drops the audit trail (stage L2) |
 | `GET /api/events` | token | SSE stream: `ready` (version + watermark) on open, heartbeat comment every 15 s, `tree-changed` broadcasts, narrowed by `?project=` (stage H1) |
 | everything else | none | the SPA from `dist/dashboard` (SPA fallback for extensionless paths) |
+
+**Export (stage L2 — `shared/export.ts`, `server/export.ts`).** One project leaves the
+plugin as a single archive, from two surfaces that share one document builder: the toolbar's
+link and the `luck_tree_export` tool. The split is deliberate — `shared/export.ts` owns the
+envelope, the schema, the serializer and the naming (importable by the dashboard), while
+`server/export.ts` owns the store read, the zip and the filesystem, because a `node:fs`
+import in `shared/` would break the browser build and the `shared/` import-boundary test.
+
+- **The envelope** is `{ format: "luck-planner-export", schemaVersion: 1, pluginVersion,
+  exportedAt, projectKey, nodes, bees, bugs, bugAttachments, goals, growth, history? }` —
+  every array reuses the shared row schemas, so an export cannot drift from the store's own
+  contracts. `nodes` includes **archived** rows with their `archivedAt` instead of dropping
+  them: an export that silently lost soft-deleted rows could not describe the tree it claims
+  to describe, and "skip archived" is the importer's policy, not the exporter's.
+- **Ids travel, ids cannot be restored.** The document carries the original row ids so the
+  import (stage L5) can verify every reference — parent, bee ends, bug attachments, goal
+  leaves, growth subject — before writing anything, but `createNode` mints a fresh
+  `randomUUID()`, so a restore is a remap, not a copy.
+- **Determinism.** `exportZipBytes` pins the zip entry's `mtime` to the DOS epoch and uses a
+  fixed entry name, so the same document compresses to the same bytes; a test asserts it.
+  The *name* is local wall-clock (`YYYYMMDD-HHmmss`) because the file lands in a folder the
+  user opens by hand; `exportStamp` and `projectSlug` are pure and pinned by tests.
+- **Never destructive.** `writeExportFile` refuses a relative `path` (the daemon's working
+  directory is not the user's), refuses to overwrite an existing file, and resolves a
+  same-second collision as `-2`, `-3`, … *before* the whole `.json.zip` extension, not before
+  `.zip` alone (`…-152055.json-2.zip` would read as if the JSON were the second one).
+  `assertExportable` turns an empty project into an error instead of a useless archive: a
+  mistyped `projectKey` is the realistic cause.
+- **Two surfaces, one shape.** `/api/export` streams the same bytes with
+  `Content-Disposition: attachment` (so the browser saves instead of rendering) and
+  `Cache-Control: no-store`; the toolbar renders a plain `<a download>` built by
+  `exportUrl(token, projectKey)` — no `fetch`, so the tab never buffers a project in memory.
+  The tool answers with the path, the size and the counts (`exportCounts`), and defaults to
+  `backups/` beside the database (`defaultBackupDir(store.dbPath)`) — no new setting, and the
+  directory survives plugin updates because it lives next to the data, not next to the code.
+- **Why zip and not gzip.** The repo has no runtime dependencies (everything is bundled from
+  `devDependencies`), and `.zip` is the archive every desktop opens by double-click; `fflate`
+  is pure JS, so the MCP bundle stays dependency-free at install time.
 
 **Why the response shapes are not redefined.** `shared/api.ts` re-exports the RPC output
 schemas (`nodeDetail.output`, `treeSearch.output`, `stats.output`) instead of writing new

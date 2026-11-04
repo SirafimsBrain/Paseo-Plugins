@@ -391,6 +391,7 @@ describe("shared/ import boundaries", () => {
     expect(files.sort()).toEqual(
       [
         "api.ts",
+        "export.ts",
         "goals.ts",
         "growth.ts",
         "links.ts",

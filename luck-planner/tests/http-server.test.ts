@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as http from "node:http";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { strFromU8, unzipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DASHBOARD_EVENT_READY,
@@ -18,6 +19,7 @@ import {
   buildNodeResponse,
   buildTreeResponse,
 } from "../server/http-server";
+import { parseExport } from "../shared/export";
 import { LuckPlannerStore } from "../server/store";
 import type { Goal, GoalStep } from "../shared/goals";
 import type { GrowthStep } from "../shared/growth";
@@ -377,6 +379,50 @@ describe("DashboardHttpServer", () => {
     expect(stats.bees).toBe(1);
     expect(stats.bugs).toEqual({ total: 1, open: 1 });
     expect(stats.growthRecords).toBe(1);
+  });
+
+  it("streams /api/export as a zip download that parses back to the project", async () => {
+    await boot();
+    const { leafA, leafB } = seedTree(store);
+    seedRelations(store, leafA, leafB);
+
+    const res = await get(`/api/export?project=${encodeURIComponent(P)}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/zip");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const disposition = res.headers.get("content-disposition") ?? "";
+    expect(disposition).toMatch(/^attachment; filename="luck-planner-demo-\d{8}-\d{6}\.json\.zip"$/);
+
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // PK\x03\x04 — a real archive, not a JSON body with a zip MIME type.
+    expect(Array.from(bytes.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    const entries = unzipSync(bytes);
+    const entry = Object.keys(entries)[0];
+    const document = parseExport(strFromU8(entries[entry]));
+    expect(document.projectKey).toBe(P);
+    expect(document.nodes).toHaveLength(5);
+    expect(document.history?.length ?? 0).toBeGreaterThan(0);
+
+    // `history=0` drops the audit trail; the download is otherwise the same.
+    const withoutHistory = await get(
+      `/api/export?project=${encodeURIComponent(P)}&history=0`,
+    );
+    const lean = parseExport(
+      strFromU8(unzipSync(new Uint8Array(await withoutHistory.arrayBuffer()))[entry]),
+    );
+    expect(lean).not.toHaveProperty("history");
+  });
+
+  it("answers /api/export as 401 without a token, 400 without a project, 400 for an empty one", async () => {
+    await boot();
+    seedTree(store);
+
+    expect((await get(`/api/export?project=${encodeURIComponent(P)}`, null)).status).toBe(401);
+    expect((await get("/api/export")).status).toBe(400);
+
+    const empty = await get(`/api/export?project=${encodeURIComponent(OTHER)}`);
+    expect(empty.status).toBe(400);
+    expect((await empty.json()).error).toContain("has no nodes to export");
   });
 
   it("answers 405 for non-GET and 404 for an unknown /api path", async () => {

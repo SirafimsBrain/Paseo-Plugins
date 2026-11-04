@@ -9,6 +9,8 @@ import {
 import {
   DASHBOARD_EVENTS_PATH,
   DASHBOARD_EVENT_READY,
+  DASHBOARD_EXPORT_HISTORY_PARAM,
+  DASHBOARD_EXPORT_PATH,
   DASHBOARD_HEALTH_PATH,
   DASHBOARD_NODE_PATH,
   DASHBOARD_PROJECT_PARAM,
@@ -24,12 +26,18 @@ import {
   type StatsResponse,
   type TreeResponse,
 } from "../shared/api";
+import { EXPORT_CONTENT_TYPE, exportFileName } from "../shared/export";
 import {
   leafStatusSchema,
   nodeKindSchema,
   type LeafStatus,
   type NodeKind,
 } from "../shared/tree";
+import {
+  assertExportable,
+  buildExportDocument,
+  exportZipBytes,
+} from "./export";
 import type { LuckPlannerStore } from "./store";
 
 /**
@@ -209,6 +217,7 @@ const PLACEHOLDER_HTML = `<!doctype html>
 <p>The dashboard web app is not built in this checkout (run the plugin build).</p>
 <p>The read-only API is live: <code>/health</code>, <code>/api/tree</code>,
 <code>/api/node/:id</code>, <code>/api/search</code>, <code>/api/stats</code>,
+<code>/api/export</code> (the project as a <code>.json.zip</code>),
 <code>/api/events</code> — each needs the access token as <code>?token=</code>.</p>
 </body>
 </html>
@@ -462,7 +471,8 @@ export class DashboardHttpServer {
       isNode ||
       url.pathname === DASHBOARD_TREE_PATH ||
       url.pathname === DASHBOARD_STATS_PATH ||
-      url.pathname === DASHBOARD_SEARCH_PATH;
+      url.pathname === DASHBOARD_SEARCH_PATH ||
+      url.pathname === DASHBOARD_EXPORT_PATH;
     if (!isKnown) {
       this.sendJson(res, 404, { error: "not found" });
       return;
@@ -485,6 +495,23 @@ export class DashboardHttpServer {
       if (url.pathname === DASHBOARD_STATS_PATH) {
         const body: StatsResponse = this.store.stats(projectKey);
         this.sendJson(res, 200, body);
+        return;
+      }
+      if (url.pathname === DASHBOARD_EXPORT_PATH) {
+        // Stage L2: the same document the MCP tool writes, streamed. The
+        // audit trail rides along unless the tab asked for a tree-only copy.
+        const document = buildExportDocument(this.store, {
+          projectKey,
+          pluginVersion: this.version,
+          includeHistory:
+            url.searchParams.get(DASHBOARD_EXPORT_HISTORY_PARAM) !== "0",
+        });
+        assertExportable(document);
+        this.sendDownload(
+          res,
+          exportZipBytes(document),
+          exportFileName(projectKey, document.exportedAt),
+        );
         return;
       }
       if (url.pathname === DASHBOARD_SEARCH_PATH) {
@@ -680,6 +707,28 @@ export class DashboardHttpServer {
 
   private closeSseClients(): void {
     for (const res of [...this.sseClients.keys()]) this.closeSseClient(res);
+  }
+
+  /**
+   * Streams an export as a download (stage L2).
+   *
+   * `Content-Disposition: attachment` is what makes the browser save the zip
+   * under the name the server chose (project slug + local timestamp) instead
+   * of opening a tab on it; `no-store` keeps a project's contents out of any
+   * cache between the tab and the plugin.
+   */
+  private sendDownload(
+    res: http.ServerResponse,
+    data: Uint8Array,
+    fileName: string,
+  ): void {
+    res.writeHead(200, {
+      "Content-Type": EXPORT_CONTENT_TYPE,
+      "Content-Length": data.byteLength,
+      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Cache-Control": "no-store",
+    });
+    res.end(Buffer.from(data));
   }
 
   private sendJson(res: http.ServerResponse, status: number, body: unknown): void {

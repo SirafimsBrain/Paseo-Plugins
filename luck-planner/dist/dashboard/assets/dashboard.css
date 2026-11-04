@@ -679,6 +679,30 @@ body {
   color: var(--lp-accent, #5b9dff);
   font-weight: 600;
 }
+.lp-toolbar-export {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--lp-text, #e6e9ef);
+  background: transparent;
+  text-decoration: none;
+  cursor: pointer;
+}
+.lp-toolbar-export:hover {
+  border-color: var(--lp-accent, #5b9dff);
+  color: var(--lp-accent, #5b9dff);
+}
+.lp-toolbar-export-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.lp-toolbar-export-disabled:hover {
+  border-color: var(--lp-border, #262b36);
+  color: var(--lp-text, #e6e9ef);
+}
 .lp-toolbar-status {
   display: flex;
   align-items: center;

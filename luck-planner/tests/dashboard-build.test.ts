@@ -224,6 +224,24 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(two).toBeLessThan(three);
   });
 
+  it("offers the export download only when the tab knows its project", () => {
+    // L2: a plain link with `download`, not a fetch — the server answers with
+    // `Content-Disposition: attachment`, so the tab never buffers a project.
+    const toolbar = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Toolbar.tsx"),
+      "utf8",
+    );
+    expect(toolbar).toContain("exportHref");
+    expect(toolbar).toContain("download");
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    // Built from the tab's own token and project; empty without them.
+    expect(app).toContain("exportUrl(params.token, params.projectKey)");
+    expect(app).toContain("params.projectKey.length > 0");
+  });
+
   it("hides the diagram layer switch and the details panel on the board", () => {
     // The layer is a property of the diagrams (G5), and the K2 modal takes
     // the panel's job on the board — the "click a node on the diagram"

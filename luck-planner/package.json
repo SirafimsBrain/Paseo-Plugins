@@ -1,7 +1,7 @@
 {
   "name": "luck-planner",
   "private": true,
-  "version": "0.41.0",
+  "version": "0.42.0",
   "scripts": {
     "bundle": "node scripts/bundle.mjs",
     "pretest": "node scripts/bundle.mjs",
@@ -21,6 +21,7 @@
     "@xyflow/react": "^12.12.0",
     "d3-hierarchy": "^3.1.2",
     "esbuild": "^0.25.12",
+    "fflate": "^0.8.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",

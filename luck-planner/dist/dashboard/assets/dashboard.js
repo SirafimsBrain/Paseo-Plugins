@@ -424,8 +424,17 @@ var DASHBOARD_NODE_PATH = "/api/node";
 var DASHBOARD_SEARCH_PATH = "/api/search";
 var DASHBOARD_STATS_PATH = "/api/stats";
 var DASHBOARD_EVENTS_PATH = "/api/events";
+var DASHBOARD_EXPORT_PATH = "/api/export";
 var DASHBOARD_TOKEN_PARAM = "token";
+var DASHBOARD_EXPORT_HISTORY_PARAM = "history";
 var DASHBOARD_PROJECT_PARAM = "project";
+function exportUrl(token, projectKey, includeHistory = true) {
+  const params = new URLSearchParams();
+  params.set(DASHBOARD_TOKEN_PARAM, token);
+  params.set(DASHBOARD_PROJECT_PARAM, projectKey);
+  if (!includeHistory) params.set(DASHBOARD_EXPORT_HISTORY_PARAM, "0");
+  return `${DASHBOARD_EXPORT_PATH}?${params.toString()}`;
+}
 var readyEventSchema = external_exports.object({
   version: external_exports.string().min(1),
   watermark: external_exports.number().int().nonnegative()
@@ -11697,7 +11706,25 @@ function Toolbar(props) {
             children: "3D"
           }
         )
-      ] })
+      ] }),
+      props.exportHref.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+        "a",
+        {
+          className: "lp-toolbar-export",
+          href: props.exportHref,
+          download: true,
+          title: "Download this project as a .json.zip: tree, bees, incidents, goals, growth and the audit trail.",
+          children: "Export"
+        }
+      ) : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+        "span",
+        {
+          className: "lp-toolbar-export lp-toolbar-export-disabled",
+          "aria-disabled": "true",
+          title: "Open the dashboard from Paseo so the URL carries the token and the project.",
+          children: "Export"
+        }
+      )
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
       /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
@@ -11802,6 +11829,10 @@ function App() {
   });
   const [focus, setFocus] = (0, import_react12.useState)(null);
   const focusSeq = (0, import_react12.useRef)(0);
+  const exportHref = (0, import_react12.useMemo)(
+    () => params.token.length > 0 && params.projectKey.length > 0 ? exportUrl(params.token, params.projectKey) : "",
+    [params.projectKey, params.token]
+  );
   const [layer, setLayer] = (0, import_react12.useState)("status");
   const webgl = (0, import_react12.useMemo)(
     () => THREE_VIEW_SUSPENDED ? { ok: false, reason: THREE_BUTTON_SUSPENDED_HINT } : detectWebGL(),
@@ -12097,7 +12128,8 @@ function App() {
         onLayerChange,
         view,
         onViewChange,
-        webglOk: webgl.ok
+        webglOk: webgl.ok,
+        exportHref
       }
     ),
     /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(

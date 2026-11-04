@@ -442,7 +442,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 | Этап | Версия | Содержание | Статус |
 |------|--------|-----------|--------|
 | L1 | 0.41.0 | `get_context` v2: `sections` / `depth` / `limit` | ✅ |
-| L2 | 0.42.0 | Экспорт проекта: JSON-конверт + zip (`fflate`), MCP-тул + скачивание из дашборда | план |
+| L2 | 0.42.0 | Экспорт проекта: JSON-конверт + zip (`fflate`), MCP-тул + скачивание из дашборда | ✅ |
 | L3 | 0.43.0 | Снимок БД: `VACUUM INTO` + zip в `backups/`, кнопка в настройках | план |
 | L4 | 0.44.0 | Восстановление БД: закрытие/подмена/переоткрытие стора, автоснимок, guard схемы | план |
 | L5 | 0.45.0 | Импорт дерева: remap id, `dryRun`, валидация иерархии | план |
@@ -459,6 +459,15 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 - JSON Schema тула (`MCP_TOOLS`) рекламирует новые поля; `server/skill.ts` — строка «Keep the answer cheap on big nodes».
 - Приёмка (тестами): `tests/mcp-tools.test.ts` — `depth` 1/2 (вложенные `children` появляются только при `depth > 1`), `limit` в обзоре и в узле, `sections` (только запрошенный блок; `[]` — только узел), отказ на неизвестной секции и `depth: 0`/`limit: 0`, и отдельный тест «полный ответ без сужений — прежний набор ключей». `typecheck` (оба конфига) + `vitest run` зелёные.
 
+**L2. Экспорт проекта** ✅ → `0.42.0`
+- `shared/export.ts` (новый, чистый): конверт `{format, schemaVersion, pluginVersion, exportedAt, projectKey, nodes, bees, bugs, bugAttachments, goals, growth, history?}`, zod-схема на готовых row-схемах, `serializeExport`/`parseExport` (ошибка называет поле), `exportCounts`, `countArchived`, `exportStamp` (локальное `YYYYMMDD-HHmmss`), `projectSlug`, `exportFileName`, `exportEntryName`. Архивные узлы едут с `archivedAt` — экспорт описывает дерево целиком, «пропускать архив» — политика импорта.
+- `server/export.ts` (новый, серверная половина): `buildExportDocument` (стор → конверт, `history` по флагу), `assertExportable` (пустой проект — ошибка, а не пустой бэкап), `exportZipBytes` (fflate, `mtime` прибит к DOS-эпохе → одни и те же байты на один документ), `defaultBackupDir` (`backups/` рядом с БД), `writeExportFile` (абсолютный путь обязателен, существующий файл не перезаписывается, коллизия в одну секунду → `-2` перед всем `.json.zip`), `freeName`.
+- `server/store.ts`: `listProjectHistory(projectKey)` — все аудит-строки проекта (у `listHistory` они по сущности).
+- `shared/tools.ts`: `exportInputSchema` (`projectKey`, `includeHistory`, `path`) + `luck_tree_export` в `MCP_TOOL_NAMES`; `server/mcp-tools.ts` — описание тула, JSON Schema, `dispatchExport` (путь/размер/счётчики).
+- `shared/api.ts`: `DASHBOARD_EXPORT_PATH`, `DASHBOARD_EXPORT_HISTORY_PARAM`, `exportUrl(token, projectKey, includeHistory)`; `server/http-server.ts` — `GET /api/export` (`Content-Disposition: attachment`, `no-store`, `history=0`), `sendDownload`; дашборд: `Toolbar` — `<a download>` (disabled без проекта/токена), `app.tsx` — `exportHref`, CSS `.lp-toolbar-export`.
+- Зависимость: `fflate` в `devDependencies` (чистый JS, бандлится esbuild — установка плагина остаётся без runtime-зависимостей).
+- Приёмка (тестами): `tests/export.test.ts` (13: полнота конверта, архивные узлы, `includeHistory:false`, round-trip, отказы парсера с именами полей, настоящий zip с одним JSON-entry, побайтовый детерминизм, имена/слаг, `backups/` по умолчанию, суффикс `-2`, абсолютный путь, отказ на относительном/занятом/пустом); `tests/http-server.test.ts` (+2: 200 с `application/zip` + `attachment` + расшифровка обратно в документ, `history=0`, 401 без токена, 400 без проекта и для пустого); `tests/mcp-tools.test.ts` (+3: файл и счётчики, `backups/` по умолчанию, отказы); `tests/dashboard-build.test.ts` (+1 исходный контракт ссылки); списки инструментов в `mcp-tools`/`mcp-server-e2e`/`readme` и модулей `shared/` обновлены. `typecheck` (оба конфига) + `vitest run` зелёные (44 файла, 751 тест).
+
 ## 5. Порядок версий и тегов
 
 | Этап | Версия | Этап | Версия |
@@ -472,7 +481,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version
 | | | J2 | 0.29.1–0.29.4 (приёмка, три бага) |
 | | | K1 ✅ / K2 ✅ | 0.33.0 / 0.34.0 (plain-вид), 0.34.1 (фикс модалки) |
 | | | K3 | — (документация; визуальные корректировки 0.34.x) |
-| L1 ✅ | 0.41.0 | L2–L11 | 0.42.0–0.51.0 (план) |
+| L1 ✅ / L2 ✅ | 0.41.0 / 0.42.0 | L3–L11 | 0.43.0–0.51.0 (план) |
 
 Каждый бамп — анонсированный тег `luck-planner@<версия>` на коммите с этой версией, отправка в origin (правило проекта). Слово «release» в задаче не используется — major-бамп не планируется. Блок J — финализация без бампа версии: J1 меняет только документацию, J2 — приёмку. Блок K: K1/K2 — minor-бампы за новую функциональность, K3 — документация без бампа, каждая визуальная корректировка — patch-бамп `0.34.x`.
 

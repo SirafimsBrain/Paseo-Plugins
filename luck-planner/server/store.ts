@@ -760,6 +760,22 @@ export class LuckPlannerStore {
   }
 
   /**
+   * Every audit row of one project, oldest first — the export path (stage L2).
+   *
+   * Unbounded where {@link listHistory} is per entity: an export is a
+   * deliberate act, and `historyRetentionDays` (stage E4) already bounds the
+   * table, so the read costs one indexed scan of what exists. Read-only: no
+   * fence, no transaction, nothing to audit.
+   */
+  listProjectHistory(projectKey: string): HistoryEntry[] {
+    const project = requireText(projectKey, "project key");
+    const rows = this.db
+      .prepare("SELECT * FROM history WHERE project_key = ? ORDER BY id")
+      .all(project) as unknown as HistoryRow[];
+    return rows.map(rowToHistory);
+  }
+
+  /**
    * Newest audit row id — the watermark the change feed (stage H1) resumes
    * from. `history.id` is `AUTOINCREMENT`, so it only ever grows: the
    * retention prune (stage E4) deletes old rows without ever making this

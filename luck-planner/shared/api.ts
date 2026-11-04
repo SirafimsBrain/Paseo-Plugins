@@ -39,9 +39,13 @@ export const DASHBOARD_SEARCH_PATH = "/api/search";
 export const DASHBOARD_STATS_PATH = "/api/stats";
 /** SSE channel: `ready` + `tree-changed` per poll (stage H1). */
 export const DASHBOARD_EVENTS_PATH = "/api/events";
+/** The project as a portable `.json.zip` (stage L2) — a download, not JSON. */
+export const DASHBOARD_EXPORT_PATH = "/api/export";
 
 /** Query parameter carrying the per-installation access token. */
 export const DASHBOARD_TOKEN_PARAM = "token";
+/** `/api/export?history=0` drops the audit trail from the archive. */
+export const DASHBOARD_EXPORT_HISTORY_PARAM = "history";
 /** Query parameter naming the project (canonical workspace path, ADR-2). */
 export const DASHBOARD_PROJECT_PARAM = "project";
 
@@ -67,6 +71,32 @@ export function dashboardUrl(
     params.set(DASHBOARD_PROJECT_PARAM, projectKey);
   }
   return `${origin.replace(/\/+$/, "")}/?${params.toString()}`;
+}
+
+/**
+ * Relative download URL of one project's export (stage L2).
+ *
+ * Relative on purpose: the toolbar renders it as a plain `<a download>`, and
+ * a tab opened from any origin (loopback today, a tunnel tomorrow) downloads
+ * from the server that served it. The token rides in the query string for the
+ * same reason it does in {@link dashboardUrl} — a navigation cannot carry an
+ * `Authorization` header — and the endpoint is read-only, so a token that
+ * already sits in this tab's URL gains nothing new by appearing in an href.
+ *
+ * An empty `projectKey` still names the endpoint (the server answers 400):
+ * the toolbar only builds this URL when it has a project, and a disabled
+ * button is clearer than a link that guesses.
+ */
+export function exportUrl(
+  token: string,
+  projectKey: string,
+  includeHistory = true,
+): string {
+  const params = new URLSearchParams();
+  params.set(DASHBOARD_TOKEN_PARAM, token);
+  params.set(DASHBOARD_PROJECT_PARAM, projectKey);
+  if (!includeHistory) params.set(DASHBOARD_EXPORT_HISTORY_PARAM, "0");
+  return `${DASHBOARD_EXPORT_PATH}?${params.toString()}`;
 }
 
 /** SSE event sent once when the stream opens. */

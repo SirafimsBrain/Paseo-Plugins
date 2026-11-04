@@ -4,6 +4,7 @@ import type {
   ApproveGoalInput,
   ArchiveNodeInput,
   ContextSection,
+  ExportInput,
   FindBugsInput,
   FindGoalsInput,
   GetContextInput,
@@ -21,6 +22,7 @@ import {
   addBeeInputSchema,
   approveGoalInputSchema,
   archiveNodeInputSchema,
+  exportInputSchema,
   findBugsInputSchema,
   findGoalsInputSchema,
   getContextInputSchema,
@@ -33,6 +35,9 @@ import {
   upsertLeafInputSchema,
   upsertNodeInputSchema,
 } from "../shared/tools";
+import { exportCounts } from "../shared/export";
+import { writeExportFile } from "./export";
+import { resolvePluginVersion } from "./plugin-paths";
 import type { LuckPlannerStore } from "./store";
 
 /**
@@ -591,6 +596,35 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       required: ["projectKey", "entityId"],
     },
   },
+  {
+    name: "luck_tree_export",
+    title: "Export a project",
+    description:
+      "Write one project to a portable `.json.zip`: the whole tree (archived " +
+      "nodes flagged, not dropped), influence bees, incidents with their leaf " +
+      "attachments, goals, growth records and — by default — the audit trail. " +
+      "The document is versioned and carries the original ids, which is what a " +
+      "later import needs to verify its references before rebuilding the graph. " +
+      "Omit `path` to land in the plugin's `backups/` directory under a " +
+      "date-stamped name; a `path` must be absolute.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        includeHistory: {
+          type: "boolean",
+          description:
+            "Carry the audit trail (default true). Turn it off for a tree-only copy.",
+        },
+        path: {
+          type: "string",
+          description:
+            "Absolute path of the archive. Omit for `backups/` beside the plugin database.",
+        },
+      },
+      required: ["projectKey"],
+    },
+  },
 ];
 
 export type ToolResult = {
@@ -894,6 +928,12 @@ export function dispatchMcpTool(
         return dispatchUpdateGrowth(store, parsed.data, actor);
       }
 
+      case "luck_tree_export": {
+        const parsed = exportInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        return dispatchExport(store, parsed.data);
+      }
+
       case "luck_tree_history": {
         const parsed = historyInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues);
@@ -922,6 +962,35 @@ export function dispatchMcpTool(
     const message = caught instanceof Error ? caught.message : String(caught);
     return error(message);
   }
+}
+
+/**
+ * Export: write the archive and answer where it landed and what it holds.
+ *
+ * The counts are the point of the reply — an agent reporting "exported the
+ * project" that silently wrote four nodes instead of four hundred is worse
+ * than no report. The document itself is not echoed: it is the file.
+ */
+function dispatchExport(
+  store: LuckPlannerStore,
+  value: ExportInput,
+): ToolResult {
+  const written = writeExportFile(store, {
+    projectKey: value.projectKey,
+    pluginVersion: resolvePluginVersion(),
+    ...(value.includeHistory === undefined
+      ? {}
+      : { includeHistory: value.includeHistory }),
+    ...(value.path === undefined ? {} : { file: value.path }),
+  });
+  return text({
+    created: true,
+    file: written.file,
+    bytes: written.bytes,
+    projectKey: value.projectKey,
+    exportedAt: written.document.exportedAt,
+    counts: exportCounts(written.document),
+  });
 }
 
 /** Context: overview without nodeId, deep open with nodeId. */

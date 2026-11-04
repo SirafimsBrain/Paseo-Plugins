@@ -42,6 +42,7 @@ export const MCP_TOOL_NAMES = [
   "luck_tree_set_goal",
   "luck_tree_update_growth",
   "luck_tree_history",
+  "luck_tree_export",
 ] as const;
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
 
@@ -295,3 +296,24 @@ export const archiveNodeInputSchema = z.object({
   actor: actorSchema.optional(),
 });
 export type ArchiveNodeInput = z.infer<typeof archiveNodeInputSchema>;
+
+/**
+ * `luck_tree_export`: one project as a portable `.json.zip`.
+ *
+ * The counterpart of the dashboard's download link: an agent that is about to
+ * restructure a large subtree, or a user asking for a copy of what is known,
+ * gets a single archive instead of a dump of tool output. The document itself
+ * is described in `shared/export.ts`.
+ *
+ * - `includeHistory` (default `true`) carries the audit trail; turning it off
+ *   drops rows the importer cannot use anyway when only the tree is wanted.
+ * - `path` must be absolute. Omitted, the archive lands in the plugin's
+ *   `backups/` directory under a date-stamped name, so an agent never has to
+ *   guess where the user keeps files.
+ */
+export const exportInputSchema = z.object({
+  projectKey: projectKeySchema,
+  includeHistory: z.boolean().optional(),
+  path: z.string().min(1).optional(),
+});
+export type ExportInput = z.infer<typeof exportInputSchema>;

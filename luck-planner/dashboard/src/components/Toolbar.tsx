@@ -27,6 +27,13 @@
  * first). A disabled button is the honest surface for a suspended feature: the
  * request never leaves the toolbar, so the policy in `planViewSwitch` only has
  * to answer the URLs and stored choices that still name `3d`.
+ *
+ * **L2** adds the export download: a plain `<a download>` pointed at
+ * `/api/export?token=…&project=…` (built by `exportUrl` in `shared/api.ts`).
+ * A link, not a fetch: the server answers with
+ * `Content-Disposition: attachment`, so the browser saves the zip and the tab
+ * never buffers a project in memory. Without a project there is nothing to
+ * export, and the control renders disabled with the reason in its title.
  */
 import { useState } from "react";
 import type { ChangeEvent, FormEvent, ReactElement } from "react";
@@ -93,6 +100,11 @@ export interface ToolbarProps {
   readonly onViewChange: (view: DashboardView) => void;
   /** Whether this tab can render WebGL — drives the 3D button's tooltip. */
   readonly webglOk: boolean;
+  /**
+   * Download URL of this project's `.json.zip` (stage L2); `""` when the tab
+   * knows no token/project, which renders the control disabled.
+   */
+  readonly exportHref: string;
 }
 
 /** One `label · value` counter cell. */
@@ -272,6 +284,24 @@ export function Toolbar(props: ToolbarProps): ReactElement {
             3D
           </button>
         </div>
+        {props.exportHref.length > 0 ? (
+          <a
+            className="lp-toolbar-export"
+            href={props.exportHref}
+            download
+            title="Download this project as a .json.zip: tree, bees, incidents, goals, growth and the audit trail."
+          >
+            Export
+          </a>
+        ) : (
+          <span
+            className="lp-toolbar-export lp-toolbar-export-disabled"
+            aria-disabled="true"
+            title="Open the dashboard from Paseo so the URL carries the token and the project."
+          >
+            Export
+          </span>
+        )}
       </div>
 
       <div className="lp-toolbar-status" role="status">
