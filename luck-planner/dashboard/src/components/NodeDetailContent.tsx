@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import type { NodeResponse } from "../../../shared/api";
+import { LEAF_TRANSITIONS, type LeafStatus } from "../../../shared/tree";
 import { beeCycleLabel } from "../../../shared/bees";
 import { growthProgress } from "../../../shared/growth";
 import {
@@ -17,6 +18,15 @@ import {
 export interface NodeDetailContentProps {
   readonly detail: NodeResponse;
   readonly resolveName: (id: string) => string;
+  /**
+   * Moves the leaf (stage L8). Absent while the tab has no writable client
+   * (no token), which hides the controls instead of offering a dead button.
+   */
+  readonly onSetStatus?: (status: LeafStatus) => void;
+  /** The status whose write is in flight; disables the row (L8). */
+  readonly pendingStatus?: LeafStatus | null;
+  /** The last write refusal for this node, in the server's words (L8). */
+  readonly writeError?: string;
 }
 
 function formatTime(ts: number): string {
@@ -39,10 +49,15 @@ function Row(props: { label: string; children: ReactNode }): ReactElement {
 }
 
 export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
-  const { detail, resolveName } = props;
+  const { detail, resolveName, onSetStatus, pendingStatus, writeError } = props;
   const { node, path, children, bees, bugs, blockingBugs, history, growth, beeCycle } =
     detail;
   const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
+  // Only a live leaf moves, and only along its own transitions (L8).
+  const allowed =
+    node.kind === "leaf" && node.archivedAt === null
+      ? LEAF_TRANSITIONS[node.status]
+      : null;
   const progress = growth === null ? null : growthProgress(growth.steps);
   const shownHistory = history.slice(-20).reverse();
 
@@ -80,6 +95,48 @@ export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
           {node.updatedBy ? ` · ${node.updatedBy}` : ""}
         </Row>
       </div>
+
+      {allowed !== null && allowed.length > 0 && onSetStatus !== undefined ? (
+        /*
+         * Stage L8: the only write a person makes while reading the diagram.
+         * Only the transitions the state machine allows are offered — the
+         * server refuses the rest anyway, and a button that always fails is a
+         * lie about the model. The status is spelled out in text.
+         */
+        <div className="lp-details-section lp-details-write">
+          <h3 className="lp-details-subtitle">Move</h3>
+          <div className="lp-details-status-actions" role="group" aria-label="Move this leaf">
+            {allowed.map((status) => (
+              <button
+                key={status}
+                type="button"
+                className="lp-write-button"
+                disabled={pendingStatus !== null && pendingStatus !== undefined}
+                aria-busy={pendingStatus === status}
+                title={`Move to ${STATUS_LABELS[status]}`}
+                onClick={() => onSetStatus(status)}
+              >
+                <span
+                  className="lp-details-dot"
+                  style={{ backgroundColor: STATUS_COLORS[status] }}
+                  aria-hidden="true"
+                />
+                {STATUS_LABELS[status]}
+              </button>
+            ))}
+          </div>
+          <span className="lp-details-hint">
+            Recorded as an audit row with the revision this panel shows
+            (r{detail.node.revision}); if the leaf moved meanwhile the move is
+            refused instead of overwriting.
+          </span>
+          {writeError !== undefined && writeError.length > 0 ? (
+            <p className="lp-details-error" role="alert">
+              {writeError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {beeCycle !== null ? (
         /*

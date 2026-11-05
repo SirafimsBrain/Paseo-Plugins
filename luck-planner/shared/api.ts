@@ -6,6 +6,8 @@ import { nodeDetail, stats as statsRpc, treeSearch } from "./rpc";
 import { themeCatalogSchema } from "./themes";
 import {
   historyEntrySchema,
+  idSchema,
+  leafStatusSchema,
   nodeSchema,
   projectKeySchema,
   timestampSchema,
@@ -48,6 +50,26 @@ export const DASHBOARD_EXPORT_PATH = "/api/export";
  * theme belongs to the tab, not to a workspace.
  */
 export const DASHBOARD_THEMES_PATH = "/api/themes";
+
+/**
+ * `POST /api/node/:id/status` — move a leaf through its state machine (L8).
+ *
+ * The first write path the dashboard has. It is deliberately **not** a generic
+ * "patch a node": the browser gets exactly the two decisions a person makes
+ * while reading the diagram — the status of a leaf and the approval of a goal
+ * — and nothing else that the MCP tools can do.
+ */
+export function nodeStatusPath(nodeId: string): string {
+  return `${DASHBOARD_NODE_PATH}/${encodeURIComponent(nodeId)}/status`;
+}
+
+/** `POST /api/goal/:id/approve` — cross the approval gate (L8). */
+export function goalApprovePath(goalId: string): string {
+  return `/api/goal/${encodeURIComponent(goalId)}/approve`;
+}
+
+/** `POST /api/goal` route prefix (the id follows it). */
+export const DASHBOARD_GOAL_PATH = "/api/goal";
 
 /** Query parameter carrying the per-installation access token. */
 export const DASHBOARD_TOKEN_PARAM = "token";
@@ -226,6 +248,48 @@ export const treeResponseSchema = z.object({
   goals: z.array(goalSchema),
   growth: z.array(growthSchema),
 });
+
+/**
+ * Body of the two writes (stage L8). `expectedRevision` is optional, so a
+ * script that does not care can write blind — but the dashboard always sends
+ * it: it renders one revision and must not overwrite another.
+ */
+export const leafStatusRequestSchema = z.object({
+  status: leafStatusSchema,
+  expectedRevision: z.number().int().positive().optional(),
+});
+export type LeafStatusRequest = z.infer<typeof leafStatusRequestSchema>;
+
+export const goalApproveRequestSchema = z.object({
+  parentBranchId: idSchema,
+  expectedRevision: z.number().int().positive().optional(),
+});
+export type GoalApproveRequest = z.infer<typeof goalApproveRequestSchema>;
+
+/** `POST /api/node/:id/status` answer: the node after the move. */
+export const leafStatusResponseSchema = z.object({
+  ok: z.literal(true),
+  node: nodeSchema,
+});
+export type LeafStatusResponse = z.infer<typeof leafStatusResponseSchema>;
+
+/** `POST /api/goal/:id/approve` answer: the goal after the gate crossing. */
+export const goalApproveResponseSchema = z.object({
+  ok: z.literal(true),
+  goal: goalSchema,
+});
+export type GoalApproveResponse = z.infer<typeof goalApproveResponseSchema>;
+
+/**
+ * A refused write: the message, plus the revision that is current now when the
+ * refusal was a stale one (HTTP 409). The tab refetches on a 409 instead of
+ * asking the user to try again — the change is already on disk.
+ */
+export const writeErrorSchema = z.object({
+  error: z.string().min(1),
+  currentRevision: z.number().int().nonnegative().optional(),
+});
+export type WriteError = z.infer<typeof writeErrorSchema>;
 
 /**
  * `GET /api/themes` — the theme catalog, in the shared schema the dashboard

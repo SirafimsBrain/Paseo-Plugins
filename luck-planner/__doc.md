@@ -76,7 +76,7 @@ Every mutation records **who, when, what, and with what result** — a mandatory
 | **ADR-5** | The tree is an **adjacency list** (`parent_id`) with kind enum (`root`,`trunk`,`branch`,`subbranch`,`leaf`); no materialized path. The dashboard builds the tree in memory from one query. | Cheap moves without path recomputation; thousands of nodes do not need materialized paths; layout happens in the dashboard. |
 | **ADR-6** | Leaves are a **state machine**: `draft → ready → claimed → in_progress → (blocked) → done`, plus terminal `cancelled` / `superseded`. Every transition increments `revision` and appends an audit row (`actor`, `action`, `revision`, `result`, `at`). | The state machine plus revisions are the heart of plan/fact. The audit log is written from the first CRUD stage (B3) — no exceptions. |
 | **ADR-7** | High goals have an **approval gate**: `draft → proposed → approved`. Only a human (via the native panel/RPC) or a managing orchestrating agent approves; only `approved` goals materialize a subtree. Replacing a plan supersedes the old goal and **cascades a reset** to derived leaves. | Requirement: the tree receives goals only after the plan is agreed. Plandex review gate; MetaGPT `reset_task` cascade semantics. |
-| **ADR-8** | Dashboard v1 is **read-only**. All mutations go through MCP (agents) or the native panel (human). Editing from the dashboard is roadmap. | Shrinks the HTTP attack surface and keeps the first release coherent. |
+| **ADR-8** | Dashboard v1 is **read-only**. All mutations go through MCP (agents) or the native panel (human). **Amended in 0.48.0 (stage L8):** the dashboard may make exactly two writes — a leaf's status and a proposed goal's approval — under header-token + same-`Origin` + `application/json` + `expectedRevision`; every other mutation still goes through MCP or the panel. | Shrinks the HTTP attack surface and keeps the first release coherent. The amendment answers a real need (a human reading a plan wants to approve it) without opening a general write path: the browser gets two named decisions, both optimistic and both audited as `user`. |
 | **ADR-9** | The HTTP server binds `127.0.0.1` only, uses a per-installation access token in the URL (memory-flash API-key precedent), exposes `GET /health`, and serves the SPA from `dist/dashboard`. No `0.0.0.0` binding without an explicit setting. | Plugins are trusted code with machine access; do not widen the surface with a cheap bind. |
 
 ## 3. Target directory layout
@@ -908,6 +908,80 @@ entry, user themes suffixed "(custom)". It hides itself while the catalog is emp
 failed fetch degrades to exactly the pre-L7 behaviour instead of an empty menu; a stored id
 whose file vanished renders as *Match Paseo*, which is what the tab is actually doing then.
 
+### Writes from the dashboard (stage L8 — `server/store.ts`, `server/http-server.ts`, `shared/api.ts`, `dashboard/src/api.ts`, `dashboard/src/app.tsx`, `dashboard/src/components/NodeDetailContent.tsx`, `dashboard/src/components/GoalDetailContent.tsx`)
+
+ADR-8 said the dashboard is read-only, and that was the right first release: a browser on a
+loopback socket is the weakest surface in the plugin. It also left a hole a person feels
+every day — reading a proposed plan in the tab and then having to find the panel to
+approve it. L8 amends the ADR with the **smallest** write path that closes it:
+
+| Route | Decision | Body |
+| ----- | -------- | ---- |
+| `POST /api/node/:id/status` | move a leaf through its state machine | `{ status, expectedRevision? }` |
+| `POST /api/goal/:id/approve` | cross the approval gate and materialize the plan | `{ parentBranchId, expectedRevision? }` |
+
+Nothing generic: there is no "patch this node", no create, no move, no archive. The
+browser gets the two decisions a human actually makes while reading, and every other
+mutation still belongs to the MCP tools or the native panel.
+
+**Four transport checks, in this order** (`handleRequest`) — the order *is* the security
+model, because each check rules out a different way of reaching the route:
+
+1. **Token from the header only** (`Authorization: Bearer`). The query token that opens the
+tab is fine for reads and never for a write: a URL ends up in the browser history, the
+daemon log and any screenshot of the address bar. Reads keep accepting both.
+2. **`POST`** — a navigation, an `<img>` or a `<form>` default cannot reach it, and the
+answer names `Allow: POST`.
+3. **`Origin` equal to the request's own `Host`** (`sameOrigin`). Compared by host, so it
+holds on loopback, on a custom port and behind a tunnel with no configured allowlist. A
+missing or unparsable `Origin` — including `null` from a `file://` page — is a refusal,
+because every browser sends it on a cross-origin POST and the only legitimate writer *is*
+the tab this server served.
+4. **`Content-Type: application/json`** — the one header an HTML form cannot set, so a
+cross-site form post that somehow passed the token and origin checks still dies here.
+
+The body is read with a **16 KiB cap** (`413` beyond it): a status move is ~70 bytes, and a
+cap means a bug cannot make the server buffer a file.
+
+**Optimistic concurrency lives in the store, not in the transport.** `SetStatusInput` and
+`ApproveGoalInput` gained an optional `expectedRevision`; `requireRevision` compares it to
+the row **inside the write transaction** — the only place that can see the race — and throws
+`StaleRevisionError` (the store's only named error). The HTTP layer maps it to **409** with
+`currentRevision`, and the tab treats a 409 as "the world moved": it refetches instead of
+asking the user to press the same button again against data that is already stale. For
+`approveGoal` the check runs **before** the "already approved" early return, so a stale
+caller gets the conflict rather than a silent "nothing to do". Absent `expectedRevision`
+keeps the pre-L8 contract exactly (the MCP tools and the panel write without one), which is
+why the change is additive rather than a new requirement everywhere.
+
+**Who wrote it.** `actor: "user"` — the same identity the native panel stamps, so the trail
+reads "a human did this" no matter which surface the human used, and agent writes stay
+distinguishable by their own ids.
+
+**After the write** the server reads the audit rows it just appended (`latestHistoryId`
+before, `listChangesSince` after, filtered to the project) and broadcasts them as a
+`tree-changed` event (`afterWrite`). Same payload the change feed sends — one shape for
+"what happened", whoever wrote it — so every other tab repaints without waiting for its
+next poll.
+
+**In the tab.** The details panel (and the K2 modal) renders the allowed transitions as
+buttons — `LEAF_TRANSITIONS[node.status]`, so a move that would be refused is never
+offered — with a note naming the revision being sent. The goal modal gets *Approve under
+<branch>* when `canApproveGoal(status)` and the project has a live branch; the branch list
+is the live `branch`/`subbranch` nodes by name. `DashboardWriteConflict` (the 409) is
+handled separately from an error: a conflict refreshes and says "moved elsewhere", a real
+refusal shows the server's sentence next to the control.
+
+**Tests** (real files, real loopback, no mocks): `tests/optimistic-write.test.ts` (6 —
+stale vs matching vs absent for both methods, nothing written and nothing audited on a
+refusal, the error names expected/current, a stale approval does not grow the plan twice) and
+the L8 half of `tests/http-server.test.ts` (8 — the happy path with the audit row and the
+`user` actor, 409 + unchanged row, the header-only token rule, foreign/missing `Origin`,
+non-JSON body, 405/404/400 cases, malformed/missing-project/oversized bodies, goal approval
+with materialization, and the `tree-changed` broadcast). `tests/dashboard-build.test.ts`
+pins the client contracts and the bundle markers; the store-level tests of the earlier
+stages keep passing untouched, which is the point of an additive `expectedRevision`.
+
 ### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
 
 Two ⌘K items and two composer slash commands, all writing through the plugin
@@ -1012,7 +1086,7 @@ The 2D/3D dashboards are a separate web app (ADR-1) that this server *serves* fr
 subprocess next to the store, so it shares the one SQLite file the native panel and the
 agent MCP servers use (ADR-2).
 
-**Endpoints** (all read-only, ADR-8):
+**Endpoints** (reads are read-only; the two writes are stage L8, see below):
 
 | Endpoint | Auth | Response |
 | --- | --- | --- |
@@ -2412,7 +2486,7 @@ from):
 | 3D overlay animation drops frames on big trees | Per-frame work is O(links) with preallocated vectors (I3); the large sets are instanced and positioned once, only one material uniform moves; I4 picking keeps the 10k meshes out of the raycast path (one ray/sphere test per click) and the idle billboard loop rewrites nothing |
 | Concurrent SQLite access (agents + UI + HTTP) | WAL + busy timeout + write-retry from stage B2; one owning process |
 | Plugin update breaks agents' MCP entry path | Revision-independent publication from stage D2 (memory-flash 0.7.1 lesson) |
-| HTTP layer as an attack vector | 127.0.0.1 + token + read-only API (ADR-8, ADR-9) |
+| HTTP layer as an attack vector | 127.0.0.1 + token + read-only API (ADR-8, ADR-9) — since 0.48.0 two named writes behind header token, same-`Origin`, JSON-only and `expectedRevision` (ADR-8 amendment) |
 | Mobile clients without a workspace browser | Native panel works everywhere; dashboard via `openExternalUrl`; 3D on mobile is best-effort, documented |
 
 Standing constraints: zero runtime npm dependencies in daemon code where possible (Node

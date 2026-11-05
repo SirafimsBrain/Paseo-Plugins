@@ -20146,12 +20146,28 @@ function createSchemaV1(db) {
   `);
 }
 var MIGRATIONS = [createSchemaV1];
+function requireRevision(entityType, id, current, expected) {
+  if (expected === void 0 || expected === current) return;
+  throw new StaleRevisionError(entityType, id, expected, current);
+}
 function isLockError(cause) {
   return cause instanceof Error && /database is locked/i.test(cause.message);
 }
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
+var StaleRevisionError = class extends Error {
+  constructor(entityType, entityId, expected, current) {
+    super(
+      `${entityType} ${entityId} moved to revision ${current}; the request expected ${expected}`
+    );
+    this.entityType = entityType;
+    this.entityId = entityId;
+    this.expected = expected;
+    this.current = current;
+    this.name = "StaleRevisionError";
+  }
+};
 var LuckPlannerStore = class {
   constructor(options = {}) {
     this.closed = false;
@@ -20722,6 +20738,7 @@ var LuckPlannerStore = class {
     return this.write(
       () => this.transaction(() => {
         const row = this.requireRow(projectKey, input2.id);
+        requireRevision("node", row.id, row.revision, input2.expectedRevision);
         if (row.archived_at !== null) {
           throw new Error(`node ${row.id} is archived and cannot change status`);
         }
@@ -21659,6 +21676,7 @@ var LuckPlannerStore = class {
     return this.write(
       () => this.transaction(() => {
         const row = this.requireGoalRow(projectKey, input2.id);
+        requireRevision("goal", row.id, row.revision, input2.expectedRevision);
         const status = parseGoalStatus(row.status);
         if (status === "approved" && row.materialized_node_id !== null) {
           return rowToGoal(row);
@@ -26083,7 +26101,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.47.0";
+var SERVER_VERSION = "0.48.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

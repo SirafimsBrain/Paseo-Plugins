@@ -23,6 +23,7 @@ import {
   KIND_LABELS,
   LAYOUT,
   LEAF_STATUSES,
+  LEAF_TRANSITIONS,
   NODE_KINDS,
   STATUS_COLORS,
   STATUS_LABELS,
@@ -38,6 +39,7 @@ import {
   buildGraph,
   buildScene3D,
   buildSceneOverlay,
+  canApproveGoal,
   defaultCollapsedIds,
   edgeTouchesNode,
   external_exports,
@@ -71,7 +73,7 @@ import {
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-4FUG2TGZ.js";
+} from "./chunk-chunk-QX7XIFHJ.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
@@ -596,6 +598,12 @@ var DASHBOARD_STATS_PATH = "/api/stats";
 var DASHBOARD_EVENTS_PATH = "/api/events";
 var DASHBOARD_EXPORT_PATH = "/api/export";
 var DASHBOARD_THEMES_PATH = "/api/themes";
+function nodeStatusPath(nodeId) {
+  return `${DASHBOARD_NODE_PATH}/${encodeURIComponent(nodeId)}/status`;
+}
+function goalApprovePath(goalId) {
+  return `/api/goal/${encodeURIComponent(goalId)}/approve`;
+}
 var DASHBOARD_TOKEN_PARAM = "token";
 var DASHBOARD_EXPORT_HISTORY_PARAM = "history";
 var DASHBOARD_PROJECT_PARAM = "project";
@@ -637,6 +645,26 @@ var treeResponseSchema = external_exports.object({
   goals: external_exports.array(goalSchema),
   growth: external_exports.array(growthSchema)
 });
+var leafStatusRequestSchema = external_exports.object({
+  status: leafStatusSchema,
+  expectedRevision: external_exports.number().int().positive().optional()
+});
+var goalApproveRequestSchema = external_exports.object({
+  parentBranchId: idSchema,
+  expectedRevision: external_exports.number().int().positive().optional()
+});
+var leafStatusResponseSchema = external_exports.object({
+  ok: external_exports.literal(true),
+  node: nodeSchema
+});
+var goalApproveResponseSchema = external_exports.object({
+  ok: external_exports.literal(true),
+  goal: goalSchema
+});
+var writeErrorSchema = external_exports.object({
+  error: external_exports.string().min(1),
+  currentRevision: external_exports.number().int().nonnegative().optional()
+});
 var themesResponseSchema = themeCatalogSchema;
 var nodeResponseSchema = nodeDetail.output;
 var searchResponseSchema = treeSearch.output;
@@ -644,6 +672,13 @@ var statsResponseSchema = stats.output;
 var errorResponseSchema = external_exports.object({ error: external_exports.string() });
 
 // dashboard/src/api.ts
+var DashboardWriteConflict = class extends Error {
+  constructor(message, currentRevision) {
+    super(message);
+    this.currentRevision = currentRevision;
+    this.name = "DashboardWriteConflict";
+  }
+};
 var DashboardApi = class {
   constructor(origin, token, projectKey, fetchImpl = fetch) {
     this.origin = origin;
@@ -682,6 +717,23 @@ var DashboardApi = class {
     return themesResponseSchema.parse(await this.get(DASHBOARD_THEMES_PATH));
   }
   /**
+   * The two writes (stage L8). Both carry the token in the **header** — a URL
+   * is a screenshot — and the project in the query string, the way the reads
+   * are scoped. A 409 becomes {@link DashboardWriteConflict} so the app can
+   * tell "someone else moved it" apart from "the server said no".
+   */
+  async setLeafStatus(nodeId, input) {
+    return leafStatusResponseSchema.parse(
+      await this.post(`${nodeStatusPath(nodeId)}?${this.writeQuery()}`, input)
+    );
+  }
+  async approveGoal(goalId, input) {
+    const body = goalApproveRequestSchema.parse(input);
+    return goalApproveResponseSchema.parse(
+      await this.post(`${goalApprovePath(goalId)}?${this.writeQuery()}`, body)
+    );
+  }
+  /**
    * Liveness probe without the token (`/health` is public, ADR-9). Used by the
    * app to detect a stale tab whose server has been restarted on another port.
    */
@@ -702,6 +754,54 @@ var DashboardApi = class {
       [DASHBOARD_PROJECT_PARAM]: this.projectKey
     });
     return `${this.origin}${DASHBOARD_EVENTS_PATH}?${query.toString()}`;
+  }
+  /** `project=…` for a write: the scope of the tab, not a secret. */
+  writeQuery() {
+    return `${DASHBOARD_PROJECT_PARAM}=${encodeURIComponent(this.projectKey)}`;
+  }
+  /**
+   * One write request. Headers, not the query: the token cannot leak through
+   * the address bar, and `Content-Type: application/json` is what the server
+   * requires to rule out a form post from another page.
+   */
+  async post(pathWithQuery, body) {
+    let response;
+    try {
+      response = await this.fetchImpl.call(
+        globalThis,
+        `${this.origin}${pathWithQuery}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(body)
+        }
+      );
+    } catch (cause) {
+      throw new Error(
+        `The plugin server is not reachable at ${this.origin} (${cause instanceof Error ? cause.message : String(cause)}).`
+      );
+    }
+    const text = await response.text();
+    const parsed = parseJsonBody(text);
+    if (!response.ok) {
+      const message = parsed !== null && typeof parsed.error === "string" ? parsed.error : response.status === 401 ? "The access token was rejected. Re-open the dashboard from Paseo." : `The dashboard API answered ${response.status}.`;
+      if (response.status === 409) {
+        throw new DashboardWriteConflict(
+          message,
+          parsed !== null && typeof parsed.currentRevision === "number" ? parsed.currentRevision : null
+        );
+      }
+      throw new Error(message);
+    }
+    if (parsed === null) {
+      throw new Error(
+        `The dashboard API returned a non-JSON body for ${pathWithQuery}.`
+      );
+    }
+    return parsed;
   }
   async get(pathWithQuery) {
     const sep = pathWithQuery.includes("?") ? "&" : "?";
@@ -734,6 +834,14 @@ var DashboardApi = class {
     }
   }
 };
+function parseJsonBody(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed !== null && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 function resolveApiOrigin(locationHref) {
   try {
     const url = new URL(locationHref);
@@ -10829,9 +10937,10 @@ function Row(props) {
   ] });
 }
 function NodeDetailContent(props) {
-  const { detail, resolveName } = props;
+  const { detail, resolveName, onSetStatus, pendingStatus, writeError } = props;
   const { node, path, children: children2, bees, bugs, blockingBugs, history, growth, beeCycle } = detail;
   const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
+  const allowed = node.kind === "leaf" && node.archivedAt === null ? LEAF_TRANSITIONS[node.status] : null;
   const progress = growth === null ? null : growthProgress(growth.steps);
   const shownHistory = history.slice(-20).reverse();
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-body", children: [
@@ -10874,6 +10983,46 @@ function NodeDetailContent(props) {
         node.updatedBy ? ` \xB7 ${node.updatedBy}` : ""
       ] })
     ] }),
+    allowed !== null && allowed.length > 0 && onSetStatus !== void 0 ? (
+      /*
+       * Stage L8: the only write a person makes while reading the diagram.
+       * Only the transitions the state machine allows are offered — the
+       * server refuses the rest anyway, and a button that always fails is a
+       * lie about the model. The status is spelled out in text.
+       */
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "lp-details-subtitle", children: "Move" }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "lp-details-status-actions", role: "group", "aria-label": "Move this leaf", children: allowed.map((status) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+          "button",
+          {
+            type: "button",
+            className: "lp-write-button",
+            disabled: pendingStatus !== null && pendingStatus !== void 0,
+            "aria-busy": pendingStatus === status,
+            title: `Move to ${STATUS_LABELS[status]}`,
+            onClick: () => onSetStatus(status),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+                "span",
+                {
+                  className: "lp-details-dot",
+                  style: { backgroundColor: STATUS_COLORS[status] },
+                  "aria-hidden": "true"
+                }
+              ),
+              STATUS_LABELS[status]
+            ]
+          },
+          status
+        )) }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-hint", children: [
+          "Recorded as an audit row with the revision this panel shows (r",
+          detail.node.revision,
+          "); if the leaf moved meanwhile the move is refused instead of overwriting."
+        ] }),
+        writeError !== void 0 && writeError.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "lp-details-error", role: "alert", children: writeError }) : null
+      ] })
+    ) : null,
     beeCycle !== null ? (
       /*
        * L6: the leaf's live bees close a loop. The whole loop is spelled out
@@ -11105,7 +11254,16 @@ function DetailsPanel(props) {
       }
     ),
     /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h2", { className: "lp-details-title", children: "Details" }),
-    error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(NodeDetailContent, { detail, resolveName })
+    error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      NodeDetailContent,
+      {
+        detail,
+        resolveName,
+        onSetStatus: props.onSetStatus,
+        pendingStatus: props.pendingStatus,
+        writeError: props.writeError
+      }
+    )
   ] });
 }
 
@@ -11179,25 +11337,37 @@ function DetailModal(props) {
 // dashboard/src/components/GoalDetailContent.tsx
 var import_jsx_runtime8 = __toESM(require_jsx_runtime());
 function GoalDetailContent(props) {
-  const { goal } = props;
+  const { goal, branches, onApprove, pending, error } = props;
+  const canApprove = canApproveGoal(goal.status);
+  const target = branches !== void 0 && branches.length > 0 ? branches[0] : null;
   return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-body", children: [
     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Goal" }),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "lp-details-path", children: goal.formalText }),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section", children: [
       /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-row", children: [
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-label", children: "Status" }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-value", children: goal.status })
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-details-row-value", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+            "span",
+            {
+              className: "lp-details-dot",
+              style: { backgroundColor: GOAL_STATUS_COLORS[goal.status] },
+              "aria-hidden": "true"
+            }
+          ),
+          GOAL_STATUS_LABELS[goal.status]
+        ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-row", children: [
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-label", children: "Revision" }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-details-row-value", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-details-row-value lp-details-mono", children: [
           "r",
           goal.revision
         ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-row", children: [
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-label", children: "Materialized" }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-value", children: goal.materializedNodeId ?? "not yet" })
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-value", children: goal.materializedNodeId === null ? "not yet" : props.resolveName?.(goal.materializedNodeId) ?? goal.materializedNodeId })
       ] })
     ] }),
     goal.plan.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section", children: [
@@ -11210,6 +11380,33 @@ function GoalDetailContent(props) {
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-child-name", children: step.title }),
         step.description ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-hint", children: step.description }) : null
       ] }, step.id)) })
+    ] }) : null,
+    canApprove && onApprove !== void 0 && target !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Approval" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+        "button",
+        {
+          type: "button",
+          className: "lp-write-button lp-write-button-approve",
+          disabled: pending === true,
+          "aria-busy": pending === true,
+          title: `Grow this goal's ${goal.plan.length} step leaf(s) under \u201C${target.name}\u201D`,
+          onClick: () => onApprove(target.id),
+          children: [
+            "Approve under ",
+            target.name
+          ]
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-details-hint", children: [
+        "Approval is the human's decision (ADR-7): it becomes an",
+        " ",
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("code", { children: "approve" }),
+        " audit row and materializes the plan under the chosen branch. The request carries r",
+        goal.revision,
+        " \u2014 a goal that moved meanwhile is refused instead of overwritten."
+      ] }),
+      error !== void 0 && error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : null
     ] }) : null
   ] });
 }
@@ -12395,6 +12592,76 @@ function App() {
     },
     [tree]
   );
+  const [writePending, setWritePending] = (0, import_react12.useState)(null);
+  const [writeError, setWriteError] = (0, import_react12.useState)("");
+  const [goalPending, setGoalPending] = (0, import_react12.useState)(false);
+  const [goalWriteError, setGoalWriteError] = (0, import_react12.useState)("");
+  const refreshAfterWrite = (0, import_react12.useCallback)(() => {
+    void load();
+    setDetailRefresh((count) => count + 1);
+  }, [load]);
+  const setStatusAction = (0, import_react12.useCallback)(
+    async (status) => {
+      if (client === null || detail === null) return;
+      setWritePending(status);
+      setWriteError("");
+      try {
+        const result = await client.setLeafStatus(detail.node.id, {
+          status,
+          expectedRevision: detail.node.revision
+        });
+        setStatusLine(
+          `${result.node.name} \u2192 ${STATUS_LABELS[result.node.status]} (r${result.node.revision}).`
+        );
+        refreshAfterWrite();
+      } catch (cause) {
+        if (cause instanceof DashboardWriteConflict) {
+          setStatusLine("This leaf moved elsewhere \u2014 reloaded the current state.");
+          refreshAfterWrite();
+        } else {
+          setWriteError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        setWritePending(null);
+      }
+    },
+    [client, detail, refreshAfterWrite]
+  );
+  const approveGoalAction = (0, import_react12.useCallback)(
+    async (goalId, parentBranchId) => {
+      if (client === null || tree === null) return;
+      const goal = tree.goals.find((entry) => entry.id === goalId);
+      if (goal === void 0) return;
+      setGoalPending(true);
+      setGoalWriteError("");
+      try {
+        const result = await client.approveGoal(goalId, {
+          parentBranchId,
+          expectedRevision: goal.revision
+        });
+        setStatusLine(
+          `Goal approved \u2014 materialized under ${resolveName(parentBranchId)}.`
+        );
+        refreshAfterWrite();
+      } catch (cause) {
+        if (cause instanceof DashboardWriteConflict) {
+          setStatusLine("This goal moved elsewhere \u2014 reloaded the current state.");
+          refreshAfterWrite();
+        } else {
+          setGoalWriteError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        setGoalPending(false);
+      }
+    },
+    [client, refreshAfterWrite, resolveName, tree]
+  );
+  const goalBranches = (0, import_react12.useMemo)(
+    () => (tree?.nodes ?? []).filter(
+      (node) => node.archivedAt === null && (node.kind === "branch" || node.kind === "subbranch")
+    ).sort((a, b) => a.name.localeCompare(b.name)).map((node) => ({ id: node.id, name: node.name })),
+    [tree]
+  );
   const filtersActive = isFilterActive(filters);
   const onDetailsWidthChange = (0, import_react12.useCallback)((width) => {
     setDetailsWidth(clampDetailsWidth(width));
@@ -12491,7 +12758,10 @@ function App() {
               width: detailsWidth,
               onWidthChange: onDetailsWidthChange,
               onWidthCommit: onDetailsWidthCommit,
-              onWidthReset: onDetailsWidthReset
+              onWidthReset: onDetailsWidthReset,
+              onSetStatus: client === null ? void 0 : (status) => void setStatusAction(status),
+              pendingStatus: writePending,
+              writeError
             }
           )
         ]
@@ -12507,11 +12777,30 @@ function App() {
           setModal(null);
         },
         children: [
-          modal?.kind === "node" && detail !== null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(NodeDetailContent, { detail, resolveName }) : null,
+          modal?.kind === "node" && detail !== null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+            NodeDetailContent,
+            {
+              detail,
+              resolveName,
+              onSetStatus: client === null ? void 0 : (status) => void setStatusAction(status),
+              pendingStatus: writePending,
+              writeError
+            }
+          ) : null,
           modal?.kind === "node" && detail === null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : null,
           modal?.kind === "goal" && tree !== null ? (() => {
             const goal = tree.goals.find((g) => g.id === modal.id);
-            return goal ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(GoalDetailContent, { goal }) : null;
+            return goal ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+              GoalDetailContent,
+              {
+                goal,
+                resolveName,
+                branches: goalBranches,
+                onApprove: client === null ? void 0 : (parentBranchId) => void approveGoalAction(goal.id, parentBranchId),
+                pending: goalPending,
+                error: goalWriteError
+              }
+            ) : null;
           })() : null,
           modal?.kind === "bug" && tree !== null ? (() => {
             const bug = tree.bugs.find((b) => b.id === modal.id);

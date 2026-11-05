@@ -19,6 +19,7 @@ import { useCallback, useRef } from "react";
 import { NodeDetailContent } from "./NodeDetailContent";
 import type { ReactElement, ReactNode } from "react";
 import type { NodeResponse } from "../../../shared/api";
+import type { LeafStatus } from "../../../shared/tree";
 import { growthProgress } from "../../../shared/growth";
 import {
   BEE_STATUS_COLORS,
@@ -52,6 +53,12 @@ export interface DetailsPanelProps {
   readonly onWidthCommit: (width: number) => void;
   /** Restores the default width (double-click on the edge). */
   readonly onWidthReset: () => void;
+  /** Moves the selected leaf (stage L8); absent without a writable client. */
+  readonly onSetStatus?: (status: LeafStatus) => void;
+  /** The status whose write is in flight (L8). */
+  readonly pendingStatus?: LeafStatus | null;
+  /** The last write refusal for the selected node (L8). */
+  readonly writeError?: string;
 }
 
 /** "18.10.2026, 14:03" — short local timestamp for the history rows. */
@@ -167,7 +174,13 @@ export function DetailsPanel(props: DetailsPanelProps): ReactElement {
           influence links, incidents and history here.
         </p>
       ) : (
-        <NodeDetailContent detail={detail} resolveName={resolveName} />
+        <NodeDetailContent
+          detail={detail}
+          resolveName={resolveName}
+          onSetStatus={props.onSetStatus}
+          pendingStatus={props.pendingStatus}
+          writeError={props.writeError}
+        />
       )}
     </aside>
   );

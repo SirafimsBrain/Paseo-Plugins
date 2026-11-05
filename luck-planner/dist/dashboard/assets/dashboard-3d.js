@@ -24,7 +24,7 @@ import {
   require_jsx_runtime,
   require_react,
   require_with_selector
-} from "./chunk-chunk-4FUG2TGZ.js";
+} from "./chunk-chunk-QX7XIFHJ.js";
 import {
   __commonJS,
   __export,

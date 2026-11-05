@@ -643,6 +643,45 @@ body {
   gap: 6px;
 }
 
+/* L8 — the write controls. Buttons, not a hover affordance: the two decisions
+   the dashboard may make have to be findable, and the status colour sits next
+   to the status *name* (never colour alone). */
+.lp-details-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lp-write-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--lp-border, #262b36);
+  background: var(--lp-surface, #171a21);
+  color: var(--lp-text, #e6e9ef);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lp-write-button:hover:not(:disabled) {
+  border-color: var(--lp-accent, #5b9dff);
+  background: var(--lp-selection, rgba(91, 157, 255, 0.16));
+}
+
+.lp-write-button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.lp-write-button-approve {
+  align-self: flex-start;
+  border-color: var(--lp-accent, #5b9dff);
+  font-weight: 600;
+}
+
 .lp-details-subtitle {
   margin: 0;
   font-size: 11px;

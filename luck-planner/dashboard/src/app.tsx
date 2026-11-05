@@ -62,8 +62,13 @@ import {
   type StatsResponse,
   type TreeResponse,
 } from "../../shared/api";
-import { DashboardApi, resolveApiOrigin } from "./api";
+import {
+  DashboardApi,
+  DashboardWriteConflict,
+  resolveApiOrigin,
+} from "./api";
 import { KIND_LABELS, STATUS_LABELS } from "./colors";
+import type { LeafStatus } from "../../shared/tree";
 import {
   ancestorsOf,
   buildGraph,
@@ -755,6 +760,93 @@ export function App(): ReactElement {
     [tree],
   );
 
+  /**
+   * Stage L8 — the two writes. Both send the revision the tab rendered and
+   * treat a conflict as "the world moved": refetch and say so, instead of
+   * asking the user to try again against data that is already stale.
+   */
+  const [writePending, setWritePending] = useState<LeafStatus | null>(null);
+  const [writeError, setWriteError] = useState("");
+  const [goalPending, setGoalPending] = useState(false);
+  const [goalWriteError, setGoalWriteError] = useState("");
+
+  const refreshAfterWrite = useCallback((): void => {
+    void load();
+    setDetailRefresh((count) => count + 1);
+  }, [load]);
+
+  const setStatusAction = useCallback(
+    async (status: LeafStatus): Promise<void> => {
+      if (client === null || detail === null) return;
+      setWritePending(status);
+      setWriteError("");
+      try {
+        const result = await client.setLeafStatus(detail.node.id, {
+          status,
+          expectedRevision: detail.node.revision,
+        });
+        setStatusLine(
+          `${result.node.name} → ${STATUS_LABELS[result.node.status]} (r${result.node.revision}).`,
+        );
+        refreshAfterWrite();
+      } catch (cause) {
+        if (cause instanceof DashboardWriteConflict) {
+          setStatusLine("This leaf moved elsewhere — reloaded the current state.");
+          refreshAfterWrite();
+        } else {
+          setWriteError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        setWritePending(null);
+      }
+    },
+    [client, detail, refreshAfterWrite],
+  );
+
+  const approveGoalAction = useCallback(
+    async (goalId: string, parentBranchId: string): Promise<void> => {
+      if (client === null || tree === null) return;
+      const goal = tree.goals.find((entry) => entry.id === goalId);
+      if (goal === undefined) return;
+      setGoalPending(true);
+      setGoalWriteError("");
+      try {
+        const result = await client.approveGoal(goalId, {
+          parentBranchId,
+          expectedRevision: goal.revision,
+        });
+        setStatusLine(
+          `Goal approved — materialized under ${resolveName(parentBranchId)}.`,
+        );
+        refreshAfterWrite();
+      } catch (cause) {
+        if (cause instanceof DashboardWriteConflict) {
+          setStatusLine("This goal moved elsewhere — reloaded the current state.");
+          refreshAfterWrite();
+        } else {
+          setGoalWriteError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        setGoalPending(false);
+      }
+    },
+    [client, refreshAfterWrite, resolveName, tree],
+  );
+
+  /** Branches a goal may grow its side branch under (stage L8). */
+  const goalBranches = useMemo(
+    () =>
+      (tree?.nodes ?? [])
+        .filter(
+          (node) =>
+            node.archivedAt === null &&
+            (node.kind === "branch" || node.kind === "subbranch"),
+        )
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((node) => ({ id: node.id, name: node.name })),
+    [tree],
+  );
+
   const filtersActive = isFilterActive(filters);
 
   /** A new width while the user drags the panel's edge. */
@@ -861,6 +953,9 @@ export function App(): ReactElement {
             onWidthChange={onDetailsWidthChange}
             onWidthCommit={onDetailsWidthCommit}
             onWidthReset={onDetailsWidthReset}
+            onSetStatus={client === null ? undefined : (status) => void setStatusAction(status)}
+            pendingStatus={writePending}
+            writeError={writeError}
           />
         )}
       </div>
@@ -881,7 +976,15 @@ export function App(): ReactElement {
         }}
       >
         {modal?.kind === "node" && detail !== null ? (
-          <NodeDetailContent detail={detail} resolveName={resolveName} />
+          <NodeDetailContent
+            detail={detail}
+            resolveName={resolveName}
+            onSetStatus={
+              client === null ? undefined : (status) => void setStatusAction(status)
+            }
+            pendingStatus={writePending}
+            writeError={writeError}
+          />
         ) : null}
         {modal?.kind === "node" && detail === null ? (
           <p className="lp-details-empty">Loading…</p>
@@ -889,7 +992,21 @@ export function App(): ReactElement {
         {modal?.kind === "goal" && tree !== null
           ? (() => {
               const goal = tree.goals.find((g) => g.id === modal.id);
-              return goal ? <GoalDetailContent goal={goal} /> : null;
+              return goal ? (
+                <GoalDetailContent
+                  goal={goal}
+                  resolveName={resolveName}
+                  branches={goalBranches}
+                  onApprove={
+                    client === null
+                      ? undefined
+                      : (parentBranchId) =>
+                          void approveGoalAction(goal.id, parentBranchId)
+                  }
+                  pending={goalPending}
+                  error={goalWriteError}
+                />
+              ) : null;
             })()
           : null}
         {modal?.kind === "bug" && tree !== null

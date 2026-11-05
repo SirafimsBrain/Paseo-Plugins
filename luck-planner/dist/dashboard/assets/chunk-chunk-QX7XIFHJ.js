@@ -32161,6 +32161,16 @@ var leafStatusSchema = external_exports.enum([
   "superseded"
 ]);
 var LEAF_STATUSES = leafStatusSchema.options;
+var LEAF_TRANSITIONS = {
+  draft: ["ready", "cancelled", "superseded"],
+  ready: ["claimed", "cancelled", "superseded"],
+  claimed: ["in_progress", "cancelled", "superseded"],
+  in_progress: ["blocked", "done", "cancelled", "superseded"],
+  blocked: ["in_progress", "cancelled", "superseded"],
+  done: ["superseded"],
+  cancelled: [],
+  superseded: []
+};
 var nodeSchema = external_exports.object({
   id: idSchema,
   projectKey: projectKeySchema,
@@ -32221,6 +32231,9 @@ var goalStatusSchema = external_exports.enum([
   "superseded"
 ]);
 var GOAL_STATUSES = goalStatusSchema.options;
+function canApproveGoal(status) {
+  return status === "proposed";
+}
 var goalStepSchema = external_exports.object({
   id: external_exports.string().min(1),
   title: external_exports.string().min(1),
@@ -34029,9 +34042,11 @@ export {
   NODE_KINDS,
   leafStatusSchema,
   LEAF_STATUSES,
+  LEAF_TRANSITIONS,
   nodeSchema,
   historyEntrySchema,
   GOAL_STATUSES,
+  canApproveGoal,
   goalStepSchema,
   goalSchema,
   growthSubjectTypeSchema,

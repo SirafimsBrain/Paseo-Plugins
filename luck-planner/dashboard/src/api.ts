@@ -14,7 +14,10 @@
  * renders them in the toolbar status line.
  */
 import {
+  goalApproveRequestSchema,
+  goalApproveResponseSchema,
   healthResponseSchema,
+  leafStatusResponseSchema,
   nodeResponseSchema,
   searchResponseSchema,
   statsResponseSchema,
@@ -28,7 +31,13 @@ import {
   DASHBOARD_TOKEN_PARAM,
   DASHBOARD_THEMES_PATH,
   DASHBOARD_TREE_PATH,
+  goalApprovePath,
+  nodeStatusPath,
   themesResponseSchema,
+  type GoalApproveRequest,
+  type GoalApproveResponse,
+  type LeafStatusRequest,
+  type LeafStatusResponse,
   type NodeResponse,
   type SearchResponse,
   type StatsResponse,
@@ -45,13 +54,39 @@ export interface DashboardSearchInput {
   readonly includeArchived?: boolean;
 }
 
-/** A typed, transport-free view of the read-only dashboard API. */
+/**
+ * A write lost a race (stage L8): the row moved to a revision this tab never
+ * rendered. Not a failure the user can fix by pressing again — the change is
+ * already on disk — so the app refetches instead of reporting an error.
+ */
+export class DashboardWriteConflict extends Error {
+  constructor(
+    message: string,
+    /** The revision that is current now, when the server named one. */
+    readonly currentRevision: number | null,
+  ) {
+    super(message);
+    this.name = "DashboardWriteConflict";
+  }
+}
+
+/** A typed, transport-free view of the dashboard API. */
 export interface DashboardClient {
   tree(): Promise<TreeResponse>;
   node(id: string): Promise<NodeResponse>;
   search(input: DashboardSearchInput): Promise<SearchResponse>;
   stats(): Promise<StatsResponse>;
   themes(): Promise<ThemeCatalog>;
+  /** Moves a leaf through its state machine (stage L8). */
+  setLeafStatus(
+    nodeId: string,
+    input: LeafStatusRequest,
+  ): Promise<LeafStatusResponse>;
+  /** Crosses a goal's approval gate (stage L8). */
+  approveGoal(
+    goalId: string,
+    input: GoalApproveRequest,
+  ): Promise<GoalApproveResponse>;
 }
 
 /**
@@ -111,6 +146,31 @@ export class DashboardApi implements DashboardClient {
   }
 
   /**
+   * The two writes (stage L8). Both carry the token in the **header** — a URL
+   * is a screenshot — and the project in the query string, the way the reads
+   * are scoped. A 409 becomes {@link DashboardWriteConflict} so the app can
+   * tell "someone else moved it" apart from "the server said no".
+   */
+  async setLeafStatus(
+    nodeId: string,
+    input: LeafStatusRequest,
+  ): Promise<LeafStatusResponse> {
+    return leafStatusResponseSchema.parse(
+      await this.post(`${nodeStatusPath(nodeId)}?${this.writeQuery()}`, input),
+    );
+  }
+
+  async approveGoal(
+    goalId: string,
+    input: GoalApproveRequest,
+  ): Promise<GoalApproveResponse> {
+    const body = goalApproveRequestSchema.parse(input);
+    return goalApproveResponseSchema.parse(
+      await this.post(`${goalApprovePath(goalId)}?${this.writeQuery()}`, body),
+    );
+  }
+
+  /**
    * Liveness probe without the token (`/health` is public, ADR-9). Used by the
    * app to detect a stale tab whose server has been restarted on another port.
    */
@@ -132,6 +192,63 @@ export class DashboardApi implements DashboardClient {
       [DASHBOARD_PROJECT_PARAM]: this.projectKey,
     });
     return `${this.origin}${DASHBOARD_EVENTS_PATH}?${query.toString()}`;
+  }
+
+  /** `project=…` for a write: the scope of the tab, not a secret. */
+  private writeQuery(): string {
+    return `${DASHBOARD_PROJECT_PARAM}=${encodeURIComponent(this.projectKey)}`;
+  }
+
+  /**
+   * One write request. Headers, not the query: the token cannot leak through
+   * the address bar, and `Content-Type: application/json` is what the server
+   * requires to rule out a form post from another page.
+   */
+  private async post(pathWithQuery: string, body: unknown): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl.call(
+        globalThis,
+        `${this.origin}${pathWithQuery}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        },
+      );
+    } catch (cause) {
+      throw new Error(
+        `The plugin server is not reachable at ${this.origin} (${cause instanceof Error ? cause.message : String(cause)}).`,
+      );
+    }
+    const text = await response.text();
+    const parsed = parseJsonBody(text);
+    if (!response.ok) {
+      const message =
+        parsed !== null && typeof parsed.error === "string"
+          ? parsed.error
+          : response.status === 401
+            ? "The access token was rejected. Re-open the dashboard from Paseo."
+            : `The dashboard API answered ${response.status}.`;
+      if (response.status === 409) {
+        throw new DashboardWriteConflict(
+          message,
+          parsed !== null && typeof parsed.currentRevision === "number"
+            ? parsed.currentRevision
+            : null,
+        );
+      }
+      throw new Error(message);
+    }
+    if (parsed === null) {
+      throw new Error(
+        `The dashboard API returned a non-JSON body for ${pathWithQuery}.`,
+      );
+    }
+    return parsed;
   }
 
   private async get(pathWithQuery: string): Promise<unknown> {
@@ -166,6 +283,18 @@ export class DashboardApi implements DashboardClient {
     } catch {
       throw new Error(`The dashboard API returned a non-JSON body for ${pathWithQuery}.`);
     }
+  }
+}
+
+/** The parsed JSON body, or `null` when the body was not JSON at all. */
+function parseJsonBody(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed !== null && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
   }
 }
 

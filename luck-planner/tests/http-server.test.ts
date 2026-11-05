@@ -8,12 +8,16 @@ import {
   DASHBOARD_EVENT_READY,
   DASHBOARD_EVENT_TREE_CHANGED,
   dashboardUrl,
+  goalApproveResponseSchema,
+  leafStatusResponseSchema,
   nodeResponseSchema,
   searchResponseSchema,
   statsResponseSchema,
   themesResponseSchema,
   treeResponseSchema,
+  writeErrorSchema,
 } from "../shared/api";
+import { UI_ACTOR } from "../shared/rpc";
 import {
   DEFAULT_DASHBOARD_HOST,
   DashboardHttpServer,
@@ -194,6 +198,39 @@ function get(pathname: string, token: string | null = TOKEN): Promise<Response> 
   const url = new URL(`${base}${pathname}`);
   if (token !== null) url.searchParams.set("token", token);
   return fetch(url);
+}
+
+/**
+ * POST as the dashboard sends it (stage L8): the token in the header, the
+ * project in the query, `Origin` naming this very server. Each test breaks one
+ * of those on purpose.
+ */
+function post(
+  pathname: string,
+  body: unknown,
+  options: {
+    token?: string | null;
+    origin?: string | null;
+    contentType?: string | null;
+    raw?: string;
+    project?: string | null;
+  } = {},
+): Promise<Response> {
+  const url = new URL(`${base}${pathname}`);
+  const project = options.project === undefined ? P : options.project;
+  if (project !== null) url.searchParams.set("project", project);
+  const headers: Record<string, string> = {};
+  const token = options.token === undefined ? TOKEN : options.token;
+  if (token !== null) headers.Authorization = `Bearer ${token}`;
+  const origin = options.origin === undefined ? base : options.origin;
+  if (origin !== null) headers.Origin = origin;
+  const contentType = options.contentType === undefined ? "application/json" : options.contentType;
+  if (contentType !== null) headers["Content-Type"] = contentType;
+  return fetch(url, {
+    method: "POST",
+    headers,
+    body: options.raw ?? JSON.stringify(body),
+  });
 }
 
 describe("response builders (pure)", () => {
@@ -430,6 +467,200 @@ describe("DashboardHttpServer", () => {
     await boot();
     const res = await get("/api/themes", null);
     expect(res.status).toBe(401);
+  });
+
+  // ── Stage L8: the two writes ───────────────────────────────────────────
+
+  it("moves a leaf through its state machine and answers the node", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+
+    const res = await post(`/api/node/${encodeURIComponent(leafA.id)}/status`, {
+      status: "ready",
+      expectedRevision: leafA.revision,
+    });
+    expect(res.status).toBe(200);
+    const answer = leafStatusResponseSchema.parse(await res.json());
+    expect(answer.node.status).toBe("ready");
+    expect(answer.node.revision).toBe(leafA.revision + 1);
+    // The human writes as `user`, the same actor the panel uses.
+    expect(answer.node.updatedBy).toBe(UI_ACTOR);
+
+    const read = await get(`/api/node/${encodeURIComponent(leafA.id)}?project=${encodeURIComponent(P)}`);
+    expect(nodeResponseSchema.parse(await read.json()).node.status).toBe("ready");
+    expect(store.listHistory(P, leafA.id).at(-1)).toMatchObject({
+      action: "status",
+      actor: UI_ACTOR,
+      result: "draft → ready",
+    });
+  });
+
+  it("refuses a stale revision with 409 and leaves the row alone", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+    const path = `/api/node/${encodeURIComponent(leafA.id)}/status`;
+
+    expect((await post(path, { status: "ready", expectedRevision: leafA.revision })).status).toBe(200);
+    const historyBefore = store.listHistory(P, leafA.id).length;
+
+    const stale = await post(path, { status: "claimed", expectedRevision: leafA.revision });
+    expect(stale.status).toBe(409);
+    const body = writeErrorSchema.parse(await stale.json());
+    expect(body.currentRevision).toBe(leafA.revision + 1);
+    expect(body.error).toMatch(/moved to revision/);
+
+    expect(store.getNode(P, leafA.id)?.status).toBe("ready");
+    expect(store.listHistory(P, leafA.id)).toHaveLength(historyBefore);
+  });
+
+  it("accepts a write without an expectedRevision (scripts, additivity)", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+    const res = await post(`/api/node/${encodeURIComponent(leafA.id)}/status`, {
+      status: "ready",
+    });
+    expect(res.status).toBe(200);
+    expect(store.getNode(P, leafA.id)?.status).toBe("ready");
+  });
+
+  it("only accepts the token from the header on a write", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+    const path = `/api/node/${encodeURIComponent(leafA.id)}/status`;
+
+    const queryOnly = await post(path, { status: "ready" }, { token: null });
+    expect(queryOnly.status).toBe(401);
+    expect(store.getNode(P, leafA.id)?.status).toBe("draft");
+
+    // The same token in the query string is fine for a *read*, never here.
+    const read = await get(`/api/node/${encodeURIComponent(leafA.id)}?project=${encodeURIComponent(P)}`);
+    expect(read.status).toBe(200);
+  });
+
+  it("refuses a foreign or missing Origin, and a non-JSON body", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+    const path = `/api/node/${encodeURIComponent(leafA.id)}/status`;
+
+    const foreign = await post(path, { status: "ready" }, { origin: "http://evil.example" });
+    expect(foreign.status).toBe(403);
+
+    const missing = await post(path, { status: "ready" }, { origin: null });
+    expect(missing.status).toBe(403);
+
+    // An HTML form can send this content type, a browser cannot forge the JSON one.
+    const form = await post(path, { status: "ready" }, { contentType: "text/plain" });
+    expect(form.status).toBe(415);
+
+    expect(store.getNode(P, leafA.id)?.status).toBe("draft");
+  });
+
+  it("answers 405 for a non-POST, 404 for an unknown node, 400 for a bad move", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+    const path = `/api/node/${encodeURIComponent(leafA.id)}/status`;
+
+    // Authenticated first, then the method: a GET with the header still fails
+    // the method, and the answer names the one that works.
+    const method = await fetch(
+      `${base}${path}?project=${encodeURIComponent(P)}`,
+      { headers: { Authorization: `Bearer ${TOKEN}` } },
+    );
+    expect(method.status).toBe(405);
+    expect(method.headers.get("allow")).toBe("POST");
+
+    const unknown = await post(
+      `/api/node/00000000-0000-4000-8000-000000000000/status`,
+      { status: "ready" },
+    );
+    expect(unknown.status).toBe(404);
+
+    const forbidden = await post(path, { status: "done" });
+    expect(forbidden.status).toBe(400);
+    expect(writeErrorSchema.parse(await forbidden.json()).error).toMatch(
+      /invalid status transition/,
+    );
+
+    const badStatus = await post(path, { status: "nope" });
+    expect(badStatus.status).toBe(400);
+    expect(writeErrorSchema.parse(await badStatus.json()).error).toMatch(/status/);
+
+    expect(store.getNode(P, leafA.id)?.status).toBe("draft");
+  });
+
+  it("rejects a malformed body, a missing project and an oversized one", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+    const path = `/api/node/${encodeURIComponent(leafA.id)}/status`;
+
+    const malformed = await post(path, null, { raw: "{ nope" });
+    expect(malformed.status).toBe(400);
+    expect(writeErrorSchema.parse(await malformed.json()).error).toMatch(
+      /not valid JSON/,
+    );
+
+    const noProject = await post(path, { status: "ready" }, { project: null });
+    expect(noProject.status).toBe(400);
+
+    const huge = await post(path, null, {
+      raw: JSON.stringify({ status: "ready", pad: "x".repeat(20 * 1024) }),
+    });
+    expect(huge.status).toBe(413);
+    expect(store.getNode(P, leafA.id)?.status).toBe("draft");
+  });
+
+  it("approves a proposed goal and materializes its plan", async () => {
+    await boot();
+    const { branch, leafA, leafB } = seedTree(store);
+    const { goal } = seedRelations(store, leafA, leafB);
+
+    const res = await post(`/api/goal/${encodeURIComponent(goal.id)}/approve`, {
+      parentBranchId: branch.id,
+      expectedRevision: goal.revision,
+    });
+    expect(res.status).toBe(200);
+    const answer = goalApproveResponseSchema.parse(await res.json());
+    expect(answer.goal.status).toBe("approved");
+    expect(answer.goal.materializedNodeId).not.toBeNull();
+
+    const tree = treeResponseSchema.parse(
+      await (await get(`/api/tree?project=${encodeURIComponent(P)}`)).json(),
+    );
+    const names = tree.nodes.map((node) => node.name);
+    expect(names).toContain("migrate charges");
+    expect(names).toContain("backfill worker");
+
+    // A second approval of the same goal is a stale revision, not a duplicate crop.
+    const again = await post(`/api/goal/${encodeURIComponent(goal.id)}/approve`, {
+      parentBranchId: branch.id,
+      expectedRevision: goal.revision,
+    });
+    expect(again.status).toBe(409);
+  });
+
+  it("broadcasts the write to its own project's streams", async () => {
+    await boot();
+    const { leafA } = seedTree(store);
+    const controller = new AbortController();
+    const res = await fetch(
+      `${base}/api/events?token=${TOKEN}&project=${encodeURIComponent(P)}`,
+      { signal: controller.signal },
+    );
+    const reader = res.body!.getReader() as unknown as SseReader;
+    const buffer = { text: "" };
+    await readUntil(reader, `event: ${DASHBOARD_EVENT_READY}`, buffer);
+    try {
+      const write = await post(`/api/node/${encodeURIComponent(leafA.id)}/status`, {
+        status: "ready",
+        expectedRevision: leafA.revision,
+      });
+      expect(write.status).toBe(200);
+      await readUntil(reader, `event: ${DASHBOARD_EVENT_TREE_CHANGED}`, buffer);
+      expect(buffer.text).toContain(`"entityId":"${leafA.id}"`);
+      expect(buffer.text).toContain('"action":"status"');
+    } finally {
+      controller.abort();
+    }
   });
 
   it("streams /api/export as a zip download that parses back to the project", async () => {

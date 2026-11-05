@@ -9,23 +9,31 @@ import {
 import {
   DASHBOARD_EVENTS_PATH,
   DASHBOARD_EVENT_READY,
+  DASHBOARD_EVENT_TREE_CHANGED,
   DASHBOARD_EXPORT_HISTORY_PARAM,
   DASHBOARD_EXPORT_PATH,
+  DASHBOARD_GOAL_PATH,
   DASHBOARD_HEALTH_PATH,
   DASHBOARD_NODE_PATH,
   DASHBOARD_PROJECT_PARAM,
   DASHBOARD_SEARCH_PATH,
   DASHBOARD_STATS_PATH,
-  DASHBOARD_TOKEN_PARAM,
   DASHBOARD_THEMES_PATH,
+  DASHBOARD_TOKEN_PARAM,
   DASHBOARD_TREE_PATH,
   dashboardUrl,
+  goalApproveRequestSchema,
+  leafStatusRequestSchema,
+  type GoalApproveResponse,
   type HealthResponse,
+  type LeafStatusResponse,
   type NodeResponse,
   type ReadyEvent,
   type SearchResponse,
   type StatsResponse,
+  type TreeChangedEvent,
   type TreeResponse,
+  type WriteError,
 } from "../shared/api";
 import { EXPORT_CONTENT_TYPE, exportFileName } from "../shared/export";
 import {
@@ -39,10 +47,23 @@ import {
   buildExportDocument,
   exportZipBytes,
 } from "./export";
+import { UI_ACTOR } from "../shared/rpc";
 import { nodeBeeCycle } from "./bees";
 import { resolveThemesDir } from "./plugin-paths";
 import { defaultThemeDir, loadThemeCatalog } from "./themes";
-import type { LuckPlannerStore } from "./store";
+import { StaleRevisionError, type LuckPlannerStore } from "./store";
+
+/** One readable line out of a zod failure, shaped like the MCP error text. */
+function issueMessage(error: {
+  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>;
+}): string {
+  return error.issues
+    .map(
+      (issue) =>
+        `${issue.path.map(String).join(".") || "body"}: ${issue.message}`,
+    )
+    .join("; ");
+}
 
 /**
  * Dashboard HTTP server (PLAN.md stage F1, `__doc.md` §6).
@@ -74,6 +95,93 @@ export const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 
 /** Heartbeat interval for idle SSE streams (proxies drop silent sockets). */
 const SSE_HEARTBEAT_MS = 15_000;
+
+/**
+ * Largest write body the dashboard may send (stage L8). A status move is ~70
+ * bytes and a goal approval ~120 — the cap exists so a bug (or a hostile local
+ * page that got past everything else) cannot make the server buffer a file.
+ */
+const MAX_WRITE_BODY_BYTES = 16 * 1024;
+
+/** The two writes the dashboard may make (stage L8). */
+type WriteRoute =
+  | { readonly kind: "node-status"; readonly id: string }
+  | { readonly kind: "goal-approve"; readonly id: string };
+
+/** One path segment, decoded; `null` for an empty or malformed one. */
+function decodeSegment(raw: string): string | null {
+  try {
+    const value = decodeURIComponent(raw);
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Recognises a write route, or answers `null` for anything else.
+ *
+ * Deliberately **not** a generic router: the browser gets exactly two
+ * decisions (a leaf's status, a goal's approval) and every other path stays on
+ * the read-only side. A malformed id is not a route — it falls through to the
+ * read path and is refused there.
+ */
+function parseWriteRoute(pathname: string): WriteRoute | null {
+  const statusSuffix = "/status";
+  if (
+    pathname.startsWith(`${DASHBOARD_NODE_PATH}/`) &&
+    pathname.endsWith(statusSuffix)
+  ) {
+    const id = decodeSegment(
+      pathname.slice(
+        DASHBOARD_NODE_PATH.length + 1,
+        pathname.length - statusSuffix.length,
+      ),
+    );
+    return id === null ? null : { kind: "node-status", id };
+  }
+  const approveSuffix = "/approve";
+  if (
+    pathname.startsWith(`${DASHBOARD_GOAL_PATH}/`) &&
+    pathname.endsWith(approveSuffix)
+  ) {
+    const id = decodeSegment(
+      pathname.slice(
+        DASHBOARD_GOAL_PATH.length + 1,
+        pathname.length - approveSuffix.length,
+      ),
+    );
+    return id === null ? null : { kind: "goal-approve", id };
+  }
+  return null;
+}
+
+/**
+ * Whether a write comes from this very origin (stage L8, ADR-8).
+ *
+ * `Origin` is compared to the request's own `Host`, so the rule holds on
+ * loopback, on a custom port and behind a tunnel without a configured allowlist.
+ * A missing or unparsable `Origin` is a refusal: every browser sends it on a
+ * cross-origin POST, and the only legitimate writer *is* the tab this server
+ * served. `Origin: null` (a `file://` page) fails the same way.
+ */
+function sameOrigin(req: http.IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  const host = req.headers.host;
+  if (typeof origin !== "string" || typeof host !== "string") return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
+/** `application/json` (charset ignored) — what an HTML form cannot send. */
+function jsonContentType(req: http.IncomingMessage): boolean {
+  const header = req.headers["content-type"];
+  if (typeof header !== "string") return false;
+  return header.split(";")[0]!.trim().toLowerCase() === "application/json";
+}
 
 /**
  * Resolves the plugin version for `GET /health` from `package.json`. The
@@ -436,6 +544,40 @@ export class DashboardHttpServer {
     const isApi = url.pathname.startsWith("/api/");
 
     if (isApi) {
+      const write = parseWriteRoute(url.pathname);
+      if (write !== null) {
+        // Stage L8 — the two writes the dashboard may make. The order is the
+        // whole security model, so it is checked top to bottom:
+        // 1) the token from the **header only** (a query token leaks into
+        //    history, logs and screenshots and must never grant a write);
+        // 2) `POST` (a navigation or an `<img>` cannot reach this);
+        // 3) `Origin` equal to this very host (a foreign page cannot forge it,
+        //    and browsers always send it on a cross-origin POST);
+        // 4) `application/json` (an HTML form cannot set it).
+        if (!this.authorizedHeader(req)) {
+          this.sendJson(res, 401, { error: "unauthorized" });
+          return;
+        }
+        if (req.method !== "POST") {
+          res.setHeader("Allow", "POST");
+          this.sendJson(res, 405, { error: "method not allowed" });
+          return;
+        }
+        if (!sameOrigin(req)) {
+          this.sendJson(res, 403, {
+            error: "a write is only accepted from this dashboard's own origin",
+          });
+          return;
+        }
+        if (!jsonContentType(req)) {
+          this.sendJson(res, 415, {
+            error: "a write body must be application/json",
+          });
+          return;
+        }
+        this.handleWrite(req, res, url, write);
+        return;
+      }
       // Every `/api/*` path — known or not — is authenticated first, so the
       // route table is not exposed to an unauthenticated local caller.
       if (!this.authorized(req, url)) {
@@ -476,6 +618,180 @@ export class DashboardHttpServer {
     // lengths, so a mismatch short-circuits before the comparison.
     if (expected.length !== actual.length) return false;
     return timingSafeEqual(expected, actual);
+  }
+
+  /**
+   * Whether the **header** carries the token. Writes (stage L8) accept nothing
+   * else: a token in a URL is a token in the browser history, the daemon log
+   * and any screenshot of the address bar, which is survivable for a read-only
+   * API and not for a write path.
+   */
+  private authorizedHeader(req: http.IncomingMessage): boolean {
+    const header = req.headers.authorization;
+    if (typeof header !== "string") return false;
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    return match !== null && this.tokenMatches(match[1]!.trim());
+  }
+
+  /**
+   * One write request, after the four transport checks (stage L8).
+   *
+   * The project rides in the query string exactly as it does for the reads,
+   * because the body belongs to the entity and the scope belongs to the tab.
+   */
+  private handleWrite(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL,
+    route: WriteRoute,
+  ): void {
+    const project = url.searchParams.get(DASHBOARD_PROJECT_PARAM);
+    if (project === null || project.length === 0) {
+      this.sendJson(res, 400, {
+        error: `the \"${DASHBOARD_PROJECT_PARAM}\" query parameter is required`,
+      });
+      return;
+    }
+    this.readJsonBody(req, res, (body) => this.applyWrite(res, project, route, body));
+  }
+
+  /** Reads a capped JSON body; every failure is answered, never thrown. */
+  private readJsonBody(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    onBody: (body: unknown) => void,
+  ): void {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let settled = false;
+
+    const fail = (status: number, message: string): void => {
+      if (settled) return;
+      settled = true;
+      this.sendJson(res, status, { error: message });
+      req.destroy();
+    };
+
+    req.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      size += chunk.byteLength;
+      if (size > MAX_WRITE_BODY_BYTES) {
+        fail(413, `a write body may not exceed ${MAX_WRITE_BODY_BYTES} bytes`);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("error", () => fail(400, "the request body could not be read"));
+    req.on("end", () => {
+      if (settled) return;
+      settled = true;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        this.sendJson(res, 400, { error: "the write body is not valid JSON" });
+        return;
+      }
+      onBody(parsed);
+    });
+  }
+
+  /**
+   * The write itself (stage L8).
+   *
+   * A missing entity answers 404 *before* the store is asked to mutate: the
+   * store's "not found" and its "invalid transition" are both plain errors,
+   * and a route answering 400 for an unknown id would be a lie. Everything the
+   * store refuses after that is a client error (400) — except a stale
+   * revision, which is a 409 with the revision that is current now, so the tab
+   * can refetch and show what actually happened.
+   */
+  private applyWrite(
+    res: http.ServerResponse,
+    projectKey: string,
+    route: WriteRoute,
+    body: unknown,
+  ): void {
+    const watermark = this.store.latestHistoryId();
+    try {
+      if (route.kind === "node-status") {
+        const parsed = leafStatusRequestSchema.safeParse(body);
+        if (!parsed.success) {
+          this.sendJson(res, 400, { error: issueMessage(parsed.error) });
+          return;
+        }
+        if (this.store.getNode(projectKey, route.id) === null) {
+          this.sendJson(res, 404, { error: "not found" });
+          return;
+        }
+        const node = this.store.setStatus({
+          projectKey,
+          id: route.id,
+          status: parsed.data.status,
+          actor: UI_ACTOR,
+          ...(parsed.data.expectedRevision === undefined
+            ? {}
+            : { expectedRevision: parsed.data.expectedRevision }),
+        });
+        this.afterWrite(projectKey, watermark);
+        const response: LeafStatusResponse = { ok: true, node };
+        this.sendJson(res, 200, response);
+        return;
+      }
+
+      const parsed = goalApproveRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        this.sendJson(res, 400, { error: issueMessage(parsed.error) });
+        return;
+      }
+      if (this.store.getGoal(projectKey, route.id) === null) {
+        this.sendJson(res, 404, { error: "not found" });
+        return;
+      }
+      const goal = this.store.approveGoal({
+        projectKey,
+        id: route.id,
+        parentBranchId: parsed.data.parentBranchId,
+        actor: UI_ACTOR,
+        ...(parsed.data.expectedRevision === undefined
+          ? {}
+          : { expectedRevision: parsed.data.expectedRevision }),
+      });
+      this.afterWrite(projectKey, watermark);
+      const response: GoalApproveResponse = { ok: true, goal };
+      this.sendJson(res, 200, response);
+    } catch (cause) {
+      if (cause instanceof StaleRevisionError) {
+        const response: WriteError = {
+          error: cause.message,
+          currentRevision: cause.current,
+        };
+        this.sendJson(res, 409, response);
+        return;
+      }
+      this.sendJson(res, 400, {
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
+
+  /**
+   * Pushes the rows this write appended to every open stream (stage L8), so a
+   * second tab — or the same tab's other view — repaints without waiting for
+   * its next poll. The payload is the same `tree-changed` event the change
+   * feed sends: one shape for "what happened", whoever wrote it.
+   */
+  private afterWrite(projectKey: string, watermark: number): void {
+    const changes = this.store
+      .listChangesSince(watermark)
+      .filter((row) => row.projectKey === projectKey);
+    if (changes.length === 0) return;
+    const event: TreeChangedEvent = {
+      projectKey,
+      watermark: changes[changes.length - 1]!.id,
+      changes,
+    };
+    this.broadcast(DASHBOARD_EVENT_TREE_CHANGED, event, projectKey);
   }
 
   private handleApi(url: URL, res: http.ServerResponse): void {

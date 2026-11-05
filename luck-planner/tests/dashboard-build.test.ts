@@ -356,6 +356,52 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(js).toContain("/api/themes");
     expect(js).toContain("lp-toolbar-theme");
   });
+
+  it("writes only the two human decisions, with the revision it rendered", () => {
+    // L8: the browser gets exactly two writes, both optimistic. A client that
+    // forgot `expectedRevision` would overwrite an agent's change silently.
+    const api = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "api.ts"),
+      "utf8",
+    );
+    expect(api).toContain("nodeStatusPath(nodeId)");
+    expect(api).toContain("goalApprovePath(goalId)");
+    expect(api).toContain("DashboardWriteConflict");
+    expect(api).toContain("Authorization: `Bearer ${this.token}`");
+
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("client.setLeafStatus(");
+    expect(app).toContain("client.approveGoal(");
+    expect(app).toContain("expectedRevision: detail.node.revision");
+    expect(app).toContain("expectedRevision: goal.revision");
+
+    const detail = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "NodeDetailContent.tsx"),
+      "utf8",
+    );
+    // Only the transitions the state machine allows are offered at all.
+    expect(detail).toContain("LEAF_TRANSITIONS[node.status]");
+    expect(detail).toContain("onSetStatus(status)");
+
+    const goal = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "GoalDetailContent.tsx"),
+      "utf8",
+    );
+    expect(goal).toContain("canApproveGoal(goal.status)");
+    expect(goal).toContain("onApprove(target.id)");
+
+    // The committed bundle and stylesheet carry the controls for real.
+    const js = fs.readFileSync(APP_JS, "utf8");
+    expect(js).toContain("/status");
+    expect(js).toContain("/approve");
+    expect(js).toContain("lp-write-button");
+    const css = fs.readFileSync(APP_CSS, "utf8");
+    expect(css).toContain(".lp-write-button {");
+    expect(css).toContain(".lp-details-status-actions {");
+  });
 });
 
 describe("the built SPA served by the real HTTP server", () => {

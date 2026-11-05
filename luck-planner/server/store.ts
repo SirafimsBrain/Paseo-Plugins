@@ -221,6 +221,12 @@ export interface SetStatusInput {
   id: string;
   status: LeafStatus;
   actor: string;
+  /**
+   * The revision the caller looked at (stage L8). When given, a write against
+   * a newer row is refused with {@link StaleRevisionError} instead of silently
+   * overwriting a change the caller never saw.
+   */
+  expectedRevision?: number;
 }
 
 /**
@@ -370,6 +376,8 @@ export interface ApproveGoalInput {
   /** Live branch (or subbranch) the goal's side branch grows under. */
   parentBranchId: string;
   actor: string;
+  /** The revision the caller looked at (stage L8): see {@link SetStatusInput}. */
+  expectedRevision?: number;
 }
 
 /** `rejectGoal` input: a `proposed` plan is sent back to `draft`. */
@@ -630,6 +638,24 @@ function createSchemaV1(db: DatabaseSync): void {
  */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [createSchemaV1];
 
+/**
+ * Fails with {@link StaleRevisionError} when the caller's revision is behind.
+ *
+ * Absent `expected` means "no opinion" — the MCP tools and the native panel
+ * write without one, and their contract must not change (stage L8 is
+ * additive). Checked by mutation, never by parsing `current`: the two numbers
+ * are integers from the same row.
+ */
+function requireRevision(
+  entityType: "node" | "goal",
+  id: string,
+  current: number,
+  expected: number | undefined,
+): void {
+  if (expected === undefined || expected === current) return;
+  throw new StaleRevisionError(entityType, id, expected, current);
+}
+
 /** node:sqlite throws a plain Error carrying "database is locked". */
 function isLockError(cause: unknown): boolean {
   return cause instanceof Error && /database is locked/i.test(cause.message);
@@ -638,6 +664,32 @@ function isLockError(cause: unknown): boolean {
 /** Synchronous sleep — the store is synchronous end to end. */
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * A write refused because the caller looked at an older revision (stage L8).
+ *
+ * The dashboard is the first surface where a *person* and an *agent* can move
+ * the same leaf within seconds, so the browser sends the revision it rendered
+ * and the store checks it where the write is serialised — inside the
+ * transaction, not in the HTTP layer, which cannot see the race.
+ *
+ * A named error (the only one in the store) because two transports map it to
+ * something other than "500": HTTP answers 409 with the current revision, and
+ * the tab refetches instead of reporting a failure the user cannot act on.
+ */
+export class StaleRevisionError extends Error {
+  constructor(
+    readonly entityType: "node" | "goal",
+    readonly entityId: string,
+    readonly expected: number,
+    readonly current: number,
+  ) {
+    super(
+      `${entityType} ${entityId} moved to revision ${current}; the request expected ${expected}`,
+    );
+    this.name = "StaleRevisionError";
+  }
 }
 
 export class LuckPlannerStore {
@@ -1333,6 +1385,7 @@ export class LuckPlannerStore {
     return this.write(() =>
       this.transaction(() => {
         const row = this.requireRow(projectKey, input.id);
+        requireRevision("node", row.id, row.revision, input.expectedRevision);
         if (row.archived_at !== null) {
           throw new Error(`node ${row.id} is archived and cannot change status`);
         }
@@ -2440,6 +2493,9 @@ export class LuckPlannerStore {
     return this.write(() =>
       this.transaction(() => {
         const row = this.requireGoalRow(projectKey, input.id);
+        // The staleness check comes first: an already-approved goal must still
+        // answer a stale caller with the conflict, not with "nothing to do".
+        requireRevision("goal", row.id, row.revision, input.expectedRevision);
         const status = parseGoalStatus(row.status);
         if (status === "approved" && row.materialized_node_id !== null) {
           return rowToGoal(row); // already crossed and grown: nothing to do
