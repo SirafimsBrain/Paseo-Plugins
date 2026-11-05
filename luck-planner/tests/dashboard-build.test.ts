@@ -357,6 +357,42 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(js).toContain("lp-toolbar-theme");
   });
 
+  it("shows the trees of a project and lets the goal approval name one", () => {
+    // L10: a forest is never guessed at — the strip shows the trees and the
+    // approval asks which one, with the server's policy preselected.
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("buildForest(");
+    expect(app).toContain("restrictToRoot(tree, activeRoot)");
+    expect(app).toContain("pickGoalParent(");
+    expect(app).toContain("onRootChange={setRootFilter}");
+
+    const toolbar = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Toolbar.tsx"),
+      "utf8",
+    );
+    expect(toolbar).toContain("props.roots.length > 1");
+    expect(toolbar).toContain("All trees");
+    expect(toolbar).toContain("lp-toolbar-roots");
+
+    const goal = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "GoalDetailContent.tsx"),
+      "utf8",
+    );
+    expect(goal).toContain("lp-write-select");
+    expect(goal).toContain("props.defaultBranchId");
+
+    const js = fs.readFileSync(APP_JS, "utf8");
+    expect(js).toContain("All trees");
+    expect(js).toContain("lp-toolbar-roots");
+    expect(js).toContain("lp-write-select");
+    const css = fs.readFileSync(APP_CSS, "utf8");
+    expect(css).toContain(".lp-toolbar-roots {");
+    expect(css).toContain(".lp-write-select {");
+  });
+
   it("makes the 2D diagram one widget with one tab stop and arrow keys", () => {
     // L9: the rule is pure (keyboard.ts); the canvas owns the DOM part only.
     const canvas = fs.readFileSync(

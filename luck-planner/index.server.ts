@@ -682,7 +682,9 @@ export default function contribute(server: PluginServerContext) {
       const goal = store.approveGoal({
         projectKey: input.projectKey,
         id: input.goalId,
-        parentBranchId: input.parentBranchId,
+        ...(input.parentBranchId === undefined || input.parentBranchId === null
+          ? {}
+          : { parentBranchId: input.parentBranchId }),
         actor: input.actor ?? UI_ACTOR,
       });
       return { ok: true, goal, error: null };

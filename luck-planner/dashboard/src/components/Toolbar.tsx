@@ -48,6 +48,7 @@ import type { StatsResponse } from "../../../shared/api";
 import { LEAF_STATUSES, NODE_KINDS } from "../../../shared/tree";
 import type { LeafStatus, NodeKind } from "../../../shared/tree";
 import type { ThemeCatalogEntry } from "../../../shared/themes";
+import type { ForestRoot } from "../../../shared/roots";
 import { GRAPH_LAYER_LABELS, GRAPH_LAYERS, type GraphLayer } from "../graph";
 import { KIND_LABELS, STATUS_LABELS } from "../colors";
 import {
@@ -121,6 +122,16 @@ export interface ToolbarProps {
   readonly themes: readonly ThemeCatalogEntry[];
   /** Stores a new choice and repaints (L7). */
   readonly onThemeChange: (themeId: string) => void;
+  /**
+   * The trees of this project (stage L10). One tree is the normal case and the
+   * strip stays hidden; several render a picker, because a forest drawn whole
+   * is three diagrams on top of each other.
+   */
+  readonly roots: readonly ForestRoot[];
+  /** The tree on screen, or `null` for all of them (L10). */
+  readonly rootId: string | null;
+  /** Shows one tree, or the whole forest (L10). */
+  readonly onRootChange: (rootId: string | null) => void;
 }
 
 /** One `label · value` counter cell. */
@@ -320,6 +331,43 @@ export function Toolbar(props: ToolbarProps): ReactElement {
               </option>
             ))}
           </select>
+        ) : null}
+        {props.roots.length > 1 ? (
+          <div
+            className="lp-toolbar-roots"
+            role="group"
+            aria-label="Trees of this project"
+          >
+            <button
+              type="button"
+              className={
+                props.rootId === null
+                  ? "lp-view-button lp-view-button-active"
+                  : "lp-view-button"
+              }
+              aria-pressed={props.rootId === null}
+              title={`All ${props.roots.length} trees of this project`}
+              onClick={() => props.onRootChange(null)}
+            >
+              All trees
+            </button>
+            {props.roots.map((root) => (
+              <button
+                key={root.id}
+                type="button"
+                className={
+                  props.rootId === root.id
+                    ? "lp-view-button lp-view-button-active"
+                    : "lp-view-button"
+                }
+                aria-pressed={props.rootId === root.id}
+                title={`${root.nodeCount} nodes · ${root.leafCount} leaves · ${root.branchCount} branches — show “${root.name}” alone`}
+                onClick={() => props.onRootChange(root.id)}
+              >
+                {root.name}
+              </button>
+            ))}
+          </div>
         ) : null}
         {props.exportHref.length > 0 ? (
           <a

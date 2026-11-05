@@ -14,6 +14,94 @@ import {
   DatabaseSync
 } from "node:sqlite";
 
+// shared/roots.ts
+var EMPTY_FOREST = { roots: [], orphanCount: 0 };
+function byNameThenId(a, b) {
+  if (a.name !== b.name) return a.name < b.name ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+function buildForest(nodes) {
+  const live = nodes.filter((node2) => node2.archivedAt === null);
+  if (live.length === 0) return EMPTY_FOREST;
+  const byId = /* @__PURE__ */ new Map();
+  for (const node2 of live) byId.set(node2.id, node2);
+  const childrenOf = /* @__PURE__ */ new Map();
+  const roots = [];
+  let orphanCount = 0;
+  for (const node2 of live) {
+    if (node2.parentId === null || !byId.has(node2.parentId)) {
+      if (node2.parentId === null) roots.push(node2);
+      else orphanCount += 1;
+      continue;
+    }
+    const list = childrenOf.get(node2.parentId) ?? [];
+    list.push(node2);
+    childrenOf.set(node2.parentId, list);
+  }
+  roots.sort(byNameThenId);
+  for (const list of childrenOf.values()) list.sort(byNameThenId);
+  const summaries = [];
+  for (const root of roots) {
+    let nodeCount = 0;
+    let leafCount = 0;
+    let branchCount = 0;
+    let defaultBranchId = null;
+    const queue = [root.id];
+    while (queue.length > 0) {
+      const id = queue.shift();
+      const node2 = byId.get(id);
+      nodeCount += 1;
+      if (node2.kind === "leaf") leafCount += 1;
+      if (node2.kind === "branch" || node2.kind === "subbranch") {
+        branchCount += 1;
+        if (defaultBranchId === null) defaultBranchId = node2.id;
+      }
+      for (const child of childrenOf.get(id) ?? []) queue.push(child.id);
+    }
+    summaries.push({
+      id: root.id,
+      name: root.name,
+      nodeCount,
+      leafCount,
+      branchCount,
+      defaultBranchId
+    });
+  }
+  return { roots: summaries, orphanCount };
+}
+function pickGoalParent(nodes) {
+  const forest = buildForest(nodes);
+  if (forest.roots.length === 0) {
+    return {
+      ok: false,
+      reason: "empty",
+      roots: forest.roots,
+      message: "the project has no live tree yet \u2014 create the skeleton first (a leaf without parentId bootstraps root \u2192 trunk \u2192 branch), then approve the goal"
+    };
+  }
+  if (forest.roots.length > 1) {
+    const named = forest.roots.map(
+      (root2) => root2.defaultBranchId === null ? `"${root2.name}" (no branch yet)` : `"${root2.name}" (default branch ${root2.defaultBranchId})`
+    ).join(", ");
+    return {
+      ok: false,
+      reason: "ambiguous",
+      roots: forest.roots,
+      message: `the project holds ${forest.roots.length} trees \u2014 name parentBranchId: the branch the goal's side branch grows under. Trees: ${named}`
+    };
+  }
+  const root = forest.roots[0];
+  if (root.defaultBranchId === null) {
+    return {
+      ok: false,
+      reason: "no-branch",
+      roots: forest.roots,
+      message: `tree "${root.name}" has no live branch \u2014 create a branch under it first, then approve the goal`
+    };
+  }
+  return { ok: true, branchId: root.defaultBranchId, rootId: root.id };
+}
+
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -21672,7 +21760,14 @@ var LuckPlannerStore = class {
   approveGoal(input2) {
     const actor = requireText(input2.actor, "actor");
     const projectKey = requireText(input2.projectKey, "project key");
-    const parentBranchId = requireText(input2.parentBranchId, "parent branch id");
+    const decideParent = () => {
+      if (typeof input2.parentBranchId === "string" && input2.parentBranchId.length > 0) {
+        return requireText(input2.parentBranchId, "parent branch id");
+      }
+      const decision = pickGoalParent(this.listNodes(projectKey));
+      if (!decision.ok) throw new Error(decision.message);
+      return decision.branchId;
+    };
     return this.write(
       () => this.transaction(() => {
         const row = this.requireGoalRow(projectKey, input2.id);
@@ -21687,7 +21782,7 @@ var LuckPlannerStore = class {
           );
         }
         const plan = parsePlan(safeParsePlan(row.plan_json));
-        const parent = this.requireGoalParent(projectKey, parentBranchId);
+        const parent = this.requireGoalParent(projectKey, decideParent());
         const approvedAt = Date.now();
         this.db.prepare(
           `UPDATE goals SET status = 'approved', revision = revision + 1,
@@ -23206,8 +23301,13 @@ var findGoalsInputSchema = external_exports.object({
 var approveGoalInputSchema = external_exports.object({
   projectKey: projectKeySchema,
   goalId: idSchema,
-  /** Live branch (or subbranch) the goal's side branch grows under. */
-  parentBranchId: idSchema,
+  /**
+   * Live branch (or subbranch) the goal's side branch grows under. Omitted
+   * (stage L10) means the policy decides: the default branch of the project's
+   * only tree. A project with several trees refuses and names them — the
+   * caller must say which tree the goal belongs to.
+   */
+  parentBranchId: idSchema.nullable().optional(),
   actor: actorSchema.optional()
 });
 var setGoalActionSchema = external_exports.enum(["create", "update", "propose"]);
@@ -25399,11 +25499,11 @@ var MCP_TOOLS = [
         goalId: str("Goal to approve."),
         /** Live branch (or subbranch) the goal's side branch grows under. */
         parentBranchId: str(
-          "Branch under which the goal's side branch will grow."
+          "Branch under which the goal's side branch will grow. Omit it in a single-tree project (the default branch is used); a project with several trees refuses and lists them."
         ),
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "goalId", "parentBranchId"]
+      required: ["projectKey", "goalId"]
     }
   },
   {
@@ -25742,7 +25842,7 @@ function dispatchMcpTool(name, args, context) {
         const goal = store.approveGoal({
           projectKey: value.projectKey,
           id: value.goalId,
-          parentBranchId: value.parentBranchId,
+          ...value.parentBranchId === void 0 ? {} : { parentBranchId: value.parentBranchId },
           actor: value.actor ?? actor
         });
         return text({
@@ -26101,7 +26201,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.49.1";
+var SERVER_VERSION = "0.50.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

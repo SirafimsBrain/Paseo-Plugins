@@ -70,6 +70,12 @@ import {
 import { KIND_LABELS, STATUS_LABELS } from "./colors";
 import type { LeafStatus } from "../../shared/tree";
 import {
+  buildForest,
+  pickGoalParent,
+  restrictToRoot,
+  rootIdOf,
+} from "../../shared/roots";
+import {
   ancestorsOf,
   buildGraph,
   defaultCollapsedIds,
@@ -287,6 +293,14 @@ export function App(): ReactElement {
   });
   const [focus, setFocus] = useState<FocusRequest | null>(null);
   const focusSeq = useRef(0);
+
+  /**
+   * Stage L10 — the forest. A project may hold several trees; the tab lists
+   * them, can look at one of them at a time, and knows which one the goal
+   * policy would pick. Derived from the payload the tab already has: no extra
+   * request, and the strip cannot disagree with the diagram.
+   */
+  const [rootFilter, setRootFilter] = useState<string | null>(null);
 
   // L2: the toolbar's download link. Built from the same two parameters the
   // rest of the tab uses, so a tab without a project renders it disabled
@@ -574,14 +588,31 @@ export function App(): ReactElement {
     [],
   );
 
+  const forest = useMemo(() => buildForest(tree?.nodes ?? []), [tree]);
+
+  /**
+   * The tree the views should show: all of them, or the one picked in the
+   * toolbar. A choice whose root disappeared (archived, replaced by an import)
+   * quietly falls back to the whole forest instead of blanking the dashboard.
+   */
+  const activeRoot =
+    rootFilter !== null && forest.roots.some((root) => root.id === rootFilter)
+      ? rootFilter
+      : null;
+
+  const scopedTree = useMemo(
+    () => (tree === null ? null : restrictToRoot(tree, activeRoot)),
+    [tree, activeRoot],
+  );
+
   // K1 plain board: the card view over the same payload and the same
   // toolbar filters (one `matchingWithAncestors` rule for three views).
   const plainBoard = useMemo(
     () =>
-      tree === null
+      scopedTree === null
         ? EMPTY_PLAIN_BOARD
-        : buildPlainBoard(tree, { filter: filters }),
-    [tree, filters],
+        : buildPlainBoard(scopedTree, { filter: filters }),
+    [scopedTree, filters],
   );
 
   /**
@@ -642,10 +673,10 @@ export function App(): ReactElement {
 
   const graph = useMemo(
     () =>
-      tree === null
+      scopedTree === null
         ? EMPTY_GRAPH
-        : buildGraph(tree, { collapsedIds, filter: filters, layer }),
-    [tree, collapsedIds, filters, layer],
+        : buildGraph(scopedTree, { collapsedIds, filter: filters, layer }),
+    [scopedTree, collapsedIds, filters, layer],
   );
 
   // K1 plain board: the card view over the same payload and the same
@@ -833,19 +864,34 @@ export function App(): ReactElement {
     [client, refreshAfterWrite, resolveName, tree],
   );
 
-  /** Branches a goal may grow its side branch under (stage L8). */
-  const goalBranches = useMemo(
-    () =>
-      (tree?.nodes ?? [])
-        .filter(
-          (node) =>
-            node.archivedAt === null &&
-            (node.kind === "branch" || node.kind === "subbranch"),
-        )
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((node) => ({ id: node.id, name: node.name })),
-    [tree],
-  );
+  /**
+   * Branches a goal may grow its side branch under (stages L8/L10). Each
+   * entry names its tree, so the choice is "which tree" as well as "which
+   * branch" — in a forest those are two questions, and the wrong answer puts
+   * a plan nobody will find.
+   */
+  const goalBranches = useMemo(() => {
+    const nodes = scopedTree?.nodes ?? [];
+    const rootNames = new Map(forest.roots.map((root) => [root.id, root.name]));
+    return nodes
+      .filter(
+        (node) =>
+          node.archivedAt === null &&
+          (node.kind === "branch" || node.kind === "subbranch"),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((node) => ({
+        id: node.id,
+        name: node.name,
+        rootName: rootNames.get(rootIdOf(nodes, node.id) ?? "") ?? "",
+      }));
+  }, [scopedTree, forest]);
+
+  /** What the server's policy would pick for an unnamed approval (L10). */
+  const defaultGoalBranch = useMemo(() => {
+    const decision = pickGoalParent(tree?.nodes ?? []);
+    return decision.ok ? decision.branchId : null;
+  }, [tree]);
 
   const filtersActive = isFilterActive(filters);
 
@@ -887,6 +933,9 @@ export function App(): ReactElement {
         themeId={themeId}
         themes={themeCatalog?.themes ?? []}
         onThemeChange={chooseTheme}
+        roots={forest.roots}
+        rootId={activeRoot}
+        onRootChange={setRootFilter}
       />
       <div
         className={view === "plain" ? "lp-body lp-body-plain" : "lp-body"}
@@ -997,6 +1046,7 @@ export function App(): ReactElement {
                   goal={goal}
                   resolveName={resolveName}
                   branches={goalBranches}
+                  defaultBranchId={defaultGoalBranch}
                   onApprove={
                     client === null
                       ? undefined

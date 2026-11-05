@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { canApproveGoal } from "../../../shared/goals";
 import type { Goal } from "../../../shared/goals";
 import { GOAL_STATUS_COLORS, GOAL_STATUS_LABELS } from "../colors";
@@ -15,8 +15,15 @@ import { GOAL_STATUS_COLORS, GOAL_STATUS_LABELS } from "../colors";
 export interface GoalDetailContentProps {
   readonly goal: Goal;
   readonly resolveName?: (id: string) => string;
-  /** Live branches the side branch may grow under (L8); empty = read-only. */
-  readonly branches?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  /** Live branches the side branch may grow under (L8/L10); empty = read-only. */
+  readonly branches?: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    /** The tree the branch belongs to — in a forest the choice needs it. */
+    readonly rootName?: string;
+  }>;
+  /** The branch the server's policy would use (L10); preselected here. */
+  readonly defaultBranchId?: string | null;
   /** Crosses the gate under `parentBranchId` (L8). */
   readonly onApprove?: (parentBranchId: string) => void;
   /** Whether an approval write is in flight (L8). */
@@ -28,7 +35,22 @@ export interface GoalDetailContentProps {
 export function GoalDetailContent(props: GoalDetailContentProps): ReactElement {
   const { goal, branches, onApprove, pending, error } = props;
   const canApprove = canApproveGoal(goal.status);
-  const target = branches !== undefined && branches.length > 0 ? branches[0]! : null;
+  const options = branches ?? [];
+  /**
+   * Where the approval grows. The policy preselects a branch (the only tree's
+   * default one) but the human decides — in a forest the tree *is* the
+   * decision, and defaulting it silently would put the plan somewhere nobody
+   * looks for it (L10).
+   */
+  const [choice, setChoice] = useState<string | null>(null);
+  const chosen =
+    choice !== null && options.some((branch) => branch.id === choice)
+      ? choice
+      : (props.defaultBranchId ?? options[0]?.id ?? null);
+  const target =
+    chosen === null
+      ? null
+      : (options.find((branch) => branch.id === chosen) ?? null);
   return (
     <div className="lp-details-body">
       <h3 className="lp-details-subtitle">Goal</h3>
@@ -79,6 +101,25 @@ export function GoalDetailContent(props: GoalDetailContentProps): ReactElement {
       {canApprove && onApprove !== undefined && target !== null ? (
         <div className="lp-details-section lp-details-write">
           <h3 className="lp-details-subtitle">Approval</h3>
+          {options.length > 1 ? (
+            <label className="lp-details-row">
+              <span className="lp-details-row-label">Grows under</span>
+              <select
+                className="lp-write-select"
+                aria-label="Branch the goal's side branch grows under"
+                value={target.id}
+                onChange={(event) => setChoice(event.target.value)}
+              >
+                {options.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.rootName !== undefined && branch.rootName.length > 0
+                      ? `${branch.rootName} · ${branch.name}`
+                      : branch.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button
             type="button"
             className="lp-write-button lp-write-button-approve"

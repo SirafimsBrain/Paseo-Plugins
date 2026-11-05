@@ -261,7 +261,12 @@ export const leafStatusRequestSchema = z.object({
 export type LeafStatusRequest = z.infer<typeof leafStatusRequestSchema>;
 
 export const goalApproveRequestSchema = z.object({
-  parentBranchId: idSchema,
+  /**
+   * The branch the goal grows under. Omitted (stage L10) means the server's
+   * policy picks the only tree's default branch — and refuses in a forest,
+   * where guessing would put the plan in the wrong tree.
+   */
+  parentBranchId: idSchema.nullable().optional(),
   expectedRevision: z.number().int().positive().optional(),
 });
 export type GoalApproveRequest = z.infer<typeof goalApproveRequestSchema>;

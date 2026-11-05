@@ -183,8 +183,13 @@ export type FindGoalsInput = z.infer<typeof findGoalsInputSchema>;
 export const approveGoalInputSchema = z.object({
   projectKey: projectKeySchema,
   goalId: idSchema,
-  /** Live branch (or subbranch) the goal's side branch grows under. */
-  parentBranchId: idSchema,
+  /**
+   * Live branch (or subbranch) the goal's side branch grows under. Omitted
+   * (stage L10) means the policy decides: the default branch of the project's
+   * only tree. A project with several trees refuses and names them — the
+   * caller must say which tree the goal belongs to.
+   */
+  parentBranchId: idSchema.nullable().optional(),
   actor: actorSchema.optional(),
 });
 export type ApproveGoalInput = z.infer<typeof approveGoalInputSchema>;

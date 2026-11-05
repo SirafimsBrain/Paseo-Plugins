@@ -79,11 +79,11 @@ import {
 } from "./chunk-chunk-IYTTBCGI.js";
 
 // dashboard/src/main.tsx
-var import_react13 = __toESM(require_react());
+var import_react14 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // dashboard/src/app.tsx
-var import_react12 = __toESM(require_react());
+var import_react13 = __toESM(require_react());
 
 // node_modules/@getpaseo/plugin/dist/rpc.js
 var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
@@ -204,7 +204,8 @@ var goalApprove = defineRpc({
   input: external_exports.object({
     projectKey: projectKeySchema,
     goalId: idSchema,
-    parentBranchId: idSchema,
+    /** Omitted in a single-tree project: the server's policy picks a branch. */
+    parentBranchId: idSchema.nullable().optional(),
     actor: actorSchema.optional()
   }),
   output: external_exports.object({
@@ -650,7 +651,12 @@ var leafStatusRequestSchema = external_exports.object({
   expectedRevision: external_exports.number().int().positive().optional()
 });
 var goalApproveRequestSchema = external_exports.object({
-  parentBranchId: idSchema,
+  /**
+   * The branch the goal grows under. Omitted (stage L10) means the server's
+   * policy picks the only tree's default branch — and refuses in a forest,
+   * where guessing would put the plan in the wrong tree.
+   */
+  parentBranchId: idSchema.nullable().optional(),
   expectedRevision: external_exports.number().int().positive().optional()
 });
 var leafStatusResponseSchema = external_exports.object({
@@ -851,6 +857,141 @@ function resolveApiOrigin(locationHref) {
   } catch {
   }
   return "http://127.0.0.1:8899";
+}
+
+// shared/roots.ts
+var EMPTY_FOREST = { roots: [], orphanCount: 0 };
+function byNameThenId(a, b) {
+  if (a.name !== b.name) return a.name < b.name ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+function buildForest(nodes) {
+  const live = nodes.filter((node) => node.archivedAt === null);
+  if (live.length === 0) return EMPTY_FOREST;
+  const byId = /* @__PURE__ */ new Map();
+  for (const node of live) byId.set(node.id, node);
+  const childrenOf = /* @__PURE__ */ new Map();
+  const roots = [];
+  let orphanCount = 0;
+  for (const node of live) {
+    if (node.parentId === null || !byId.has(node.parentId)) {
+      if (node.parentId === null) roots.push(node);
+      else orphanCount += 1;
+      continue;
+    }
+    const list = childrenOf.get(node.parentId) ?? [];
+    list.push(node);
+    childrenOf.set(node.parentId, list);
+  }
+  roots.sort(byNameThenId);
+  for (const list of childrenOf.values()) list.sort(byNameThenId);
+  const summaries = [];
+  for (const root2 of roots) {
+    let nodeCount = 0;
+    let leafCount = 0;
+    let branchCount = 0;
+    let defaultBranchId = null;
+    const queue = [root2.id];
+    while (queue.length > 0) {
+      const id2 = queue.shift();
+      const node = byId.get(id2);
+      nodeCount += 1;
+      if (node.kind === "leaf") leafCount += 1;
+      if (node.kind === "branch" || node.kind === "subbranch") {
+        branchCount += 1;
+        if (defaultBranchId === null) defaultBranchId = node.id;
+      }
+      for (const child of childrenOf.get(id2) ?? []) queue.push(child.id);
+    }
+    summaries.push({
+      id: root2.id,
+      name: root2.name,
+      nodeCount,
+      leafCount,
+      branchCount,
+      defaultBranchId
+    });
+  }
+  return { roots: summaries, orphanCount };
+}
+function rootIdOf(nodes, nodeId) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const node of nodes) {
+    if (node.archivedAt === null) byId.set(node.id, node);
+  }
+  let current = byId.get(nodeId);
+  const seen = /* @__PURE__ */ new Set();
+  while (current !== void 0 && !seen.has(current.id)) {
+    seen.add(current.id);
+    if (current.parentId === null) return current.id;
+    current = byId.get(current.parentId);
+  }
+  return null;
+}
+function pickGoalParent(nodes) {
+  const forest = buildForest(nodes);
+  if (forest.roots.length === 0) {
+    return {
+      ok: false,
+      reason: "empty",
+      roots: forest.roots,
+      message: "the project has no live tree yet \u2014 create the skeleton first (a leaf without parentId bootstraps root \u2192 trunk \u2192 branch), then approve the goal"
+    };
+  }
+  if (forest.roots.length > 1) {
+    const named2 = forest.roots.map(
+      (root3) => root3.defaultBranchId === null ? `"${root3.name}" (no branch yet)` : `"${root3.name}" (default branch ${root3.defaultBranchId})`
+    ).join(", ");
+    return {
+      ok: false,
+      reason: "ambiguous",
+      roots: forest.roots,
+      message: `the project holds ${forest.roots.length} trees \u2014 name parentBranchId: the branch the goal's side branch grows under. Trees: ${named2}`
+    };
+  }
+  const root2 = forest.roots[0];
+  if (root2.defaultBranchId === null) {
+    return {
+      ok: false,
+      reason: "no-branch",
+      roots: forest.roots,
+      message: `tree "${root2.name}" has no live branch \u2014 create a branch under it first, then approve the goal`
+    };
+  }
+  return { ok: true, branchId: root2.defaultBranchId, rootId: root2.id };
+}
+function restrictToRoot(tree, rootId) {
+  if (rootId === null) return tree;
+  if (!tree.nodes.some((node) => node.id === rootId)) return tree;
+  const keep = /* @__PURE__ */ new Set();
+  const childrenOf = /* @__PURE__ */ new Map();
+  for (const node of tree.nodes) {
+    if (node.archivedAt !== null || node.parentId === null) continue;
+    const list = childrenOf.get(node.parentId) ?? [];
+    list.push(node);
+    childrenOf.set(node.parentId, list);
+  }
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const id2 = queue.shift();
+    if (keep.has(id2)) continue;
+    keep.add(id2);
+    for (const child of childrenOf.get(id2) ?? []) queue.push(child.id);
+  }
+  return {
+    ...tree,
+    nodes: tree.nodes.filter((node) => keep.has(node.id)),
+    bees: tree.bees.filter(
+      (bee) => keep.has(bee.sourceLeafId) && keep.has(bee.targetLeafId)
+    ),
+    bugAttachments: tree.bugAttachments.filter((link2) => keep.has(link2.nodeId)),
+    growth: tree.growth.filter(
+      (record) => record.subjectType !== "node" || keep.has(record.subjectId)
+    ),
+    goals: tree.goals.filter(
+      (goal) => goal.materializedNodeId === null || keep.has(goal.materializedNodeId)
+    )
+  };
 }
 
 // dashboard/src/params.ts
@@ -11470,11 +11611,15 @@ function DetailModal(props) {
 }
 
 // dashboard/src/components/GoalDetailContent.tsx
+var import_react9 = __toESM(require_react());
 var import_jsx_runtime8 = __toESM(require_jsx_runtime());
 function GoalDetailContent(props) {
   const { goal, branches, onApprove, pending, error } = props;
   const canApprove = canApproveGoal(goal.status);
-  const target = branches !== void 0 && branches.length > 0 ? branches[0] : null;
+  const options = branches ?? [];
+  const [choice, setChoice] = (0, import_react9.useState)(null);
+  const chosen = choice !== null && options.some((branch) => branch.id === choice) ? choice : props.defaultBranchId ?? options[0]?.id ?? null;
+  const target = chosen === null ? null : options.find((branch) => branch.id === chosen) ?? null;
   return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-body", children: [
     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Goal" }),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "lp-details-path", children: goal.formalText }),
@@ -11518,6 +11663,19 @@ function GoalDetailContent(props) {
     ] }) : null,
     canApprove && onApprove !== void 0 && target !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Approval" }),
+      options.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("label", { className: "lp-details-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-label", children: "Grows under" }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+          "select",
+          {
+            className: "lp-write-select",
+            "aria-label": "Branch the goal's side branch grows under",
+            value: target.id,
+            onChange: (event) => setChoice(event.target.value),
+            children: options.map((branch) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: branch.id, children: branch.rootName !== void 0 && branch.rootName.length > 0 ? `${branch.rootName} \xB7 ${branch.name}` : branch.name }, branch.id))
+          }
+        )
+      ] }) : null,
       /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
         "button",
         {
@@ -11634,7 +11792,7 @@ function Legend() {
 }
 
 // dashboard/src/components/PlainView.tsx
-var import_react9 = __toESM(require_react());
+var import_react10 = __toESM(require_react());
 var import_jsx_runtime11 = __toESM(require_jsx_runtime());
 function descendantCardCount(section) {
   let count = 0;
@@ -12045,7 +12203,7 @@ function BugCardBody(props) {
 function PlainView(props) {
   const { board, loaded } = props;
   const total = board.index.size;
-  (0, import_react9.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (props.scrollTargetEntityId === null) return;
     document.getElementById(`lp-plain-card-${props.scrollTargetEntityId}`)?.scrollIntoView({ block: "center" });
   }, [props.scrollTargetEntityId]);
@@ -12072,20 +12230,20 @@ function PlainView(props) {
 }
 
 // dashboard/src/components/ThreeView.tsx
-var import_react10 = __toESM(require_react());
+var import_react11 = __toESM(require_react());
 var import_jsx_runtime12 = __toESM(require_jsx_runtime());
 function ThreeView(props) {
-  const containerRef = (0, import_react10.useRef)(null);
-  const handleRef = (0, import_react10.useRef)(null);
-  const stateRef = (0, import_react10.useRef)(props.onSceneState);
+  const containerRef = (0, import_react11.useRef)(null);
+  const handleRef = (0, import_react11.useRef)(null);
+  const stateRef = (0, import_react11.useRef)(props.onSceneState);
   stateRef.current = props.onSceneState;
-  const selectRef = (0, import_react10.useRef)(props.onSelectNode);
+  const selectRef = (0, import_react11.useRef)(props.onSelectNode);
   selectRef.current = props.onSelectNode;
-  const sceneRef = (0, import_react10.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
+  const sceneRef = (0, import_react11.useRef)({ model: props.model, overlay: props.overlay, fitKey: props.fitKey });
   sceneRef.current = { model: props.model, overlay: props.overlay, fitKey: props.fitKey };
-  const interactionRef = (0, import_react10.useRef)(props.interaction);
+  const interactionRef = (0, import_react11.useRef)(props.interaction);
   interactionRef.current = props.interaction;
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     const container2 = containerRef.current;
     if (container2 === null) return;
     if (!props.webgl.ok) {
@@ -12125,10 +12283,10 @@ function ThreeView(props) {
       handleRef.current = null;
     };
   }, [props.webgl.ok]);
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     handleRef.current?.setScene(props.model, props.overlay, props.fitKey);
   }, [props.model, props.overlay, props.fitKey]);
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     handleRef.current?.setInteraction(props.interaction);
   }, [props.interaction]);
   return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
@@ -12143,7 +12301,7 @@ function ThreeView(props) {
 }
 
 // dashboard/src/components/Toolbar.tsx
-var import_react11 = __toESM(require_react());
+var import_react12 = __toESM(require_react());
 var import_jsx_runtime13 = __toESM(require_jsx_runtime());
 var LIVE_LABELS = {
   connecting: "connecting",
@@ -12163,7 +12321,7 @@ function Counter(props) {
 }
 function Toolbar(props) {
   const stats2 = props.stats;
-  const [draft, setDraft] = (0, import_react11.useState)("");
+  const [draft, setDraft] = (0, import_react12.useState)("");
   const themeValue = props.themes.some((theme) => theme.id === props.themeChoice) ? props.themeChoice : "";
   const submit = (event) => {
     event.preventDefault();
@@ -12303,6 +12461,39 @@ function Toolbar(props) {
           ]
         }
       ) : null,
+      props.roots.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
+        "div",
+        {
+          className: "lp-toolbar-roots",
+          role: "group",
+          "aria-label": "Trees of this project",
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+              "button",
+              {
+                type: "button",
+                className: props.rootId === null ? "lp-view-button lp-view-button-active" : "lp-view-button",
+                "aria-pressed": props.rootId === null,
+                title: `All ${props.roots.length} trees of this project`,
+                onClick: () => props.onRootChange(null),
+                children: "All trees"
+              }
+            ),
+            props.roots.map((root2) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+              "button",
+              {
+                type: "button",
+                className: props.rootId === root2.id ? "lp-view-button lp-view-button-active" : "lp-view-button",
+                "aria-pressed": props.rootId === root2.id,
+                title: `${root2.nodeCount} nodes \xB7 ${root2.leafCount} leaves \xB7 ${root2.branchCount} branches \u2014 show \u201C${root2.name}\u201D alone`,
+                onClick: () => props.onRootChange(root2.id),
+                children: root2.name
+              },
+              root2.id
+            ))
+          ]
+        }
+      ) : null,
       props.exportHref.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         "a",
         {
@@ -12386,74 +12577,75 @@ function syncViewToUrl(view) {
   );
 }
 function App() {
-  const params = (0, import_react12.useMemo)(() => parseDashboardParams(window.location.search), []);
-  const client = (0, import_react12.useMemo)(
+  const params = (0, import_react13.useMemo)(() => parseDashboardParams(window.location.search), []);
+  const client = (0, import_react13.useMemo)(
     () => params.token.length > 0 ? new DashboardApi(resolveApiOrigin(window.location.href), params.token, params.projectKey) : null,
     [params.projectKey, params.token]
   );
-  const [stats2, setStats] = (0, import_react12.useState)(null);
-  const [tree, setTree] = (0, import_react12.useState)(null);
-  const [collapsedIds, setCollapsedIds] = (0, import_react12.useState)(
+  const [stats2, setStats] = (0, import_react13.useState)(null);
+  const [tree, setTree] = (0, import_react13.useState)(null);
+  const [collapsedIds, setCollapsedIds] = (0, import_react13.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [plainCollapsed, setPlainCollapsed] = (0, import_react12.useState)(
+  const [plainCollapsed, setPlainCollapsed] = (0, import_react13.useState)(
     () => /* @__PURE__ */ new Set()
   );
-  const [plainScrollTarget, setPlainScrollTarget] = (0, import_react12.useState)(null);
-  const [statusLine, setStatusLine] = (0, import_react12.useState)("");
-  const [themeCatalog, setThemeCatalog] = (0, import_react12.useState)(null);
-  const [themeChoice, setThemeChoice] = (0, import_react12.useState)(
+  const [plainScrollTarget, setPlainScrollTarget] = (0, import_react13.useState)(null);
+  const [statusLine, setStatusLine] = (0, import_react13.useState)("");
+  const [themeCatalog, setThemeCatalog] = (0, import_react13.useState)(null);
+  const [themeChoice, setThemeChoice] = (0, import_react13.useState)(
     () => readStoredTheme(safeStorage()) ?? THEME_FOLLOW
   );
-  const appearance = (0, import_react12.useMemo)(
+  const appearance = (0, import_react13.useMemo)(
     () => resolveAppearance(params.appearance, prefersDarkScheme()),
     [params.appearance]
   );
-  const themeId = (0, import_react12.useMemo)(
+  const themeId = (0, import_react13.useMemo)(
     () => themeCatalog === null ? "" : initialThemeId(themeChoice, themeCatalog, appearance),
     [appearance, themeCatalog, themeChoice]
   );
-  const [detailsWidth, setDetailsWidth] = (0, import_react12.useState)(
+  const [detailsWidth, setDetailsWidth] = (0, import_react13.useState)(
     () => readStoredDetailsWidth(detailsStorage())
   );
-  const [selectedId, setSelectedId] = (0, import_react12.useState)(null);
-  const [modal, setModal] = (0, import_react12.useState)(null);
-  const [detail, setDetail] = (0, import_react12.useState)(null);
-  const [detailLoading, setDetailLoading] = (0, import_react12.useState)(false);
-  const [detailError, setDetailError] = (0, import_react12.useState)("");
-  const [filters, setFilters] = (0, import_react12.useState)({
+  const [selectedId, setSelectedId] = (0, import_react13.useState)(null);
+  const [modal, setModal] = (0, import_react13.useState)(null);
+  const [detail, setDetail] = (0, import_react13.useState)(null);
+  const [detailLoading, setDetailLoading] = (0, import_react13.useState)(false);
+  const [detailError, setDetailError] = (0, import_react13.useState)("");
+  const [filters, setFilters] = (0, import_react13.useState)({
     kind: "",
     status: "",
     version: ""
   });
-  const [focus, setFocus] = (0, import_react12.useState)(null);
-  const focusSeq = (0, import_react12.useRef)(0);
-  const exportHref = (0, import_react12.useMemo)(
+  const [focus, setFocus] = (0, import_react13.useState)(null);
+  const focusSeq = (0, import_react13.useRef)(0);
+  const [rootFilter, setRootFilter] = (0, import_react13.useState)(null);
+  const exportHref = (0, import_react13.useMemo)(
     () => params.token.length > 0 && params.projectKey.length > 0 ? exportUrl(params.token, params.projectKey) : "",
     [params.projectKey, params.token]
   );
-  const [layer, setLayer] = (0, import_react12.useState)("status");
-  const webgl = (0, import_react12.useMemo)(
+  const [layer, setLayer] = (0, import_react13.useState)("status");
+  const webgl = (0, import_react13.useMemo)(
     () => THREE_VIEW_SUSPENDED ? { ok: false, reason: THREE_BUTTON_SUSPENDED_HINT } : detectWebGL(),
     []
   );
-  const storage = (0, import_react12.useMemo)(() => safeStorage(), []);
-  const [view, setView] = (0, import_react12.useState)(() => {
+  const storage = (0, import_react13.useMemo)(() => safeStorage(), []);
+  const [view, setView] = (0, import_react13.useState)(() => {
     const wanted = initialView(window.location.search, storage);
     return planViewSwitch(webgl, wanted).view;
   });
-  const [live, setLive] = (0, import_react12.useState)("connecting");
-  const [detailRefresh, setDetailRefresh] = (0, import_react12.useState)(0);
-  const selectedIdRef = (0, import_react12.useRef)(null);
+  const [live, setLive] = (0, import_react13.useState)("connecting");
+  const [detailRefresh, setDetailRefresh] = (0, import_react13.useState)(0);
+  const selectedIdRef = (0, import_react13.useRef)(null);
   selectedIdRef.current = selectedId;
-  (0, import_react12.useEffect)(() => {
+  (0, import_react13.useEffect)(() => {
     applyTheme(themeId, themeCatalog);
   }, [themeId, themeCatalog]);
-  const chooseTheme = (0, import_react12.useCallback)((next) => {
+  const chooseTheme = (0, import_react13.useCallback)((next) => {
     setThemeChoice(next);
     writeStoredTheme(safeStorage(), next);
   }, []);
-  (0, import_react12.useEffect)(() => {
+  (0, import_react13.useEffect)(() => {
     if (client === null) return;
     let cancelled = false;
     void (async () => {
@@ -12477,7 +12669,7 @@ function App() {
       cancelled = true;
     };
   }, [client]);
-  const load = (0, import_react12.useCallback)(async () => {
+  const load = (0, import_react13.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
       return;
@@ -12504,10 +12696,10 @@ function App() {
       setStatusLine(cause instanceof Error ? cause.message : String(cause));
     }
   }, [client, params.projectKey]);
-  (0, import_react12.useEffect)(() => {
+  (0, import_react13.useEffect)(() => {
     void load();
   }, [load]);
-  (0, import_react12.useEffect)(() => {
+  (0, import_react13.useEffect)(() => {
     if (client === null) return;
     let opens = 0;
     const stream = createChangeStream({
@@ -12528,7 +12720,7 @@ function App() {
     });
     return () => stream.close();
   }, [client, load]);
-  (0, import_react12.useEffect)(() => {
+  (0, import_react13.useEffect)(() => {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
@@ -12551,13 +12743,13 @@ function App() {
       stale = true;
     };
   }, [client, selectedId, detailRefresh]);
-  const onToggleNode = (0, import_react12.useCallback)((id2) => {
+  const onToggleNode = (0, import_react13.useCallback)((id2) => {
     setCollapsedIds((previous) => toggleCollapsed(previous, id2));
   }, []);
-  const onTogglePlainSection = (0, import_react12.useCallback)((key) => {
+  const onTogglePlainSection = (0, import_react13.useCallback)((key) => {
     setPlainCollapsed((previous) => togglePlainSection(previous, key));
   }, []);
-  const onPlainCardSelect = (0, import_react12.useCallback)(
+  const onPlainCardSelect = (0, import_react13.useCallback)(
     (kind, entityId) => {
       if (kind === "leaf") {
         setSelectedId(entityId);
@@ -12570,11 +12762,11 @@ function App() {
     },
     []
   );
-  const requestFocus = (0, import_react12.useCallback)((nodeId) => {
+  const requestFocus = (0, import_react13.useCallback)((nodeId) => {
     focusSeq.current += 1;
     setFocus({ nodeId, seq: focusSeq.current });
   }, []);
-  const onLayerChange = (0, import_react12.useCallback)(
+  const onLayerChange = (0, import_react13.useCallback)(
     (next) => {
       setLayer(next);
       setStatusLine((previous) => {
@@ -12589,7 +12781,7 @@ function App() {
     },
     [tree]
   );
-  const onViewChange = (0, import_react12.useCallback)(
+  const onViewChange = (0, import_react13.useCallback)(
     (target) => {
       const plan = planViewSwitch(webgl, target);
       setView(plan.view);
@@ -12599,24 +12791,30 @@ function App() {
     },
     [storage, webgl]
   );
-  (0, import_react12.useEffect)(() => {
+  (0, import_react13.useEffect)(() => {
     const wanted = initialView(window.location.search, storage);
     const plan = planViewSwitch(webgl, wanted);
     if (plan.status !== null) setStatusLine(plan.status);
     syncViewToUrl(plan.view);
   }, [storage, webgl]);
-  const onSceneState = (0, import_react12.useCallback)(
+  const onSceneState = (0, import_react13.useCallback)(
     (state, status) => {
       setStatusLine(status);
       if (state === "failed") setView("2d");
     },
     []
   );
-  const plainBoard = (0, import_react12.useMemo)(
-    () => tree === null ? EMPTY_PLAIN_BOARD : buildPlainBoard(tree, { filter: filters }),
-    [tree, filters]
+  const forest = (0, import_react13.useMemo)(() => buildForest(tree?.nodes ?? []), [tree]);
+  const activeRoot = rootFilter !== null && forest.roots.some((root2) => root2.id === rootFilter) ? rootFilter : null;
+  const scopedTree = (0, import_react13.useMemo)(
+    () => tree === null ? null : restrictToRoot(tree, activeRoot),
+    [tree, activeRoot]
   );
-  const revealNode = (0, import_react12.useCallback)((nodeId) => {
+  const plainBoard = (0, import_react13.useMemo)(
+    () => scopedTree === null ? EMPTY_PLAIN_BOARD : buildPlainBoard(scopedTree, { filter: filters }),
+    [scopedTree, filters]
+  );
+  const revealNode = (0, import_react13.useCallback)((nodeId) => {
     setCollapsedIds((previous) => {
       const next = new Set(previous);
       for (const ancestor of ancestorsOf(tree?.nodes ?? [], nodeId)) {
@@ -12630,7 +12828,7 @@ function App() {
       return filterExcludesNode(previous, node);
     });
   }, [tree]);
-  const onSearch = (0, import_react12.useCallback)(
+  const onSearch = (0, import_react13.useCallback)(
     async (query) => {
       if (client === null) return;
       try {
@@ -12661,27 +12859,27 @@ function App() {
     },
     [client, plainBoard, revealNode, requestFocus]
   );
-  const graph = (0, import_react12.useMemo)(
-    () => tree === null ? EMPTY_GRAPH : buildGraph(tree, { collapsedIds, filter: filters, layer }),
-    [tree, collapsedIds, filters, layer]
+  const graph = (0, import_react13.useMemo)(
+    () => scopedTree === null ? EMPTY_GRAPH : buildGraph(scopedTree, { collapsedIds, filter: filters, layer }),
+    [scopedTree, collapsedIds, filters, layer]
   );
-  const scene3dModel = (0, import_react12.useMemo)(
+  const scene3dModel = (0, import_react13.useMemo)(
     () => tree === null || view !== "3d" ? null : buildScene3D(tree.nodes, { filter: filters }),
     [tree, filters, view]
   );
-  const scene3dOverlay = (0, import_react12.useMemo)(
+  const scene3dOverlay = (0, import_react13.useMemo)(
     () => tree === null || scene3dModel === null ? null : buildSceneOverlay(tree, scene3dModel, { layer }),
     [tree, scene3dModel, layer]
   );
-  const scene3dFitKey = (0, import_react12.useMemo)(
+  const scene3dFitKey = (0, import_react13.useMemo)(
     () => tree === null ? "" : `${tree.nodes.length}:${tree.nodes[0]?.id ?? ""}`,
     [tree]
   );
-  const scene3dCandidates = (0, import_react12.useMemo)(
+  const scene3dCandidates = (0, import_react13.useMemo)(
     () => scene3dModel === null ? [] : pickCandidates(scene3dModel),
     [scene3dModel]
   );
-  const scene3dInteraction = (0, import_react12.useMemo)(() => {
+  const scene3dInteraction = (0, import_react13.useMemo)(() => {
     if (tree === null || scene3dModel === null) return EMPTY_INTERACTION;
     const selected2 = selectedId === null ? null : tree.nodes.find((node) => node.id === selectedId) ?? null;
     const position = selectedId === null ? null : scene3dModel.nodes.find((node) => node.id === selectedId)?.position ?? null;
@@ -12713,29 +12911,29 @@ function App() {
     tree
   ]);
   const scene3dEmpty = scene3dModel !== null && scene3dModel.nodes.length === 0;
-  (0, import_react12.useEffect)(() => {
+  (0, import_react13.useEffect)(() => {
     if (view !== "3d") return;
     setStatusLine((previous) => {
       if (scene3dEmpty) return SCENE_EMPTY_HINT;
       return previous === SCENE_EMPTY_HINT ? "" : previous;
     });
   }, [scene3dEmpty, view]);
-  const resolveName = (0, import_react12.useCallback)(
+  const resolveName = (0, import_react13.useCallback)(
     (id2) => {
       const node = tree?.nodes.find((candidate) => candidate.id === id2);
       return node !== void 0 ? node.name : `\u2026${id2.slice(0, 8)}`;
     },
     [tree]
   );
-  const [writePending, setWritePending] = (0, import_react12.useState)(null);
-  const [writeError, setWriteError] = (0, import_react12.useState)("");
-  const [goalPending, setGoalPending] = (0, import_react12.useState)(false);
-  const [goalWriteError, setGoalWriteError] = (0, import_react12.useState)("");
-  const refreshAfterWrite = (0, import_react12.useCallback)(() => {
+  const [writePending, setWritePending] = (0, import_react13.useState)(null);
+  const [writeError, setWriteError] = (0, import_react13.useState)("");
+  const [goalPending, setGoalPending] = (0, import_react13.useState)(false);
+  const [goalWriteError, setGoalWriteError] = (0, import_react13.useState)("");
+  const refreshAfterWrite = (0, import_react13.useCallback)(() => {
     void load();
     setDetailRefresh((count) => count + 1);
   }, [load]);
-  const setStatusAction = (0, import_react12.useCallback)(
+  const setStatusAction = (0, import_react13.useCallback)(
     async (status) => {
       if (client === null || detail === null) return;
       setWritePending(status);
@@ -12762,7 +12960,7 @@ function App() {
     },
     [client, detail, refreshAfterWrite]
   );
-  const approveGoalAction = (0, import_react12.useCallback)(
+  const approveGoalAction = (0, import_react13.useCallback)(
     async (goalId, parentBranchId) => {
       if (client === null || tree === null) return;
       const goal = tree.goals.find((entry) => entry.id === goalId);
@@ -12791,22 +12989,31 @@ function App() {
     },
     [client, refreshAfterWrite, resolveName, tree]
   );
-  const goalBranches = (0, import_react12.useMemo)(
-    () => (tree?.nodes ?? []).filter(
+  const goalBranches = (0, import_react13.useMemo)(() => {
+    const nodes = scopedTree?.nodes ?? [];
+    const rootNames = new Map(forest.roots.map((root2) => [root2.id, root2.name]));
+    return nodes.filter(
       (node) => node.archivedAt === null && (node.kind === "branch" || node.kind === "subbranch")
-    ).sort((a, b) => a.name.localeCompare(b.name)).map((node) => ({ id: node.id, name: node.name })),
-    [tree]
-  );
+    ).sort((a, b) => a.name.localeCompare(b.name)).map((node) => ({
+      id: node.id,
+      name: node.name,
+      rootName: rootNames.get(rootIdOf(nodes, node.id) ?? "") ?? ""
+    }));
+  }, [scopedTree, forest]);
+  const defaultGoalBranch = (0, import_react13.useMemo)(() => {
+    const decision = pickGoalParent(tree?.nodes ?? []);
+    return decision.ok ? decision.branchId : null;
+  }, [tree]);
   const filtersActive = isFilterActive(filters);
-  const onDetailsWidthChange = (0, import_react12.useCallback)((width) => {
+  const onDetailsWidthChange = (0, import_react13.useCallback)((width) => {
     setDetailsWidth(clampDetailsWidth(width));
   }, []);
-  const onDetailsWidthCommit = (0, import_react12.useCallback)((width) => {
+  const onDetailsWidthCommit = (0, import_react13.useCallback)((width) => {
     const clamped = clampDetailsWidth(width);
     setDetailsWidth(clamped);
     storeDetailsWidth(detailsStorage(), clamped);
   }, []);
-  const onDetailsWidthReset = (0, import_react12.useCallback)(() => {
+  const onDetailsWidthReset = (0, import_react13.useCallback)(() => {
     setDetailsWidth(DEFAULT_DETAILS_WIDTH);
     forgetDetailsWidth(detailsStorage());
   }, []);
@@ -12830,7 +13037,10 @@ function App() {
         themeChoice,
         themeId,
         themes: themeCatalog?.themes ?? [],
-        onThemeChange: chooseTheme
+        onThemeChange: chooseTheme,
+        roots: forest.roots,
+        rootId: activeRoot,
+        onRootChange: setRootFilter
       }
     ),
     /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
@@ -12931,6 +13141,7 @@ function App() {
                 goal,
                 resolveName,
                 branches: goalBranches,
+                defaultBranchId: defaultGoalBranch,
                 onApprove: client === null ? void 0 : (parentBranchId) => void approveGoalAction(goal.id, parentBranchId),
                 pending: goalPending,
                 error: goalWriteError
@@ -12955,5 +13166,5 @@ if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(import_react13.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(import_react14.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(App, {}) })
 );

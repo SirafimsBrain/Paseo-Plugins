@@ -6,6 +6,7 @@ import {
   DatabaseSync,
   type DatabaseSyncOptions,
 } from "node:sqlite";
+import { pickGoalParent } from "../shared/roots";
 import {
   BEE_STATUSES,
   BEE_TRANSITIONS,
@@ -373,8 +374,12 @@ export interface SetGoalStatusInput {
 export interface ApproveGoalInput {
   projectKey: string;
   id: string;
-  /** Live branch (or subbranch) the goal's side branch grows under. */
-  parentBranchId: string;
+  /**
+   * Live branch (or subbranch) the goal's side branch grows under. Omitted
+   * (stage L10) means "use the policy": the default branch of the project's
+   * only tree. In a forest the policy refuses instead of guessing.
+   */
+  parentBranchId?: string | null;
   actor: string;
   /** The revision the caller looked at (stage L8): see {@link SetStatusInput}. */
   expectedRevision?: number;
@@ -2488,7 +2493,20 @@ export class LuckPlannerStore {
   approveGoal(input: ApproveGoalInput): Goal {
     const actor = requireText(input.actor, "actor");
     const projectKey = requireText(input.projectKey, "project key");
-    const parentBranchId = requireText(input.parentBranchId, "parent branch id");
+    /**
+     * The parent is resolved **inside** the transaction (stage L10): the default
+     * branch comes from the live nodes, and a forest may lose its only tree
+     * between the caller's read and this write. A named parent is passed
+     * through unchanged — validation is `requireGoalParent`'s job, as before.
+     */
+    const decideParent = (): string => {
+      if (typeof input.parentBranchId === "string" && input.parentBranchId.length > 0) {
+        return requireText(input.parentBranchId, "parent branch id");
+      }
+      const decision = pickGoalParent(this.listNodes(projectKey));
+      if (!decision.ok) throw new Error(decision.message);
+      return decision.branchId;
+    };
 
     return this.write(() =>
       this.transaction(() => {
@@ -2506,7 +2524,7 @@ export class LuckPlannerStore {
           );
         }
         const plan = parsePlan(safeParsePlan(row.plan_json));
-        const parent = this.requireGoalParent(projectKey, parentBranchId);
+        const parent = this.requireGoalParent(projectKey, decideParent());
 
         // 1) The gate crossing.
         const approvedAt = Date.now();

@@ -127,7 +127,8 @@ export const goalApprove = defineRpc({
   input: z.object({
     projectKey: projectKeySchema,
     goalId: idSchema,
-    parentBranchId: idSchema,
+    /** Omitted in a single-tree project: the server's policy picks a branch. */
+    parentBranchId: idSchema.nullable().optional(),
     actor: actorSchema.optional(),
   }),
   output: z.object({

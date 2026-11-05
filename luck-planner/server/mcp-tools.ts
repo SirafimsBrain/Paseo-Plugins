@@ -507,11 +507,13 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         goalId: str("Goal to approve."),
         /** Live branch (or subbranch) the goal's side branch grows under. */
         parentBranchId: str(
-          "Branch under which the goal's side branch will grow.",
+          "Branch under which the goal's side branch will grow. Omit it in a " +
+            "single-tree project (the default branch is used); a project with " +
+            "several trees refuses and lists them.",
         ),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "goalId", "parentBranchId"],
+      required: ["projectKey", "goalId"],
     },
   },
   {
@@ -952,7 +954,9 @@ export function dispatchMcpTool(
         const goal = store.approveGoal({
           projectKey: value.projectKey,
           id: value.goalId,
-          parentBranchId: value.parentBranchId,
+          ...(value.parentBranchId === undefined
+            ? {}
+            : { parentBranchId: value.parentBranchId }),
           actor: value.actor ?? actor,
         });
         return text({

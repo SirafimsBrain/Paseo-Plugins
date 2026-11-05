@@ -982,6 +982,86 @@ with materialization, and the `tree-changed` broadcast). `tests/dashboard-build.
 pins the client contracts and the bundle markers; the store-level tests of the earlier
 stages keep passing untouched, which is the point of an additive `expectedRevision`.
 
+### Several trees in one project (stage L10 — `shared/roots.ts`, `server/store.ts`, `dashboard/src/app.tsx`, `dashboard/src/components/Toolbar.tsx`, `dashboard/src/components/GoalDetailContent.tsx`)
+
+The schema never forbade a second root: `luck_tree_upsert_node` can create one, the 2D
+layout already draws a forest (roots side by side, `indexTree.roots` is a list), and the import
+format validates "exactly one root" only because merging two projects would *silently* produce
+two. What was missing was the part that makes a forest usable — a surface and a policy. L10 is
+both, and deliberately adds **no table, no column, no migration**: a tree is a live node whose
+`parentId` is `NULL`, and everything else is derived.
+
+**The model** (`shared/roots.ts`, pure — no store, no DOM, no SDK):
+
+| Export | Role |
+| ------ | ---- |
+| `ForestRoot` | one tree: `id`, `name`, `nodeCount`, `leafCount`, `branchCount`, `defaultBranchId` |
+| `buildForest(nodes)` | groups live nodes by root, counts each tree, and counts `orphanCount` (nodes whose parent the payload lacks — a filtered payload, never the store) |
+| `rootIdOf(nodes, id)` | which tree a node belongs to; the walk is visited-guarded so a broken payload cannot loop |
+| `forestIsSingleRoot(forest)` | the normal case, as a predicate |
+| `pickGoalParent(nodes)` | the policy (below) |
+| `restrictToRoot(tree, rootId)` | the project narrowed to one tree |
+| `EMPTY_FOREST` | no live nodes |
+
+Ordering is the dashboard's (`indexTree`): roots and siblings by name, ties by id — otherwise
+"the default branch" would depend on insert order, i.e. on who wrote first. Walking is
+breadth-first with an explicit queue: a ten-thousand-node chain is a legal tree and a recursive
+walk would be a stack overflow in the tab rather than a diagram. The default branch is the
+first branch/subbranch met — shallowest, alphabetically first — because a side branch grown
+deep inside another feature is a plan hidden in a corner.
+
+**The policy** — `pickGoalParent`, the one decision that has to name a tree. It is the same
+function the store runs and the tab runs, and it ignores archived branches (they cannot take a
+child, so they cannot be the answer):
+
+| Situation | Answer |
+| --------- | ------ |
+| no live tree | refuse — `"the project has no live tree yet — create the skeleton first …"` |
+| exactly one tree with a branch | `{ ok: true, branchId: defaultBranchId, rootId }` |
+| exactly one tree without a branch | refuse — `"tree “X” has no live branch …"` |
+| several trees | refuse — `"the project holds 2 trees — name parentBranchId … Trees: “alpha” (default branch …), “beta” (…)`” |
+
+The refusal is the point: the model may hold a forest, but **no process may guess** which tree
+a goal belongs to, because a goal that lands in the wrong tree is a plan nobody will find. So
+the unnamed case in a forest is a *question*, and the question lists the trees and each one's
+default branch.
+
+**Where the policy is wired.** `ApproveGoalInput.parentBranchId` became optional
+(`L8`'s shape is unchanged for callers that name one). `store.approveGoal` resolves the parent
+**inside** the write transaction, next to `requireGoalParent` — a forest can lose its only tree
+between the caller's read and the write, and a decision taken outside the transaction would be
+a decision about a different project state. `luck_tree_approve_goal` no longer requires
+`parentBranchId` (its description states the rule), the RPC `luck-planner.goal-approve` and
+`goalApproveRequestSchema` accept its absence, and the dashboard's approval asks only when
+there is something to ask about.
+
+**The surface** (`app.tsx` + `Toolbar.tsx` + `GoalDetailContent.tsx`). The tab derives the
+forest from the payload it already has — no extra request, and the strip cannot disagree with
+the diagram. With more than one tree the toolbar renders `All trees` plus one button per root
+(`aria-pressed`, counts in the tooltip); the choice narrows `plainBoard`, `graph` and the 3D
+model through `restrictToRoot`, and a choice whose root disappeared (archived, replaced by an
+import) falls back to the whole forest instead of blanking the dashboard. `restrictToRoot`
+drops bees, bug attachments and growth records with a node that left the view — a link with one
+end outside cannot be drawn or trusted — while **bugs** and **not-yet-materialized goals** stay:
+a bug is a project incident and an unmaterialized goal is a proposal with no tree, so hiding
+them under every tree would make them vanish from the whole projection. A payload that does not
+hold the requested root is returned untouched (stale choice, show everything). The goal modal
+replaced L8's "approve under the first branch" shortcut with a branch `<select>` whose options
+read `tree · branch`, preselecting `pickGoalParent`'s answer.
+
+**Tests** (53 files / 926): `tests/forest.test.ts` — 15 pure cases: empty/archived-only forest,
+grouping and counts, ordering by name, `forestIsSingleRoot`, orphan counting, default-branch
+choice (shallowest, alphabetical, none), `rootIdOf`, the four policy answers (including the
+full ambiguity message and archived branches), and `restrictToRoot` (untouched without a root,
+one tree with its links, a goal dropped from the other tree while a proposal stays, a stale
+root). `tests/goal-root-policy.test.ts` — 7 against a real database: the single-tree default
+branch and its audit row, the forest refusal **writing nothing** (status, pointer, node count
+and history all unchanged), an explicit branch in the second tree, the `no tree` → `no branch`
+sequence, an archived parent still refused, and the two MCP answers (success without
+`parentBranchId`, readable refusal with both tree names). `tests/dashboard-build.test.ts` pins
+the wiring and the bundle markers; `tests/shared-schemas.test.ts` lists `roots.ts`, so the
+boundary rules (no Node, no React, no DOM globals) apply to it too.
+
 ### Keyboard navigation of the 2D diagram (stage L9 — `dashboard/src/keyboard.ts`, `dashboard/src/components/Canvas.tsx`, `dashboard/src/components/graph-nodes.tsx`)
 
 A diagram is a picture, and a picture is unusable without a mouse unless the positions visible
