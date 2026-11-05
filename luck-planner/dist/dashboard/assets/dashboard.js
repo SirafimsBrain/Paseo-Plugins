@@ -5167,7 +5167,7 @@ var getDirection = ({ source, sourcePosition = Position.Bottom, target }) => {
   return source.y < target.y ? { x: 0, y: 1 } : { x: 0, y: -1 };
 };
 var distance = (a, b) => Math.sqrt(Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y, 2));
-function getPoints({ source, sourcePosition = Position.Bottom, target, targetPosition = Position.Top, center, offset, stepPosition }) {
+function getPoints({ source, sourcePosition = Position.Bottom, target, targetPosition = Position.Top, center: center2, offset, stepPosition }) {
   const sourceDir = handleDirections[sourcePosition];
   const targetDir = handleDirections[targetPosition];
   const sourceGapped = { x: source.x + sourceDir.x * offset, y: source.y + sourceDir.y * offset };
@@ -5191,11 +5191,11 @@ function getPoints({ source, sourcePosition = Position.Bottom, target, targetPos
   });
   if (sourceDir[dirAccessor] * targetDir[dirAccessor] === -1) {
     if (dirAccessor === "x") {
-      centerX = center.x ?? sourceGapped.x + (targetGapped.x - sourceGapped.x) * stepPosition;
-      centerY = center.y ?? (sourceGapped.y + targetGapped.y) / 2;
+      centerX = center2.x ?? sourceGapped.x + (targetGapped.x - sourceGapped.x) * stepPosition;
+      centerY = center2.y ?? (sourceGapped.y + targetGapped.y) / 2;
     } else {
-      centerX = center.x ?? (sourceGapped.x + targetGapped.x) / 2;
-      centerY = center.y ?? sourceGapped.y + (targetGapped.y - sourceGapped.y) * stepPosition;
+      centerX = center2.x ?? (sourceGapped.x + targetGapped.x) / 2;
+      centerY = center2.y ?? sourceGapped.y + (targetGapped.y - sourceGapped.y) * stepPosition;
     }
     const verticalSplit = [
       { x: centerX, y: sourceGapped.y },
@@ -5352,11 +5352,11 @@ function toHandleBounds(handles) {
     target
   };
 }
-function getHandlePosition(node, handle, fallbackPosition = Position.Left, center = false) {
+function getHandlePosition(node, handle, fallbackPosition = Position.Left, center2 = false) {
   const x = (handle?.x ?? 0) + node.internals.positionAbsolute.x;
   const y = (handle?.y ?? 0) + node.internals.positionAbsolute.y;
   const { width, height } = handle ?? getNodeDimensions(node);
-  if (center) {
+  if (center2) {
     return { x: x + width / 2, y: y + height / 2 };
   }
   const position = handle?.position ?? fallbackPosition;
@@ -10495,6 +10495,80 @@ function ResizeControl({ nodeId, position, variant = ResizeControlVariant.Handle
 }
 var NodeResizeControl = (0, import_react2.memo)(ResizeControl);
 
+// dashboard/src/keyboard.ts
+var LATERAL_WEIGHT = 2;
+var NAV_KEYS = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right"
+};
+var NAV_COMMANDS = {
+  ...NAV_KEYS,
+  Home: "first",
+  End: "last"
+};
+function navBoxes(nodes) {
+  return nodes.map((node) => ({
+    id: node.id,
+    x: node.position.x,
+    y: node.position.y,
+    width: node.width ?? LAYOUT.nodeWidth,
+    height: node.height ?? LAYOUT.nodeHeight
+  })).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+function center(box) {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+function readingOrder(boxes) {
+  return [...boxes].sort((a, b) => {
+    const dy = a.y - b.y;
+    if (Math.abs(dy) > a.height / 2) return dy;
+    return a.x - b.x;
+  }).map((box) => box.id);
+}
+function nearestInDirection(boxes, fromId, direction) {
+  const from = boxes.find((box) => box.id === fromId);
+  if (from === void 0) return null;
+  const origin = center(from);
+  const horizontal = direction === "left" || direction === "right";
+  const sign = direction === "right" || direction === "down" ? 1 : -1;
+  const scored = [];
+  for (const box of boxes) {
+    if (box.id === from.id) continue;
+    const point = center(box);
+    const primary = (horizontal ? point.x - origin.x : point.y - origin.y) * sign;
+    const lateral = horizontal ? Math.abs(point.y - origin.y) : Math.abs(point.x - origin.x);
+    if (primary <= 1) continue;
+    scored.push({ id: box.id, primary, lateral });
+  }
+  if (scored.length === 0) return null;
+  let best = null;
+  for (const candidate of scored) {
+    const score = candidate.primary + candidate.lateral * LATERAL_WEIGHT;
+    if (best === null || score < best.score || score === best.score && candidate.id < best.id) {
+      best = { id: candidate.id, score };
+    }
+  }
+  return best === null ? null : best.id;
+}
+function navTarget(boxes, fromId, key) {
+  const order = readingOrder(boxes);
+  if (order.length === 0) return null;
+  const command = NAV_COMMANDS[key];
+  if (command === void 0) return null;
+  if (command === "first") return order[0];
+  if (command === "last") return order[order.length - 1];
+  if (fromId === null || !order.includes(fromId)) return order[0];
+  return nearestInDirection(boxes, fromId, command);
+}
+function tabStopId(boxes, selectedId) {
+  const order = readingOrder(boxes);
+  if (order.length === 0) return null;
+  return selectedId !== null && order.includes(selectedId) ? selectedId : order[0];
+}
+var KEYBOARD_HINT = "Use the arrow keys to move between nodes, Home and End for the first and last, Enter or Space to select, Escape to clear the selection.";
+
 // dashboard/src/components/graph-edges.tsx
 var import_jsx_runtime2 = __toESM(require_jsx_runtime());
 function BeeEdge({
@@ -10701,6 +10775,8 @@ function GraphNode({ data }) {
       "data-layer": heat !== null ? "growth" : "status",
       "data-selected": data.selected ? "true" : void 0,
       "data-bug-linked": data.bugLinked ? "true" : void 0,
+      "data-lp-node-id": data.id,
+      tabIndex: data.tabIndex ?? -1,
       children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Handle, { type: "target", position: Position.Top }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "lp-node-title", children: [
@@ -10855,8 +10931,8 @@ function FocusController({ focus }) {
     if (focus === null) return;
     const node = flow.getNodes().find((candidate) => candidate.id === focus.nodeId);
     if (node === void 0) return;
-    const center = graphNodeCenter(node);
-    void flow.setCenter(center.x, center.y, {
+    const center2 = graphNodeCenter(node);
+    void flow.setCenter(center2.x, center2.y, {
       zoom: Math.max(flow.getZoom(), 0.85),
       duration: 400
     });
@@ -10865,6 +10941,45 @@ function FocusController({ focus }) {
 }
 function Canvas(props) {
   const { graph, loaded, onToggleNode, selectedId, onSelectNode, focus } = props;
+  const sectionRef = (0, import_react5.useRef)(null);
+  const [pan, setPan] = (0, import_react5.useState)(null);
+  const boxes = navBoxes(graph.nodes);
+  const tabStop = tabStopId(boxes, selectedId);
+  const focusNode = (id2) => {
+    const element = sectionRef.current?.querySelector(
+      `[data-lp-node-id="${CSS.escape(id2)}"]`
+    );
+    element?.focus();
+  };
+  const onKeyDown = (event) => {
+    const target = event.target;
+    const focusedId = target?.closest("[data-lp-node-id]")?.dataset.lpNodeId ?? selectedId;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onSelectNode(null);
+      sectionRef.current?.focus();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      if (focusedId !== null && focusedId !== void 0) {
+        event.preventDefault();
+        onSelectNode(focusedId);
+      }
+      return;
+    }
+    const next = navTarget(boxes, focusedId ?? null, event.key);
+    if (next === null) return;
+    event.preventDefault();
+    onSelectNode(next);
+    setPan({ nodeId: next, seq: (pan?.seq ?? 0) + 1 });
+    requestAnimationFrame(() => focusNode(next));
+  };
+  const onFocus = (event) => {
+    const id2 = event.target.closest(
+      "[data-lp-node-id]"
+    )?.dataset.lpNodeId;
+    if (id2 !== void 0 && id2 !== selectedId) onSelectNode(id2);
+  };
   if (loaded && graph.nodes.length === 0) {
     return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "lp-canvas-empty", children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "lp-canvas-empty-title", children: props.emptyTitle ?? "This project has no tree yet" }),
@@ -10878,7 +10993,8 @@ function Canvas(props) {
       ...node.data,
       onToggle: () => onToggleNode(node.id),
       selected: node.id === selectedId,
-      bugLinked: bugLinked.has(node.id)
+      bugLinked: bugLinked.has(node.id),
+      tabIndex: node.id === tabStop ? 0 : -1
     }
   }));
   const edges = graph.edges.map((edge) => {
@@ -10890,30 +11006,47 @@ function Canvas(props) {
       style: { ...edge.style, strokeWidth: emphasized, opacity: 1 }
     };
   });
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("section", { className: "lp-canvas", "aria-label": "Tree diagram", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
-    index,
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
+    "section",
     {
-      nodes: [...nodes, ...graph.goalFrames],
-      edges,
-      nodeTypes,
-      edgeTypes,
-      onNodeClick: (_event, node) => onSelectNode(node.id),
-      onPaneClick: () => onSelectNode(null),
-      fitView: true,
-      fitViewOptions: { padding: 0.15, maxZoom: 1 },
-      minZoom: 0.2,
-      maxZoom: 2,
-      nodesDraggable: false,
-      nodesConnectable: false,
-      elementsSelectable: false,
-      proOptions: { hideAttribution: true },
+      ref: sectionRef,
+      className: "lp-canvas",
+      "aria-label": "Tree diagram",
+      role: "application",
+      tabIndex: 0,
+      onKeyDown,
+      onFocus,
+      "aria-describedby": "lp-canvas-keyboard-hint",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(FocusController, { focus }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Background, { gap: 22 }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Controls, { showInteractive: false })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { id: "lp-canvas-keyboard-hint", className: "lp-canvas-hint", children: KEYBOARD_HINT }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
+          index,
+          {
+            nodes: [...nodes, ...graph.goalFrames],
+            edges,
+            nodeTypes,
+            edgeTypes,
+            onNodeClick: (_event, node) => onSelectNode(node.id),
+            onPaneClick: () => onSelectNode(null),
+            nodesFocusable: false,
+            fitView: true,
+            fitViewOptions: { padding: 0.15, maxZoom: 1 },
+            minZoom: 0.2,
+            maxZoom: 2,
+            nodesDraggable: false,
+            nodesConnectable: false,
+            elementsSelectable: false,
+            proOptions: { hideAttribution: true },
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(FocusController, { focus: pan ?? focus }),
+              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Background, { gap: 22 }),
+              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Controls, { showInteractive: false })
+            ]
+          }
+        )
       ]
     }
-  ) });
+  );
 }
 
 // dashboard/src/components/DetailsPanel.tsx

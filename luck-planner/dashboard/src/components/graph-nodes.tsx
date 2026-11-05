@@ -196,6 +196,10 @@ export function GraphNode({ data }: NodeProps<GraphFlowNode>): ReactElement {
       data-layer={heat !== null ? "growth" : "status"}
       data-selected={data.selected ? "true" : undefined}
       data-bug-linked={data.bugLinked ? "true" : undefined}
+      // Stage L9: the node body is the tab stop (roving tabindex) and carries
+      // the id the canvas' arrow-key handler resolves the focused node from.
+      data-lp-node-id={data.id}
+      tabIndex={data.tabIndex ?? -1}
     >
       <Handle type="target" position={Position.Top} />
       <div className="lp-node-title">

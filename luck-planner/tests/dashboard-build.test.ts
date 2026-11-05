@@ -357,6 +357,36 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(js).toContain("lp-toolbar-theme");
   });
 
+  it("makes the 2D diagram one widget with one tab stop and arrow keys", () => {
+    // L9: the rule is pure (keyboard.ts); the canvas owns the DOM part only.
+    const canvas = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Canvas.tsx"),
+      "utf8",
+    );
+    expect(canvas).toContain("navTarget(boxes, focusedId ?? null, event.key)");
+    expect(canvas).toContain('role="application"');
+    expect(canvas).toContain("tabIndex={0}");
+    expect(canvas).toContain("nodesFocusable={false}");
+    expect(canvas).toContain("tabIndex: node.id === tabStop ? 0 : -1");
+    expect(canvas).toContain("KEYBOARD_HINT");
+
+    const nodes = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "graph-nodes.tsx"),
+      "utf8",
+    );
+    expect(nodes).toContain("data-lp-node-id={data.id}");
+    expect(nodes).toContain("tabIndex={data.tabIndex ?? -1}");
+
+    // And it is in the first chunk: the 2D view is the default diagram.
+    const js = fs.readFileSync(APP_JS, "utf8");
+    expect(js).toContain("ArrowDown");
+    expect(js).toContain("lp-canvas-hint");
+    expect(js).toContain("data-lp-node-id");
+    const css = fs.readFileSync(APP_CSS, "utf8");
+    expect(css).toContain(".lp-node:focus-visible {");
+    expect(css).toContain(".lp-canvas-hint {");
+  });
+
   it("writes only the two human decisions, with the revision it rendered", () => {
     // L8: the browser gets exactly two writes, both optimistic. A client that
     // forgot `expectedRevision` would overwrite an agent's change silently.

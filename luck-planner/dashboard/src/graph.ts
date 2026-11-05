@@ -131,6 +131,11 @@ export type GraphNodeData = {
   selected?: boolean;
   /** Shares an open incident with the selection (Canvas, stage G4). */
   bugLinked?: boolean;
+  /**
+   * Roving tab index of the diagram (Canvas, stage L9): `0` on the single node
+   * Tab lands on, `-1` everywhere else. Wired by the Canvas, never the adapter.
+   */
+  tabIndex?: number;
 };
 
 /**

@@ -982,6 +982,71 @@ with materialization, and the `tree-changed` broadcast). `tests/dashboard-build.
 pins the client contracts and the bundle markers; the store-level tests of the earlier
 stages keep passing untouched, which is the point of an additive `expectedRevision`.
 
+### Keyboard navigation of the 2D diagram (stage L9 — `dashboard/src/keyboard.ts`, `dashboard/src/components/Canvas.tsx`, `dashboard/src/components/graph-nodes.tsx`)
+
+A diagram is a picture, and a picture is unusable without a mouse unless the positions visible
+on screen also exist in the model. L9 puts them there — not by walking the tree, but by moving
+through the layout the adapter already drew, because the eye follows the drawing.
+
+**The rule is pure and separate** (`dashboard/src/keyboard.ts`, same discipline as `graph.ts`
+and `plain.ts`: no React, no DOM, no SDK, testable on numbers):
+
+| Export | Role |
+| ------ | ---- |
+| `NavBox` | one node's footprint in flow coordinates |
+| `navBoxes(nodes)` | boxes for a graph; the size is `LAYOUT.nodeWidth`/`nodeHeight`, not a `getBoundingClientRect` — the adapter draws every kind at that size, so the constants *are* the measurement |
+| `readingOrder(boxes)` | top to bottom, then left to right (rows are detected by half a box height) |
+| `nearestInDirection(boxes, from, dir)` | one arrow |
+| `navTarget(boxes, from, key)` | the whole key → target rule, arrows plus `Home`/`End` |
+| `tabStopId(boxes, selected)` | the single tab stop of the diagram |
+| `KEYBOARD_HINT` | the keys in words, for `aria-describedby` |
+
+**How an arrow picks.** The candidate must lie **ahead** in the requested direction — level
+with the current node and behind it are both out, which is what makes "never backwards" a
+structural property rather than a special case. Among the candidates the cheapest wins, with
+cost `forward + 2 · |drift|`: progress along the arrow counts half as much as drifting away
+from it. That factor of two is the whole tuning. It makes an arrow land on the **nearest
+generation** — from a trunk, a child two levels up the drawing costs `160 + 2·226` while a
+grandchild that happens to sit closer to straight up costs `320 + 2·226` — while a candidate
+lying straight ahead still beats a closer one far to the side. There is no cone to fall out
+of, so a wide gap in the layout cannot swallow a key press; the answer is `null` only at the
+edge of the drawing, and the caller keeps the selection. Ties break by id, and `navBoxes`
+sorts by id, so a shuffled payload walks the same way.
+
+**The DOM part lives in `Canvas.tsx`**, and only there:
+
+- the `<section>` is the widget — `role="application"` (screen readers pass arrows through),
+  `tabIndex={0}`, one `keydown` handler and one `focus` handler, described by the hidden
+  `.lp-canvas-hint` paragraph;
+- **roving tabindex**: the node body carries `data-lp-node-id` and `tabIndex={data.tabIndex}`
+  (`Canvas` decorates the graph with `0` for `tabStopId` and `-1` for the rest), and React
+  Flow gets `nodesFocusable={false}` so its own wrapper does not add a second stop per node. A
+  200-node diagram must not put 200 stops between the toolbar and the panel;
+- arrows resolve the focused node from `event.target.closest("[data-lp-node-id]")`, then
+  `navTarget`, then `onSelectNode`, then an animated `setCenter` through the existing
+  `FocusController` (the local request wins over a search hit), then focus the winner in the
+  next frame — so the camera, the selection, the panel and the next key press agree;
+- `Enter`/`Space` select the focused node exactly like a click, `Escape` clears the selection
+  and puts focus back on the section; `Tab` on a node selects it via the `focus` handler;
+- the ring is `:focus-visible` only (`.lp-node:focus-visible`), so a mouse click does not
+  paint it, and it uses the theme accent rather than a fixed colour.
+
+**Why the stop is the node and not a list.** There is no `<ul>` of nodes in this view — the
+nodes *are* the boxes — so a fake listbox would duplicate the data with a second source of
+truth. The widget role plus one tab stop plus announced text is the smallest honest mapping of
+a drawing onto the keyboard.
+
+**Tests** (51 files / 903): `tests/dashboard-keyboard.test.ts` — 20 cases: default box size,
+reading order, determinism for every arrow over a reversed payload, up/down through the levels
+(the layout grows upwards, so `up` walks towards the leaves), left/right between neighbours, a
+`null` at every edge, "never backwards", alignment beating a closer off-axis node, the nearest
+generation beating an aligned grandchild, an exact tie broken by id, an unknown id, `Home`/`End`,
+the landing rule when nothing is selected, the empty graph, exactly one tab stop and a vanished
+selection not swallowing `Tab`, the hint in words — and two runs over a layout the adapter
+*did* build (`buildGraph`): climbing the real tree, and a collapsed subtree staying out of reach.
+`tests/dashboard-build.test.ts` pins the source contracts and the bundle markers (`ArrowDown`,
+`lp-canvas-hint`, `data-lp-node-id`, the CSS ring) so the wiring cannot be dropped silently.
+
 ### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
 
 Two ⌘K items and two composer slash commands, all writing through the plugin

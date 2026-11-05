@@ -19,13 +19,21 @@
  * node's layout box, so "find a leaf by search" never turns into a
  * scroll hunt (the G4 acceptance scenario).
  *
+ * Stage L9 makes the drawing reachable without a mouse. The rule itself lives
+ * in `dashboard/src/keyboard.ts` (pure, tested on numbers); this file owns only
+ * the DOM part: one **roving tab stop** (the selected node, else the first), a
+ * `keydown` handler on the section that delegates to `navTarget`, focus moved
+ * to the winning node, and the camera following so an arrow never selects
+ * something off screen. `Escape` clears the selection, `Enter`/`Space` select
+ * the focused node, exactly like a click does.
+ *
  * Before the first `/api/tree` response (or when the graph is empty after
  * filters/collapse) the canvas shows the honest empty state instead of a
  * blank viewport; the app overrides the wording when the emptiness is the
  * result of the active filters (G4).
  */
-import { useEffect } from "react";
-import type { ReactElement } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { FocusEvent, KeyboardEvent, ReactElement } from "react";
 import { Background, Controls, ReactFlow, useReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -35,6 +43,7 @@ import {
   type DashboardGraph,
   type FocusRequest,
 } from "../graph";
+import { KEYBOARD_HINT, navBoxes, navTarget, tabStopId } from "../keyboard";
 import { edgeTypes } from "./graph-edges";
 import { nodeTypes } from "./graph-nodes";
 
@@ -79,6 +88,61 @@ function FocusController({ focus }: { focus: FocusRequest | null }): null {
 
 export function Canvas(props: CanvasProps): ReactElement {
   const { graph, loaded, onToggleNode, selectedId, onSelectNode, focus } = props;
+  const sectionRef = useRef<HTMLElement | null>(null);
+  // A keyboard move pans the camera the same way a search hit does; the local
+  // request wins over the app's when both exist.
+  const [pan, setPan] = useState<FocusRequest | null>(null);
+
+  const boxes = navBoxes(graph.nodes);
+  const tabStop = tabStopId(boxes, selectedId);
+
+  /** Moves DOM focus to the drawn node, so the next key press starts there. */
+  const focusNode = (id: string): void => {
+    const element = sectionRef.current?.querySelector<HTMLElement>(
+      `[data-lp-node-id="${CSS.escape(id)}"]`,
+    );
+    element?.focus();
+  };
+
+  /**
+   * One key, one decision. Keys pressed on a node bubble here, so the handler
+   * is the single place that knows the mapping — including `Enter`/`Space`
+   * (select, like a click) and `Escape` (clear the selection).
+   */
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    const target = event.target as HTMLElement | null;
+    const focusedId =
+      target?.closest<HTMLElement>("[data-lp-node-id]")?.dataset.lpNodeId ??
+      selectedId;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onSelectNode(null);
+      sectionRef.current?.focus();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      if (focusedId !== null && focusedId !== undefined) {
+        event.preventDefault();
+        onSelectNode(focusedId);
+      }
+      return;
+    }
+    const next = navTarget(boxes, focusedId ?? null, event.key);
+    if (next === null) return;
+    event.preventDefault();
+    onSelectNode(next);
+    setPan({ nodeId: next, seq: (pan?.seq ?? 0) + 1 });
+    // The node is re-rendered with the new tab stop before we focus it.
+    requestAnimationFrame(() => focusNode(next));
+  };
+
+  /** Tabbing onto a node (or clicking one) selects what the panel shows. */
+  const onFocus = (event: FocusEvent<HTMLElement>): void => {
+    const id = (event.target as HTMLElement).closest<HTMLElement>(
+      "[data-lp-node-id]",
+    )?.dataset.lpNodeId;
+    if (id !== undefined && id !== selectedId) onSelectNode(id);
+  };
 
   if (loaded && graph.nodes.length === 0) {
     return (
@@ -110,6 +174,7 @@ export function Canvas(props: CanvasProps): ReactElement {
       onToggle: () => onToggleNode(node.id),
       selected: node.id === selectedId,
       bugLinked: bugLinked.has(node.id),
+      tabIndex: node.id === tabStop ? 0 : -1,
     },
   }));
   const edges = graph.edges.map((edge) => {
@@ -126,7 +191,21 @@ export function Canvas(props: CanvasProps): ReactElement {
   });
 
   return (
-    <section className="lp-canvas" aria-label="Tree diagram">
+    <section
+      ref={sectionRef}
+      className="lp-canvas"
+      aria-label="Tree diagram"
+      // A diagram is a custom widget: screen readers pass the arrow keys
+      // through instead of treating them as their own navigation.
+      role="application"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onFocus={onFocus}
+      aria-describedby="lp-canvas-keyboard-hint"
+    >
+      <p id="lp-canvas-keyboard-hint" className="lp-canvas-hint">
+        {KEYBOARD_HINT}
+      </p>
       <ReactFlow
         nodes={[...nodes, ...graph.goalFrames]}
         edges={edges}
@@ -134,6 +213,9 @@ export function Canvas(props: CanvasProps): ReactElement {
         edgeTypes={edgeTypes}
         onNodeClick={(_event, node) => onSelectNode(node.id)}
         onPaneClick={() => onSelectNode(null)}
+        // React Flow's own wrapper would add a second tab stop per node; the
+        // roving tabindex on our node body is the one that counts (L9).
+        nodesFocusable={false}
         fitView
         fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         minZoom={0.2}
@@ -143,7 +225,7 @@ export function Canvas(props: CanvasProps): ReactElement {
         elementsSelectable={false}
         proOptions={{ hideAttribution: true }}
       >
-        <FocusController focus={focus} />
+        <FocusController focus={pan ?? focus} />
         <Background gap={22} />
         <Controls showInteractive={false} />
       </ReactFlow>
