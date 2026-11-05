@@ -369,6 +369,8 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(canvas).toContain("nodesFocusable={false}");
     expect(canvas).toContain("tabIndex: node.id === tabStop ? 0 : -1");
     expect(canvas).toContain("KEYBOARD_HINT");
+    // A collapse button inside a node keeps Enter/Space for itself.
+    expect(canvas).toContain('closest("button, a, input, select, textarea")');
 
     const nodes = fs.readFileSync(
       path.join(ROOT, "dashboard", "src", "components", "graph-nodes.tsx"),

@@ -121,6 +121,10 @@ export function Canvas(props: CanvasProps): ReactElement {
       return;
     }
     if (event.key === "Enter" || event.key === " ") {
+      // A node's collapse button owns these keys: it must toggle, not select.
+      const control =
+        target?.closest("button, a, input, select, textarea") ?? null;
+      if (control !== null) return;
       if (focusedId !== null && focusedId !== undefined) {
         event.preventDefault();
         onSelectNode(focusedId);

@@ -10961,6 +10961,8 @@ function Canvas(props) {
       return;
     }
     if (event.key === "Enter" || event.key === " ") {
+      const control = target?.closest("button, a, input, select, textarea") ?? null;
+      if (control !== null) return;
       if (focusedId !== null && focusedId !== void 0) {
         event.preventDefault();
         onSelectNode(focusedId);
