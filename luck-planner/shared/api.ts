@@ -3,6 +3,7 @@ import { goalSchema } from "./goals";
 import { growthSchema } from "./growth";
 import { beeSchema, bugNodeSchema, bugSchema } from "./links";
 import { nodeDetail, stats as statsRpc, treeSearch } from "./rpc";
+import { themeCatalogSchema } from "./themes";
 import {
   historyEntrySchema,
   nodeSchema,
@@ -41,6 +42,12 @@ export const DASHBOARD_STATS_PATH = "/api/stats";
 export const DASHBOARD_EVENTS_PATH = "/api/events";
 /** The project as a portable `.json.zip` (stage L2) — a download, not JSON. */
 export const DASHBOARD_EXPORT_PATH = "/api/export";
+/**
+ * The theme catalog (stage L7): the shipped palettes plus the ones a person
+ * put in the plugin's `themes/` directory. Project-independent on purpose — a
+ * theme belongs to the tab, not to a workspace.
+ */
+export const DASHBOARD_THEMES_PATH = "/api/themes";
 
 /** Query parameter carrying the per-installation access token. */
 export const DASHBOARD_TOKEN_PARAM = "token";
@@ -48,6 +55,11 @@ export const DASHBOARD_TOKEN_PARAM = "token";
 export const DASHBOARD_EXPORT_HISTORY_PARAM = "history";
 /** Query parameter naming the project (canonical workspace path, ADR-2). */
 export const DASHBOARD_PROJECT_PARAM = "project";
+/**
+ * Appearance hint the plugin derives from Paseo's own colours (stage L7), so a
+ * tab opened from a light host starts light instead of guessing from the OS.
+ */
+export const DASHBOARD_APPEARANCE_PARAM = "appearance";
 
 /**
  * Builds the browser URL the dashboard is opened with (stage F2).
@@ -71,6 +83,38 @@ export function dashboardUrl(
     params.set(DASHBOARD_PROJECT_PARAM, projectKey);
   }
   return `${origin.replace(/\/+$/, "")}/?${params.toString()}`;
+}
+
+/**
+ * `GET /api/themes` — the catalog, parsed by the tab.
+ *
+ * Relative like {@link exportUrl}: the tab that got the HTML is the server to
+ * ask. The token rides in the query string for the same reason it does in
+ * {@link dashboardUrl}.
+ */
+export function themesUrl(token: string): string {
+  const params = new URLSearchParams();
+  params.set(DASHBOARD_TOKEN_PARAM, token);
+  return `${DASHBOARD_THEMES_PATH}?${params.toString()}`;
+}
+
+/**
+ * Appends the appearance hint to an already-built dashboard URL (stage L7).
+ *
+ * The address is built by the server (`dashboardUrl`) and handed to the opener
+ * by the `dashboard-status` RPC, which knows nothing about the client's colours
+ * — so the hint is added here, where the host theme is in hand. A `null` hint
+ * leaves the URL untouched: the tab then follows the OS preference, exactly as
+ * it did before this stage.
+ */
+export function withAppearance(
+  url: string,
+  appearance: string | null,
+): string {
+  if (appearance !== "light" && appearance !== "dark") return url;
+  const parsed = new URL(url);
+  parsed.searchParams.set(DASHBOARD_APPEARANCE_PARAM, appearance);
+  return parsed.toString();
 }
 
 /**
@@ -182,6 +226,14 @@ export const treeResponseSchema = z.object({
   goals: z.array(goalSchema),
   growth: z.array(growthSchema),
 });
+
+/**
+ * `GET /api/themes` — the theme catalog, in the shared schema the dashboard
+ * parses (stage L7). Arbitrary JSON files, so the loader's report about the
+ * files it refused travels with it.
+ */
+export const themesResponseSchema = themeCatalogSchema;
+export type { ThemeCatalog, ThemeCatalogEntry } from "./themes";
 
 /** `GET /api/node/:id` — the same shape the `node-detail` RPC returns. */
 export const nodeResponseSchema = nodeDetail.output;

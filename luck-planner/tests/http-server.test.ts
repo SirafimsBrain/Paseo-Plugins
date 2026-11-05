@@ -11,6 +11,7 @@ import {
   nodeResponseSchema,
   searchResponseSchema,
   statsResponseSchema,
+  themesResponseSchema,
   treeResponseSchema,
 } from "../shared/api";
 import {
@@ -379,6 +380,56 @@ describe("DashboardHttpServer", () => {
     expect(stats.bees).toBe(1);
     expect(stats.bugs).toEqual({ total: 1, open: 1 });
     expect(stats.growthRecords).toBe(1);
+  });
+
+  // Stage L7: the theme catalog. Project-independent, so the tab can paint
+  // itself before it knows which workspace it shows.
+  it("serves /api/themes without a project, merging the user's directory", async () => {
+    await boot();
+    const userDir = path.join(dir, "themes");
+    mkdirSync(userDir, { recursive: true });
+    writeFileSync(
+      path.join(userDir, "sepia.json"),
+      JSON.stringify({
+        id: "sepia",
+        name: "Sepia",
+        appearance: "light",
+        tokens: {
+          bg: "#f4efe6",
+          surface: "#fffaf0",
+          border: "#d9cdb8",
+          text: "#3b3226",
+          textMuted: "#7a6c58",
+          accent: "#8a5a2b",
+          selection: "rgba(138, 90, 43, 0.14)",
+        },
+      }),
+    );
+    writeFileSync(path.join(userDir, "broken.json"), "{ nope");
+
+    const res = await get("/api/themes");
+    expect(res.status).toBe(200);
+    const catalog = themesResponseSchema.parse(await res.json());
+    // The shipped palettes are there even though this test never pointed the
+    // server at a fixture: the checkout's own `themes/` is the default.
+    expect(catalog.themes.map((theme) => theme.id)).toEqual(
+      expect.arrayContaining(["dark", "light", "sepia"]),
+    );
+    expect(catalog.themes.find((theme) => theme.id === "sepia")?.origin).toBe(
+      "user",
+    );
+    expect(catalog.userDirectory).toBe(userDir);
+    expect(catalog.default).toBe("dark");
+    // A bad file is reported, not fatal — the rest of the catalog arrives.
+    expect(catalog.problems.map((problem) => path.basename(problem.file))).toEqual([
+      "broken.json",
+    ]);
+  });
+
+  it("401s /api/themes without the token", async () => {
+    await boot();
+    const res = await get("/api/themes", null);
+    expect(res.status).toBe(401);
   });
 
   it("streams /api/export as a zip download that parses back to the project", async () => {

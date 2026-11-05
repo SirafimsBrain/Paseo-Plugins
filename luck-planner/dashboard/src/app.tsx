@@ -115,7 +115,14 @@ import {
   type DashboardView,
   type WebGLSupport,
 } from "./webgl";
-import { resolveTheme, THEME_STORAGE_KEY, tokensFor, type ThemeName } from "./theme";
+import {
+  initialThemeId,
+  readStoredTheme,
+  THEME_FOLLOW,
+  themeVariables,
+  writeStoredTheme,
+} from "./theme";
+import { resolveAppearance, type Appearance, type ThemeCatalog } from "../../shared/themes";
 import { Canvas } from "./components/Canvas";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { DetailModal } from "./components/DetailModal";
@@ -127,30 +134,26 @@ import { PlainView } from "./components/PlainView";
 import { ThreeView, type ThreeViewState } from "./components/ThreeView";
 import { Toolbar, type ToolbarFilters } from "./components/Toolbar";
 
-/** Applies a theme's tokens to `:root` as the CSS custom properties. */
-function applyTheme(theme: ThemeName): void {
-  const tokens = tokensFor(theme);
+/**
+ * Applies a theme's tokens to `:root` (stage L7: the tokens come from the
+ * server's catalog, so this function no longer knows any palette) and marks the
+ * element with the theme id, which the stylesheet uses for the few spots that
+ * need to know the *name* of the scheme (none today — the tokens suffice).
+ */
+function applyTheme(themeId: string, catalog: ThemeCatalog | null): void {
+  const theme = catalog?.themes.find((entry) => entry.id === themeId) ?? null;
+  if (theme === null) return; // No catalog yet: the stylesheet's floor stays.
   const root = document.documentElement;
-  root.dataset.theme = theme;
-  root.style.setProperty("--lp-bg", tokens.bg);
-  root.style.setProperty("--lp-surface", tokens.surface);
-  root.style.setProperty("--lp-border", tokens.border);
-  root.style.setProperty("--lp-text", tokens.text);
-  root.style.setProperty("--lp-text-muted", tokens.textMuted);
-  root.style.setProperty("--lp-accent", tokens.accent);
-  root.style.setProperty("--lp-selection", tokens.selection);
+  root.dataset.theme = theme.id;
+  root.dataset.appearance = theme.appearance;
+  for (const [property, value] of Object.entries(themeVariables(theme.tokens))) {
+    root.style.setProperty(property, value);
+  }
 }
 
-/** Startup theme: stored choice, else the OS preference, else dark. */
-function initialTheme(): ThemeName {
-  let stored: string | null = null;
-  try {
-    stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  } catch {
-    // Private mode / disabled storage: fall back to the OS preference.
-  }
-  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
-  return resolveTheme(stored, prefersDark);
+/** Whether the operating system asks for a dark scheme. */
+function prefersDarkScheme(): boolean {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
 }
 
 /**
@@ -241,7 +244,24 @@ export function App(): ReactElement {
   // K1: the entity the toolbar search should scroll into view on the board.
   const [plainScrollTarget, setPlainScrollTarget] = useState<string | null>(null);
   const [statusLine, setStatusLine] = useState("");
-  const [theme] = useState<ThemeName>(initialTheme);
+  // L7 themes: the catalog arrives from the server, the choice is the value a
+  // picker sets ("" = follow the host/OS). The theme itself is derived, never
+  // stored: a deleted user theme must fall back instead of pinning a dead id.
+  const [themeCatalog, setThemeCatalog] = useState<ThemeCatalog | null>(null);
+  const [themeChoice, setThemeChoice] = useState<string>(
+    () => readStoredTheme(safeStorage()) ?? THEME_FOLLOW,
+  );
+  const appearance: Appearance = useMemo(
+    () => resolveAppearance(params.appearance, prefersDarkScheme()),
+    [params.appearance],
+  );
+  const themeId = useMemo(
+    () =>
+      themeCatalog === null
+        ? ""
+        : initialThemeId(themeChoice, themeCatalog, appearance),
+    [appearance, themeCatalog, themeChoice],
+  );
   // The details panel is resizable; the width survives a reload.
   const [detailsWidth, setDetailsWidth] = useState(() =>
     readStoredDetailsWidth(detailsStorage()),
@@ -309,8 +329,49 @@ export function App(): ReactElement {
   selectedIdRef.current = selectedId;
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    applyTheme(themeId, themeCatalog);
+  }, [themeId, themeCatalog]);
+
+  /**
+   * Picks a theme: stores the choice and lets the derived state repaint. An
+   * empty value is "follow the host" — stored as the empty sentinel, not as a
+   * deleted key, so the picker has something to show.
+   */
+  const chooseTheme = useCallback((next: string): void => {
+    setThemeChoice(next);
+    writeStoredTheme(safeStorage(), next);
+  }, []);
+
+  /**
+   * Loads the theme catalog once per tab (stage L7). It is independent of the
+   * project — a tab without a workspace is still a page someone has to look at —
+   * and a failure is not fatal: the stylesheet's own floor palette stays, and
+   * the status line says why the catalog is missing.
+   */
+  useEffect(() => {
+    if (client === null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const catalog = await client.themes();
+        if (cancelled) return;
+        setThemeCatalog(catalog);
+        if (catalog.problems.length > 0) {
+          setStatusLine(
+            `${catalog.problems.length} theme file${catalog.problems.length === 1 ? " was" : "s were"} not loaded — see the themes README beside the plugin.`,
+          );
+        }
+      } catch (cause) {
+        if (cancelled) return;
+        setStatusLine(
+          `Theme catalog unavailable: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   const load = useCallback(async (): Promise<void> => {
     if (client === null) {
@@ -730,6 +791,10 @@ export function App(): ReactElement {
         onViewChange={onViewChange}
         webglOk={webgl.ok}
         exportHref={exportHref}
+        themeChoice={themeChoice}
+        themeId={themeId}
+        themes={themeCatalog?.themes ?? []}
+        onThemeChange={chooseTheme}
       />
       <div
         className={view === "plain" ? "lp-body lp-body-plain" : "lp-body"}

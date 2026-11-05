@@ -8,6 +8,9 @@
  * otherwise only be spotted by eye — that every `shared/tree.ts` kind and
  * status has a colour, a label and a glyph.
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { LEAF_STATUSES, NODE_KINDS } from "../shared/tree";
 import { BEE_STATUSES } from "../shared/links";
@@ -33,45 +36,142 @@ import {
   withAlpha,
 } from "../dashboard/src/colors";
 import {
-  DARK_THEME,
-  LIGHT_THEME,
-  resolveTheme,
-  tokensFor,
+  THEME_FOLLOW,
+  THEME_STORAGE_KEY,
+  readStoredTheme,
+  themeVariables,
+  writeStoredTheme,
 } from "../dashboard/src/theme";
+import {
+  DEFAULT_THEME_ID,
+  resolveAppearance,
+  resolveThemeId,
+  THEME_TOKEN_KEYS,
+  THEME_TOKEN_VARIABLES,
+  themeCatalogSchema,
+  themeDefinitionSchema,
+  type ThemeCatalog,
+} from "../shared/themes";
 
-describe("resolveTheme", () => {
-  it("prefers the stored choice over the OS preference", () => {
-    expect(resolveTheme("light", true)).toBe("light");
-    expect(resolveTheme("dark", false)).toBe("dark");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** The shipped palettes are data now (L7), so the tests read the real files. */
+function shippedCatalog(): ThemeCatalog {
+  const dir = join(__dirname, "..", "themes");
+  const files = readdirSync(dir).filter((name) => name.endsWith(".json"));
+  const themes = files.map((name) => {
+    const parsed = themeDefinitionSchema.parse(
+      JSON.parse(readFileSync(join(dir, name), "utf8")),
+    );
+    expect(`${parsed.id}.json`, "the file name is the theme id").toBe(name);
+    return { ...parsed, origin: "built-in" as const };
+  });
+  return themeCatalogSchema.parse({
+    default: DEFAULT_THEME_ID,
+    themes,
+    problems: [],
+    userDirectory: "/tmp/luck-planner-test-themes",
+  });
+}
+
+describe("theme catalog (L7)", () => {
+  const catalog = shippedCatalog();
+
+  it("ships a dark and a light palette, and the default is shipped", () => {
+    expect(catalog.themes.map((theme) => theme.appearance).sort()).toEqual([
+      "dark",
+      "light",
+    ]);
+    expect(catalog.themes.some((theme) => theme.id === catalog.default)).toBe(true);
   });
 
-  it("falls back to the OS preference when nothing is stored", () => {
-    expect(resolveTheme(null, true)).toBe("dark");
-    expect(resolveTheme(null, false)).toBe("light");
+  it("defines every token in every shipped palette", () => {
+    for (const theme of catalog.themes) {
+      expect(Object.keys(theme.tokens).sort()).toEqual(
+        [...THEME_TOKEN_KEYS].sort(),
+      );
+      for (const [name, value] of Object.entries(theme.tokens)) {
+        expect(value, `${theme.id}.${name} must be a colour`).toMatch(/^#|^rgba\(/);
+      }
+    }
   });
 
-  it("treats an unknown stored value as absent", () => {
-    expect(resolveTheme("sepia", true)).toBe("dark");
-    expect(resolveTheme("sepia", false)).toBe("light");
+  it("maps every token onto the CSS property the stylesheet reads", () => {
+    const variables = themeVariables(catalog.themes[0]!.tokens);
+    expect(Object.keys(variables).sort()).toEqual(
+      Object.values(THEME_TOKEN_VARIABLES).sort(),
+    );
+    expect(variables["--lp-bg"]).toBe(catalog.themes[0]!.tokens.bg);
   });
 });
 
-describe("theme tokens", () => {
-  it("returns the palette for each theme name", () => {
-    expect(tokensFor("dark")).toBe(DARK_THEME);
-    expect(tokensFor("light")).toBe(LIGHT_THEME);
+describe("resolveAppearance", () => {
+  it("prefers the host hint over the OS preference", () => {
+    expect(resolveAppearance("light", true)).toBe("light");
+    expect(resolveAppearance("dark", false)).toBe("dark");
   });
 
-  it("defines every token in both palettes", () => {
-    const keys = Object.keys(DARK_THEME).sort();
-    expect(Object.keys(LIGHT_THEME).sort()).toEqual(keys);
-    for (const tokens of [DARK_THEME, LIGHT_THEME]) {
-      for (const [name, value] of Object.entries(tokens)) {
-        expect(value, `${name} must be a hex/rgba colour`).toMatch(
-          /^#|^rgba\(/,
-        );
-      }
-    }
+  it("follows the OS when the host gave no hint", () => {
+    expect(resolveAppearance(null, true)).toBe("dark");
+    expect(resolveAppearance(null, false)).toBe("light");
+  });
+});
+
+describe("resolveThemeId", () => {
+  const catalog = shippedCatalog();
+
+  it("honours a stored id that still exists", () => {
+    expect(resolveThemeId("light", catalog, "dark")).toBe("light");
+  });
+
+  it("falls back to the appearance when nothing is stored", () => {
+    expect(resolveThemeId(null, catalog, "dark")).toBe("dark");
+    expect(resolveThemeId(THEME_FOLLOW, catalog, "light")).toBe("light");
+  });
+
+  it("treats a stored id whose file vanished as absent", () => {
+    expect(resolveThemeId("sepia", catalog, "light")).toBe("light");
+  });
+
+  it("answers an empty id for an empty catalog (no invented palette)", () => {
+    expect(
+      resolveThemeId("dark", { default: "", themes: [] }, "dark"),
+    ).toBe("");
+  });
+});
+
+describe("theme storage", () => {
+  function memoryStorage(): {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  } {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => void values.set(key, value),
+    };
+  }
+
+  it("round-trips the choice under one key", () => {
+    const storage = memoryStorage();
+    expect(readStoredTheme(storage)).toBeNull();
+    writeStoredTheme(storage, "light");
+    expect(storage.getItem(THEME_STORAGE_KEY)).toBe("light");
+    expect(readStoredTheme(storage)).toBe("light");
+  });
+
+  it("treats a missing or throwing storage as no choice", () => {
+    expect(readStoredTheme(null)).toBeNull();
+    const throwing = {
+      getItem: () => {
+        throw new Error("denied");
+      },
+      setItem: () => {
+        throw new Error("denied");
+      },
+    };
+    expect(readStoredTheme(throwing)).toBeNull();
+    expect(() => writeStoredTheme(throwing, "dark")).not.toThrow();
   });
 });
 

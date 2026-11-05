@@ -324,6 +324,38 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(css).toContain(".lp-bee-cycle-halo {");
     expect(css).toContain(".lp-details-cycle-walk {");
   });
+
+  it("selects a theme from the server catalog instead of a hard-wired pair", () => {
+    // L7: the palettes are data files (`themes/*.json`) served by
+    // `/api/themes`. A second copy compiled into the tab would paint a theme
+    // nobody can find on disk, so the source must hold no palette at all.
+    const theme = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "theme.ts"),
+      "utf8",
+    );
+    expect(theme).toContain("THEME_STORAGE_KEY");
+    expect(theme).not.toMatch(/#[0-9a-fA-F]{6}/);
+
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("client.themes()");
+    expect(app).toContain("chooseTheme");
+
+    const toolbarSrc = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Toolbar.tsx"),
+      "utf8",
+    );
+    expect(toolbarSrc).toContain("Match Paseo");
+    expect(toolbarSrc).toContain("props.onThemeChange");
+
+    // The committed bundle carries the picker for real.
+    const js = fs.readFileSync(APP_JS, "utf8");
+    expect(js).toContain("Match Paseo");
+    expect(js).toContain("/api/themes");
+    expect(js).toContain("lp-toolbar-theme");
+  });
 });
 
 describe("the built SPA served by the real HTTP server", () => {

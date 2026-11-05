@@ -89,6 +89,22 @@ export function resolveDashboardDir(): string {
   return existing ?? candidates[0] ?? path.join(process.cwd(), "dist", "dashboard");
 }
 
+/**
+ * The **shipped theme catalog** (stage L7): `<plugin>/themes`, the directory
+ * of `dark.json`, `light.json` and their README. First candidate that exists,
+ * so a development checkout reads its own catalog and an installed plugin
+ * reads the one in the daemon's checkout; the first candidate is the honest
+ * answer even when nothing exists, because the loader treats a missing
+ * directory as an empty catalog rather than an error.
+ */
+export function resolveThemesDir(): string {
+  const candidates = candidateRoots().map((root) => path.join(root, "themes"));
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[0] ?? path.join(process.cwd(), "themes");
+}
+
 /** The plugin's manifest (`package.json`) — the first candidate that exists. */
 export function resolveManifestPath(): string {
   const candidates = candidateRoots().map((root) => path.join(root, "package.json"));

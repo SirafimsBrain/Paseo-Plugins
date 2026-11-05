@@ -1,77 +1,90 @@
 /**
- * The dashboard's own theme (PLAN.md stage G1, ADR-1).
+ * Theme selection in the dashboard tab (PLAN.md stage G1, rewritten in L7).
  *
- * The dashboard is a standalone web app served over loopback: it must not read
- * Paseo's theme tokens (they are not even reachable from a browser tab), so it
- * ships its own small palette in CSS custom properties, with a light and a
- * dark variant keyed off `prefers-color-scheme`. Colors are chosen for a
- * technical diagram: dark canvas, muted surfaces, saturated accents reserved
- * for state (status bars, bee edges, bug badges).
+ * Stage G1 hard-wired two palettes here and applied them from the app; L7 moved
+ * the palettes **out of the code** into `themes/*.json` (shipped) and into the
+ * user's `themes/` directory, served by `GET /api/themes`. What is left here is
+ * the browser-side half: the storage key, the guarded read/write of the user's
+ * choice, and the one function that turns a theme into CSS custom properties.
  *
- * Pure data + pure functions: `tests/dashboard-theme.test.ts` pins the palettes
- * and the preference rule without a DOM; the app applies them in
- * `dashboard/src/main.tsx`.
+ * Everything else — which appearance applies, which theme id wins, how the
+ * catalog merges — lives in `shared/themes.ts`, because the server needs the
+ * same rules and a tab that decided differently from the server would be a bug
+ * waiting for a big project.
+ *
+ * No DOM here: the app owns `document.documentElement`; this module returns the
+ * record it sets, so the rule stays testable in Node.
  */
+import {
+  resolveThemeId,
+  themeCssVariables,
+  type Appearance,
+  type ThemeTokens,
+} from "../../shared/themes";
 
-/** Which of the two palettes is active. */
-export type ThemeName = "dark" | "light";
-
-/**
- * CSS custom-property names the app defines on `:root` and reads in
- * `dashboard/src/styles.css`. Kept as data so a theme switch is a
- * re-application of one record, not a second stylesheet.
- */
-export interface ThemeTokens {
-  /** Page and canvas background. */
-  readonly bg: string;
-  /** Toolbar / details-panel / legend surface. */
-  readonly surface: string;
-  readonly border: string;
-  readonly text: string;
-  readonly textMuted: string;
-  readonly accent: string;
-  /** Selection/hover wash over nodes and rows. */
-  readonly selection: string;
-}
-
-/** Dark palette — the default: dashboards are read on a second screen. */
-export const DARK_THEME: ThemeTokens = {
-  bg: "#0f1115",
-  surface: "#171a21",
-  border: "#262b36",
-  text: "#e6e9ef",
-  textMuted: "#8b93a3",
-  accent: "#5b9dff",
-  selection: "rgba(91, 157, 255, 0.16)",
-};
-
-/** Light palette for daytime use; same roles, higher contrast borders. */
-export const LIGHT_THEME: ThemeTokens = {
-  bg: "#f6f7f9",
-  surface: "#ffffff",
-  border: "#d7dbe2",
-  text: "#1b1f27",
-  textMuted: "#5c6470",
-  accent: "#1f6feb",
-  selection: "rgba(31, 111, 235, 0.12)",
-};
-
-/** The palette for a theme name. */
-export function tokensFor(theme: ThemeName): ThemeTokens {
-  return theme === "light" ? LIGHT_THEME : DARK_THEME;
-}
-
-/**
- * Resolves the startup theme: an explicit user choice (stored by the app)
- * wins over the OS preference, which wins over the dark default.
- */
-export function resolveTheme(
-  stored: string | null,
-  prefersDark: boolean,
-): ThemeName {
-  if (stored === "dark" || stored === "light") return stored;
-  return prefersDark ? "dark" : "light";
-}
-
-/** Storage key of the user's explicit choice (absent = follow the OS). */
+/** Storage key of the user's explicit choice (absent = match Paseo/OS). */
 export const THEME_STORAGE_KEY = "luck-planner:theme";
+
+/**
+ * Stored value meaning "no choice": follow the appearance hint (Paseo's own
+ * colours) and, without one, the operating system. Kept as a sentinel instead
+ * of deleting the key so the picker has a value to render.
+ */
+export const THEME_FOLLOW = "";
+
+/** The CSS custom properties of a theme, ready for `applyThemeVariables`. */
+export function themeVariables(tokens: ThemeTokens): Record<string, string> {
+  return themeCssVariables(tokens);
+}
+
+/**
+ * The storage the app hands in — `view-state.ts`'s `ViewStorage` shape, so the
+ * tab passes the very object it already uses for the view choice and this
+ * module needs no DOM (it is compiled by the plugin's Node build too).
+ */
+export interface ThemeStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/** The stored choice, or `null` when unavailable (private mode, no storage). */
+export function readStoredTheme(storage: ThemeStorage | null): string | null {
+  if (storage === null) return null;
+  try {
+    return storage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    // A storage that throws is a storage that does not exist.
+    return null;
+  }
+}
+
+/**
+ * Remembers the choice (`THEME_FOLLOW` clears the follow-the-app hint).
+ *
+ * A storage that refuses the write (private browsing, a full quota) is not an
+ * error the user can act on: the choice still applies to this tab, it just
+ * does not survive a reload.
+ */
+export function writeStoredTheme(
+  storage: ThemeStorage | null,
+  themeId: string,
+): void {
+  if (storage === null) return;
+  try {
+    storage.setItem(THEME_STORAGE_KEY, themeId);
+  } catch {
+    // Ignored on purpose: see above.
+  }
+}
+
+/**
+ * The theme id to paint, given the stored choice and the resolved appearance —
+ * a thin re-export so the app has one import for "what do I paint".
+ */
+export function initialThemeId(
+  stored: string | null,
+  catalog: { default: string; themes: ReadonlyArray<{ id: string; appearance: Appearance }> },
+  appearance: Appearance,
+): string {
+  return resolveThemeId(stored, catalog, appearance);
+}

@@ -400,6 +400,7 @@ describe("shared/ import boundaries", () => {
         "panel.ts",
         "rpc.ts",
         "settings.ts",
+        "themes.ts",
         "timeline.ts",
         "tools.ts",
         "tree.ts",

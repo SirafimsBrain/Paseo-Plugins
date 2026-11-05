@@ -1,0 +1,14 @@
+{
+  "id": "light",
+  "name": "Paper",
+  "appearance": "light",
+  "tokens": {
+    "bg": "#f6f7f9",
+    "surface": "#ffffff",
+    "border": "#d7dbe2",
+    "text": "#1b1f27",
+    "textMuted": "#5c6470",
+    "accent": "#1f6feb",
+    "selection": "rgba(31, 111, 235, 0.12)"
+  }
+}

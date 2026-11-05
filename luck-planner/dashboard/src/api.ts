@@ -26,10 +26,13 @@ import {
   DASHBOARD_SEARCH_PATH,
   DASHBOARD_STATS_PATH,
   DASHBOARD_TOKEN_PARAM,
+  DASHBOARD_THEMES_PATH,
   DASHBOARD_TREE_PATH,
+  themesResponseSchema,
   type NodeResponse,
   type SearchResponse,
   type StatsResponse,
+  type ThemeCatalog,
   type TreeResponse,
 } from "../../shared/api";
 
@@ -48,6 +51,7 @@ export interface DashboardClient {
   node(id: string): Promise<NodeResponse>;
   search(input: DashboardSearchInput): Promise<SearchResponse>;
   stats(): Promise<StatsResponse>;
+  themes(): Promise<ThemeCatalog>;
 }
 
 /**
@@ -95,6 +99,15 @@ export class DashboardApi implements DashboardClient {
 
   async stats(): Promise<StatsResponse> {
     return statsResponseSchema.parse(await this.get(DASHBOARD_STATS_PATH));
+  }
+
+  /**
+   * The theme catalog (stage L7). Project-independent — the server answers it
+   * before the project parameter is even looked at — but it rides the same
+   * `get` path, so the token and the project travel as usual.
+   */
+  async themes(): Promise<ThemeCatalog> {
+    return themesResponseSchema.parse(await this.get(DASHBOARD_THEMES_PATH));
   }
 
   /**

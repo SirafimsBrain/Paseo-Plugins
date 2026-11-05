@@ -512,6 +512,81 @@ var RPC_CONTRACT_NAMES = [
   treeImport.name
 ];
 
+// shared/themes.ts
+var appearanceSchema = external_exports.enum(["light", "dark"]);
+var APPEARANCES = appearanceSchema.options;
+var themeTokensSchema = external_exports.object({
+  /** Page and canvas background. */
+  bg: external_exports.string().min(1),
+  /** Toolbar / details-panel / legend surface. */
+  surface: external_exports.string().min(1),
+  border: external_exports.string().min(1),
+  text: external_exports.string().min(1),
+  textMuted: external_exports.string().min(1),
+  accent: external_exports.string().min(1),
+  /** Selection/hover wash over nodes and rows (an `rgba()` is normal). */
+  selection: external_exports.string().min(1)
+});
+var THEME_TOKEN_KEYS = Object.keys(
+  themeTokensSchema.shape
+);
+var THEME_TOKEN_VARIABLES = {
+  bg: "--lp-bg",
+  surface: "--lp-surface",
+  border: "--lp-border",
+  text: "--lp-text",
+  textMuted: "--lp-text-muted",
+  accent: "--lp-accent",
+  selection: "--lp-selection"
+};
+function themeCssVariables(tokens) {
+  const variables = {};
+  for (const key of THEME_TOKEN_KEYS) {
+    variables[THEME_TOKEN_VARIABLES[key]] = tokens[key];
+  }
+  return variables;
+}
+var themeIdSchema = external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "theme ids are lowercase letters, digits and hyphens").max(40);
+var themeDefinitionSchema = external_exports.object({
+  id: themeIdSchema,
+  /** Human label in the picker; the id stays stable across renames. */
+  name: external_exports.string().min(1).max(60),
+  appearance: appearanceSchema,
+  tokens: themeTokensSchema
+});
+var themeOriginSchema = external_exports.enum(["built-in", "user"]);
+var themeCatalogEntrySchema = themeDefinitionSchema.extend({
+  origin: themeOriginSchema
+});
+var themeProblemSchema = external_exports.object({
+  file: external_exports.string().min(1),
+  problem: external_exports.string().min(1)
+});
+var themeCatalogSchema = external_exports.object({
+  default: external_exports.string(),
+  themes: external_exports.array(themeCatalogEntrySchema),
+  problems: external_exports.array(themeProblemSchema),
+  userDirectory: external_exports.string()
+});
+function resolveAppearance(host, prefersDark) {
+  if (host !== null) return host;
+  return prefersDark ? "dark" : "light";
+}
+function resolveThemeId(stored, catalog, appearance) {
+  if (stored !== null && stored.length > 0) {
+    const chosen = catalog.themes.find((theme) => theme.id === stored);
+    if (chosen !== void 0) return chosen.id;
+  }
+  const matching = catalog.themes.find(
+    (theme) => theme.appearance === appearance
+  );
+  if (matching !== void 0) return matching.id;
+  if (catalog.themes.some((theme) => theme.id === catalog.default)) {
+    return catalog.default;
+  }
+  return catalog.themes[0]?.id ?? "";
+}
+
 // shared/api.ts
 var DASHBOARD_HEALTH_PATH = "/health";
 var DASHBOARD_TREE_PATH = "/api/tree";
@@ -520,9 +595,11 @@ var DASHBOARD_SEARCH_PATH = "/api/search";
 var DASHBOARD_STATS_PATH = "/api/stats";
 var DASHBOARD_EVENTS_PATH = "/api/events";
 var DASHBOARD_EXPORT_PATH = "/api/export";
+var DASHBOARD_THEMES_PATH = "/api/themes";
 var DASHBOARD_TOKEN_PARAM = "token";
 var DASHBOARD_EXPORT_HISTORY_PARAM = "history";
 var DASHBOARD_PROJECT_PARAM = "project";
+var DASHBOARD_APPEARANCE_PARAM = "appearance";
 function exportUrl(token, projectKey, includeHistory = true) {
   const params = new URLSearchParams();
   params.set(DASHBOARD_TOKEN_PARAM, token);
@@ -560,6 +637,7 @@ var treeResponseSchema = external_exports.object({
   goals: external_exports.array(goalSchema),
   growth: external_exports.array(growthSchema)
 });
+var themesResponseSchema = themeCatalogSchema;
 var nodeResponseSchema = nodeDetail.output;
 var searchResponseSchema = treeSearch.output;
 var statsResponseSchema = stats.output;
@@ -594,6 +672,14 @@ var DashboardApi = class {
   }
   async stats() {
     return statsResponseSchema.parse(await this.get(DASHBOARD_STATS_PATH));
+  }
+  /**
+   * The theme catalog (stage L7). Project-independent — the server answers it
+   * before the project parameter is even looked at — but it rides the same
+   * `get` path, so the token and the project travel as usual.
+   */
+  async themes() {
+    return themesResponseSchema.parse(await this.get(DASHBOARD_THEMES_PATH));
   }
   /**
    * Liveness probe without the token (`/health` is public, ADR-9). Used by the
@@ -662,9 +748,13 @@ function resolveApiOrigin(locationHref) {
 // dashboard/src/params.ts
 function parseDashboardParams(search) {
   const params = new URLSearchParams(search);
+  const appearance = appearanceSchema.safeParse(
+    params.get(DASHBOARD_APPEARANCE_PARAM) ?? ""
+  );
   return {
     token: params.get(DASHBOARD_TOKEN_PARAM) ?? "",
-    projectKey: params.get(DASHBOARD_PROJECT_PARAM) ?? ""
+    projectKey: params.get(DASHBOARD_PROJECT_PARAM) ?? "",
+    appearance: appearance.success ? appearance.data : null
   };
 }
 
@@ -1203,32 +1293,29 @@ function planViewSwitch(webgl, target) {
 }
 
 // dashboard/src/theme.ts
-var DARK_THEME = {
-  bg: "#0f1115",
-  surface: "#171a21",
-  border: "#262b36",
-  text: "#e6e9ef",
-  textMuted: "#8b93a3",
-  accent: "#5b9dff",
-  selection: "rgba(91, 157, 255, 0.16)"
-};
-var LIGHT_THEME = {
-  bg: "#f6f7f9",
-  surface: "#ffffff",
-  border: "#d7dbe2",
-  text: "#1b1f27",
-  textMuted: "#5c6470",
-  accent: "#1f6feb",
-  selection: "rgba(31, 111, 235, 0.12)"
-};
-function tokensFor(theme) {
-  return theme === "light" ? LIGHT_THEME : DARK_THEME;
-}
-function resolveTheme(stored, prefersDark) {
-  if (stored === "dark" || stored === "light") return stored;
-  return prefersDark ? "dark" : "light";
-}
 var THEME_STORAGE_KEY = "luck-planner:theme";
+var THEME_FOLLOW = "";
+function themeVariables(tokens) {
+  return themeCssVariables(tokens);
+}
+function readStoredTheme(storage) {
+  if (storage === null) return null;
+  try {
+    return storage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+function writeStoredTheme(storage, themeId) {
+  if (storage === null) return;
+  try {
+    storage.setItem(THEME_STORAGE_KEY, themeId);
+  } catch {
+  }
+}
+function initialThemeId(stored, catalog, appearance) {
+  return resolveThemeId(stored, catalog, appearance);
+}
 
 // dashboard/src/components/Canvas.tsx
 var import_react5 = __toESM(require_react());
@@ -11745,6 +11832,7 @@ function Counter(props) {
 function Toolbar(props) {
   const stats2 = props.stats;
   const [draft, setDraft] = (0, import_react11.useState)("");
+  const themeValue = props.themes.some((theme) => theme.id === props.themeChoice) ? props.themeChoice : "";
   const submit = (event) => {
     event.preventDefault();
     const query = draft.trim();
@@ -11869,6 +11957,20 @@ function Toolbar(props) {
           }
         )
       ] }),
+      props.themes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
+        "select",
+        {
+          className: "lp-toolbar-filter lp-toolbar-theme",
+          "aria-label": "Theme",
+          title: `Theme of this tab \u2014 now \u201C${props.themeId}\u201D. \u201CMatch Paseo\u201D follows the host's appearance.`,
+          value: themeValue,
+          onChange: (event) => props.onThemeChange(event.target.value),
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "", children: "Match Paseo" }),
+            props.themes.map((theme) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: theme.id, children: theme.origin === "user" ? `${theme.name} (custom)` : theme.name }, theme.id))
+          ]
+        }
+      ) : null,
       props.exportHref.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         "a",
         {
@@ -11907,26 +12009,18 @@ function Toolbar(props) {
 
 // dashboard/src/app.tsx
 var import_jsx_runtime14 = __toESM(require_jsx_runtime());
-function applyTheme(theme) {
-  const tokens = tokensFor(theme);
+function applyTheme(themeId, catalog) {
+  const theme = catalog?.themes.find((entry) => entry.id === themeId) ?? null;
+  if (theme === null) return;
   const root2 = document.documentElement;
-  root2.dataset.theme = theme;
-  root2.style.setProperty("--lp-bg", tokens.bg);
-  root2.style.setProperty("--lp-surface", tokens.surface);
-  root2.style.setProperty("--lp-border", tokens.border);
-  root2.style.setProperty("--lp-text", tokens.text);
-  root2.style.setProperty("--lp-text-muted", tokens.textMuted);
-  root2.style.setProperty("--lp-accent", tokens.accent);
-  root2.style.setProperty("--lp-selection", tokens.selection);
-}
-function initialTheme() {
-  let stored = null;
-  try {
-    stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  } catch {
+  root2.dataset.theme = theme.id;
+  root2.dataset.appearance = theme.appearance;
+  for (const [property, value] of Object.entries(themeVariables(theme.tokens))) {
+    root2.style.setProperty(property, value);
   }
-  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
-  return resolveTheme(stored, prefersDark);
+}
+function prefersDarkScheme() {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
 }
 function filterExcludesNode(filters, node) {
   return {
@@ -11975,7 +12069,18 @@ function App() {
   );
   const [plainScrollTarget, setPlainScrollTarget] = (0, import_react12.useState)(null);
   const [statusLine, setStatusLine] = (0, import_react12.useState)("");
-  const [theme] = (0, import_react12.useState)(initialTheme);
+  const [themeCatalog, setThemeCatalog] = (0, import_react12.useState)(null);
+  const [themeChoice, setThemeChoice] = (0, import_react12.useState)(
+    () => readStoredTheme(safeStorage()) ?? THEME_FOLLOW
+  );
+  const appearance = (0, import_react12.useMemo)(
+    () => resolveAppearance(params.appearance, prefersDarkScheme()),
+    [params.appearance]
+  );
+  const themeId = (0, import_react12.useMemo)(
+    () => themeCatalog === null ? "" : initialThemeId(themeChoice, themeCatalog, appearance),
+    [appearance, themeCatalog, themeChoice]
+  );
   const [detailsWidth, setDetailsWidth] = (0, import_react12.useState)(
     () => readStoredDetailsWidth(detailsStorage())
   );
@@ -12010,8 +12115,36 @@ function App() {
   const selectedIdRef = (0, import_react12.useRef)(null);
   selectedIdRef.current = selectedId;
   (0, import_react12.useEffect)(() => {
-    applyTheme(theme);
-  }, [theme]);
+    applyTheme(themeId, themeCatalog);
+  }, [themeId, themeCatalog]);
+  const chooseTheme = (0, import_react12.useCallback)((next) => {
+    setThemeChoice(next);
+    writeStoredTheme(safeStorage(), next);
+  }, []);
+  (0, import_react12.useEffect)(() => {
+    if (client === null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const catalog = await client.themes();
+        if (cancelled) return;
+        setThemeCatalog(catalog);
+        if (catalog.problems.length > 0) {
+          setStatusLine(
+            `${catalog.problems.length} theme file${catalog.problems.length === 1 ? " was" : "s were"} not loaded \u2014 see the themes README beside the plugin.`
+          );
+        }
+      } catch (cause) {
+        if (cancelled) return;
+        setStatusLine(
+          `Theme catalog unavailable: ${cause instanceof Error ? cause.message : String(cause)}`
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
   const load = (0, import_react12.useCallback)(async () => {
     if (client === null) {
       setStatusLine("Open this page from Paseo (\u2318K \u2192 \u201COpen luck-planner dashboard\u201D) so the URL carries the access token.");
@@ -12291,7 +12424,11 @@ function App() {
         view,
         onViewChange,
         webglOk: webgl.ok,
-        exportHref
+        exportHref,
+        themeChoice,
+        themeId,
+        themes: themeCatalog?.themes ?? [],
+        onThemeChange: chooseTheme
       }
     ),
     /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(

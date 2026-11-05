@@ -7,6 +7,8 @@ import { openExternalUrl, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { ExternalLink } from "@getpaseo/plugin/client/ui";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { dashboardStatus, type DashboardStatus } from "../shared/rpc";
+import { withAppearance } from "../shared/api";
+import { appearanceFromHostColors } from "../shared/themes";
 import { openDashboardUrl, type DashboardOpeners } from "./open-dashboard";
 import { scaledFont } from "./host-font-scale";
 import { useHostFontScale } from "./use-host-typography";
@@ -109,18 +111,26 @@ export async function openDashboard(
     },
   };
 
+  // L7: the tab opens in the scheme the person is already looking at. The
+  // server builds the address and knows nothing about the client's colours, so
+  // the hint is appended here, from the host theme this surface already gets.
+  const url = withAppearance(
+    status.url,
+    appearanceFromHostColors(request.props.theme.colors),
+  );
+
   try {
-    const result = await openDashboardUrl(status.url, openers, request.workspaceId);
+    const result = await openDashboardUrl(url, openers, request.workspaceId);
     return {
       outcome: result.via,
-      url: status.url,
+      url,
       message:
         result.via === "browser"
           ? "Opened in a Paseo browser tab."
           : "Opened in your external browser.",
     };
   } catch (cause) {
-    return { outcome: "error", url: status.url, message: messageOf(cause) };
+    return { outcome: "error", url, message: messageOf(cause) };
   }
 }
 

@@ -1,0 +1,14 @@
+{
+  "id": "dark",
+  "name": "Graphite",
+  "appearance": "dark",
+  "tokens": {
+    "bg": "#0f1115",
+    "surface": "#171a21",
+    "border": "#262b36",
+    "text": "#e6e9ef",
+    "textMuted": "#8b93a3",
+    "accent": "#5b9dff",
+    "selection": "rgba(91, 157, 255, 0.16)"
+  }
+}

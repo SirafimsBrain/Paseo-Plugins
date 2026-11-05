@@ -17,6 +17,7 @@ import {
   DASHBOARD_SEARCH_PATH,
   DASHBOARD_STATS_PATH,
   DASHBOARD_TOKEN_PARAM,
+  DASHBOARD_THEMES_PATH,
   DASHBOARD_TREE_PATH,
   dashboardUrl,
   type HealthResponse,
@@ -39,6 +40,8 @@ import {
   exportZipBytes,
 } from "./export";
 import { nodeBeeCycle } from "./bees";
+import { resolveThemesDir } from "./plugin-paths";
+import { defaultThemeDir, loadThemeCatalog } from "./themes";
 import type { LuckPlannerStore } from "./store";
 
 /**
@@ -244,6 +247,12 @@ export interface DashboardHttpServerOptions {
   /** SPA root; defaults to `dist/dashboard`. */
   dashboardDir?: string;
   /**
+   * Shipped theme catalog (stage L7); defaults to `<plugin>/themes`. The
+   * *user* theme directory follows the database (`themes/` beside it), so
+   * tests point this one at a fixture and get an isolated pair.
+   */
+  themesDir?: string;
+  /**
    * Audit-row cursor reported in the SSE `ready` payload (stage H1). The
    * endpoint passes its change feed's watermark, so a reconnecting tab can
    * tell whether it missed anything; defaults to a constant `0`.
@@ -257,6 +266,7 @@ export class DashboardHttpServer {
   private readonly host: string;
   private readonly version: string;
   private readonly dashboardDir: string;
+  private readonly themesDir: string;
   private readonly watermark: () => number;
   private readonly options: DashboardHttpServerOptions;
   private server: http.Server | null = null;
@@ -285,6 +295,7 @@ export class DashboardHttpServer {
     this.host = options.host ?? DEFAULT_DASHBOARD_HOST;
     this.version = options.version ?? resolvePluginVersion();
     this.dashboardDir = options.dashboardDir ?? resolveDashboardDir();
+    this.themesDir = options.themesDir ?? resolveThemesDir();
     this.watermark = options.watermark ?? (() => 0);
   }
 
@@ -471,6 +482,20 @@ export class DashboardHttpServer {
     // Route first, then validate the project parameter: an unknown route is a
     // 404 no matter what the query says, and a known one needs `project`.
     const isNode = url.pathname.startsWith(`${DASHBOARD_NODE_PATH}/`);
+    if (url.pathname === DASHBOARD_THEMES_PATH) {
+      // Stage L7: project-independent, so it answers before the project
+      // parameter is validated (a tab with no workspace still paints itself).
+      // Read on every request: a new theme file needs a reload, not a restart.
+      this.sendJson(
+        res,
+        200,
+        loadThemeCatalog({
+          builtInDir: this.themesDir,
+          userDir: defaultThemeDir(this.store.dbPath),
+        }),
+      );
+      return;
+    }
     const isKnown =
       isNode ||
       url.pathname === DASHBOARD_TREE_PATH ||

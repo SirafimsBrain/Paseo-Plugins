@@ -28,6 +28,13 @@
  * request never leaves the toolbar, so the policy in `planViewSwitch` only has
  * to answer the URLs and stored choices that still name `3d`.
  *
+ * **L7** adds the theme picker: a `<select>` over the catalog the server
+ * serves (`/api/themes`). Its empty option means "match Paseo" — the tab
+ * follows the appearance hint the plugin derived from the host's colours, then
+ * the OS. The control hides itself while the catalog is empty (a tab that
+ * never loaded one has nothing to offer but its floor palette), so a failed
+ * fetch degrades to exactly the pre-L7 behaviour instead of an empty menu.
+ *
  * **L2** adds the export download: a plain `<a download>` pointed at
  * `/api/export?token=…&project=…` (built by `exportUrl` in `shared/api.ts`).
  * A link, not a fetch: the server answers with
@@ -40,6 +47,7 @@ import type { ChangeEvent, FormEvent, ReactElement } from "react";
 import type { StatsResponse } from "../../../shared/api";
 import { LEAF_STATUSES, NODE_KINDS } from "../../../shared/tree";
 import type { LeafStatus, NodeKind } from "../../../shared/tree";
+import type { ThemeCatalogEntry } from "../../../shared/themes";
 import { GRAPH_LAYER_LABELS, GRAPH_LAYERS, type GraphLayer } from "../graph";
 import { KIND_LABELS, STATUS_LABELS } from "../colors";
 import {
@@ -105,6 +113,14 @@ export interface ToolbarProps {
    * knows no token/project, which renders the control disabled.
    */
   readonly exportHref: string;
+  /** The stored theme choice; `""` = follow Paseo, then the OS (stage L7). */
+  readonly themeChoice: string;
+  /** The theme actually painted, for the tooltip (L7). */
+  readonly themeId: string;
+  /** Catalog entries from `/api/themes`; empty = no picker (L7). */
+  readonly themes: readonly ThemeCatalogEntry[];
+  /** Stores a new choice and repaints (L7). */
+  readonly onThemeChange: (themeId: string) => void;
 }
 
 /** One `label · value` counter cell. */
@@ -120,6 +136,11 @@ function Counter(props: { label: string; value: number }): ReactElement {
 export function Toolbar(props: ToolbarProps): ReactElement {
   const stats = props.stats;
   const [draft, setDraft] = useState("");
+  // A stored id whose theme file was deleted has no option to select; showing
+  // "Match Paseo" is what the tab is actually doing then (L7).
+  const themeValue = props.themes.some((theme) => theme.id === props.themeChoice)
+    ? props.themeChoice
+    : "";
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -284,6 +305,22 @@ export function Toolbar(props: ToolbarProps): ReactElement {
             3D
           </button>
         </div>
+        {props.themes.length > 0 ? (
+          <select
+            className="lp-toolbar-filter lp-toolbar-theme"
+            aria-label="Theme"
+            title={`Theme of this tab — now “${props.themeId}”. “Match Paseo” follows the host's appearance.`}
+            value={themeValue}
+            onChange={(event) => props.onThemeChange(event.target.value)}
+          >
+            <option value="">Match Paseo</option>
+            {props.themes.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.origin === "user" ? `${theme.name} (custom)` : theme.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
         {props.exportHref.length > 0 ? (
           <a
             className="lp-toolbar-export"

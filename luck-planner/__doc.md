@@ -839,6 +839,75 @@ trouble".
 The 3D scene is suspended (0.40.9) and was not touched; the plain board shows the loop through
 the details modal only — marking cards is a plain-view decision left to a later stage.
 
+### Themes v2 (stage L7 — `themes/*.json`, `shared/themes.ts`, `server/themes.ts`, `/api/themes`, `dashboard/src/theme.ts`, `dashboard/src/app.tsx`, `dashboard/src/components/Toolbar.tsx`, `client/dashboard-screen.tsx`)
+
+G1 shipped two palettes hard-wired in `dashboard/src/theme.ts` and called that theming. It
+was honest for one install and wrong for a tool people stare at all day: a palette is a
+**taste**, and a taste is not a compile-time constant. L7 turns a theme into **data** — one
+JSON file per theme — and separates the three concerns that used to be one module.
+
+**The catalog is a directory.**
+
+| Directory | Contents | Who writes it |
+| --------- | -------- | ------------- |
+| `<plugin>/themes/` | the shipped palettes (`dark.json` *Graphite*, `light.json` *Paper*) and their README | the plugin, committed with the code |
+| `<data>/themes/` (`$PASEO_HOME/plugins/luck-planner/themes/`, beside the database like `backups/`) | the user's own palettes | the person |
+
+Same file format, same merge, both read by `server/themes.ts` on **every request** — there
+is no watcher, no cache and no invalidation: add a file, reload the tab. A user file with a
+shipped id **replaces** it (the honest way to tweak a palette you almost like), and the
+entry keeps `origin: "user"` so the picker can say "(custom)".
+
+**The file** is `{ id, name, appearance, tokens }`: the id is the file name (a mismatch is
+reported instead of letting merge order decide which file wins), `appearance` is
+`light`/`dark`, and `tokens` are exactly the seven CSS custom properties the stylesheet
+reads (`bg`, `surface`, `border`, `text`, `textMuted`, `accent`, `selection`). Semantic
+colours — node kinds, leaf statuses, bee statuses, goal frames, the growth ramp — are
+**not** themeable and stay in `dashboard/src/colors.ts`: they encode meaning, and a theme
+that recoloured them would change what the diagram *says* rather than how it looks.
+
+**Nothing is fatal.** A theme is a taste, so a typo in one file must not take the dashboard
+down or hide the other themes: every unusable file becomes a `{ file, problem }` entry in
+the response (unreadable, not a file, over 64 KiB, not JSON, a zod issue naming the field,
+id ≠ file name), the rest of the catalog loads, and the tab shows a one-line status note.
+That is the difference between a bad theme and a broken product.
+
+**`GET /api/themes`** answers the catalog (token-scoped like every `/api/*` path, but
+**project-independent**: a tab that knows no workspace is still a page someone looks at, so
+the route answers before `project` is validated). The payload is `themeCatalogSchema` —
+`{ default, themes: [{ …definition, origin }], problems, userDirectory }` — so the dashboard
+parses the very schema the server built, and `userDirectory` spells out one real path for
+the docs instead of a rule.
+
+**Which theme is painted** — three rules, all in `shared/themes.ts` so the server and the
+tab cannot decide differently:
+
+1. **appearance**: the host's hint → `prefers-color-scheme` → dark. Paseo hands the plugin
+   colours, not a mode (`PluginTheme` has no `appearance` field), so the hint is **derived**:
+   WCAG relative luminance of `surface0` (falling back to inverting `foreground`) against a
+   0.5 threshold. Unreadable colours yield `null` = "no hint", which is the whole point — a
+   host that changes its palette shape must not silently pin the tab to dark.
+2. **theme id**: a stored choice wins *while it still exists* (a deleted user theme must
+   fall back instead of pinning a dead id), then the first theme of that appearance, then
+   the catalog `default` while it names a real theme, then `""` = keep the stylesheet's own
+   floor palette. No invented palette anywhere.
+3. **applying**: `shared/themes.ts` maps tokens → `--lp-*` properties, `app.tsx` sets them on
+   `:root`.
+
+**The hint travels in the URL.** The address is built by the server (`dashboardUrl`) and
+handed to the opener by the `dashboard-status` RPC, which knows nothing about the client's
+colours — so `client/dashboard-screen.tsx` appends `?appearance=light|dark` with
+`withAppearance` (`shared/api.ts`) from `props.theme.colors`, and `dashboard/src/params.ts`
+parses it (an unknown value is "no hint"). The two decisions stay separate: the **hint**
+(then the OS) chooses the *appearance*, and the stored choice picks the theme inside it — so
+an explicit pick survives a host that switches to the other scheme, while "Match Paseo"
+follows it.
+
+**The picker** is a toolbar `<select>`: *Match Paseo* (the empty sentinel) plus every catalog
+entry, user themes suffixed "(custom)". It hides itself while the catalog is empty, so a
+failed fetch degrades to exactly the pre-L7 behaviour instead of an empty menu; a stored id
+whose file vanished renders as *Match Paseo*, which is what the tab is actually doing then.
+
 ### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
 
 Two ⌘K items and two composer slash commands, all writing through the plugin
@@ -953,6 +1022,7 @@ agent MCP servers use (ADR-2).
 | `GET /api/search?project=<key>&q=&kind=&status=&limit=&includeArchived=` | token | the `tree-search` RPC shape (`matches`, `results[]`) |
 | `GET /api/stats?project=<key>` | token | the `stats` RPC shape |
 | `GET /api/export?project=<key>&history=` | token | the project as a `.json.zip` download (`Content-Disposition: attachment`); `history=0` drops the audit trail (stage L2) |
+| `GET /api/themes` | token | the theme catalog: shipped palettes plus the user's `themes/` directory, with the files that were refused (stage L7). Project-independent — it answers before `project` is validated |
 | `GET /api/events` | token | SSE stream: `ready` (version + watermark) on open, heartbeat comment every 15 s, `tree-changed` broadcasts, narrowed by `?project=` (stage H1) |
 | everything else | none | the SPA from `dist/dashboard` (SPA fallback for extensionless paths) |
 
@@ -1131,10 +1201,12 @@ box, the kind/status filters and the 3D half of the view switch render disabled 
 hint naming the stage that wires them (G4, I4) — a scaffold that lies about its state is
 worse than one that says what is coming.
 
-**Own theming** (`dashboard/src/theme.ts`, `dashboard/src/dashboard.css`). The tab cannot
-see Paseo's theme tokens, so the dashboard ships its own dark/light palette as CSS custom
+**Own theming** (`dashboard/src/theme.ts`, `dashboard/src/dashboard.css`; superseded by
+stage L7, see "Themes v2" below). The tab cannot
+see Paseo's theme tokens, so the dashboard shipped its own dark/light palette as CSS custom
 properties on `:root`, resolved as *stored choice > `prefers-color-scheme` > dark* and
-applied once on startup. Colours are data (`ThemeTokens`), not scattered hexes, and the
+applied once on startup. L7 kept the mechanism and moved the palettes out of the code into
+`themes/*.json`, served by `/api/themes`. Colours are data (`ThemeTokens`), not scattered hexes, and the
 semantic diagram palette (`dashboard/src/colors.ts`: kind colours, status-bar colours,
 labels and glyphs for every `shared/tree.ts` enum member) is one module shared by the
 legend today and the G3 custom nodes tomorrow, so a legend swatch cannot drift from the
