@@ -61,6 +61,7 @@ export const contextSectionSchema = z.enum([
   "bees",
   "blockingBugs",
   "growth",
+  "beeCycle",
 ]);
 export type ContextSection = z.infer<typeof contextSectionSchema>;
 export const CONTEXT_SECTIONS = contextSectionSchema.options;

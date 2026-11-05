@@ -62,6 +62,7 @@ import { probeOpenCodeService } from "./server/opencode-service";
 import { snapshotDatabase } from "./server/snapshot";
 import { readRestoreSource, replaceDatabase } from "./server/restore";
 import { runImport } from "./server/import";
+import { nodeBeeCycle } from "./server/bees";
 import { normalizeProjectKey, seedProjectTree } from "./server/project-seed";
 import { ensureSkillInstalled } from "./server/skill";
 import { ChangeFeed, readChangesSince } from "./server/change-feed";
@@ -563,6 +564,9 @@ export default function contribute(server: PluginServerContext) {
       blockingBugs: store.listBlockingBugs(input.projectKey, node.id),
       history: store.listHistory(input.projectKey, node.id),
       growth: store.getGrowthForSubject(input.projectKey, "node", node.id),
+      // L6: the influence cycle this node sits on, if any — the details panel
+      // draws the loop and the other leaves in it.
+      beeCycle: nodeBeeCycle(store, input.projectKey, node.id),
     };
   });
 

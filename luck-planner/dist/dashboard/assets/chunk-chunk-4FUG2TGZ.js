@@ -32447,6 +32447,7 @@ var BEE_STATUS_LABELS = {
   cancelled: "Cancelled"
 };
 var BUG_BADGE_COLOR = "#e05d5d";
+var CYCLE_COLOR = "#b779f5";
 var BUG_STATUS_COLORS = {
   open: "#e05d5d",
   // the same red as the node badge it echoes
@@ -32890,6 +32891,168 @@ function tree_default() {
   return tree;
 }
 
+// shared/bees.ts
+var beeCycleSchema = external_exports.object({
+  /** Members of the strongly-connected component, sorted by id. */
+  nodeIds: external_exports.array(idSchema),
+  /** Live bees with both ends in the component, sorted by id. */
+  beeIds: external_exports.array(idSchema),
+  /**
+   * One real cycle through the first member, as a closed walk of leaf ids:
+   * `[a, b, c, a]`. The first and the last entry are the same leaf, which is
+   * what makes it a loop rather than a path.
+   */
+  walk: external_exports.array(idSchema)
+});
+var beeCycleReportSchema = external_exports.object({
+  /** Number of cycles — the project-level `0` is the healthy answer. */
+  count: external_exports.number().int().nonnegative(),
+  /** Every leaf that sits on a cycle, sorted by id (no duplicates). */
+  nodeIds: external_exports.array(idSchema),
+  /** Every bee that closes a cycle, sorted by id (no duplicates). */
+  beeIds: external_exports.array(idSchema),
+  /** The cycles themselves, ordered by their first member id. */
+  cycles: external_exports.array(beeCycleSchema)
+});
+var NO_BEE_CYCLES = {
+  count: 0,
+  nodeIds: [],
+  beeIds: [],
+  cycles: []
+};
+function isBeeLive(status) {
+  return status === "active" || status === "watching";
+}
+var compareIds = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+function findBeeCycles(bees) {
+  const live = bees.filter(
+    (bee) => isBeeLive(bee.status) && bee.sourceLeafId !== bee.targetLeafId
+  );
+  if (live.length === 0) return NO_BEE_CYCLES;
+  const leaves = [
+    ...new Set(
+      live.flatMap((bee) => [bee.sourceLeafId, bee.targetLeafId])
+    )
+  ].sort(compareIds);
+  const adjacency = new Map(
+    leaves.map((leaf) => [leaf, []])
+  );
+  for (const bee of live) {
+    const targets = adjacency.get(bee.sourceLeafId);
+    if (targets === void 0 || targets.includes(bee.targetLeafId)) continue;
+    targets.push(bee.targetLeafId);
+  }
+  for (const targets of adjacency.values()) targets.sort(compareIds);
+  const cycles = [];
+  for (const component of stronglyConnected(leaves, adjacency)) {
+    if (component.length < 2) continue;
+    const members2 = new Set(component);
+    const beeIds = live.filter(
+      (bee) => members2.has(bee.sourceLeafId) && members2.has(bee.targetLeafId)
+    ).map((bee) => bee.id);
+    cycles.push({
+      nodeIds: component,
+      beeIds: [...new Set(beeIds)].sort(compareIds),
+      walk: shortestCycle(component[0], adjacency, members2)
+    });
+  }
+  cycles.sort((a, b) => compareIds(a.nodeIds[0], b.nodeIds[0]));
+  return {
+    count: cycles.length,
+    nodeIds: [...new Set(cycles.flatMap((cycle) => cycle.nodeIds))].sort(
+      compareIds
+    ),
+    beeIds: [...new Set(cycles.flatMap((cycle) => cycle.beeIds))].sort(
+      compareIds
+    ),
+    cycles
+  };
+}
+function beeCycleLabel(cycle, nameOf) {
+  return cycle.walk.map((nodeId) => {
+    const name = nameOf(nodeId);
+    return name.length > 0 ? name : nodeId;
+  }).join(" \u2192 ");
+}
+function stronglyConnected(leaves, adjacency) {
+  let counter = 0;
+  const index = /* @__PURE__ */ new Map();
+  const low = /* @__PURE__ */ new Map();
+  const onStack = /* @__PURE__ */ new Set();
+  const stack = [];
+  const components = [];
+  const frames = [];
+  for (const root of leaves) {
+    if (index.has(root)) continue;
+    frames.push({ leaf: root, edge: 0 });
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      if (frame.edge === 0) {
+        index.set(frame.leaf, counter);
+        low.set(frame.leaf, counter);
+        counter += 1;
+        stack.push(frame.leaf);
+        onStack.add(frame.leaf);
+      }
+      const targets = adjacency.get(frame.leaf) ?? [];
+      if (frame.edge < targets.length) {
+        const next = targets[frame.edge];
+        frame.edge += 1;
+        if (!index.has(next)) {
+          frames.push({ leaf: next, edge: 0 });
+        } else if (onStack.has(next)) {
+          low.set(
+            frame.leaf,
+            Math.min(low.get(frame.leaf), index.get(next))
+          );
+        }
+        continue;
+      }
+      frames.pop();
+      if (frames.length > 0) {
+        const parent = frames[frames.length - 1];
+        low.set(parent.leaf, Math.min(low.get(parent.leaf), low.get(frame.leaf)));
+      }
+      if (low.get(frame.leaf) === index.get(frame.leaf)) {
+        const component = [];
+        for (; ; ) {
+          const member = stack.pop();
+          onStack.delete(member);
+          component.push(member);
+          if (member === frame.leaf) break;
+        }
+        components.push(component.sort(compareIds));
+      }
+    }
+  }
+  return components;
+}
+function shortestCycle(start, adjacency, members2) {
+  const parent = /* @__PURE__ */ new Map([[start, null]]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const leaf = queue.shift();
+    for (const next of adjacency.get(leaf) ?? []) {
+      if (!members2.has(next)) continue;
+      if (next === start) {
+        const walk = [];
+        let cursor = leaf;
+        while (cursor !== null) {
+          walk.push(cursor);
+          cursor = parent.get(cursor) ?? null;
+        }
+        walk.reverse();
+        walk.push(start);
+        return walk;
+      }
+      if (parent.has(next)) continue;
+      parent.set(next, leaf);
+      queue.push(next);
+    }
+  }
+  return [start];
+}
+
 // dashboard/src/graph.ts
 var NODE_KIND_TO_TYPE = {
   root: "root",
@@ -33022,6 +33185,14 @@ function buildGraph(input2, options = {}) {
   const { visible, hiddenCounts } = visibleSet(index, collapsed, sizes);
   const shown = applyFilter(input2.nodes, visible, index, options.filter);
   const bugIdsByNode = openBugIdsByNode(input2);
+  const cycleReport = findBeeCycles(input2.bees);
+  const cycleSizeByNode = /* @__PURE__ */ new Map();
+  for (const cycle of cycleReport.cycles) {
+    for (const leafId of cycle.nodeIds) {
+      cycleSizeByNode.set(leafId, cycle.nodeIds.length);
+    }
+  }
+  const cycleBees = new Set(cycleReport.beeIds);
   const nodeGrowth = growthRollups(input2);
   const VIRTUAL_ROOT = "";
   const makeLayout = (id) => ({
@@ -33069,6 +33240,7 @@ function buildGraph(input2, options = {}) {
         hiddenDescendantCount: hiddenCounts.get(node2.id) ?? 0,
         openBugCount: openBugIds.length,
         openBugIds,
+        cycleSize: cycleSizeByNode.get(node2.id) ?? 0,
         collapsed: collapsed.has(node2.id),
         growth,
         heat: heatFor(growth, layer)
@@ -33106,7 +33278,12 @@ function buildGraph(input2, options = {}) {
       // bee edge draws its own stroke, colour and status label.
       type: "bee",
       animated: bee.status === "active",
-      data: { kind: "bee", impact: bee.impact, status: bee.status }
+      data: {
+        kind: "bee",
+        impact: bee.impact,
+        status: bee.status,
+        onCycle: cycleBees.has(bee.id)
+      }
     });
   }
   return {
@@ -33866,6 +34043,8 @@ export {
   BUG_STATUSES,
   bugSchema,
   bugNodeSchema,
+  beeCycleSchema,
+  beeCycleLabel,
   KIND_COLORS,
   STATUS_COLORS,
   KIND_LABELS,
@@ -33877,6 +34056,7 @@ export {
   BEE_STATUS_COLORS,
   BEE_STATUS_LABELS,
   BUG_BADGE_COLOR,
+  CYCLE_COLOR,
   BUG_STATUS_COLORS,
   BUG_STATUS_LABELS,
   SELECTION_COLOR,

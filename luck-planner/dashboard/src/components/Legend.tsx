@@ -86,7 +86,9 @@ export function Legend(): ReactElement {
         <span>growth 0 % → 100 %</span>
       </span>
       <span className="lp-legend-note">
-        🐞 = open incidents on the node · 🎯 = goal subtree · the growth bar
+        🐞 = open incidents on the node · ⟳ = the leaf is inside an influence
+        cycle (its bees loop back on each other; the loop-closing bee edges
+        carry the same mark) · 🎯 = goal subtree · the growth bar
         under a node counts completed steps (its own record plus everything
         below it) · in 3D the same palette: 🐝 fly along arcs, 🐞 pulse on
         their leaves, 🎯 rings float over their subtree, growth glows as rings

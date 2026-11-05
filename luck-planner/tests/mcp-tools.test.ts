@@ -387,7 +387,11 @@ describe("luck_tree_get_context", () => {
     const result = payload<Record<string, unknown>>(
       call(store, "luck_tree_get_context", { projectKey: P, nodeId: leafA.id }),
     );
+    // L6 added `beeCycle` to the full answer: a leaf in a loop is a fact the
+    // agent needs before it sequences anything, and `null` costs one token
+    // everywhere else.
     expect(Object.keys(result).sort()).toEqual([
+      "beeCycle",
       "bees",
       "blockingBugs",
       "children",
@@ -400,6 +404,76 @@ describe("luck_tree_get_context", () => {
       "siblings",
     ]);
     expect(result.truncated).toBeUndefined();
+  });
+
+  // Stage L6: the influence cycle of a leaf, asked for by section.
+  it("answers the influence cycle of a leaf when the section is asked for", () => {
+    const store = openStore();
+    const { leafA, leafB } = seedTree(store);
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafA.id,
+      targetLeafId: leafB.id,
+      impact: "refund proration depends on retry outcome",
+      actor: ACTOR,
+    });
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafB.id,
+      targetLeafId: leafA.id,
+      impact: "retry budget depends on refund volume",
+      actor: ACTOR,
+    });
+
+    const result = payload<{
+      beeCycle: {
+        nodeIds: string[];
+        beeIds: string[];
+        walk: string[];
+        loop: string;
+      } | null;
+    }>(
+      call(store, "luck_tree_get_context", {
+        projectKey: P,
+        nodeId: leafA.id,
+        sections: ["beeCycle"],
+      }),
+    );
+    expect(result.beeCycle?.nodeIds.sort()).toEqual(
+      [leafA.id, leafB.id].sort(),
+    );
+    expect(result.beeCycle?.beeIds).toHaveLength(2);
+    expect(result.beeCycle?.walk[0]).toBe(result.beeCycle?.walk.at(-1));
+    // The answer also spells the loop out: an agent reading ids alone would
+    // not know which leaves it has to break apart. A loop has no first leaf,
+    // so the walk may start at either of them — it must still close.
+    const loop = result.beeCycle!.loop.split(" → ");
+    expect(loop).toHaveLength(3);
+    expect(loop[0]).toBe(loop[2]);
+    expect(new Set(loop)).toEqual(
+      new Set(["retry failed charges", "prorate refunds"]),
+    );
+    expect(result).not.toHaveProperty("bees");
+  });
+
+  it("answers null for a leaf whose bees do not loop", () => {
+    const store = openStore();
+    const { leafA, leafB } = seedTree(store);
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafA.id,
+      targetLeafId: leafB.id,
+      impact: "one way only",
+      actor: ACTOR,
+    });
+    const result = payload<{ beeCycle: unknown }>(
+      call(store, "luck_tree_get_context", {
+        projectKey: P,
+        nodeId: leafA.id,
+        sections: ["beeCycle"],
+      }),
+    );
+    expect(result.beeCycle).toBeNull();
   });
 
   it("rejects an unknown section and out-of-range depth/limit", () => {

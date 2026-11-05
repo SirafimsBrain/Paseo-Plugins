@@ -551,6 +551,29 @@ body {
 }
 
 /* 🐝 bee-edge label: status in text next to the stroke colour. */
+/* L6: the `⟳ ×N` chip of a leaf inside an influence cycle. Same metrics as the
+   incident badge so a leaf carrying both keeps one tidy row. */
+.lp-node-cyclebadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 6px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+/* L6: the halo under a bee edge that closes a cycle. The cycle colour and the
+   opacity are set inline (they come from the shared palette); this only keeps
+   the halo from swallowing pointer events or inheriting the edge animation. */
+.lp-bee-cycle-halo {
+  pointer-events: none;
+}
+
 .lp-bee-label {
   position: absolute;
   font-size: 10px;
@@ -665,6 +688,17 @@ body {
 .lp-details-hint {
   color: var(--lp-text-muted, #8b93a3);
   font-size: 11px;
+}
+
+/* L6: the loop of an influence cycle, spelled out as one arrow chain. Coloured
+   by the shared cycle hue, and wrapped rather than truncated: a long loop is
+   still readable, and the count below says how many leaves it holds. */
+.lp-details-cycle-walk {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .lp-details-error {

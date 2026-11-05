@@ -204,6 +204,12 @@ exist for coordination, not ceremony.
   (both live leaves of the same project; self-loops are rejected). Use it
   when changing one fact ripples into another, and give \`impact\` a sentence
   about how strongly.
+- Bees are **directed**, so they can close a loop (A affects B, B affects C,
+  C affects A). A loop has no honest execution order: check it with
+  \`luck_tree_get_context { "nodeId": …, "sections": ["beeCycle"] }\` and
+  break it by resolving or cancelling one link (\`status\`) before sequencing
+  the work. Only \`active\` and \`watching\` links count — a settled link is
+  history.
 - \`luck_tree_report_bug\` — an incident: \`title\`, \`severity\`
   (\`low|medium|high|critical\`), and \`nodeIds\` to attach immediately. An
   open bug attached to a leaf shows up as a blocker wherever that leaf is

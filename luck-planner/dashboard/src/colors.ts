@@ -131,6 +131,15 @@ export const BEE_STATUS_LABELS: Record<BeeStatus, string> = {
 /** Incident badge (🐞 ×N) painted on nodes with open incidents. */
 export const BUG_BADGE_COLOR = "#e05d5d";
 
+/**
+ * Influence-cycle marking (L6): the `⟳ N` chip on a leaf in a loop and the
+ * halo under the bee edges that close it. Kept away from every status hue on
+ * purpose — a cycle is not a status, it is a shape problem in the graph, so
+ * it must not read as "this leaf is in trouble" and must stay visible in both
+ * themes. The chip always spells the count, never colour alone.
+ */
+export const CYCLE_COLOR = "#b779f5";
+
 /** Accent colour of an incident card, by bug status (stage K1). */
 export const BUG_STATUS_COLORS: Record<BugStatus, string> = {
   open: "#e05d5d", // the same red as the node badge it echoes

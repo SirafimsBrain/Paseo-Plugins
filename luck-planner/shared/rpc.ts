@@ -1,5 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { beeCycleSchema } from "./bees";
 import { beeSchema, bugSchema, bugSeveritySchema } from "./links";
 import { goalSchema, goalStepSchema } from "./goals";
 import { growthSchema, growthSubjectTypeSchema } from "./growth";
@@ -80,7 +81,11 @@ export const treeSearch = defineRpc({
   }),
 });
 
-/** `luck-planner.node-detail`: one node with its history, bees and bugs. */
+/**
+ * `luck-planner.node-detail`: one node with its history, bees and bugs, plus
+ * the influence cycle the node sits on (stage L6) — `null` when its live bees
+ * do not loop back to it.
+ */
 export const nodeDetail = defineRpc({
   name: "luck-planner.node-detail",
   input: z.object({
@@ -96,6 +101,7 @@ export const nodeDetail = defineRpc({
     blockingBugs: z.array(bugSchema),
     history: z.array(historyEntrySchema),
     growth: growthSchema.nullable(),
+    beeCycle: beeCycleSchema.nullable(),
   }),
 });
 

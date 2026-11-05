@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import type { TreeResponse } from "../shared/api";
 import type { Node as TreeNode } from "../shared/tree";
 import type { Goal } from "../shared/goals";
+import type { Bee } from "../shared/links";
 import { summarizeGrowth } from "../shared/growth";
 import type { Growth, GrowthStep, GrowthStepState } from "../shared/growth";
 import {
@@ -88,6 +89,27 @@ function mkgoal(
     createdBy: "user",
     updatedBy: "user",
     ...extra,
+  };
+}
+
+function mkbee(
+  id: string,
+  sourceLeafId: string,
+  targetLeafId: string,
+  status: Bee["status"] = "active",
+): Bee {
+  return {
+    id,
+    projectKey: P,
+    sourceLeafId,
+    targetLeafId,
+    status,
+    revision: 1,
+    impact: "",
+    createdAt: T0,
+    updatedAt: T0,
+    createdBy: "agent-1",
+    updatedBy: "agent-1",
   };
 }
 
@@ -301,6 +323,63 @@ describe("buildGraph collapse and payloads", () => {
 
     const collapsedGraph = buildGraph(withBee, { collapsedIds: new Set(["branch-1"]) });
     expect(collapsedGraph.edges.some((e) => e.data?.kind === "bee")).toBe(false);
+  });
+
+  // Stage L6: the cycle marking is data, so it is pinned here and the
+  // renderers only draw what the adapter says.
+  it("marks both leaves of a loop and the bees that close it", () => {
+    const graph = buildGraph({
+      ...fixture(),
+      bees: [mkbee("bee-1", "leaf-a", "leaf-b"), mkbee("bee-2", "leaf-b", "leaf-a")],
+    });
+    const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+    expect(byId.get("leaf-a")!.data.cycleSize).toBe(2);
+    expect(byId.get("leaf-b")!.data.cycleSize).toBe(2);
+    expect(byId.get("branch-1")!.data.cycleSize).toBe(0);
+    const bees = graph.edges.filter((edge) => edge.data?.kind === "bee");
+    expect(bees.map((edge) => (edge.data as { onCycle: boolean }).onCycle)).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("does not mark a one-way link or a settled loop", () => {
+    const oneWay = buildGraph({
+      ...fixture(),
+      bees: [mkbee("bee-1", "leaf-a", "leaf-b")],
+    });
+    expect(
+      oneWay.nodes.filter((node) => node.data.cycleSize > 0),
+    ).toHaveLength(0);
+    expect(
+      (oneWay.edges.find((edge) => edge.data?.kind === "bee")!.data as {
+        onCycle: boolean;
+      }).onCycle,
+    ).toBe(false);
+
+    const settled = buildGraph({
+      ...fixture(),
+      bees: [
+        mkbee("bee-1", "leaf-a", "leaf-b", "resolved"),
+        mkbee("bee-2", "leaf-b", "leaf-a", "cancelled"),
+      ],
+    });
+    expect(settled.nodes.filter((node) => node.data.cycleSize > 0)).toHaveLength(0);
+  });
+
+  it("keeps a loop marked when a filter hides the other leaves", () => {
+    // `leaf-b` keeps the default `0.1.0` version, so the version filter drops
+    // it; the loop is still the loop, and the remaining leaf says so.
+    const graph = buildGraph(
+      {
+        ...fixture(),
+        bees: [mkbee("bee-1", "leaf-a", "leaf-b"), mkbee("bee-2", "leaf-b", "leaf-a")],
+      },
+      { filter: { version: "2.1" } },
+    );
+    const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+    expect(byId.has("leaf-b")).toBe(false);
+    expect(byId.get("leaf-a")!.data.cycleSize).toBe(2);
   });
 
   it("counts open incidents per node (open plus investigating only)", () => {

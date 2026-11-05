@@ -1,10 +1,12 @@
 import type { ReactElement, ReactNode } from "react";
 import type { NodeResponse } from "../../../shared/api";
+import { beeCycleLabel } from "../../../shared/bees";
 import { growthProgress } from "../../../shared/growth";
 import {
   BEE_STATUS_COLORS,
   BEE_STATUS_LABELS,
   BUG_BADGE_COLOR,
+  CYCLE_COLOR,
   KIND_COLORS,
   KIND_GLYPHS,
   KIND_LABELS,
@@ -38,7 +40,7 @@ function Row(props: { label: string; children: ReactNode }): ReactElement {
 
 export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
   const { detail, resolveName } = props;
-  const { node, path, children, bees, bugs, blockingBugs, history, growth } =
+  const { node, path, children, bees, bugs, blockingBugs, history, growth, beeCycle } =
     detail;
   const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
   const progress = growth === null ? null : growthProgress(growth.steps);
@@ -78,6 +80,30 @@ export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
           {node.updatedBy ? ` · ${node.updatedBy}` : ""}
         </Row>
       </div>
+
+      {beeCycle !== null ? (
+        /*
+         * L6: the leaf's live bees close a loop. The whole loop is spelled out
+         * (names, in order) — the panel is where a person decides which link to
+         * settle, and an arrow chain of ids would not help them do it.
+         */
+        <div className="lp-details-section lp-details-cycle">
+          <h3 className="lp-details-subtitle">Influence cycle</h3>
+          <p
+            className="lp-details-cycle-walk"
+            style={{ color: CYCLE_COLOR }}
+            title="These leaves influence each other in a loop"
+          >
+            <span aria-hidden="true">⟳ </span>
+            {beeCycleLabel(beeCycle, resolveName)}
+          </p>
+          <span className="lp-details-hint">
+            {beeCycle.nodeIds.length} leaves loop back on each other, so none of
+            them can be done first — settle one of the {beeCycle.beeIds.length}{" "}
+            links to break the loop.
+          </span>
+        </div>
+      ) : null}
 
       {progress !== null && progress.total > 0 ? (
         <div className="lp-details-section">

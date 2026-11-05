@@ -38,6 +38,7 @@ import {
   buildExportDocument,
   exportZipBytes,
 } from "./export";
+import { nodeBeeCycle } from "./bees";
 import type { LuckPlannerStore } from "./store";
 
 /**
@@ -134,6 +135,9 @@ export function buildNodeResponse(
     blockingBugs: store.listBlockingBugs(projectKey, node.id),
     history: store.listHistory(projectKey, node.id),
     growth: store.getGrowthForSubject(projectKey, "node", node.id),
+    // L6: `/api/node/:id` answers the same contract as the RPC, so the cycle
+    // the leaf sits on travels with it.
+    beeCycle: nodeBeeCycle(store, projectKey, node.id),
   };
 }
 

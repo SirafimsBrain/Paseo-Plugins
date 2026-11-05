@@ -6,6 +6,7 @@ import {
   BUG_STATUSES,
   BUG_STATUS_COLORS,
   BUG_STATUS_LABELS,
+  CYCLE_COLOR,
   EMPTY_GRAPH,
   EMPTY_INTERACTION,
   EMPTY_OVERLAY,
@@ -28,6 +29,8 @@ import {
   STATUS_PROGRESS,
   actorSchema,
   ancestorsOf,
+  beeCycleLabel,
+  beeCycleSchema,
   beeSchema,
   bugNodeSchema,
   bugSchema,
@@ -68,7 +71,7 @@ import {
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-3KRWBM5O.js";
+} from "./chunk-chunk-4FUG2TGZ.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
@@ -176,7 +179,8 @@ var nodeDetail = defineRpc({
     bugs: external_exports.array(bugSchema),
     blockingBugs: external_exports.array(bugSchema),
     history: external_exports.array(historyEntrySchema),
-    growth: growthSchema.nullable()
+    growth: growthSchema.nullable(),
+    beeCycle: beeCycleSchema.nullable()
   })
 });
 var nodeSetStatus = defineRpc({
@@ -10311,9 +10315,9 @@ function BeeEdge({
   interactionWidth
 }) {
   if (data?.kind !== "bee") return null;
-  const { status, impact } = data;
+  const { status, impact, onCycle } = data;
   const color2 = BEE_STATUS_COLORS[status];
-  const label = BEE_STATUS_LABELS[status];
+  const label = onCycle ? `${BEE_STATUS_LABELS[status]} \xB7 \u27F3 loop` : BEE_STATUS_LABELS[status];
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -10325,6 +10329,24 @@ function BeeEdge({
   });
   const settled = status === "resolved" || status === "cancelled";
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+    onCycle ? (
+      /* The halo of a loop-closing link: wider than the bee's own stroke,
+         below it in paint order, and never hit-testable so it cannot steal
+         the edge's interaction width. */
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        "path",
+        {
+          className: "lp-bee-cycle-halo",
+          d: path,
+          fill: "none",
+          stroke: CYCLE_COLOR,
+          strokeWidth: 8,
+          strokeOpacity: 0.28,
+          strokeLinecap: "round",
+          pointerEvents: "none"
+        }
+      )
+    ) : null,
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       BaseEdge,
       {
@@ -10344,6 +10366,7 @@ function BeeEdge({
       {
         className: "lp-bee-label",
         "data-status": status,
+        "data-cycle": onCycle ? "true" : void 0,
         title: impact.length > 0 ? `${label} \u2014 ${impact}` : label,
         style: {
           transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
@@ -10388,6 +10411,24 @@ function BugBadge({ count }) {
       children: [
         "\u{1F41E} \xD7",
         count
+      ]
+    }
+  );
+}
+function CycleBadge({ size }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+    "span",
+    {
+      className: "lp-node-cyclebadge",
+      title: `In an influence cycle of ${size} leaves: their bees loop back on each other, so none of them can be done first \u2014 settle one link to break the loop`,
+      style: {
+        backgroundColor: `${CYCLE_COLOR}26`,
+        borderColor: CYCLE_COLOR,
+        color: CYCLE_COLOR
+      },
+      children: [
+        "\u27F3 \xD7",
+        size
       ]
     }
   );
@@ -10470,6 +10511,7 @@ function GraphNode({ data }) {
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "lp-node-title", children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-node-glyph", "aria-hidden": "true", children: KIND_GLYPHS[data.kind] }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "lp-node-name", title: data.name, children: data.name }),
+          data.cycleSize > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CycleBadge, { size: data.cycleSize }) : null,
           data.openBugCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(BugBadge, { count: data.openBugCount }) : null
         ] }),
         data.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "lp-node-status", children: [
@@ -10701,7 +10743,7 @@ function Row(props) {
 }
 function NodeDetailContent(props) {
   const { detail, resolveName } = props;
-  const { node, path, children: children2, bees, bugs, blockingBugs, history, growth } = detail;
+  const { node, path, children: children2, bees, bugs, blockingBugs, history, growth, beeCycle } = detail;
   const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
   const progress = growth === null ? null : growthProgress(growth.steps);
   const shownHistory = history.slice(-20).reverse();
@@ -10745,6 +10787,35 @@ function NodeDetailContent(props) {
         node.updatedBy ? ` \xB7 ${node.updatedBy}` : ""
       ] })
     ] }),
+    beeCycle !== null ? (
+      /*
+       * L6: the leaf's live bees close a loop. The whole loop is spelled out
+       * (names, in order) — the panel is where a person decides which link to
+       * settle, and an arrow chain of ids would not help them do it.
+       */
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section lp-details-cycle", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "lp-details-subtitle", children: "Influence cycle" }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+          "p",
+          {
+            className: "lp-details-cycle-walk",
+            style: { color: CYCLE_COLOR },
+            title: "These leaves influence each other in a loop",
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { "aria-hidden": "true", children: "\u27F3 " }),
+              beeCycleLabel(beeCycle, resolveName)
+            ]
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-hint", children: [
+          beeCycle.nodeIds.length,
+          " leaves loop back on each other, so none of them can be done first \u2014 settle one of the ",
+          beeCycle.beeIds.length,
+          " ",
+          "links to break the loop."
+        ] })
+      ] })
+    ) : null,
     progress !== null && progress.total > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "lp-details-subtitle", children: "Growth" }),
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
@@ -11139,7 +11210,7 @@ function Legend() {
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u{1F3AF} = goal subtree \xB7 the growth bar under a node counts completed steps (its own record plus everything below it) \xB7 in 3D the same palette: \u{1F41D} fly along arcs, \u{1F41E} pulse on their leaves, \u{1F3AF} rings float over their subtree, growth glows as rings \xB7 a click selects in both views; in 3D the selected node wears a white ring and its links are drawn as curves" })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "lp-legend-note", children: "\u{1F41E} = open incidents on the node \xB7 \u27F3 = the leaf is inside an influence cycle (its bees loop back on each other; the loop-closing bee edges carry the same mark) \xB7 \u{1F3AF} = goal subtree \xB7 the growth bar under a node counts completed steps (its own record plus everything below it) \xB7 in 3D the same palette: \u{1F41D} fly along arcs, \u{1F41E} pulse on their leaves, \u{1F3AF} rings float over their subtree, growth glows as rings \xB7 a click selects in both views; in 3D the selected node wears a white ring and its links are drawn as curves" })
   ] });
 }
 

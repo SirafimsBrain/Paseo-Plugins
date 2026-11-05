@@ -30,6 +30,12 @@
  *   as one progress heatmap. A node without any growth record stays untinted
  *   (no data ≠ 0 %).
  *
+ * Stage L6 adds the **influence-cycle chip**: a leaf whose live bees loop
+ * back on it wears `⟳ ×N` (N = leaves in the loop) next to the incident
+ * badge. It is a chip and not a tint on purpose — the loop is a property of
+ * the graph, not of the leaf's state, so it must not compete with the status
+ * bar or the growth heat that do describe the leaf.
+ *
  * Edges live in `graph-edges.tsx` (bee renderer); tree edges keep React Flow's
  * built-in `smoothstep` path with a kind-tinted stroke from the adapter.
  *
@@ -41,6 +47,7 @@ import type { NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import {
   BUG_BADGE_COLOR,
+  CYCLE_COLOR,
   GOAL_STATUS_COLORS,
   GOAL_STATUS_LABELS,
   GROWTH_STATUS_COLORS,
@@ -87,6 +94,27 @@ function BugBadge({ count }: { count: number }): ReactElement {
       }}
     >
       🐞 ×{count}
+    </span>
+  );
+}
+
+/**
+ * The `⟳ ×N` chip of a leaf inside an influence cycle (L6). The count is the
+ * number of leaves in the loop, and the tooltip states the consequence: the
+ * loop has no first leaf, so the work in it cannot be sequenced.
+ */
+function CycleBadge({ size }: { size: number }): ReactElement {
+  return (
+    <span
+      className="lp-node-cyclebadge"
+      title={`In an influence cycle of ${size} leaves: their bees loop back on each other, so none of them can be done first — settle one link to break the loop`}
+      style={{
+        backgroundColor: `${CYCLE_COLOR}26`,
+        borderColor: CYCLE_COLOR,
+        color: CYCLE_COLOR,
+      }}
+    >
+      ⟳ ×{size}
     </span>
   );
 }
@@ -177,6 +205,7 @@ export function GraphNode({ data }: NodeProps<GraphFlowNode>): ReactElement {
         <span className="lp-node-name" title={data.name}>
           {data.name}
         </span>
+        {data.cycleSize > 0 ? <CycleBadge size={data.cycleSize} /> : null}
         {data.openBugCount > 0 ? <BugBadge count={data.openBugCount} /> : null}
       </div>
       {data.kind === "leaf" ? (

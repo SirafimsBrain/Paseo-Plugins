@@ -28,6 +28,11 @@
  *   ratio into the heat value the renderer tints the node with. The layer is a
  *   *display* option only — it never touches the layout, so switching it
  *   cannot move a node (the G5 acceptance rule).
+ * - **influence cycles** (L6): the shared detector (`shared/bees.ts`) runs on
+ *   the same payload, and its verdict rides along as data — `cycleSize` on a
+ *   leaf that sits on a loop, `onCycle` on the bee edges that close one. The
+ *   marking is data like the badges: this module never decides how a cycle
+ *   looks, only which nodes and edges are in one.
  *
  * Determinism: children are sorted by name before the layout, so the same
  * payload always yields identical positions — required for the fixture tests
@@ -38,6 +43,7 @@ import type { Edge, Node } from "@xyflow/react";
 import { hierarchy, tree } from "d3-hierarchy";
 import type { LeafStatus, Node as TreeNode, NodeKind } from "../../shared/tree";
 import type { BeeStatus } from "../../shared/links";
+import { findBeeCycles } from "../../shared/bees";
 import type { GoalStatus } from "../../shared/goals";
 import { growthProgress } from "../../shared/growth";
 import type {
@@ -100,6 +106,12 @@ export type GraphNodeData = {
   openBugCount: number;
   /** Ids behind the badge, sorted — the G4 selection uses them. */
   openBugIds: string[];
+  /**
+   * Size of the influence cycle this leaf sits on (L6); `0` means no loop
+   * through it. The count is the number of leaves in the loop, so the chip
+   * can say `⟳ 3` instead of an unexplained glyph.
+   */
+  cycleSize: number;
   /** Whether this node currently hides its subtree. */
   collapsed: boolean;
   /**
@@ -162,6 +174,12 @@ export type BeeEdgeData = {
   kind: "bee";
   impact: string;
   status: BeeStatus;
+  /**
+   * Whether this link is part of an influence cycle (L6). The renderer draws
+   * such an edge with a halo, so a loop is visible as a loop and not only as
+   * a pair of marked leaves.
+   */
+  onCycle: boolean;
 };
 
 /**
@@ -399,6 +417,18 @@ export function buildGraph(
   // Visibility (collapse) is then narrowed by the toolbar filters (G4).
   const shown = applyFilter(input.nodes, visible, index, options.filter);
   const bugIdsByNode = openBugIdsByNode(input);
+  // Influence cycles (L6) are a property of the live bees, computed once per
+  // build: the loop marks every leaf in it and every bee that closes it,
+  // including leaves the toolbar filters or a collapse hides — a cycle is not
+  // smaller because you cannot see all of it.
+  const cycleReport = findBeeCycles(input.bees);
+  const cycleSizeByNode = new Map<string, number>();
+  for (const cycle of cycleReport.cycles) {
+    for (const leafId of cycle.nodeIds) {
+      cycleSizeByNode.set(leafId, cycle.nodeIds.length);
+    }
+  }
+  const cycleBees = new Set(cycleReport.beeIds);
   // Growth roll-ups (G5) are computed over the *full* tree: a collapsed
   // branch still reports the progress of what it hides. A goal's own record
   // joins the roll-up at the node it materialized, so the heat map covers
@@ -474,6 +504,7 @@ export function buildGraph(
         hiddenDescendantCount: hiddenCounts.get(node.id) ?? 0,
         openBugCount: openBugIds.length,
         openBugIds,
+        cycleSize: cycleSizeByNode.get(node.id) ?? 0,
         collapsed: collapsed.has(node.id),
         growth,
         heat: heatFor(growth, layer),
@@ -514,7 +545,12 @@ export function buildGraph(
       // bee edge draws its own stroke, colour and status label.
       type: "bee",
       animated: bee.status === "active",
-      data: { kind: "bee", impact: bee.impact, status: bee.status },
+      data: {
+        kind: "bee",
+        impact: bee.impact,
+        status: bee.status,
+        onCycle: cycleBees.has(bee.id),
+      },
     });
   }
 

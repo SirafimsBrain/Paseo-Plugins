@@ -37,7 +37,9 @@ import {
   upsertLeafInputSchema,
   upsertNodeInputSchema,
 } from "../shared/tools";
+import { beeCycleLabel } from "../shared/bees";
 import { exportCounts } from "../shared/export";
+import { nodeBeeCycle } from "./bees";
 import { writeExportFile } from "./export";
 import { runImport } from "./import";
 import { resolvePluginVersion } from "./plugin-paths";
@@ -153,7 +155,9 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       "overview: roots (tech stacks) with their trunks. With nodeId returns " +
       "the path root → … → that node, its children, its sibling leaves, the " +
       "influence bees touching it, its blocking bugs and its growth " +
-      "progress. Call this before descending into a subtree.",
+      "progress. Call this before descending into a subtree. `sections: " +
+      "[\"beeCycle\"]` adds the influence cycle the leaf sits on (leaves whose " +
+      "bees loop back on each other have no execution order).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1175,6 +1179,23 @@ function dispatchGetContext(
 
   if (wants("growth")) {
     answer.growth = store.getGrowthProgress(value.projectKey, "node", node.id);
+  }
+
+  if (wants("beeCycle")) {
+    // L6: the loop this leaf's live bees close, if they close one. Beyond the
+    // shared shape the answer carries `loop`, the same cycle written as names —
+    // an agent reading ids alone cannot tell an influence loop from a list.
+    const cycle = nodeBeeCycle(store, value.projectKey, node.id);
+    answer.beeCycle =
+      cycle === null
+        ? null
+        : {
+            ...cycle,
+            loop: beeCycleLabel(
+              cycle,
+              (leafId) => store.getNode(value.projectKey, leafId)?.name ?? leafId,
+            ),
+          };
   }
 
   if (Object.keys(truncated).length > 0) answer.truncated = truncated;

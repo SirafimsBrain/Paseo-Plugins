@@ -148,6 +148,9 @@ transition bumps `revision` and appends a `history` row.
 - A **bee** connects two leaves of the same `project_key`; self-loops are rejected. It carries
   `status`, `revision`, and a free-text `impact` describing the influence and its degree.
   The API "all bees of a node" works in both directions — the dashboard and panel need it.
+  Bees are **directed**, so a set of individually legal links can close a loop, and nothing in
+  the schema forbids it (a cycle is a property of the graph, not of a row). Loops are computed,
+  not stored — see "Influence cycles" in §6.
 - A **bug** is an incident with `title`, `description`, `severity`
   (`low|medium|high|critical`), `status`, `revision`, and an m2m `bug_nodes` table: one bug may
   block a leaf or a group of leaves. An `open` bug attached to a leaf is surfaced as a blocker
@@ -495,8 +498,8 @@ transport-independent on purpose: the stdio server of stage D2 and
   (`tests/mcp-tools.test.ts` pins both halves):
 
 - `sections: ContextSection[]` — the blocks of a **node** answer, named by their response keys
-  (`path`, `children`, `siblings`, `bees`, `blockingBugs`, `growth`). Omitted = all; `[]` = the
-  node and its `parentId` only. Ignored in the overview.
+  (`path`, `children`, `siblings`, `bees`, `blockingBugs`, `growth`, and `beeCycle` since L6).
+  Omitted = all; `[]` = the node and its `parentId` only. Ignored in the overview.
 - `depth: 1…3` — overview only: how many levels to descend below each root; `1` is the classic
   roots + first level, so nested `children` arrays appear only when asked for.
 - `limit: 1…200` — caps every listing (roots, children, siblings, bees, blocking bugs). A cut
@@ -505,6 +508,12 @@ transport-independent on purpose: the stdio server of stage D2 and
 
 The names are the response keys on purpose: asking `sections: ["blockingBugs"]` returns exactly
   one block under the name the agent already knows, with no lookup table to consult.
+
+**L6 exception to "byte for byte as before".** A section is part of the *full* answer when
+  `sections` is omitted, so adding `beeCycle` (L6) added one key to the default node answer.
+  That is deliberate: a leaf whose bees loop back on each other cannot be sequenced at all, and
+  an agent about to order work must hear it without a second call. The cost is one `null`
+  everywhere else, and `tests/mcp-tools.test.ts` pins the new key list explicitly.
 
 Conventions:
 
@@ -601,7 +610,8 @@ temp-directory database) covers the surface:
 
 - **Reads** return store rows directly: `tree-get` (roots with their first level of
   children), `tree-search` (FTS5 with kind/status filters), `node-detail` (node +
-  path + children + bees + bugs + blocking bugs + history + growth), `growth-get`
+  path +  children + bees + bugs + blocking bugs + history + growth + the influence cycle the node
+  sits on, L6), `growth-get`
   (record plus the shared `growthProgress` aggregate), `stats` (panel counters —
   new `store.stats()`: live nodes by kind/status, in-progress/done leaves, bees,
   open bugs, proposed/approved goals, growth records), `dashboard-status` (F2:
@@ -776,6 +786,58 @@ the first described. The dry run is a full run minus the write — it reads,
 unpacks, validates and checks the target — so "would this work" is answered
 before a row exists. The RPC turns every failure into `{ ok: false, error }`;
 the tool turns it into `isError` with the same message.
+
+### Influence cycles (stage L6 — `shared/bees.ts`, `server/bees.ts`, `shared/rpc.ts`, `shared/tools.ts`, `server/mcp-tools.ts`, `dashboard/src/graph.ts`, `dashboard/src/components/*`, `dashboard/src/colors.ts`, `dashboard/src/dashboard.css`)
+
+A bee is a **directed** influence link between two leaves. Each link is legal on its own, but a
+set of them can close a loop — A affects B, B affects C, C affects A — and a loop has no honest
+first leaf: no order in which its work can be done. Nothing in the schema prevents it, nothing
+in the database records it (a cycle is a property of the graph), so the plugin **computes** it
+and says so wherever the graph is read.
+
+**The detector** (`shared/bees.ts`, pure, client/server neutral like `panel.ts`/`growth.ts`).
+`findBeeCycles(bees)` takes only the four fields it reads (`id`, `sourceLeafId`, `targetLeafId`,
+`status`) and returns a `BeeCycleReport`:
+
+- **live links only** — `active` and `watching`; `resolved` and `cancelled` describe a
+  relationship that is over, and counting them would report a loop nobody has to break
+  (`isBeeLive` is the single definition, the same split the edge renderer dashes by).
+- **Tarjan's SCC search** over those links, written **iteratively**: the recursion depth would
+  otherwise follow the length of an influence chain, and a long chain is exactly what a big
+  project has (a 3000-leaf ring is a test, not a thought experiment). Every leaf in a component
+  of two or more leaves sits on a cycle, and every live bee whose ends are in that component
+  closes one — for a directed graph, an edge inside an SCC lies on a cycle by definition, so no
+  edge is guessed. A self-link (rejected by `beeSchema`, defended against anyway) is never a
+  one-leaf cycle.
+- **`walk`** — one real closed walk of leaf ids (`[a, b, c, a]`, first === last), the shortest
+  cycle through the component's first member: breadth-first over the component's own edges with
+  pre-sorted neighbours, so the shape of the loop cannot depend on payload order.
+- **Determinism** — components, members and bees are sorted by id and the cycles are ordered by
+  their first member, so a live refetch (H1) or a filter change cannot make a loop redraw
+  differently. `tests/bee-cycles.test.ts` builds the same fixture forward, backward and shuffled
+  and compares the reports.
+
+**Where it lands.**
+
+| Surface | What it answers |
+| ------- | --------------- |
+| `luck-planner.node-detail` / `GET /api/node/:id` | `beeCycle: BeeCycle \| null` — the loop the node sits on. Both builders (`index.server.ts`, `buildNodeResponse` in `server/http-server.ts`) call `server/bees.ts#nodeBeeCycle`, which first checks the node's own bees and only loads the project's bees when a live one touches it (the panel asks this every 2 s while pinned, and most nodes are branches). |
+| `luck_tree_get_context` | the `beeCycle` section: the same cycle plus `loop`, the walk written as names (`A → B → C → A`). `sections: []` still means "the node alone"; the full answer gained the key (see §6, L1 note). `limit` does not apply — a cycle is one record, and half a loop is not a fact. |
+| 2D diagram | `GraphNodeData.cycleSize` (0 = not in a loop) and `BeeEdgeData.onCycle`; the adapter runs the detector **once per build** and the renderers only draw what it says. `nodeBeeCycle`'s guard has no client counterpart: the diagram marks a loop even when a filter or a collapse hides its other leaves — a cycle is not smaller because you cannot see it. |
+| Details panel (and the plain modal) | `NodeDetailContent` spells the loop out with `beeCycleLabel(cycle, resolveName)`: names, in order, wrapped. |
+| Agent skill (`server/skill.ts`) | tells the agent to check `beeCycle` before sequencing and to break a loop by settling one link rather than reordering the work. |
+
+**The visual rule** is the project's standing one: colour never carries state alone. A leaf in a
+loop wears a `⟳ ×N` chip (N = leaves in the loop) with a tooltip that states the consequence,
+not just the fact; the bee edges that close the loop get a translucent halo *under* their status
+stroke (status colour and dash stay untouched — the halo adds the loop, it does not replace the
+status) and `· ⟳ loop` in their label; the legend note explains the glyph. The cycle hue is its
+own palette entry (`CYCLE_COLOR`), deliberately away from every status hue: a loop is a shape
+problem in the graph, not a state of the leaf, and it must not read as "this leaf is in
+trouble".
+
+The 3D scene is suspended (0.40.9) and was not touched; the plain board shows the loop through
+the details modal only — marking cards is a plain-view decision left to a later stage.
 
 ### Command Center and slash commands (stage E3 — `client/slash.ts`, `index.client.tsx`)
 

@@ -1010,6 +1010,22 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.lp-node-cyclebadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 6px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.lp-bee-cycle-halo {
+  pointer-events: none;
+}
 .lp-bee-label {
   position: absolute;
   font-size: 10px;
@@ -1103,6 +1119,13 @@ body {
 .lp-details-hint {
   color: var(--lp-text-muted, #8b93a3);
   font-size: 11px;
+}
+.lp-details-cycle-walk {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .lp-details-error {
   margin: 0;

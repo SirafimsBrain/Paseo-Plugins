@@ -16,6 +16,12 @@
  *   text, colour alone never carries it;
  * - the `impact` description rides behind the label's `title` attribute, so
  *   hovering the edge answers "in what way does this influence?".
+ *
+ * Stage L6 marks the edges that close an influence cycle: a wide translucent
+ * halo under the bee's own stroke (the status colour and the dash stay what
+ * they were — the halo *adds* the loop) and `· ⟳ loop` in the label. A loop
+ * is therefore visible along its whole length, not just as a chip on the two
+ * leaves where it happens to be noticed.
  */
 import type { ReactElement } from "react";
 import {
@@ -24,7 +30,7 @@ import {
   getBezierPath,
   type EdgeProps,
 } from "@xyflow/react";
-import { BEE_STATUS_COLORS, BEE_STATUS_LABELS } from "../colors";
+import { BEE_STATUS_COLORS, BEE_STATUS_LABELS, CYCLE_COLOR } from "../colors";
 import type { GraphFlowEdge } from "../graph";
 
 /** The 🐝 influence edge between two visible leaves. */
@@ -41,9 +47,11 @@ export function BeeEdge({
   interactionWidth,
 }: EdgeProps<GraphFlowEdge>): ReactElement | null {
   if (data?.kind !== "bee") return null;
-  const { status, impact } = data;
+  const { status, impact, onCycle } = data;
   const color = BEE_STATUS_COLORS[status];
-  const label = BEE_STATUS_LABELS[status];
+  const label = onCycle
+    ? `${BEE_STATUS_LABELS[status]} · ⟳ loop`
+    : BEE_STATUS_LABELS[status];
 
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
@@ -59,6 +67,21 @@ export function BeeEdge({
 
   return (
     <>
+      {onCycle ? (
+        /* The halo of a loop-closing link: wider than the bee's own stroke,
+           below it in paint order, and never hit-testable so it cannot steal
+           the edge's interaction width. */
+        <path
+          className="lp-bee-cycle-halo"
+          d={path}
+          fill="none"
+          stroke={CYCLE_COLOR}
+          strokeWidth={8}
+          strokeOpacity={0.28}
+          strokeLinecap="round"
+          pointerEvents="none"
+        />
+      ) : null}
       <BaseEdge
         id={id}
         path={path}
@@ -74,6 +97,7 @@ export function BeeEdge({
         <div
           className="lp-bee-label"
           data-status={status}
+          data-cycle={onCycle ? "true" : undefined}
           title={impact.length > 0 ? `${label} — ${impact}` : label}
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,

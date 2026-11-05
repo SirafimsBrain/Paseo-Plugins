@@ -23113,7 +23113,8 @@ var contextSectionSchema = external_exports.enum([
   "siblings",
   "bees",
   "blockingBugs",
-  "growth"
+  "growth",
+  "beeCycle"
 ]);
 var CONTEXT_SECTIONS = contextSectionSchema.options;
 var getContextInputSchema = external_exports.object({
@@ -23252,6 +23253,171 @@ var importInputSchema = external_exports.object({
   dryRun: external_exports.boolean().optional()
 });
 
+// shared/bees.ts
+var beeCycleSchema = external_exports.object({
+  /** Members of the strongly-connected component, sorted by id. */
+  nodeIds: external_exports.array(idSchema),
+  /** Live bees with both ends in the component, sorted by id. */
+  beeIds: external_exports.array(idSchema),
+  /**
+   * One real cycle through the first member, as a closed walk of leaf ids:
+   * `[a, b, c, a]`. The first and the last entry are the same leaf, which is
+   * what makes it a loop rather than a path.
+   */
+  walk: external_exports.array(idSchema)
+});
+var beeCycleReportSchema = external_exports.object({
+  /** Number of cycles — the project-level `0` is the healthy answer. */
+  count: external_exports.number().int().nonnegative(),
+  /** Every leaf that sits on a cycle, sorted by id (no duplicates). */
+  nodeIds: external_exports.array(idSchema),
+  /** Every bee that closes a cycle, sorted by id (no duplicates). */
+  beeIds: external_exports.array(idSchema),
+  /** The cycles themselves, ordered by their first member id. */
+  cycles: external_exports.array(beeCycleSchema)
+});
+var NO_BEE_CYCLES = {
+  count: 0,
+  nodeIds: [],
+  beeIds: [],
+  cycles: []
+};
+function isBeeLive(status) {
+  return status === "active" || status === "watching";
+}
+var compareIds = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+function findBeeCycles(bees) {
+  const live = bees.filter(
+    (bee) => isBeeLive(bee.status) && bee.sourceLeafId !== bee.targetLeafId
+  );
+  if (live.length === 0) return NO_BEE_CYCLES;
+  const leaves = [
+    ...new Set(
+      live.flatMap((bee) => [bee.sourceLeafId, bee.targetLeafId])
+    )
+  ].sort(compareIds);
+  const adjacency = new Map(
+    leaves.map((leaf) => [leaf, []])
+  );
+  for (const bee of live) {
+    const targets = adjacency.get(bee.sourceLeafId);
+    if (targets === void 0 || targets.includes(bee.targetLeafId)) continue;
+    targets.push(bee.targetLeafId);
+  }
+  for (const targets of adjacency.values()) targets.sort(compareIds);
+  const cycles = [];
+  for (const component of stronglyConnected(leaves, adjacency)) {
+    if (component.length < 2) continue;
+    const members2 = new Set(component);
+    const beeIds = live.filter(
+      (bee) => members2.has(bee.sourceLeafId) && members2.has(bee.targetLeafId)
+    ).map((bee) => bee.id);
+    cycles.push({
+      nodeIds: component,
+      beeIds: [...new Set(beeIds)].sort(compareIds),
+      walk: shortestCycle(component[0], adjacency, members2)
+    });
+  }
+  cycles.sort((a, b) => compareIds(a.nodeIds[0], b.nodeIds[0]));
+  return {
+    count: cycles.length,
+    nodeIds: [...new Set(cycles.flatMap((cycle) => cycle.nodeIds))].sort(
+      compareIds
+    ),
+    beeIds: [...new Set(cycles.flatMap((cycle) => cycle.beeIds))].sort(
+      compareIds
+    ),
+    cycles
+  };
+}
+function beeCycleOf(report, nodeId) {
+  return report.cycles.find((cycle) => cycle.nodeIds.includes(nodeId)) ?? null;
+}
+function beeCycleLabel(cycle, nameOf) {
+  return cycle.walk.map((nodeId) => {
+    const name = nameOf(nodeId);
+    return name.length > 0 ? name : nodeId;
+  }).join(" \u2192 ");
+}
+function stronglyConnected(leaves, adjacency) {
+  let counter = 0;
+  const index = /* @__PURE__ */ new Map();
+  const low = /* @__PURE__ */ new Map();
+  const onStack = /* @__PURE__ */ new Set();
+  const stack = [];
+  const components = [];
+  const frames = [];
+  for (const root of leaves) {
+    if (index.has(root)) continue;
+    frames.push({ leaf: root, edge: 0 });
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      if (frame.edge === 0) {
+        index.set(frame.leaf, counter);
+        low.set(frame.leaf, counter);
+        counter += 1;
+        stack.push(frame.leaf);
+        onStack.add(frame.leaf);
+      }
+      const targets = adjacency.get(frame.leaf) ?? [];
+      if (frame.edge < targets.length) {
+        const next = targets[frame.edge];
+        frame.edge += 1;
+        if (!index.has(next)) {
+          frames.push({ leaf: next, edge: 0 });
+        } else if (onStack.has(next)) {
+          low.set(
+            frame.leaf,
+            Math.min(low.get(frame.leaf), index.get(next))
+          );
+        }
+        continue;
+      }
+      frames.pop();
+      if (frames.length > 0) {
+        const parent = frames[frames.length - 1];
+        low.set(parent.leaf, Math.min(low.get(parent.leaf), low.get(frame.leaf)));
+      }
+      if (low.get(frame.leaf) === index.get(frame.leaf)) {
+        const component = [];
+        for (; ; ) {
+          const member = stack.pop();
+          onStack.delete(member);
+          component.push(member);
+          if (member === frame.leaf) break;
+        }
+        components.push(component.sort(compareIds));
+      }
+    }
+  }
+  return components;
+}
+function shortestCycle(start, adjacency, members2) {
+  const parent = /* @__PURE__ */ new Map([[start, null]]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const leaf = queue.shift();
+    for (const next of adjacency.get(leaf) ?? []) {
+      if (!members2.has(next)) continue;
+      if (next === start) {
+        const walk = [];
+        let cursor = leaf;
+        while (cursor !== null) {
+          walk.push(cursor);
+          cursor = parent.get(cursor) ?? null;
+        }
+        walk.reverse();
+        walk.push(start);
+        return walk;
+      }
+      if (parent.has(next)) continue;
+      parent.set(next, leaf);
+      queue.push(next);
+    }
+  }
+  return [start];
+}
+
 // shared/export.ts
 var EXPORT_FORMAT = "luck-planner-export";
 var EXPORT_SCHEMA_VERSION = 1;
@@ -23323,6 +23489,16 @@ function exportFileName(projectKey, exportedAt) {
 }
 function exportEntryName(fileName) {
   return fileName.endsWith(".zip") ? fileName.slice(0, -".zip".length) : fileName;
+}
+
+// server/bees.ts
+function projectBeeCycles(store, projectKey) {
+  return findBeeCycles(store.listBees(projectKey));
+}
+function nodeBeeCycle(store, projectKey, nodeId) {
+  const touching = store.listBeesForNode(projectKey, nodeId);
+  if (!touching.some((bee) => isBeeLive(bee.status))) return null;
+  return beeCycleOf(projectBeeCycles(store, projectKey), nodeId);
 }
 
 // server/export.ts
@@ -24911,7 +25087,7 @@ var MCP_TOOLS = [
   {
     name: "luck_tree_get_context",
     title: "Get tree context",
-    description: "Orient yourself in the project tree. Without nodeId returns the overview: roots (tech stacks) with their trunks. With nodeId returns the path root \u2192 \u2026 \u2192 that node, its children, its sibling leaves, the influence bees touching it, its blocking bugs and its growth progress. Call this before descending into a subtree.",
+    description: 'Orient yourself in the project tree. Without nodeId returns the overview: roots (tech stacks) with their trunks. With nodeId returns the path root \u2192 \u2026 \u2192 that node, its children, its sibling leaves, the influence bees touching it, its blocking bugs and its growth progress. Call this before descending into a subtree. `sections: ["beeCycle"]` adds the influence cycle the leaf sits on (leaves whose bees loop back on each other have no execution order).',
     inputSchema: {
       type: "object",
       properties: {
@@ -25710,6 +25886,16 @@ function dispatchGetContext(store, value) {
   if (wants("growth")) {
     answer.growth = store.getGrowthProgress(value.projectKey, "node", node2.id);
   }
+  if (wants("beeCycle")) {
+    const cycle = nodeBeeCycle(store, value.projectKey, node2.id);
+    answer.beeCycle = cycle === null ? null : {
+      ...cycle,
+      loop: beeCycleLabel(
+        cycle,
+        (leafId) => store.getNode(value.projectKey, leafId)?.name ?? leafId
+      )
+    };
+  }
   if (Object.keys(truncated).length > 0) answer.truncated = truncated;
   return text(answer);
 }
@@ -25897,7 +26083,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.45.0";
+var SERVER_VERSION = "0.46.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

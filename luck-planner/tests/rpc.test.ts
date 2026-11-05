@@ -560,6 +560,46 @@ describe("node.detail", () => {
     }
   });
 
+  it("carries the influence cycle of a leaf and null for the others", async () => {
+    const store = new LuckPlannerStore();
+    const { branch, leafA, leafB } = seedTree(store);
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafA.id,
+      targetLeafId: leafB.id,
+      impact: "refund proration depends on retry outcome",
+      actor: ACTOR,
+    });
+    store.createBee({
+      projectKey: P,
+      sourceLeafId: leafB.id,
+      targetLeafId: leafA.id,
+      impact: "retry budget depends on refund volume",
+      actor: ACTOR,
+    });
+    store.close();
+    const server = createFakeServer();
+    const cleanup = contribute(server);
+    try {
+      const inLoop = await server.call<{
+        beeCycle: { nodeIds: string[]; beeIds: string[]; walk: string[] } | null;
+      }>(nodeDetail.name, { projectKey: P, nodeId: leafA.id });
+      expect(inLoop.beeCycle?.nodeIds.sort()).toEqual(
+        [leafA.id, leafB.id].sort(),
+      );
+      expect(inLoop.beeCycle?.beeIds).toHaveLength(2);
+      expect(inLoop.beeCycle?.walk.at(-1)).toBe(inLoop.beeCycle?.walk[0]);
+
+      const outside = await server.call<{ beeCycle: unknown }>(nodeDetail.name, {
+        projectKey: P,
+        nodeId: branch.id,
+      });
+      expect(outside.beeCycle).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
   it("throws a readable error for an unknown node", async () => {
     const store = new LuckPlannerStore();
     seedTree(store);

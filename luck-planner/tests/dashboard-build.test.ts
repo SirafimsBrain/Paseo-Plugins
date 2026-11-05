@@ -283,6 +283,47 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(plain).toContain("props.onSelectCard(card.kind, card.entityId)");
     expect(plain).not.toContain("<article");
   });
+
+  it("marks influence cycles in the diagram and the details panel", () => {
+    // L6: the adapter decides, the renderers draw. A renderer that re-ran the
+    // detector could disagree with the adapter (and with the MCP answer), so
+    // the mark must arrive as data.
+    const graph = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "graph.ts"),
+      "utf8",
+    );
+    expect(graph).toContain("findBeeCycles(input.bees)");
+    expect(graph).toContain("onCycle: cycleBees.has(bee.id)");
+    expect(graph).toContain("cycleSize: cycleSizeByNode.get(node.id) ?? 0");
+
+    const nodes = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "graph-nodes.tsx"),
+      "utf8",
+    );
+    expect(nodes).toContain("data.cycleSize > 0 ? <CycleBadge");
+
+    const edges = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "graph-edges.tsx"),
+      "utf8",
+    );
+    expect(edges).toContain("⟳ loop");
+    expect(edges).toContain("lp-bee-cycle-halo");
+
+    const detail = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "NodeDetailContent.tsx"),
+      "utf8",
+    );
+    expect(detail).toContain("beeCycleLabel(beeCycle, resolveName)");
+
+    // The committed bundle and stylesheet carry the marking for real.
+    const js = fs.readFileSync(APP_JS, "utf8");
+    expect(js).toContain("lp-node-cyclebadge");
+    expect(js).toContain("lp-bee-cycle-halo");
+    const css = fs.readFileSync(APP_CSS, "utf8");
+    expect(css).toContain(".lp-node-cyclebadge {");
+    expect(css).toContain(".lp-bee-cycle-halo {");
+    expect(css).toContain(".lp-details-cycle-walk {");
+  });
 });
 
 describe("the built SPA served by the real HTTP server", () => {
