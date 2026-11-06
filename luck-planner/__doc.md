@@ -665,7 +665,7 @@ answer because a path the user cannot find is not a backup.
   trap, and the per-project artifact already exists (L2). It also runs on an
   explicit request only — a timer would turn "a backup" into "a directory
   nobody reads", and the criteria for automatic archiving are their own stage
-  (L11).
+  (L11, **deferred**: the rules come first, and they are not specified yet).
 
 ### Database restore (stage L4 — `server/restore.ts`, `index.server.ts`, `shared/rpc.ts`)
 
