@@ -114,6 +114,7 @@ extended to the real stores. The verified layout on a Linux host:
 | OpenCode (`opencode-ai@1.18.x`) | SQLite `~/.local/share/opencode/opencode.db` (`session`, `message`, `part`, FK `ON DELETE CASCADE`), plus `storage/session_diff/`, `snapshot/`, `tool-output/` | The database reached 543 MB on the audited machine |
 | Kilo CLI (`@kilocode/cli@7.7.x`) | SQLite `~/.local/share/kilo/kilo.db` (same schema family as OpenCode), plus `storage/session_diff/`, `snapshot/` | Kilo is an OpenCode fork and keeps the same `session` commands |
 | Qwen Code (`@qwen-code/qwen-code@0.20.x`) | `~/.qwen/projects/<sanitized-cwd>/chats/<sessionId>.jsonl`, sidecars `~/.qwen/plans/<sessionId>.md`, `~/.qwen/todos/<sessionId>.json`, runtime registry `~/.qwen/sessions/<pid>.json` | `qwen sessions list` exists, `qwen sessions` has no delete command |
+| Kimi Code CLI (`@moonshot-ai/kimi-code`) | `~/.kimi-code/sessions/<workDirKey>/<sessionId>/` with `state.json`, plus master index `~/.kimi-code/session_index.jsonl` (NDJSON) and occupancy locks under `~/.kimi-code/locks/sessions/` | No `session list`/`delete` CLI: sessions are listed and deleted from disk directly; export via `kimi export <id> -o <path>` (ZIP) |
 | acpx CLI (`acpx@0.13.x`) | `~/.acpx/sessions/index.json` (`schema`, `files`, `entries`), `<id>.json`, `<id>.stream.ndjson` | Unrelated to Paseo, kept for parity |
 
 Paseo agent records reference the native session through

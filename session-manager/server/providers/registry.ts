@@ -1,6 +1,7 @@
 import { acpxProvider } from "./acpx";
 import { clineProvider } from "./cline";
 import { kiloProvider } from "./kilo";
+import { kimiProvider } from "./kimi";
 import { opencodeProvider } from "./opencode";
 import { qwenProvider } from "./qwen";
 import type { ProviderAdapter } from "./types";
@@ -17,6 +18,7 @@ export const providers: readonly ProviderAdapter[] = [
   opencodeProvider,
   kiloProvider,
   qwenProvider,
+  kimiProvider,
   acpxProvider,
 ];
 

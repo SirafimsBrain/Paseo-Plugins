@@ -8,7 +8,7 @@ connected to Paseo, so old transcripts stop filling the disk.
 - **Workspace panel** titled "Agent sessions" (available in the `workspace` and
   `explorer` panel locations).
 - **Command Center item** ("Open agent sessions") that opens the panel on demand.
-- **One list per agent** — Cline, OpenCode, Kilo, Qwen Code, and the standalone
+- **One list per agent** — Cline, OpenCode, Kilo, Qwen Code, Kimi Code, and the standalone
   `acpx` ACP store are scanned in one pass and labelled per provider.
 - **Filtering** — by provider and by age (`> 1 day`, `> 7 days`, `> 30 days`),
   with an "Archived Paseo agents" view and an oldest-first default order.
@@ -41,6 +41,7 @@ way (see [`__doc.md`](./__doc.md) for the verified paths):
 | `opencode`  | `~/.local/share/opencode/opencode.db`                            | `opencode session delete <id>`      |
 | `kilo`      | `~/.local/share/kilo/kilo.db`                                    | `kilo session delete <id>`          |
 | `qwen-code` | `~/.qwen/projects/<project>/chats/<id>.jsonl`                    | transcript (+ `plans`, `todos`, `file-history`) removed from disk |
+| `kimi`      | `~/.kimi-code/sessions/<workDirKey>/<id>/` + `session_index.jsonl` | session directory + index entry removed from disk; export via `kimi export` (ZIP) |
 | `acpx`      | `~/.acpx/sessions/index.json` + `*.json` + `*.stream.ndjson`     | record, stream and index entry removed |
 
 Agents that expose their own session commands are driven through their CLI, so the
@@ -75,13 +76,14 @@ installation. Updates: `paseo plugin update session-manager`.
   `assertPluginCompatibility` before the plugin loads).
 - Verified against Paseo `0.15.0` (2026-11-03, SDK `@getpaseo/plugin@^0.15.0`,
   installed with `npm install` so the lockfile carries it): `npm run typecheck`
-  and `npm test` (9 suites / 74 tests) pass, the `agent.close.after` hook fires
+  and `npm test` (10 suites / 85 tests) pass, the `agent.close.after` hook fires
   on the real daemon, and the plugin is `running` in an isolated 0.15.0 daemon —
   see Compatibility in [`__doc.md`](./__doc.md) §19. Earlier: Paseo `0.12.0` /
   SDK 0.12.0 (2026-10-21), Paseo `0.10.3` / SDK 0.10.1.
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
-  `cline`, `opencode`, `kilo`. Qwen Code and `acpx` are read and written as files
-  and need no CLI.
+  `cline`, `opencode`, `kilo`. Qwen Code, Kimi Code and `acpx` are read and
+  written as files and need no CLI for listing or deletion (Kimi only needs its
+  CLI for `kimi export`).
 - `npm test` (vitest) and `npm run typecheck` run the server-side test suites;
   the tests build throwaway stores under the OS temp directory and never touch
   the real home stores.
