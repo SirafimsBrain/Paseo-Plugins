@@ -222,9 +222,20 @@ exist for coordination, not ceremony.
 - \`luck_tree_set_goal\` — **pre-approval only**:
   \`create\` (formalText + plan steps → \`draft\`), \`update\` (draft/proposed
   edits), \`propose\` (draft → proposed). **You cannot approve a goal** — a
-  human approves it in the Paseo panel, and only an approved goal
+  human approves it in the luck-planner dashboard, and only an approved goal
   materializes into sub-branches with leaves. After \`propose\`, say so in
   your reply and wait; a repeated \`propose\` is a readable no-op error.
+- **No implementation before the gate (hard).** A \`draft\` or \`proposed\`
+  goal is a question to the user, not permission to work. Until the goal is
+  \`approved\`/\`in_progress\` in the tree — or the user plainly says the plan
+  is approved — do **not** edit code, run commands that change the project,
+  or start "preparatory" work: state the plan and stop. A plan the user asked
+  to see is not a plan the user accepted.
+- **Never approve your own proposal.** \`luck_tree_approve_goal\` exists only
+  for a managing agent whose user explicitly told it to approve on their
+  behalf; calling it for a plan you wrote yourself turns the approval gate
+  and the audit trail into a false statement. Without that instruction, the
+  gate belongs to the human.
 - \`luck_tree_update_growth\` — attach or refresh progress steps for a goal
   or node (\`steps\` when creating, \`steps\`/\`status\` when updating). Update
   it as steps complete or stall (with \`reason\`) — the dashboard renders it

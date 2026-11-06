@@ -11661,6 +11661,19 @@ function GoalDetailContent(props) {
         step.description ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-hint", children: step.description }) : null
       ] }, step.id)) })
     ] }) : null,
+    canApprove && onApprove !== void 0 && target === null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Approval" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { className: "lp-details-hint", children: [
+        "Nothing to grow under: this project has no live branch or sub-branch, and the plan becomes a side branch. Create one with",
+        " ",
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("code", { children: "luck_tree_upsert_node" }),
+        ", then approve again."
+      ] })
+    ] }) : null,
+    canApprove && onApprove === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Approval" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "lp-details-hint", children: "This tab cannot write \u2014 open the dashboard from Paseo so it carries the access token, then approve the goal here." })
+    ] }) : null,
     canApprove && onApprove !== void 0 && target !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Approval" }),
       options.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("label", { className: "lp-details-row", children: [
@@ -11969,7 +11982,7 @@ function nextStepFor(card) {
       case "draft":
         return "\u041F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0446\u0435\u043B\u044C \u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u043D\u0430 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u0435 (proposed).";
       case "proposed":
-        return "\u041E\u0434\u043E\u0431\u0440\u0438\u0442\u0435 \u0446\u0435\u043B\u044C (approved), \u0447\u0442\u043E\u0431\u044B \u0430\u0433\u0435\u043D\u0442 \u043C\u0430\u0442\u0435\u0440\u0438\u0430\u043B\u0438\u0437\u043E\u0432\u0430\u043B \u043F\u043E\u0434\u0434\u0435\u0440\u0435\u0432\u043E.";
+        return "\u041E\u0434\u043E\u0431\u0440\u0438\u0442\u0435 \u0446\u0435\u043B\u044C: \u043E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u043A\u0430\u0440\u0442\u043E\u0447\u043A\u0443 \u0438 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xABApprove under \u2026\xBB \u2014 \u043F\u043B\u0430\u043D \u0441\u0442\u0430\u043D\u0435\u0442 \u043F\u043E\u0434\u0434\u0435\u0440\u0435\u0432\u043E\u043C.";
       case "approved":
         return "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0440\u0435\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044E (in_progress).";
       case "in_progress":

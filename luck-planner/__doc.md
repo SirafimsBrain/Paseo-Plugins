@@ -75,7 +75,7 @@ Every mutation records **who, when, what, and with what result** — a mandatory
 | **ADR-4** | **2D — React Flow**; **3D — @react-three/fiber + drei + d3-hierarchy** (last implementation block). Both views share **one data layer** (same JSON API + graph-model adapter + same details panel), with a 2D/3D toggle in the toolbar. | Matches both requirement drafts; a shared data layer prevents logic drift and makes 3D a renderer swap, not a second dashboard. |
 | **ADR-5** | The tree is an **adjacency list** (`parent_id`) with kind enum (`root`,`trunk`,`branch`,`subbranch`,`leaf`); no materialized path. The dashboard builds the tree in memory from one query. | Cheap moves without path recomputation; thousands of nodes do not need materialized paths; layout happens in the dashboard. |
 | **ADR-6** | Leaves are a **state machine**: `draft → ready → claimed → in_progress → (blocked) → done`, plus terminal `cancelled` / `superseded`. Every transition increments `revision` and appends an audit row (`actor`, `action`, `revision`, `result`, `at`). | The state machine plus revisions are the heart of plan/fact. The audit log is written from the first CRUD stage (B3) — no exceptions. |
-| **ADR-7** | High goals have an **approval gate**: `draft → proposed → approved`. Only a human (via the native panel/RPC) or a managing orchestrating agent approves; only `approved` goals materialize a subtree. Replacing a plan supersedes the old goal and **cascades a reset** to derived leaves. | Requirement: the tree receives goals only after the plan is agreed. Plandex review gate; MetaGPT `reset_task` cascade semantics. |
+| **ADR-7** | High goals have an **approval gate**: `draft → proposed → approved`. Only a human (via the dashboard modal or the RPC behind it; the native panel is read-only for goals) or an explicitly instructed managing agent approves; only `approved` goals materialize a subtree. Replacing a plan supersedes the old goal and **cascades a reset** to derived leaves. | Requirement: the tree receives goals only after the plan is agreed. Plandex review gate; MetaGPT `reset_task` cascade semantics. |
 | **ADR-8** | Dashboard v1 is **read-only**. All mutations go through MCP (agents) or the native panel (human). **Amended in 0.48.0 (stage L8):** the dashboard may make exactly two writes — a leaf's status and a proposed goal's approval — under header-token + same-`Origin` + `application/json` + `expectedRevision`; every other mutation still goes through MCP or the panel. | Shrinks the HTTP attack surface and keeps the first release coherent. The amendment answers a real need (a human reading a plan wants to approve it) without opening a general write path: the browser gets two named decisions, both optimistic and both audited as `user`. |
 | **ADR-9** | The HTTP server binds `127.0.0.1` only, uses a per-installation access token in the URL (memory-flash API-key precedent), exposes `GET /health`, and serves the SPA from `dist/dashboard`. No `0.0.0.0` binding without an explicit setting. | Plugins are trusted code with machine access; do not widen the surface with a cheap bind. |
 
@@ -158,11 +158,30 @@ transition bumps `revision` and appends a `history` row.
 
 ### 4.3 High goals and the approval gate
 
-`draft → proposed → approved` — approval only through the native panel/RPC, recorded with the
-approving actor. `approved` materializes a subtree (side branches + leaves derived from
-`plan_json`) linked by `materialized_node_id`; materialization is idempotent. Replacing a plan
-marks the goal `superseded` and cascades a reset onto derived leaves (MetaGPT `reset_task`
-semantics), so plan/fact stays honest after a redo.
+`draft → proposed → approved` — approval only through the dashboard modal (or the RPC behind
+it), recorded with the approving actor. The native panel is read-only for goals: it renders the
+tree and the audit history but no approval control, which is why the plain board's goal card
+names the control in its next-step line instead of leaving the user to guess. `approved`
+materializes a subtree (side branches + leaves derived from `plan_json`) linked by
+`materialized_node_id`; materialization is idempotent. Replacing a plan marks the goal
+`superseded` and cascades a reset onto derived leaves (MetaGPT `reset_task` semantics), so
+plan/fact stays honest after a redo.
+
+**Who may cross the gate.** `store.setGoalStatus` refuses `approved` from every path but
+`approveGoal`, so no generic write reaches the gate by accident. The MCP action
+`luck_tree_approve_goal` is the one deliberate exception, for a managing agent whose user
+explicitly asked it to approve for them; the skill states that no agent may call it for its own
+proposal. The skill also carries the rule that closes the loop the gate cannot: a `draft` or
+`proposed` goal is a question to the user, so an agent stops after `propose` and does not touch
+code until the goal is `approved`/`in_progress` or the user says the plan is accepted. The
+plugin has no authority over an agent's file edits, so that rule is carried by the skill (and
+by the host's own permission prompts), not by the store.
+
+**A modal that cannot approve.** Two states used to render an empty approval section, which
+read as a missing button: a project with no live branch or sub-branch (the side branch has
+nowhere to grow) and a tab opened without the write token. `GoalDetailContent` now states each
+case in words — create a branch with `luck_tree_upsert_node`, or reopen the dashboard from
+Paseo — so an unavailable gate is never silent.
 
 ### 4.4 Growth rates
 
@@ -487,7 +506,7 @@ transport-independent on purpose: the stdio server of stage D2 and
 | `luck_tree_archive_node` | Soft-delete a node **and its subtree**: the rows stay in the database and the audit trail keeps them, the tree and every diagram built from it stop showing them. |
 | `luck_tree_add_bee` | Directed influence edge between two live leaves of one project; self-loops, non-leaf ends and foreign ids are rejected by the store with readable messages. |
 | `luck_tree_report_bug` | Incident with severity; `nodeIds` attach blocking leaves immediately — every id must resolve inside the project or nothing is written. |
-| `luck_tree_set_goal` | Pre-approval goal management only: `create` (draft; `formalText` + `plan` required), `update` (draft/proposed edits), `propose` (draft → proposed). **Deliberately no `approve` action** — ADR-7: the store refuses `approved` from any path but the native panel/RPC. `create`/`propose` responses carry a note telling the agent a human approves; a repeated `propose` is a readable no-op error, not a second transition. |
+| `luck_tree_set_goal` | Pre-approval goal management only: `create` (draft; `formalText` + `plan` required), `update` (draft/proposed edits), `propose` (draft → proposed). **Deliberately no `approve` action** — ADR-7: the store refuses `approved` from any path but `approveGoal` (the dashboard modal, the RPC behind it, and `luck_tree_approve_goal` for a managing agent that was explicitly told to approve). `create`/`propose` responses carry a note telling the agent a human approves; a repeated `propose` is a readable no-op error, not a second transition. |
 | `luck_tree_update_growth` | Upsert of one subject's progress record: an explicit `growthId` wins; otherwise the record is resolved by subject — updated when one exists (error when neither `steps` nor `status` is given), or a fresh one is attached (`steps` required). Step shape and status transitions are validated by the store. |
 | `luck_tree_history` | Append-only audit trail of any entity (node/bee/bug/goal/growth), oldest first; an unknown id returns an empty list rather than an error. |
 | `luck_tree_export` | One project as a portable `.json.zip` (stage L2): the tree with archived nodes flagged, bees, incidents and their attachments, goals, growth and the audit trail unless `includeHistory: false`. `path` must be absolute; omitted, the archive lands in `backups/` beside the database under a date-stamped name. Empty project, relative path and an existing file are readable errors. |

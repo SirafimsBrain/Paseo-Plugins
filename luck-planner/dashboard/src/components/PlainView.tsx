@@ -281,7 +281,7 @@ function nextStepFor(card: PlainCard): string {
       case "draft":
         return "Подтвердите цель и отправьте на утверждение (proposed).";
       case "proposed":
-        return "Одобрите цель (approved), чтобы агент материализовал поддерево.";
+        return "Одобрите цель: откройте карточку и нажмите «Approve under …» — план станет поддеревом.";
       case "approved":
         return "Запустите реализацию (in_progress).";
       case "in_progress":

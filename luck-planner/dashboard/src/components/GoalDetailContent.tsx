@@ -98,6 +98,31 @@ export function GoalDetailContent(props: GoalDetailContentProps): ReactElement {
           </ol>
         </div>
       ) : null}
+      {/*
+       * The gate is open but there is nowhere to grow: the plan becomes a side
+       * branch, and a project without a live branch or sub-branch has none to
+       * host it. Saying so beats a modal that silently offers no button.
+       */}
+      {canApprove && onApprove !== undefined && target === null ? (
+        <div className="lp-details-section lp-details-write">
+          <h3 className="lp-details-subtitle">Approval</h3>
+          <p className="lp-details-hint">
+            Nothing to grow under: this project has no live branch or
+            sub-branch, and the plan becomes a side branch. Create one with{" "}
+            <code>luck_tree_upsert_node</code>, then approve again.
+          </p>
+        </div>
+      ) : null}
+      {/* A tab opened without the write token reads; it cannot cross the gate. */}
+      {canApprove && onApprove === undefined ? (
+        <div className="lp-details-section lp-details-write">
+          <h3 className="lp-details-subtitle">Approval</h3>
+          <p className="lp-details-hint">
+            This tab cannot write — open the dashboard from Paseo so it carries
+            the access token, then approve the goal here.
+          </p>
+        </div>
+      ) : null}
       {canApprove && onApprove !== undefined && target !== null ? (
         <div className="lp-details-section lp-details-write">
           <h3 className="lp-details-subtitle">Approval</h3>
