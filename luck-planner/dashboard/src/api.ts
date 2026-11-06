@@ -14,8 +14,12 @@
  * renders them in the toolbar status line.
  */
 import {
+  bugStatusRequestSchema,
+  bugStatusResponseSchema,
   goalApproveRequestSchema,
   goalApproveResponseSchema,
+  goalStatusRequestSchema,
+  goalStatusResponseSchema,
   healthResponseSchema,
   leafStatusResponseSchema,
   nodeResponseSchema,
@@ -31,11 +35,17 @@ import {
   DASHBOARD_TOKEN_PARAM,
   DASHBOARD_THEMES_PATH,
   DASHBOARD_TREE_PATH,
+  bugStatusPath,
   goalApprovePath,
+  goalStatusPath,
   nodeStatusPath,
   themesResponseSchema,
+  type BugStatusRequest,
+  type BugStatusResponse,
   type GoalApproveRequest,
   type GoalApproveResponse,
+  type GoalStatusRequest,
+  type GoalStatusResponse,
   type LeafStatusRequest,
   type LeafStatusResponse,
   type NodeResponse,
@@ -87,6 +97,16 @@ export interface DashboardClient {
     goalId: string,
     input: GoalApproveRequest,
   ): Promise<GoalApproveResponse>;
+  /** Moves a goal through its lifecycle, short of the gate (0.51.1). */
+  setGoalStatus(
+    goalId: string,
+    input: GoalStatusRequest,
+  ): Promise<GoalStatusResponse>;
+  /** Moves an incident through its lifecycle (0.51.1). */
+  setBugStatus(
+    bugId: string,
+    input: BugStatusRequest,
+  ): Promise<BugStatusResponse>;
 }
 
 /**
@@ -167,6 +187,26 @@ export class DashboardApi implements DashboardClient {
     const body = goalApproveRequestSchema.parse(input);
     return goalApproveResponseSchema.parse(
       await this.post(`${goalApprovePath(goalId)}?${this.writeQuery()}`, body),
+    );
+  }
+
+  async setGoalStatus(
+    goalId: string,
+    input: GoalStatusRequest,
+  ): Promise<GoalStatusResponse> {
+    const body = goalStatusRequestSchema.parse(input);
+    return goalStatusResponseSchema.parse(
+      await this.post(`${goalStatusPath(goalId)}?${this.writeQuery()}`, body),
+    );
+  }
+
+  async setBugStatus(
+    bugId: string,
+    input: BugStatusRequest,
+  ): Promise<BugStatusResponse> {
+    const body = bugStatusRequestSchema.parse(input);
+    return bugStatusResponseSchema.parse(
+      await this.post(`${bugStatusPath(bugId)}?${this.writeQuery()}`, body),
     );
   }
 

@@ -29,7 +29,7 @@ import {
  * changed something, and the panel acts on behalf of the human.
  */
 
-export const UI_ACTOR = "user";
+export { UI_ACTOR } from "./tree";
 
 /** One of the agent config files the plugin can register itself with. */
 export const agentMcpTargetIdSchema = z.enum([

@@ -74,9 +74,9 @@ Every mutation records **who, when, what, and with what result** — a mandatory
 | **ADR-3** | Agent access is a **bundled stdio MCP server** (`dist/mcp-server.js`, esbuild), injected into every agent via `server.addHook("agent.create.before")` (formerly `server.before("agent.create")`) plus `paseo-plugin.json` `mcp.entry` (revision-independent publication, as in memory-flash 0.7.x). Agents read/write the tree with `luck_tree_*` tools. | The point of the plugin is that coding agents maintain the tree. Plugin RPCs are not reachable from agent processes; MCP is the only channel. Proven mechanics from memory-flash and bunny-search. |
 | **ADR-4** | **2D — React Flow**; **3D — @react-three/fiber + drei + d3-hierarchy** (last implementation block). Both views share **one data layer** (same JSON API + graph-model adapter + same details panel), with a 2D/3D toggle in the toolbar. | Matches both requirement drafts; a shared data layer prevents logic drift and makes 3D a renderer swap, not a second dashboard. |
 | **ADR-5** | The tree is an **adjacency list** (`parent_id`) with kind enum (`root`,`trunk`,`branch`,`subbranch`,`leaf`); no materialized path. The dashboard builds the tree in memory from one query. | Cheap moves without path recomputation; thousands of nodes do not need materialized paths; layout happens in the dashboard. |
-| **ADR-6** | Leaves are a **state machine**: `draft → ready → claimed → in_progress → (blocked) → done`, plus terminal `cancelled` / `superseded`. Every transition increments `revision` and appends an audit row (`actor`, `action`, `revision`, `result`, `at`). | The state machine plus revisions are the heart of plan/fact. The audit log is written from the first CRUD stage (B3) — no exceptions. |
+| **ADR-6** | Leaves are a **state machine**: `draft → ready → claimed → in_progress → (blocked | deferred) → done`, plus terminal `cancelled` / `superseded`. Every transition increments `revision` and appends an audit row (`actor`, `action`, `revision`, `result`, `at`). | The state machine plus revisions are the heart of plan/fact. The audit log is written from the first CRUD stage (B3) — no exceptions. |
 | **ADR-7** | High goals have an **approval gate**: `draft → proposed → approved`. Only a human (via the dashboard modal or the RPC behind it; the native panel is read-only for goals) or an explicitly instructed managing agent approves; only `approved` goals materialize a subtree. Replacing a plan supersedes the old goal and **cascades a reset** to derived leaves. | Requirement: the tree receives goals only after the plan is agreed. Plandex review gate; MetaGPT `reset_task` cascade semantics. |
-| **ADR-8** | Dashboard v1 is **read-only**. All mutations go through MCP (agents) or the native panel (human). **Amended in 0.48.0 (stage L8):** the dashboard may make exactly two writes — a leaf's status and a proposed goal's approval — under header-token + same-`Origin` + `application/json` + `expectedRevision`; every other mutation still goes through MCP or the panel. | Shrinks the HTTP attack surface and keeps the first release coherent. The amendment answers a real need (a human reading a plan wants to approve it) without opening a general write path: the browser gets two named decisions, both optimistic and both audited as `user`. |
+| **ADR-8** | Dashboard v1 is **read-only**. All mutations go through MCP (agents) or the native panel (human). **Amended in 0.48.0 (stage L8):** the dashboard may write — a leaf's status and a proposed goal's approval — under header-token + same-`Origin` + `application/json` + `expectedRevision`; every other mutation still goes through MCP or the panel. **Amended again in 0.51.1:** the same four checks now cover the lifecycle of an incident and of a goal (short of the gate), because the plain board is where the owner decides and a status must not require the MCP channel to change. | Shrinks the HTTP attack surface and keeps the first release coherent. The amendment answers a real need (a human reading a plan wants to approve it) without opening a general write path: the browser gets two named decisions, both optimistic and both audited as `user`. |
 | **ADR-9** | The HTTP server binds `127.0.0.1` only, uses a per-installation access token in the URL (memory-flash API-key precedent), exposes `GET /health`, and serves the SPA from `dist/dashboard`. No `0.0.0.0` binding without an explicit setting. | Plugins are trusted code with machine access; do not widen the surface with a cheap bind. |
 
 ## 3. Target directory layout
@@ -137,6 +137,7 @@ DOM globals are forbidden outside `client/web.ts` (which this plugin does not ne
 | `claimed` | Locked by an agent |
 | `in_progress` | Work under way |
 | `blocked` | Waits on a dependency/human (often an open bug) |
+| `deferred` | Set aside on purpose by the owner: the schedule decided, the work did not |
 | `done` | Step confirmed (by agent or human) |
 | `cancelled` / `superseded` | Cancelled / replaced by another plan |
 
@@ -1250,7 +1251,7 @@ The 2D/3D dashboards are a separate web app (ADR-1) that this server *serves* fr
 subprocess next to the store, so it shares the one SQLite file the native panel and the
 agent MCP servers use (ADR-2).
 
-**Endpoints** (reads are read-only; the two writes are stage L8, see below):
+**Endpoints** (reads are read-only; the writes are stage L8 plus the 0.51.1 lifecycle routes, see below):
 
 | Endpoint | Auth | Response |
 | --- | --- | --- |
@@ -3432,3 +3433,75 @@ there instead of leaving the agent without any way to write.
 | Seeding, `worktree.create.after` | **PASS** — `[luck-planner] worktree.create.after eager-rhino: seeded root → trunk → 'General' for …/worktrees/<id>/eager-rhino`, before the workspace and the agent started |
 | Seeding, in the database | **PASS** — three projects (`luck-planner`, the probe repo, the worktree), each with root → `Trunk` → `General`, and **9** `create` audit rows, all with actor `paseo` |
 | Cleanup | the agents created for the checks were removed with the scratch home; the daemon was stopped and `.tmp/` deleted — the production daemon and its data were never touched |
+
+### 10.12 Version 0.51.1 — the owner's statuses on the board (2026-11-06)
+
+The plain board became the dashboard's default in K1/ADR-10, but it could only *show*
+statuses: the only browser writes were a leaf's status (from the modal or the 2D details
+panel) and a goal approval. The owner of the plan asked for the obvious consequence — the
+board is where planning is read, so it is where planning is decided — and it turned out to
+need three things, not one.
+
+**1. Plain first (a priority rule, not a feature).** The board is the primary surface: a
+change a person has to *do* lands on a card first, and reaches the 2D diagram second. The
+diagram stays first-class (same payload, same filters, heat map, keyboard model); the rule
+only fixes the order features are built in, so a capability that exists only in 2D is in the
+wrong place. The 3D scene is suspended and outside the rule until it is resumed.
+
+**2. A `deferred` leaf status.** "Defer" was the one verb the state machine could not express:
+`blocked` is a fact about the work (something stops it), while a deferral is a decision about
+the schedule, and the person who owns the schedule had no way to say it. `deferred` hangs off
+every non-terminal state and returns to `ready`/`claimed`/`in_progress` — resuming a paused
+leaf keeps its place instead of restarting the happy path. No migration was needed: the
+`nodes.status` column carries no `CHECK` constraint (v1 chose the enum in code, not in
+SQLite), so adding a value is a schema-free change; the export/import path validates through
+the same zod enum.
+
+**3. Lifecycle writes for every entity the board shows.** Two new routes —
+`POST /api/bug/:id/status` and `POST /api/goal/:id/status` — join the leaf route, all behind
+the same four transport checks (header token, `POST`, same `Origin`, `application/json`) and
+the same `expectedRevision` protocol. Their store methods are `setBugStatus` (new) and
+`setGoalStatus` (which gained `expectedRevision`). `.setGoalStatus` still refuses `approved`
+and `superseded`, so the gate and the plan-replacement cascade keep exactly one door each.
+
+| Layer | Change |
+| --- | --- |
+| `shared/tree.ts` | `deferred` in the enum and in `LEAF_TRANSITIONS`; `UI_ACTOR` moved here from `rpc.ts` so the store can compare actors without importing the RPC/SDK layer |
+| `shared/api.ts` | `goalStatusPath`, `bugStatusPath`, request/response schemas, `DASHBOARD_BUG_PATH` |
+| `server/store.ts` | `setBugStatus`; `SetGoalStatusInput.expectedRevision`; `StaleRevisionError` entity type widened to `bug`; `overrideNote` + `lastStatusActor` |
+| `server/http-server.ts` | `parseWriteRoute` rewritten around one `<prefix>/<id><suffix>` helper; two new `applyWrite` branches |
+| `dashboard/src/plain.ts` | `cardStatusActions(kind, status)` — the verbs, derived from the state machines |
+| `dashboard/src/components/PlainView.tsx` | the card is a `div[role=button]` (its actions are real buttons; a button in a button is invalid), action row, per-card pending state |
+| `dashboard/src/components/{Goal,Bug}DetailContent.tsx` | the same actions inside the modal |
+| `server/mcp-tools.ts` | `luck_tree_set_status` (node/bug/goal), `reason` on `upsert_leaf`/`upsert_node` |
+
+**The reason rule — whose decision it is.** Agents and the owner share the state machines, so
+the store has to tell their writes apart. The rule is deliberately narrow: an agent that moves
+a status **whose last audit row is a `status` action by `user`** must pass `reason`, recorded
+as `deferred → in_progress — step 2 depends on step 1`. Everything else needs no prose —
+a row the human created, a subtree they approved, or plan replacement's cascade are not status
+decisions, and demanding a sentence for each would only teach everyone to type "done".
+
+The first draft keyed on `updated_by`, which was wrong in exactly those cases: approving a plan
+writes the human as the author of every derived leaf, so the cascade that resets them looked
+like an override (four goal tests failed on it). Reading the last audit row instead is both
+narrower and cheaper to explain: the one thing the owner cannot reconstruct later is *their own*
+status decision, and that is precisely what the check now protects. The check runs inside the
+write transaction, next to `requireRevision`, so it sees the same row the move is about to
+change.
+
+**Two moves stay off the card.** Approving a goal grows a subtree and may need a branch (in a
+forest the tree *is* the decision), so it remains the modal's *Approve under …*; `superseded`
+only comes from plan replacement, which owns the cascade. Both are filtered out of
+`cardStatusActions` rather than hidden in the component, so the pure rule is what the tests pin.
+
+**Verification.** `npm run typecheck` exit 0 (root + `dashboard/tsconfig.json`);
+`npm test` — 54 suites / 938 tests. New: `tests/status-owner.test.ts` (7: the refusal, the
+reason in the audit trail, agent-owned and human-created rows, incident and goal parity, stale
+revisions on both new writers), two cases in `tests/http-server.test.ts` (the happy path incl.
+the gate refusal, and the auth matrix with a query token, a foreign `Origin` and a wrong
+content type), three `cardStatusActions` cases in `tests/dashboard-plain.test.ts`, and the
+bundle assertions for the new controls. One run reported
+`http-server.test.ts > streams /api/export as a zip download` failing while every other file
+passed; it passed in isolation and on the next full run, and it does not touch any code this
+version changed — recorded here as a pre-existing flake, not hidden.

@@ -29,11 +29,11 @@
  * so an SSE-driven rebuild (H1) cannot make the board dance.
  */
 import type { TreeResponse } from "../../shared/api";
-import { GOAL_STATUSES } from "../../shared/goals";
+import { GOAL_STATUSES, GOAL_TRANSITIONS } from "../../shared/goals";
 import type { GoalStatus } from "../../shared/goals";
-import { BUG_STATUSES } from "../../shared/links";
+import { BUG_STATUSES, BUG_TRANSITIONS } from "../../shared/links";
 import type { BugSeverity, BugStatus } from "../../shared/links";
-import { LEAF_STATUSES } from "../../shared/tree";
+import { LEAF_STATUSES, LEAF_TRANSITIONS } from "../../shared/tree";
 import type { LeafStatus, Node as TreeNode, NodeKind } from "../../shared/tree";
 import {
   growthRollups,
@@ -82,6 +82,9 @@ const LEAF_ZONES: Record<LeafStatus, PlainZoneId> = {
   claimed: "active",
   in_progress: "active",
   blocked: "active",
+  // Set aside on purpose: it is a planning decision, so it belongs next to the
+  // plan the owner reads, not among the work in motion.
+  deferred: "plan",
   done: "done",
   cancelled: "done",
   superseded: "done",
@@ -119,6 +122,113 @@ export function zoneForGoal(status: GoalStatus): PlainZoneId {
 /** Zone of a bug status. */
 export function zoneForBug(status: BugStatus): PlainZoneId {
   return BUG_ZONES[status];
+}
+
+// ── Lifecycle actions (0.51.1: the owner moves statuses from the board) ───
+
+/**
+ * One lifecycle move the owner can make on a card.
+ *
+ * The board is the **primary** surface (README, "Plain view"), so the moves a
+ * person actually makes — defer, stop, resume, close — must not hide behind a
+ * modal on a card that already states the item's status. The list is derived
+ * from the very state machines the store enforces, so the board can only ever
+ * offer a transition that will be accepted (or refused for a *concurrent*
+ * reason, which the tab reports as a reload).
+ */
+export interface PlainCardAction {
+  /** Target status, passed to the write route verbatim. */
+  readonly status: string;
+  /** Short verb on the button (the target status lives in its `title`). */
+  readonly label: string;
+}
+
+/** The verb for a leaf move; `from` decides which reading is honest. */
+function leafActionLabel(from: LeafStatus, to: LeafStatus): string {
+  switch (to) {
+    case "ready":
+      return "Back to plan";
+    case "claimed":
+      return "Claim";
+    case "in_progress":
+      return from === "blocked" || from === "deferred" ? "Resume" : "Start";
+    case "blocked":
+      return "Stop";
+    case "deferred":
+      return "Defer";
+    case "done":
+      return "Close";
+    case "cancelled":
+      return "Cancel";
+    case "superseded":
+      return "Replace";
+    default:
+      return to;
+  }
+}
+
+function goalActionLabel(from: GoalStatus, to: GoalStatus): string {
+  switch (to) {
+    case "draft":
+      return "Back to draft";
+    case "proposed":
+      return "Propose";
+    case "in_progress":
+      return "Start";
+    case "done":
+      return "Close";
+    case "cancelled":
+      return "Cancel";
+    default:
+      return to;
+  }
+}
+
+function bugActionLabel(from: BugStatus, to: BugStatus): string {
+  switch (to) {
+    case "open":
+      return "Reopen";
+    case "investigating":
+      return "Investigate";
+    case "resolved":
+      return "Resolve";
+    case "cancelled":
+      return "Cancel";
+    default:
+      return to;
+  }
+}
+
+/**
+ * The moves a card offers, in state-machine order.
+ *
+ * Three transitions are deliberately absent, because the board must not
+ * pretend they are a button: a goal's `approved` (the approval gate grows a
+ * subtree and may need a branch, so it stays the modal's decision) and
+ * `superseded` for both a goal and a leaf (only plan replacement produces it,
+ * and it cascades a reset onto derived leaves).
+ */
+export function cardStatusActions(
+  kind: PlainCardKind,
+  status: string,
+): readonly PlainCardAction[] {
+  if (kind === "leaf") {
+    const from = status as LeafStatus;
+    return LEAF_TRANSITIONS[from]
+      .filter((to) => to !== "superseded")
+      .map((to) => ({ status: to, label: leafActionLabel(from, to) }));
+  }
+  if (kind === "goal") {
+    const from = status as GoalStatus;
+    return GOAL_TRANSITIONS[from]
+      .filter((to) => to !== "approved" && to !== "superseded")
+      .map((to) => ({ status: to, label: goalActionLabel(from, to) }));
+  }
+  const from = status as BugStatus;
+  return BUG_TRANSITIONS[from].map((to) => ({
+    status: to,
+    label: bugActionLabel(from, to),
+  }));
 }
 
 // ── Cards ─────────────────────────────────────────────────────────────────

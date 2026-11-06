@@ -30,6 +30,7 @@ import {
   PLAIN_ZONE_GLYPHS,
   PLAIN_ZONE_LABELS,
   PLAIN_ZONES,
+  cardStatusActions,
   plainReveal,
   plainVisibleCardCount,
   togglePlainSection,
@@ -660,5 +661,82 @@ describe("K1 acceptance: a 1000-leaf project", () => {
     const started = Date.now();
     for (let i = 0; i < 5; i += 1) buildPlainBoard(payload);
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+/**
+ * The lifecycle actions a card offers (0.51.1).
+ *
+ * The board is the primary surface, so the verbs the owner uses — defer, stop,
+ * resume, close — are derived here from the very state machines the store
+ * enforces. Two transitions are deliberately missing: `approved` (the approval
+ * gate grows a subtree and may need a branch, so it stays the modal's decision)
+ * and `superseded` (only plan replacement produces it, and it cascades a reset).
+ */
+describe("cardStatusActions", () => {
+  it("offers the owner's verbs for a leaf, and never superseded", () => {
+    const inProgress = cardStatusActions("leaf", "in_progress");
+    expect(inProgress.map((action) => action.status)).toEqual([
+      "blocked",
+      "deferred",
+      "done",
+      "cancelled",
+    ]);
+    expect(inProgress.map((action) => action.label)).toEqual([
+      "Stop",
+      "Defer",
+      "Close",
+      "Cancel",
+    ]);
+
+    // A paused leaf resumes rather than "starts".
+    expect(cardStatusActions("leaf", "deferred")).toContainEqual({
+      status: "in_progress",
+      label: "Resume",
+    });
+    expect(cardStatusActions("leaf", "blocked")).toContainEqual({
+      status: "in_progress",
+      label: "Resume",
+    });
+    expect(cardStatusActions("leaf", "claimed")).toContainEqual({
+      status: "in_progress",
+      label: "Start",
+    });
+
+    // Terminal statuses offer nothing: `done` could only be superseded, and
+    // that mark belongs to plan replacement, not to a card button.
+    expect(cardStatusActions("leaf", "done")).toEqual([]);
+    expect(cardStatusActions("leaf", "cancelled")).toEqual([]);
+    for (const status of LEAF_STATUSES) {
+      expect(cardStatusActions("leaf", status).map((a) => a.status)).not.toContain(
+        "superseded",
+      );
+    }
+  });
+
+  it("keeps the approval gate out of the goal's action list", () => {
+    for (const status of GOAL_STATUSES) {
+      expect(cardStatusActions("goal", status).map((a) => a.status)).not.toContain(
+        "approved",
+      );
+    }
+    expect(cardStatusActions("goal", "approved")).toEqual([
+      { status: "in_progress", label: "Start" },
+      { status: "cancelled", label: "Cancel" },
+    ]);
+  });
+
+  it("maps an incident's lifecycle to its own verbs", () => {
+    expect(cardStatusActions("bug", "open")).toEqual([
+      { status: "investigating", label: "Investigate" },
+      { status: "resolved", label: "Resolve" },
+      { status: "cancelled", label: "Cancel" },
+    ]);
+    expect(cardStatusActions("bug", "resolved")).toEqual([
+      { status: "open", label: "Reopen" },
+    ]);
+    for (const status of BUG_STATUSES) {
+      expect(cardStatusActions("bug", status).length).toBeGreaterThan(0);
+    }
   });
 });

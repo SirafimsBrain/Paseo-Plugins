@@ -19843,23 +19843,26 @@ var ALLOWED_CHILD_KINDS = {
 function canHaveChild(parentKind, childKind) {
   return ALLOWED_CHILD_KINDS[parentKind].includes(childKind);
 }
+var UI_ACTOR = "user";
 var leafStatusSchema = external_exports.enum([
   "draft",
   "ready",
   "claimed",
   "in_progress",
   "blocked",
+  "deferred",
   "done",
   "cancelled",
   "superseded"
 ]);
 var LEAF_STATUSES = leafStatusSchema.options;
 var LEAF_TRANSITIONS = {
-  draft: ["ready", "cancelled", "superseded"],
-  ready: ["claimed", "cancelled", "superseded"],
-  claimed: ["in_progress", "cancelled", "superseded"],
-  in_progress: ["blocked", "done", "cancelled", "superseded"],
-  blocked: ["in_progress", "cancelled", "superseded"],
+  draft: ["ready", "deferred", "cancelled", "superseded"],
+  ready: ["claimed", "deferred", "cancelled", "superseded"],
+  claimed: ["in_progress", "deferred", "cancelled", "superseded"],
+  in_progress: ["blocked", "deferred", "done", "cancelled", "superseded"],
+  blocked: ["in_progress", "deferred", "cancelled", "superseded"],
+  deferred: ["ready", "claimed", "in_progress", "cancelled", "superseded"],
   done: ["superseded"],
   cancelled: [],
   superseded: []
@@ -20238,6 +20241,20 @@ function requireRevision(entityType, id, current, expected) {
   if (expected === void 0 || expected === current) return;
   throw new StaleRevisionError(entityType, id, expected, current);
 }
+function overrideNote(entity, id, actor, previousStatusActor, reason) {
+  if (actor === UI_ACTOR) return null;
+  if (previousStatusActor !== UI_ACTOR) return null;
+  const text2 = reason?.trim() ?? "";
+  if (text2.length < 3) {
+    throw new Error(
+      `the owner set ${entity} ${id}'s status by hand; an agent override must say why \u2014 pass \`reason\` (for example "step 2 depends on step 1")`
+    );
+  }
+  return text2;
+}
+function statusNote(from, to, reason) {
+  return reason === null ? `${from} \u2192 ${to}` : `${from} \u2192 ${to} \u2014 ${reason}`;
+}
 function isLockError(cause) {
   return cause instanceof Error && /database is locked/i.test(cause.message);
 }
@@ -20522,6 +20539,20 @@ var LuckPlannerStore = class {
            (project_key, entity_type, entity_id, action, revision, actor, result, at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(projectKey, entityType, entityId, action, revision, actor, result, at);
+  }
+  /**
+   * Who performed the **last status move** on a row, or `null` when the last
+   * audit row is something else (a create, an approve, a rename). This is what
+   * {@link overrideNote} keys on: only a status the person set themselves must
+   * be explained when an agent moves it again.
+   */
+  lastStatusActor(entityType, entityId) {
+    const row = this.db.prepare(
+      `SELECT actor, action FROM history
+          WHERE entity_type = ? AND entity_id = ?
+          ORDER BY id DESC LIMIT 1`
+    ).get(entityType, entityId);
+    return row !== void 0 && row.action === "status" ? row.actor : null;
   }
   /** Creates a node; `parentId: null` is accepted for `root` nodes only. */
   createNode(input2) {
@@ -20845,6 +20876,13 @@ var LuckPlannerStore = class {
             `invalid status transition ${from} \u2192 ${to} for node ${row.id}; allowed from "${from}": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`
           );
         }
+        const note = overrideNote(
+          "node",
+          row.id,
+          actor,
+          this.lastStatusActor("node", row.id),
+          input2.reason
+        );
         const now = Date.now();
         this.db.prepare(
           `UPDATE nodes SET status = ?, revision = revision + 1,
@@ -20858,7 +20896,7 @@ var LuckPlannerStore = class {
           "status",
           row.revision + 1,
           actor,
-          `${from} \u2192 ${to}`,
+          statusNote(from, to, note),
           now
         );
         return rowToNode(this.requireRow(projectKey, row.id));
@@ -21407,6 +21445,59 @@ var LuckPlannerStore = class {
     );
   }
   /**
+   * Moves an **incident** through `BUG_TRANSITIONS` (0.51.1): the plain
+   * board's stop / resume / close for a bug, and the agent's
+   * `luck_tree_set_status` for one. Separate from {@link updateBug} because
+   * this is the write a person makes (it takes `expectedRevision`, like a leaf
+   * move) and because the agent-override reason belongs to a lifecycle move,
+   * not to a title edit.
+   */
+  setBugStatus(input2) {
+    const actor = requireText(input2.actor, "actor");
+    const projectKey = requireText(input2.projectKey, "project key");
+    const to = parseBugStatus(input2.status);
+    return this.write(
+      () => this.transaction(() => {
+        const row = this.requireBugRow(projectKey, input2.id);
+        requireRevision("bug", row.id, row.revision, input2.expectedRevision);
+        const from = parseBugStatus(row.status);
+        if (from === to) {
+          throw new Error(`bug ${row.id} already has status "${from}"`);
+        }
+        if (!canTransitionBug(from, to)) {
+          const allowed = BUG_TRANSITIONS[from];
+          throw new Error(
+            `invalid status transition ${from} \u2192 ${to} for bug ${row.id}; allowed from "${from}": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`
+          );
+        }
+        const note = overrideNote(
+          "bug",
+          row.id,
+          actor,
+          this.lastStatusActor("bug", row.id),
+          input2.reason
+        );
+        const now = Date.now();
+        this.db.prepare(
+          `UPDATE bugs SET status = ?, revision = revision + 1,
+                            updated_at = ?, updated_by = ?
+             WHERE project_key = ? AND id = ?`
+        ).run(to, now, actor, projectKey, row.id);
+        this.appendHistory(
+          projectKey,
+          "bug",
+          row.id,
+          "status",
+          row.revision + 1,
+          actor,
+          statusNote(from, to, note),
+          now
+        );
+        return rowToBug(this.requireBugRow(projectKey, row.id));
+      })
+    );
+  }
+  /**
    * Links one live leaf to the incident: the group membership grows by one.
    * The bug's revision bumps and a `link` row is appended — attachment is a
    * mutation **of the bug**; the leaf's own revision and history stay
@@ -21713,6 +21804,7 @@ var LuckPlannerStore = class {
     return this.write(
       () => this.transaction(() => {
         const row = this.requireGoalRow(projectKey, input2.id);
+        requireRevision("goal", row.id, row.revision, input2.expectedRevision);
         const from = parseGoalStatus(row.status);
         if (from === to) {
           throw new Error(`goal ${row.id} already has status "${from}"`);
@@ -21723,6 +21815,13 @@ var LuckPlannerStore = class {
             `invalid status transition ${from} \u2192 ${to} for goal ${row.id}; allowed from "${from}": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`
           );
         }
+        const note = overrideNote(
+          "goal",
+          row.id,
+          actor,
+          this.lastStatusActor("goal", row.id),
+          input2.reason
+        );
         const now = Date.now();
         this.db.prepare(
           `UPDATE goals SET status = ?, revision = revision + 1,
@@ -21736,7 +21835,7 @@ var LuckPlannerStore = class {
           "status",
           row.revision + 1,
           actor,
-          `${from} \u2192 ${to}`,
+          statusNote(from, to, note),
           now
         );
         return rowToGoal(this.requireGoalRow(projectKey, row.id));
@@ -23254,6 +23353,13 @@ var upsertLeafInputSchema = external_exports.object({
   version: external_exports.string().optional(),
   payload: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
   status: leafStatusSchema.optional(),
+  /**
+   * Why an agent overrides a status the owner set by hand (0.51.1). Required
+   * only in that case: the store refuses the write without it, because the
+   * owner's decision must not be replaced silently. A leaf the agent still
+   * owns needs no explanation.
+   */
+  reason: external_exports.string().optional(),
   actor: actorSchema.optional()
 });
 var addBeeInputSchema = external_exports.object({
@@ -23311,6 +23417,17 @@ var approveGoalInputSchema = external_exports.object({
   actor: actorSchema.optional()
 });
 var setGoalActionSchema = external_exports.enum(["create", "update", "propose"]);
+var setStatusEntityTypeSchema = external_exports.enum(["node", "bug", "goal"]);
+var setStatusInputSchema = external_exports.object({
+  projectKey: projectKeySchema,
+  entityType: setStatusEntityTypeSchema,
+  entityId: idSchema,
+  /** Target status of that entity's own state machine (validated by type). */
+  status: external_exports.string().min(1),
+  /** Required when the owner (the dashboard) set the current status by hand. */
+  reason: external_exports.string().optional(),
+  actor: actorSchema.optional()
+});
 var setGoalInputSchema = external_exports.object({
   projectKey: projectKeySchema,
   action: setGoalActionSchema,
@@ -23345,6 +23462,8 @@ var upsertNodeInputSchema = external_exports.object({
   version: external_exports.string().optional(),
   payload: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
   status: leafStatusSchema.optional(),
+  /** See {@link upsertLeafInputSchema.shape.reason} (0.51.1). */
+  reason: external_exports.string().optional(),
   actor: actorSchema.optional()
 });
 var moveNodeInputSchema = external_exports.object({
@@ -25304,12 +25423,16 @@ var MCP_TOOLS = [
             "claimed",
             "in_progress",
             "blocked",
+            "deferred",
             "done",
             "cancelled",
             "superseded"
           ],
           description: "Desired leaf status; applied as a state-machine transition when it differs from the current one."
         },
+        reason: str(
+          "Why you override a status the human set in the dashboard. Required only then (the store refuses the move without it)."
+        ),
         actor: str("Who performs the change (agent id).")
       },
       required: ["projectKey"]
@@ -25347,12 +25470,16 @@ var MCP_TOOLS = [
             "claimed",
             "in_progress",
             "blocked",
+            "deferred",
             "done",
             "cancelled",
             "superseded"
           ],
           description: "Desired status (leaf state machine)."
         },
+        reason: str(
+          "Why you override a status the human set in the dashboard. Required only then."
+        ),
         actor: str("Who performs the change (agent id).")
       },
       required: ["projectKey"]
@@ -25535,6 +25662,32 @@ var MCP_TOOLS = [
     }
   },
   {
+    name: "luck_tree_set_status",
+    title: "Move a status with a reason",
+    description: "Move one entity through its own state machine: a leaf (node), an incident (bug) or a high goal. Use it when the lifecycle moved for a reason the owner cannot see from the status alone \u2014 for example step 2 is deferred because it depends on step 1, or a goal is done. If the human set the current status in the dashboard, `reason` is required: the store refuses the override without it. A row the agent still owns needs no explanation. `approved` is not reachable here \u2014 only luck_tree_approve_goal crosses the approval gate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        entityType: {
+          type: "string",
+          enum: ["node", "bug", "goal"],
+          description: "Which state machine the move belongs to."
+        },
+        entityId: str("The leaf, incident or goal to move."),
+        status: {
+          type: "string",
+          description: "Target status of that entity (leaf: draft|ready|claimed|in_progress|blocked|deferred|done|cancelled|superseded; bug: open|investigating|resolved|cancelled; goal: draft|proposed|in_progress|done|cancelled)."
+        },
+        reason: str(
+          "Why the status moves. Required when the human set the current status by hand."
+        ),
+        actor: str("Who performs the change (agent id).")
+      },
+      required: ["projectKey", "entityType", "entityId", "status"]
+    }
+  },
+  {
     name: "luck_tree_update_growth",
     title: "Update growth progress",
     description: "Upsert the progress record of one subject (any node or a goal). With growthId updates that record; otherwise resolves the subject's record \u2014 updating it when one exists, attaching a fresh one (steps required) when none does. Each step carries state, facts and a reason; status follows active/stalled/done/cancelled.",
@@ -25706,7 +25859,8 @@ function dispatchMcpTool(name, args, context) {
             projectKey: value.projectKey,
             id: value.nodeId,
             status: value.status,
-            actor
+            actor,
+            ...value.reason === void 0 ? {} : { reason: value.reason }
           });
           return text({ created: false, node: node3 });
         }
@@ -25859,6 +26013,11 @@ function dispatchMcpTool(name, args, context) {
         const parsed = setGoalInputSchema.safeParse(input2);
         if (!parsed.success) return invalidInput(parsed.error.issues);
         return dispatchSetGoal(store, parsed.data, actor);
+      }
+      case "luck_tree_set_status": {
+        const parsed = setStatusInputSchema.safeParse(input2);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        return dispatchSetStatus(store, parsed.data, actor);
       }
       case "luck_tree_update_growth": {
         const parsed = updateGrowthInputSchema.safeParse(input2);
@@ -26033,6 +26192,34 @@ function capList(items, limit) {
   }
   return { items: items.slice(0, limit), dropped: items.length - limit };
 }
+function dispatchSetStatus(store, value, actor) {
+  const who = value.actor ?? actor;
+  const shared = {
+    projectKey: value.projectKey,
+    id: value.entityId,
+    actor: who,
+    ...value.reason === void 0 ? {} : { reason: value.reason }
+  };
+  if (value.entityType === "node") {
+    const node2 = store.setStatus({
+      ...shared,
+      status: value.status
+    });
+    return text({ entityType: "node", node: node2 });
+  }
+  if (value.entityType === "bug") {
+    const bug = store.setBugStatus({
+      ...shared,
+      status: value.status
+    });
+    return text({ entityType: "bug", bug });
+  }
+  const goal = store.setGoalStatus({
+    ...shared,
+    status: value.status
+  });
+  return text({ entityType: "goal", goal });
+}
 function dispatchUpsertLeaf(store, value, actor) {
   if (value.leafId !== void 0) {
     const existing = store.getNode(value.projectKey, value.leafId);
@@ -26064,7 +26251,8 @@ function dispatchUpsertLeaf(store, value, actor) {
         projectKey: value.projectKey,
         id: value.leafId,
         status: value.status,
-        actor
+        actor,
+        ...value.reason === void 0 ? {} : { reason: value.reason }
       });
     }
     return text({ created: false, leaf: leaf2 });
@@ -26201,7 +26389,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.50.1";
+var SERVER_VERSION = "0.51.1";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

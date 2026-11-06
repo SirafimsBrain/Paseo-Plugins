@@ -1,7 +1,12 @@
 import { z } from "zod";
-import { goalSchema } from "./goals";
+import { goalSchema, goalStatusSchema } from "./goals";
 import { growthSchema } from "./growth";
-import { beeSchema, bugNodeSchema, bugSchema } from "./links";
+import {
+  beeSchema,
+  bugNodeSchema,
+  bugSchema,
+  bugStatusSchema,
+} from "./links";
 import { nodeDetail, stats as statsRpc, treeSearch } from "./rpc";
 import { themeCatalogSchema } from "./themes";
 import {
@@ -54,10 +59,11 @@ export const DASHBOARD_THEMES_PATH = "/api/themes";
 /**
  * `POST /api/node/:id/status` — move a leaf through its state machine (L8).
  *
- * The first write path the dashboard has. It is deliberately **not** a generic
- * "patch a node": the browser gets exactly the two decisions a person makes
- * while reading the diagram — the status of a leaf and the approval of a goal
- * — and nothing else that the MCP tools can do.
+ * Not a generic "patch a node": the browser gets the **lifecycle decisions** a
+ * person makes while reading the board — a leaf's status, an incident's
+ * status, a goal's status short of the gate, and the approval of a goal
+ * (0.51.1 added the incident and goal lifecycle writes; before it the tab had
+ * two). Nothing else that the MCP tools can do is reachable from the tab.
  */
 export function nodeStatusPath(nodeId: string): string {
   return `${DASHBOARD_NODE_PATH}/${encodeURIComponent(nodeId)}/status`;
@@ -65,11 +71,23 @@ export function nodeStatusPath(nodeId: string): string {
 
 /** `POST /api/goal/:id/approve` — cross the approval gate (L8). */
 export function goalApprovePath(goalId: string): string {
-  return `/api/goal/${encodeURIComponent(goalId)}/approve`;
+  return `${DASHBOARD_GOAL_PATH}/${encodeURIComponent(goalId)}/approve`;
+}
+
+/** `POST /api/goal/:id/status` — a goal's lifecycle, short of the gate. */
+export function goalStatusPath(goalId: string): string {
+  return `${DASHBOARD_GOAL_PATH}/${encodeURIComponent(goalId)}/status`;
+}
+
+/** `POST /api/bug/:id/status` — an incident's lifecycle. */
+export function bugStatusPath(bugId: string): string {
+  return `${DASHBOARD_BUG_PATH}/${encodeURIComponent(bugId)}/status`;
 }
 
 /** `POST /api/goal` route prefix (the id follows it). */
 export const DASHBOARD_GOAL_PATH = "/api/goal";
+/** `POST /api/bug` route prefix (the id follows it). */
+export const DASHBOARD_BUG_PATH = "/api/bug";
 
 /** Query parameter carrying the per-installation access token. */
 export const DASHBOARD_TOKEN_PARAM = "token";
@@ -271,6 +289,23 @@ export const goalApproveRequestSchema = z.object({
 });
 export type GoalApproveRequest = z.infer<typeof goalApproveRequestSchema>;
 
+/**
+ * Body of the lifecycle writes (0.51.1): an incident or a goal moved through
+ * its own state machine. `approved` is deliberately **not** reachable here —
+ * `POST /api/goal/:id/approve` is the only gate, and it materializes the plan.
+ */
+export const goalStatusRequestSchema = z.object({
+  status: goalStatusSchema,
+  expectedRevision: z.number().int().positive().optional(),
+});
+export type GoalStatusRequest = z.infer<typeof goalStatusRequestSchema>;
+
+export const bugStatusRequestSchema = z.object({
+  status: bugStatusSchema,
+  expectedRevision: z.number().int().positive().optional(),
+});
+export type BugStatusRequest = z.infer<typeof bugStatusRequestSchema>;
+
 /** `POST /api/node/:id/status` answer: the node after the move. */
 export const leafStatusResponseSchema = z.object({
   ok: z.literal(true),
@@ -284,6 +319,20 @@ export const goalApproveResponseSchema = z.object({
   goal: goalSchema,
 });
 export type GoalApproveResponse = z.infer<typeof goalApproveResponseSchema>;
+
+/** `POST /api/goal/:id/status` answer: the goal after the move. */
+export const goalStatusResponseSchema = z.object({
+  ok: z.literal(true),
+  goal: goalSchema,
+});
+export type GoalStatusResponse = z.infer<typeof goalStatusResponseSchema>;
+
+/** `POST /api/bug/:id/status` answer: the incident after the move. */
+export const bugStatusResponseSchema = z.object({
+  ok: z.literal(true),
+  bug: bugSchema,
+});
+export type BugStatusResponse = z.infer<typeof bugStatusResponseSchema>;
 
 /**
  * A refused write: the message, plus the revision that is current now when the

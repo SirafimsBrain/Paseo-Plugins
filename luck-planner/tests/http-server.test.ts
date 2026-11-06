@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DASHBOARD_EVENT_READY,
   DASHBOARD_EVENT_TREE_CHANGED,
+  bugStatusResponseSchema,
   dashboardUrl,
   goalApproveResponseSchema,
+  goalStatusResponseSchema,
   leafStatusResponseSchema,
   nodeResponseSchema,
   searchResponseSchema,
@@ -636,6 +638,77 @@ describe("DashboardHttpServer", () => {
       expectedRevision: goal.revision,
     });
     expect(again.status).toBe(409);
+  });
+
+  it("moves an incident and a goal through their own state machines", async () => {
+    await boot();
+    const { leafA, leafB } = seedTree(store);
+    const { goal, bugId } = seedRelations(store, leafA, leafB);
+
+    const bugBefore = store.getBug(P, bugId)!;
+    const bugRes = await post(`/api/bug/${encodeURIComponent(bugId)}/status`, {
+      status: "investigating",
+      expectedRevision: bugBefore.revision,
+    });
+    expect(bugRes.status).toBe(200);
+    const bugAnswer = bugStatusResponseSchema.parse(await bugRes.json());
+    expect(bugAnswer.bug.status).toBe("investigating");
+    expect(bugAnswer.bug.updatedBy).toBe(UI_ACTOR);
+
+    // The lifecycle route must not smuggle the approval gate: `approved` is
+    // only reachable through /approve, which also materializes the plan.
+    const gate = await post(`/api/goal/${encodeURIComponent(goal.id)}/status`, {
+      status: "approved",
+      expectedRevision: goal.revision,
+    });
+    expect(gate.status).toBe(400);
+    expect(writeErrorSchema.parse(await gate.json()).error).toMatch(
+      /approval gate/,
+    );
+
+    const cancel = await post(`/api/goal/${encodeURIComponent(goal.id)}/status`, {
+      status: "cancelled",
+      expectedRevision: goal.revision,
+    });
+    expect(cancel.status).toBe(200);
+    const goalAnswer = goalStatusResponseSchema.parse(await cancel.json());
+    expect(goalAnswer.goal.status).toBe("cancelled");
+
+    // The new routes use the same revision protocol as the leaf route.
+    const stale = await post(`/api/bug/${encodeURIComponent(bugId)}/status`, {
+      status: "resolved",
+      expectedRevision: bugBefore.revision,
+    });
+    expect(stale.status).toBe(409);
+    expect(store.getBug(P, bugId)?.status).toBe("investigating");
+  });
+
+  it("guards the lifecycle routes like every other write", async () => {
+    await boot();
+    const { leafA, leafB } = seedTree(store);
+    const { bugId } = seedRelations(store, leafA, leafB);
+    const path = `/api/bug/${encodeURIComponent(bugId)}/status`;
+
+    // A query token is a read token (ADR-8): the header is the only way in.
+    const queryToken = await fetch(
+      `${base}${path}?token=${TOKEN}&project=${encodeURIComponent(P)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: base },
+        body: JSON.stringify({ status: "resolved" }),
+      },
+    );
+    expect(queryToken.status).toBe(401);
+
+    expect((await post(path, { status: "resolved" }, { origin: "http://evil.test" })).status).toBe(403);
+    expect((await post(path, { status: "resolved" }, { contentType: "text/plain" })).status).toBe(415);
+
+    const unknown = await post(
+      `/api/goal/00000000-0000-4000-8000-000000000000/status`,
+      { status: "cancelled" },
+    );
+    expect(unknown.status).toBe(404);
+    expect(store.getBug(P, bugId)?.status).toBe("open");
   });
 
   it("broadcasts the write to its own project's streams", async () => {

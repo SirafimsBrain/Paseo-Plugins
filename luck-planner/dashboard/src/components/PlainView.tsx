@@ -37,6 +37,7 @@ import {
   PLAIN_ZONE_EMPTY_HINTS,
   PLAIN_ZONE_GLYPHS,
   PLAIN_ZONE_LABELS,
+  cardStatusActions,
   type PlainBoard,
   type PlainBugCard,
   type PlainCard,
@@ -47,6 +48,21 @@ import {
   type PlainSection,
   type PlainZone,
 } from "../plain";
+
+/**
+ * The write side of the board (0.51.1): whether this tab may write, which
+ * card is mid-request, and the one callback every level passes down.
+ */
+export interface PlainWriteProps {
+  readonly canWrite: boolean;
+  readonly pendingKey: string | null;
+  readonly onSetStatus: (
+    kind: PlainCardKind,
+    entityId: string,
+    revision: number,
+    status: string,
+  ) => void;
+}
 
 /** Props of the board view. */
 export interface PlainViewProps {
@@ -67,6 +83,10 @@ export interface PlainViewProps {
   /** Title of the empty state (filters that hide everything, etc.). */
   readonly emptyTitle?: string;
   readonly emptyText?: string;
+  /** The lifecycle writes the board offers (0.51.1). */
+  readonly write: PlainWriteProps;
+  /** A write error from the last card action, shown above the zones. */
+  readonly writeError?: string;
 }
 
 /** Cards hidden below a section header (its subtree's cards minus its own). */
@@ -106,6 +126,7 @@ function ZoneBand(props: {
   onToggleSection: (key: string) => void;
   selectedEntityId: string | null;
   onSelectCard: (kind: PlainCardKind, entityId: string) => void;
+  write: PlainWriteProps;
 }): ReactElement {
   const { zone } = props;
   return (
@@ -130,6 +151,7 @@ function ZoneBand(props: {
             onToggleSection={props.onToggleSection}
             selectedEntityId={props.selectedEntityId}
             onSelectCard={props.onSelectCard}
+            write={props.write}
           />
         ))
       )}
@@ -144,6 +166,7 @@ function Group(props: {
   onToggleSection: (key: string) => void;
   selectedEntityId: string | null;
   onSelectCard: (kind: PlainCardKind, entityId: string) => void;
+  write: PlainWriteProps;
 }): ReactElement {
   const { group } = props;
   return (
@@ -164,6 +187,7 @@ function Group(props: {
           card={card}
           selected={card.entityId === props.selectedEntityId}
           onSelectCard={props.onSelectCard}
+          write={props.write}
         />
       ))}
       {group.sections.map((section) => (
@@ -174,6 +198,7 @@ function Group(props: {
           onToggleSection={props.onToggleSection}
           selectedEntityId={props.selectedEntityId}
           onSelectCard={props.onSelectCard}
+          write={props.write}
         />
       ))}
     </div>
@@ -187,6 +212,7 @@ function SectionNode(props: {
   onToggleSection: (key: string) => void;
   selectedEntityId: string | null;
   onSelectCard: (kind: PlainCardKind, entityId: string) => void;
+  write: PlainWriteProps;
 }): ReactElement {
   const { section } = props;
   const isCollapsed = props.collapsed.has(section.key);
@@ -220,6 +246,7 @@ function SectionNode(props: {
               card={card}
               selected={card.entityId === props.selectedEntityId}
               onSelectCard={props.onSelectCard}
+              write={props.write}
             />
           ))}
           {section.children.map((child) => (
@@ -230,6 +257,7 @@ function SectionNode(props: {
               onToggleSection={props.onToggleSection}
               selectedEntityId={props.selectedEntityId}
               onSelectCard={props.onSelectCard}
+              write={props.write}
             />
           ))}
         </>
@@ -269,9 +297,11 @@ function nextStepFor(card: PlainCard): string {
       case "claimed":
         return "Проверьте, что агент взял задачу; при бездействии верните в ready.";
       case "in_progress":
-        return "Проверьте прогресс и при завершении переведите в done.";
+        return "Проверьте прогресс и при завершении переведите в done (кнопка Close на карточке).";
       case "blocked":
-        return "Устраните блокер/откройте инцидент или подтвердите отмену.";
+        return "Устраните блокер/откройте инцидент, продолжите (Resume) или отложите (Defer).";
+      case "deferred":
+        return "Отложено вами. Верните в ready или продолжите (Resume), когда придёт время.";
       default:
         return "Проверьте состояние листа.";
     }
@@ -332,15 +362,24 @@ function agentInstruction(card: PlainCard): string {
   return lines.join("\n");
 }
 
-/** One card — a button for every kind: the click opens the K2 modal. */
+/**
+ * One card. The click opens the K2 modal (for every kind) and the footer
+ * carries the lifecycle moves this status allows (0.51.1) — the board is the
+ * primary surface, so "defer / stop / resume / close" must not require the
+ * modal. A `div[role=button]` rather than a `<button>`: the actions are real
+ * buttons, and a button inside a button is invalid HTML.
+ */
 function Card(props: {
   card: PlainCard;
   selected: boolean;
   onSelectCard: (kind: PlainCardKind, entityId: string) => void;
+  write: PlainWriteProps;
 }): ReactElement {
   const { card } = props;
   const attention = requiresAttention(card);
   const nextStep = attention ? nextStepFor(card) : null;
+  const actions = cardStatusActions(card.kind, card.status);
+  const busy = props.write.pendingKey === card.id;
   const className = props.selected
     ? "lp-plain-card lp-plain-card-selected"
     : "lp-plain-card";
@@ -403,12 +442,40 @@ function Card(props: {
           {nextStep}
         </div>
       ) : null}
+      {props.write.canWrite && actions.length > 0 ? (
+        <div className="lp-plain-card-actions">
+          {actions.map((action) => (
+            <button
+              key={action.status}
+              type="button"
+              className="lp-plain-card-action"
+              data-status={action.status}
+              disabled={busy}
+              title={`Статус: ${cardStatusLabel(card.kind, action.status)}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                props.write.onSetStatus(
+                  card.kind,
+                  card.entityId,
+                  card.revision,
+                  action.status,
+                );
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              {action.label}
+            </button>
+          ))}
+          {busy ? <span className="lp-plain-card-saving">saving…</span> : null}
+        </div>
+      ) : null}
     </>
   );
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       id={`lp-plain-card-${card.entityId}`}
       className={className}
       data-kind={card.kind}
@@ -419,9 +486,18 @@ function Card(props: {
           : undefined
       }
       onClick={() => props.onSelectCard(card.kind, card.entityId)}
+      onKeyDown={(event) => {
+        // Only the card itself opens the modal; its action buttons keep their
+        // own Enter/Space (they stop propagation themselves).
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          props.onSelectCard(card.kind, card.entityId);
+        }
+      }}
     >
       {body}
-    </button>
+    </div>
   );
 }
 
@@ -576,6 +652,11 @@ export function PlainView(props: PlainViewProps): ReactElement {
 
   return (
     <section className="lp-plain" aria-label="Plain board">
+      {props.writeError !== undefined && props.writeError.length > 0 ? (
+        <p className="lp-plain-write-error" role="alert">
+          {props.writeError}
+        </p>
+      ) : null}
       {board.zones.map((zone) => (
         <ZoneBand
           key={zone.id}
@@ -584,6 +665,7 @@ export function PlainView(props: PlainViewProps): ReactElement {
           onToggleSection={props.onToggleSection}
           selectedEntityId={props.selectedEntityId}
           onSelectCard={props.onSelectCard}
+          write={props.write}
         />
       ))}
     </section>

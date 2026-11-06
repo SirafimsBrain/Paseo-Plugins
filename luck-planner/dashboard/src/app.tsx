@@ -67,8 +67,15 @@ import {
   DashboardWriteConflict,
   resolveApiOrigin,
 } from "./api";
-import { KIND_LABELS, STATUS_LABELS } from "./colors";
+import {
+  BUG_STATUS_LABELS,
+  GOAL_STATUS_LABELS,
+  KIND_LABELS,
+  STATUS_LABELS,
+} from "./colors";
 import type { LeafStatus } from "../../shared/tree";
+import type { GoalStatus } from "../../shared/goals";
+import type { BugStatus } from "../../shared/links";
 import {
   buildForest,
   pickGoalParent,
@@ -865,6 +872,66 @@ export function App(): ReactElement {
   );
 
   /**
+   * 0.51.1 — the board's lifecycle writes: a leaf, an incident or a goal moves
+   * through its own state machine right where the owner reads it. One key
+   * (`<kind>:<id>`) says which card is mid-request, so the board can disable
+   * just that row.
+   */
+  const [cardPending, setCardPending] = useState<string | null>(null);
+  const [cardWriteError, setCardWriteError] = useState("");
+
+  const setCardStatusAction = useCallback(
+    async (
+      kind: PlainCardKind,
+      entityId: string,
+      revision: number,
+      status: string,
+    ): Promise<void> => {
+      if (client === null) return;
+      setCardPending(`${kind}:${entityId}`);
+      setCardWriteError("");
+      try {
+        if (kind === "leaf") {
+          const result = await client.setLeafStatus(entityId, {
+            status: status as LeafStatus,
+            expectedRevision: revision,
+          });
+          setStatusLine(
+            `${result.node.name} → ${STATUS_LABELS[result.node.status]} (r${result.node.revision}).`,
+          );
+        } else if (kind === "goal") {
+          const result = await client.setGoalStatus(entityId, {
+            status: status as GoalStatus,
+            expectedRevision: revision,
+          });
+          setStatusLine(
+            `Goal → ${GOAL_STATUS_LABELS[result.goal.status]} (r${result.goal.revision}).`,
+          );
+        } else {
+          const result = await client.setBugStatus(entityId, {
+            status: status as BugStatus,
+            expectedRevision: revision,
+          });
+          setStatusLine(
+            `Incident → ${BUG_STATUS_LABELS[result.bug.status]} (r${result.bug.revision}).`,
+          );
+        }
+        refreshAfterWrite();
+      } catch (cause) {
+        if (cause instanceof DashboardWriteConflict) {
+          setStatusLine("This item moved elsewhere — reloaded the current state.");
+          refreshAfterWrite();
+        } else {
+          setCardWriteError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        setCardPending(null);
+      }
+    },
+    [client, refreshAfterWrite],
+  );
+
+  /**
    * Branches a goal may grow its side branch under (stages L8/L10). Each
    * entry names its tree, so the choice is "which tree" as well as "which
    * branch" — in a forest those are two questions, and the wrong answer puts
@@ -954,6 +1021,13 @@ export function App(): ReactElement {
             selectedEntityId={selectedId}
             onSelectCard={onPlainCardSelect}
             scrollTargetEntityId={plainScrollTarget}
+            write={{
+              canWrite: client !== null,
+              pendingKey: cardPending,
+              onSetStatus: (kind, entityId, revision, status) =>
+                void setCardStatusAction(kind, entityId, revision, status),
+            }}
+            writeError={cardWriteError}
             emptyTitle={filtersActive ? "No nodes match the filters" : undefined}
             emptyText={
               filtersActive
@@ -1055,6 +1129,20 @@ export function App(): ReactElement {
                   }
                   pending={goalPending}
                   error={goalWriteError}
+                  onSetStatus={
+                    client === null
+                      ? undefined
+                      : (status) =>
+                          void setCardStatusAction(
+                            "goal",
+                            goal.id,
+                            goal.revision,
+                            status,
+                          )
+                  }
+                  pendingStatus={
+                    cardPending === `goal:${goal.id}` ? goal.status : null
+                  }
                 />
               ) : null;
             })()
@@ -1062,7 +1150,26 @@ export function App(): ReactElement {
         {modal?.kind === "bug" && tree !== null
           ? (() => {
               const bug = tree.bugs.find((b) => b.id === modal.id);
-              return bug ? <BugDetailContent bug={bug} /> : null;
+              return bug ? (
+                <BugDetailContent
+                  bug={bug}
+                  onSetStatus={
+                    client === null
+                      ? undefined
+                      : (status) =>
+                          void setCardStatusAction(
+                            "bug",
+                            bug.id,
+                            bug.revision,
+                            status,
+                          )
+                  }
+                  pendingStatus={
+                    cardPending === `bug:${bug.id}` ? bug.status : null
+                  }
+                  error={cardWriteError}
+                />
+              ) : null;
             })()
           : null}
       </DetailModal>

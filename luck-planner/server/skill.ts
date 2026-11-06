@@ -231,6 +231,13 @@ exist for coordination, not ceremony.
   is approved — do **not** edit code, run commands that change the project,
   or start "preparatory" work: state the plan and stop. A plan the user asked
   to see is not a plan the user accepted.
+- \`luck_tree_set_status\` — one lifecycle move for a leaf, an incident or a
+  goal (\`entityType\`, \`entityId\`, \`status\`). The user moves the same
+  statuses from the dashboard, so **if their status move is the current one,
+  your override needs a \`reason\`** — the call is refused without it
+  (\`deferred → in_progress — step 2 depends on step 1\`). A row you wrote and
+  nobody has touched needs no prose. Moving a status is a decision about the
+  plan, not a way to mark your own work done silently.
 - **Never approve your own proposal.** \`luck_tree_approve_goal\` exists only
   for a managing agent whose user explicitly told it to approve on their
   behalf; calling it for a plan you wrote yourself turns the approval gate

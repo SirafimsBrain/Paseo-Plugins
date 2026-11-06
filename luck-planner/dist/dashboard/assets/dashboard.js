@@ -6,6 +6,7 @@ import {
   BUG_STATUSES,
   BUG_STATUS_COLORS,
   BUG_STATUS_LABELS,
+  BUG_TRANSITIONS,
   CYCLE_COLOR,
   EMPTY_GRAPH,
   EMPTY_INTERACTION,
@@ -13,6 +14,7 @@ import {
   GOAL_STATUSES,
   GOAL_STATUS_COLORS,
   GOAL_STATUS_LABELS,
+  GOAL_TRANSITIONS,
   GRAPH_LAYERS,
   GRAPH_LAYER_LABELS,
   GROWTH_STATUS_COLORS,
@@ -36,6 +38,7 @@ import {
   bugNodeSchema,
   bugSchema,
   bugSeveritySchema,
+  bugStatusSchema,
   buildGraph,
   buildScene3D,
   buildSceneOverlay,
@@ -45,6 +48,7 @@ import {
   external_exports,
   focusTarget,
   goalSchema,
+  goalStatusSchema,
   goalStepSchema,
   graphNodeCenter,
   growthProgress,
@@ -73,7 +77,7 @@ import {
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-QX7XIFHJ.js";
+} from "./chunk-chunk-5BS3GBAV.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
@@ -603,8 +607,16 @@ function nodeStatusPath(nodeId) {
   return `${DASHBOARD_NODE_PATH}/${encodeURIComponent(nodeId)}/status`;
 }
 function goalApprovePath(goalId) {
-  return `/api/goal/${encodeURIComponent(goalId)}/approve`;
+  return `${DASHBOARD_GOAL_PATH}/${encodeURIComponent(goalId)}/approve`;
 }
+function goalStatusPath(goalId) {
+  return `${DASHBOARD_GOAL_PATH}/${encodeURIComponent(goalId)}/status`;
+}
+function bugStatusPath(bugId) {
+  return `${DASHBOARD_BUG_PATH}/${encodeURIComponent(bugId)}/status`;
+}
+var DASHBOARD_GOAL_PATH = "/api/goal";
+var DASHBOARD_BUG_PATH = "/api/bug";
 var DASHBOARD_TOKEN_PARAM = "token";
 var DASHBOARD_EXPORT_HISTORY_PARAM = "history";
 var DASHBOARD_PROJECT_PARAM = "project";
@@ -659,6 +671,14 @@ var goalApproveRequestSchema = external_exports.object({
   parentBranchId: idSchema.nullable().optional(),
   expectedRevision: external_exports.number().int().positive().optional()
 });
+var goalStatusRequestSchema = external_exports.object({
+  status: goalStatusSchema,
+  expectedRevision: external_exports.number().int().positive().optional()
+});
+var bugStatusRequestSchema = external_exports.object({
+  status: bugStatusSchema,
+  expectedRevision: external_exports.number().int().positive().optional()
+});
 var leafStatusResponseSchema = external_exports.object({
   ok: external_exports.literal(true),
   node: nodeSchema
@@ -666,6 +686,14 @@ var leafStatusResponseSchema = external_exports.object({
 var goalApproveResponseSchema = external_exports.object({
   ok: external_exports.literal(true),
   goal: goalSchema
+});
+var goalStatusResponseSchema = external_exports.object({
+  ok: external_exports.literal(true),
+  goal: goalSchema
+});
+var bugStatusResponseSchema = external_exports.object({
+  ok: external_exports.literal(true),
+  bug: bugSchema
 });
 var writeErrorSchema = external_exports.object({
   error: external_exports.string().min(1),
@@ -737,6 +765,18 @@ var DashboardApi = class {
     const body = goalApproveRequestSchema.parse(input);
     return goalApproveResponseSchema.parse(
       await this.post(`${goalApprovePath(goalId)}?${this.writeQuery()}`, body)
+    );
+  }
+  async setGoalStatus(goalId, input) {
+    const body = goalStatusRequestSchema.parse(input);
+    return goalStatusResponseSchema.parse(
+      await this.post(`${goalStatusPath(goalId)}?${this.writeQuery()}`, body)
+    );
+  }
+  async setBugStatus(bugId, input) {
+    const body = bugStatusRequestSchema.parse(input);
+    return bugStatusResponseSchema.parse(
+      await this.post(`${bugStatusPath(bugId)}?${this.writeQuery()}`, body)
     );
   }
   /**
@@ -1146,6 +1186,9 @@ var LEAF_ZONES = {
   claimed: "active",
   in_progress: "active",
   blocked: "active",
+  // Set aside on purpose: it is a planning decision, so it belongs next to the
+  // plan the owner reads, not among the work in motion.
+  deferred: "plan",
   done: "done",
   cancelled: "done",
   superseded: "done"
@@ -1173,6 +1216,73 @@ function zoneForGoal(status) {
 }
 function zoneForBug(status) {
   return BUG_ZONES[status];
+}
+function leafActionLabel(from, to) {
+  switch (to) {
+    case "ready":
+      return "Back to plan";
+    case "claimed":
+      return "Claim";
+    case "in_progress":
+      return from === "blocked" || from === "deferred" ? "Resume" : "Start";
+    case "blocked":
+      return "Stop";
+    case "deferred":
+      return "Defer";
+    case "done":
+      return "Close";
+    case "cancelled":
+      return "Cancel";
+    case "superseded":
+      return "Replace";
+    default:
+      return to;
+  }
+}
+function goalActionLabel(from, to) {
+  switch (to) {
+    case "draft":
+      return "Back to draft";
+    case "proposed":
+      return "Propose";
+    case "in_progress":
+      return "Start";
+    case "done":
+      return "Close";
+    case "cancelled":
+      return "Cancel";
+    default:
+      return to;
+  }
+}
+function bugActionLabel(from, to) {
+  switch (to) {
+    case "open":
+      return "Reopen";
+    case "investigating":
+      return "Investigate";
+    case "resolved":
+      return "Resolve";
+    case "cancelled":
+      return "Cancel";
+    default:
+      return to;
+  }
+}
+function cardStatusActions(kind, status) {
+  if (kind === "leaf") {
+    const from2 = status;
+    return LEAF_TRANSITIONS[from2].filter((to) => to !== "superseded").map((to) => ({ status: to, label: leafActionLabel(from2, to) }));
+  }
+  if (kind === "goal") {
+    const from2 = status;
+    return GOAL_TRANSITIONS[from2].filter((to) => to !== "approved" && to !== "superseded").map((to) => ({ status: to, label: goalActionLabel(from2, to) }));
+  }
+  const from = status;
+  return BUG_TRANSITIONS[from].map((to) => ({
+    status: to,
+    label: bugActionLabel(from, to)
+  }));
 }
 var EMPTY_PLAIN_BOARD = {
   zones: PLAIN_ZONES.map((id2) => ({ id: id2, cardCount: 0, groups: [] })),
@@ -11650,6 +11760,21 @@ function GoalDetailContent(props) {
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-value", children: goal.materializedNodeId === null ? "not yet" : props.resolveName?.(goal.materializedNodeId) ?? goal.materializedNodeId })
       ] })
     ] }),
+    props.onSetStatus !== void 0 && cardStatusActions("goal", goal.status).length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Lifecycle" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "lp-details-status-actions", children: cardStatusActions("goal", goal.status).map((action) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "lp-write-button",
+          disabled: props.pendingStatus !== void 0 && props.pendingStatus !== null,
+          title: `Move the goal to ${action.status}`,
+          onClick: () => props.onSetStatus?.(action.status),
+          children: action.label
+        },
+        action.status
+      )) })
+    ] }) : null,
     goal.plan.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section", children: [
       /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("h3", { className: "lp-details-subtitle", children: [
         "Plan (",
@@ -11734,6 +11859,22 @@ function BugDetailContent(props) {
         /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-details-row-value", children: bug.status })
       ] })
     ] }),
+    props.onSetStatus !== void 0 && cardStatusActions("bug", bug.status).length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { className: "lp-details-subtitle", children: "Lifecycle" }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-details-status-actions", children: cardStatusActions("bug", bug.status).map((action) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "lp-write-button",
+          disabled: props.pendingStatus !== void 0 && props.pendingStatus !== null,
+          title: `Move the incident to ${action.status}`,
+          onClick: () => props.onSetStatus?.(action.status),
+          children: action.label
+        },
+        action.status
+      )) }),
+      props.error !== void 0 && props.error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "lp-details-error", role: "alert", children: props.error }) : null
+    ] }) : null,
     bug.description ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-details-section", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "lp-details-hint", children: bug.description }) }) : null
   ] });
 }
@@ -11848,7 +11989,8 @@ function ZoneBand(props) {
         collapsed: props.collapsed,
         onToggleSection: props.onToggleSection,
         selectedEntityId: props.selectedEntityId,
-        onSelectCard: props.onSelectCard
+        onSelectCard: props.onSelectCard,
+        write: props.write
       },
       group.id
     ))
@@ -11875,7 +12017,8 @@ function Group(props) {
       {
         card,
         selected: card.entityId === props.selectedEntityId,
-        onSelectCard: props.onSelectCard
+        onSelectCard: props.onSelectCard,
+        write: props.write
       },
       card.id
     )),
@@ -11886,7 +12029,8 @@ function Group(props) {
         collapsed: props.collapsed,
         onToggleSection: props.onToggleSection,
         selectedEntityId: props.selectedEntityId,
-        onSelectCard: props.onSelectCard
+        onSelectCard: props.onSelectCard,
+        write: props.write
       },
       section.key
     ))
@@ -11926,7 +12070,8 @@ function SectionNode(props) {
             {
               card,
               selected: card.entityId === props.selectedEntityId,
-              onSelectCard: props.onSelectCard
+              onSelectCard: props.onSelectCard,
+              write: props.write
             },
             card.id
           )),
@@ -11937,7 +12082,8 @@ function SectionNode(props) {
               collapsed: props.collapsed,
               onToggleSection: props.onToggleSection,
               selectedEntityId: props.selectedEntityId,
-              onSelectCard: props.onSelectCard
+              onSelectCard: props.onSelectCard,
+              write: props.write
             },
             child.key
           ))
@@ -11970,9 +12116,11 @@ function nextStepFor(card) {
       case "claimed":
         return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435, \u0447\u0442\u043E \u0430\u0433\u0435\u043D\u0442 \u0432\u0437\u044F\u043B \u0437\u0430\u0434\u0430\u0447\u0443; \u043F\u0440\u0438 \u0431\u0435\u0437\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0438 \u0432\u0435\u0440\u043D\u0438\u0442\u0435 \u0432 ready.";
       case "in_progress":
-        return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043F\u0440\u043E\u0433\u0440\u0435\u0441\u0441 \u0438 \u043F\u0440\u0438 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u0438 \u043F\u0435\u0440\u0435\u0432\u0435\u0434\u0438\u0442\u0435 \u0432 done.";
+        return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043F\u0440\u043E\u0433\u0440\u0435\u0441\u0441 \u0438 \u043F\u0440\u0438 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u0438 \u043F\u0435\u0440\u0435\u0432\u0435\u0434\u0438\u0442\u0435 \u0432 done (\u043A\u043D\u043E\u043F\u043A\u0430 Close \u043D\u0430 \u043A\u0430\u0440\u0442\u043E\u0447\u043A\u0435).";
       case "blocked":
-        return "\u0423\u0441\u0442\u0440\u0430\u043D\u0438\u0442\u0435 \u0431\u043B\u043E\u043A\u0435\u0440/\u043E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442 \u0438\u043B\u0438 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043E\u0442\u043C\u0435\u043D\u0443.";
+        return "\u0423\u0441\u0442\u0440\u0430\u043D\u0438\u0442\u0435 \u0431\u043B\u043E\u043A\u0435\u0440/\u043E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442, \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u0435 (Resume) \u0438\u043B\u0438 \u043E\u0442\u043B\u043E\u0436\u0438\u0442\u0435 (Defer).";
+      case "deferred":
+        return "\u041E\u0442\u043B\u043E\u0436\u0435\u043D\u043E \u0432\u0430\u043C\u0438. \u0412\u0435\u0440\u043D\u0438\u0442\u0435 \u0432 ready \u0438\u043B\u0438 \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u0435 (Resume), \u043A\u043E\u0433\u0434\u0430 \u043F\u0440\u0438\u0434\u0451\u0442 \u0432\u0440\u0435\u043C\u044F.";
       default:
         return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u043B\u0438\u0441\u0442\u0430.";
     }
@@ -12034,6 +12182,8 @@ function Card(props) {
   const { card } = props;
   const attention = requiresAttention(card);
   const nextStep = attention ? nextStepFor(card) : null;
+  const actions = cardStatusActions(card.kind, card.status);
+  const busy = props.write.pendingKey === card.id;
   const className = props.selected ? "lp-plain-card lp-plain-card-selected" : "lp-plain-card";
   const body = /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-head", children: [
@@ -12091,18 +12241,51 @@ function Card(props) {
       /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-card-nextstep-label", children: "\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433:" }),
       " ",
       nextStep
+    ] }) : null,
+    props.write.canWrite && actions.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-actions", children: [
+      actions.map((action) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "lp-plain-card-action",
+          "data-status": action.status,
+          disabled: busy,
+          title: `\u0421\u0442\u0430\u0442\u0443\u0441: ${cardStatusLabel(card.kind, action.status)}`,
+          onClick: (event) => {
+            event.stopPropagation();
+            props.write.onSetStatus(
+              card.kind,
+              card.entityId,
+              card.revision,
+              action.status
+            );
+          },
+          onKeyDown: (event) => event.stopPropagation(),
+          children: action.label
+        },
+        action.status
+      )),
+      busy ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-card-saving", children: "saving\u2026" }) : null
     ] }) : null
   ] });
   return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
-    "button",
+    "div",
     {
-      type: "button",
+      role: "button",
+      tabIndex: 0,
       id: `lp-plain-card-${card.entityId}`,
       className,
       "data-kind": card.kind,
       "aria-pressed": card.kind === "leaf" ? props.selected : void 0,
       "aria-label": attention ? `${card.name} \u2014 \u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F. ${nextStep}` : void 0,
       onClick: () => props.onSelectCard(card.kind, card.entityId),
+      onKeyDown: (event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          props.onSelectCard(card.kind, card.entityId);
+        }
+      },
       children: body
     }
   );
@@ -12229,17 +12412,21 @@ function PlainView(props) {
       props.emptyText !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-empty-text", children: props.emptyText }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-empty-text", children: "Agents write the tree with the luck_tree_* MCP tools; goals proposed from the native panel land in the Plan zone at the top." })
     ] }) });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("section", { className: "lp-plain", "aria-label": "Plain board", children: board.zones.map((zone) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
-    ZoneBand,
-    {
-      zone,
-      collapsed: props.collapsed,
-      onToggleSection: props.onToggleSection,
-      selectedEntityId: props.selectedEntityId,
-      onSelectCard: props.onSelectCard
-    },
-    zone.id
-  )) });
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("section", { className: "lp-plain", "aria-label": "Plain board", children: [
+    props.writeError !== void 0 && props.writeError.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "lp-plain-write-error", role: "alert", children: props.writeError }) : null,
+    board.zones.map((zone) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+      ZoneBand,
+      {
+        zone,
+        collapsed: props.collapsed,
+        onToggleSection: props.onToggleSection,
+        selectedEntityId: props.selectedEntityId,
+        onSelectCard: props.onSelectCard,
+        write: props.write
+      },
+      zone.id
+    ))
+  ] });
 }
 
 // dashboard/src/components/ThreeView.tsx
@@ -13002,6 +13189,53 @@ function App() {
     },
     [client, refreshAfterWrite, resolveName, tree]
   );
+  const [cardPending, setCardPending] = (0, import_react13.useState)(null);
+  const [cardWriteError, setCardWriteError] = (0, import_react13.useState)("");
+  const setCardStatusAction = (0, import_react13.useCallback)(
+    async (kind, entityId, revision, status) => {
+      if (client === null) return;
+      setCardPending(`${kind}:${entityId}`);
+      setCardWriteError("");
+      try {
+        if (kind === "leaf") {
+          const result = await client.setLeafStatus(entityId, {
+            status,
+            expectedRevision: revision
+          });
+          setStatusLine(
+            `${result.node.name} \u2192 ${STATUS_LABELS[result.node.status]} (r${result.node.revision}).`
+          );
+        } else if (kind === "goal") {
+          const result = await client.setGoalStatus(entityId, {
+            status,
+            expectedRevision: revision
+          });
+          setStatusLine(
+            `Goal \u2192 ${GOAL_STATUS_LABELS[result.goal.status]} (r${result.goal.revision}).`
+          );
+        } else {
+          const result = await client.setBugStatus(entityId, {
+            status,
+            expectedRevision: revision
+          });
+          setStatusLine(
+            `Incident \u2192 ${BUG_STATUS_LABELS[result.bug.status]} (r${result.bug.revision}).`
+          );
+        }
+        refreshAfterWrite();
+      } catch (cause) {
+        if (cause instanceof DashboardWriteConflict) {
+          setStatusLine("This item moved elsewhere \u2014 reloaded the current state.");
+          refreshAfterWrite();
+        } else {
+          setCardWriteError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        setCardPending(null);
+      }
+    },
+    [client, refreshAfterWrite]
+  );
   const goalBranches = (0, import_react13.useMemo)(() => {
     const nodes = scopedTree?.nodes ?? [];
     const rootNames = new Map(forest.roots.map((root2) => [root2.id, root2.name]));
@@ -13074,6 +13308,12 @@ function App() {
               selectedEntityId: selectedId,
               onSelectCard: onPlainCardSelect,
               scrollTargetEntityId: plainScrollTarget,
+              write: {
+                canWrite: client !== null,
+                pendingKey: cardPending,
+                onSetStatus: (kind, entityId, revision, status) => void setCardStatusAction(kind, entityId, revision, status)
+              },
+              writeError: cardWriteError,
               emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
               emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the board again." : void 0
             }
@@ -13157,13 +13397,33 @@ function App() {
                 defaultBranchId: defaultGoalBranch,
                 onApprove: client === null ? void 0 : (parentBranchId) => void approveGoalAction(goal.id, parentBranchId),
                 pending: goalPending,
-                error: goalWriteError
+                error: goalWriteError,
+                onSetStatus: client === null ? void 0 : (status) => void setCardStatusAction(
+                  "goal",
+                  goal.id,
+                  goal.revision,
+                  status
+                ),
+                pendingStatus: cardPending === `goal:${goal.id}` ? goal.status : null
               }
             ) : null;
           })() : null,
           modal?.kind === "bug" && tree !== null ? (() => {
             const bug = tree.bugs.find((b) => b.id === modal.id);
-            return bug ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(BugDetailContent, { bug }) : null;
+            return bug ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+              BugDetailContent,
+              {
+                bug,
+                onSetStatus: client === null ? void 0 : (status) => void setCardStatusAction(
+                  "bug",
+                  bug.id,
+                  bug.revision,
+                  status
+                ),
+                pendingStatus: cardPending === `bug:${bug.id}` ? bug.status : null,
+                error: cardWriteError
+              }
+            ) : null;
           })() : null
         ]
       }

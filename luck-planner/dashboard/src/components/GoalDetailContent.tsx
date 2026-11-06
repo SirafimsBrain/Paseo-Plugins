@@ -2,6 +2,7 @@ import { useState, type ReactElement } from "react";
 import { canApproveGoal } from "../../../shared/goals";
 import type { Goal } from "../../../shared/goals";
 import { GOAL_STATUS_COLORS, GOAL_STATUS_LABELS } from "../colors";
+import { cardStatusActions } from "../plain";
 
 /**
  * A high goal in the details modal (stage K2), with the approval gate (L8).
@@ -30,6 +31,14 @@ export interface GoalDetailContentProps {
   readonly pending?: boolean;
   /** The last refusal, in the server's words (L8). */
   readonly error?: string;
+  /**
+   * Moves the goal through its lifecycle short of the gate (0.51.1):
+   * approved → in_progress → done, or → cancelled. Absent without the write
+   * token, and `approved` is never in this list — only the gate is.
+   */
+  readonly onSetStatus?: (status: string) => void;
+  /** Status of a write in flight, or `null` (0.51.1). */
+  readonly pendingStatus?: string | null;
 }
 
 export function GoalDetailContent(props: GoalDetailContentProps): ReactElement {
@@ -83,6 +92,26 @@ export function GoalDetailContent(props: GoalDetailContentProps): ReactElement {
           </span>
         </div>
       </div>
+      {props.onSetStatus !== undefined &&
+      cardStatusActions("goal", goal.status).length > 0 ? (
+        <div className="lp-details-section lp-details-write">
+          <h3 className="lp-details-subtitle">Lifecycle</h3>
+          <div className="lp-details-status-actions">
+            {cardStatusActions("goal", goal.status).map((action) => (
+              <button
+                key={action.status}
+                type="button"
+                className="lp-write-button"
+                disabled={props.pendingStatus !== undefined && props.pendingStatus !== null}
+                title={`Move the goal to ${action.status}`}
+                onClick={() => props.onSetStatus?.(action.status)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {goal.plan.length > 0 ? (
         <div className="lp-details-section">
           <h3 className="lp-details-subtitle">Plan ({goal.plan.length})</h3>

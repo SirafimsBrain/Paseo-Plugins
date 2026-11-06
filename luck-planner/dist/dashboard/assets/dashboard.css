@@ -1515,11 +1515,57 @@ body {
   font-size: 12px;
   text-align: start;
 }
-button.lp-plain-card {
+.lp-plain-card[role=button] {
   cursor: pointer;
 }
-button.lp-plain-card:hover {
+.lp-plain-card[role=button]:hover {
   border-color: var(--lp-accent, #5b9dff);
+}
+.lp-plain-card[role=button]:focus-visible {
+  outline: 2px solid var(--lp-accent, #5b9dff);
+  outline-offset: 1px;
+}
+.lp-plain-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--lp-border, #262b36);
+}
+.lp-plain-card-action {
+  padding: 2px 8px;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 999px;
+  background: var(--lp-surface, #171a21);
+  color: var(--lp-text, #e6e9ef);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.lp-plain-card-action:hover:not(:disabled),
+.lp-plain-card-action:focus-visible {
+  border-color: var(--lp-accent, #5b9dff);
+  color: var(--lp-accent, #5b9dff);
+  outline: none;
+}
+.lp-plain-card-action:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+.lp-plain-card-saving {
+  align-self: center;
+  font-size: 11px;
+  color: var(--lp-muted, #8b93a3);
+}
+.lp-plain-write-error {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid #e05d5d;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e05d5d;
 }
 .lp-plain-card-selected {
   border-color: var(--lp-selection, rgba(91, 157, 255, 0.16));

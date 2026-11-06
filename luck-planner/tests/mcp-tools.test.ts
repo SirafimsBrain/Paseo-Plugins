@@ -126,6 +126,7 @@ describe("MCP tool surface", () => {
       "luck_tree_find_goals",
       "luck_tree_approve_goal",
       "luck_tree_set_goal",
+      "luck_tree_set_status",
       "luck_tree_update_growth",
       "luck_tree_history",
       "luck_tree_export",

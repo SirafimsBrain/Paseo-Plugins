@@ -425,15 +425,19 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(css).toContain(".lp-canvas-hint {");
   });
 
-  it("writes only the two human decisions, with the revision it rendered", () => {
-    // L8: the browser gets exactly two writes, both optimistic. A client that
-    // forgot `expectedRevision` would overwrite an agent's change silently.
+  it("writes only the human decisions, with the revision it rendered", () => {
+    // L8: the browser gets the human decisions, all optimistic. 0.51.1 added
+    // the incident and goal lifecycle routes, so the plain board can move every
+    // entity it shows. A client that forgot `expectedRevision` would overwrite
+    // an agent's change silently.
     const api = fs.readFileSync(
       path.join(ROOT, "dashboard", "src", "api.ts"),
       "utf8",
     );
     expect(api).toContain("nodeStatusPath(nodeId)");
     expect(api).toContain("goalApprovePath(goalId)");
+    expect(api).toContain("goalStatusPath(goalId)");
+    expect(api).toContain("bugStatusPath(bugId)");
     expect(api).toContain("DashboardWriteConflict");
     expect(api).toContain("Authorization: `Bearer ${this.token}`");
 
@@ -443,8 +447,11 @@ describe("source contracts the bundler cannot tell us", () => {
     );
     expect(app).toContain("client.setLeafStatus(");
     expect(app).toContain("client.approveGoal(");
+    expect(app).toContain("client.setGoalStatus(");
+    expect(app).toContain("client.setBugStatus(");
     expect(app).toContain("expectedRevision: detail.node.revision");
     expect(app).toContain("expectedRevision: goal.revision");
+    expect(app).toContain("expectedRevision: revision");
 
     const detail = fs.readFileSync(
       path.join(ROOT, "dashboard", "src", "components", "NodeDetailContent.tsx"),
@@ -462,13 +469,25 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(goal).toContain("onApprove(target.id)");
 
     // The committed bundle and stylesheet carry the controls for real.
+    // The board's own lifecycle controls (0.51.1) travel with it, not only the
+    // modal's write button.
+    const plainView = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "PlainView.tsx"),
+      "utf8",
+    );
+    expect(plainView).toContain("cardStatusActions(card.kind, card.status)");
+    expect(plainView).toContain("lp-plain-card-action");
+    expect(plainView).toContain('role="button"');
+
     const js = fs.readFileSync(APP_JS, "utf8");
     expect(js).toContain("/status");
     expect(js).toContain("/approve");
     expect(js).toContain("lp-write-button");
+    expect(js).toContain("lp-plain-card-action");
     const css = fs.readFileSync(APP_CSS, "utf8");
     expect(css).toContain(".lp-write-button {");
     expect(css).toContain(".lp-details-status-actions {");
+    expect(css).toContain(".lp-plain-card-actions {");
   });
 });
 

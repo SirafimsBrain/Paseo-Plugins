@@ -58,6 +58,7 @@ import {
   LEAF_STATUSES,
   LEAF_TRANSITIONS,
   NODE_KINDS,
+  UI_ACTOR,
   canHaveChild,
   canTransitionLeaf,
   historyEntrySchema,
@@ -223,6 +224,11 @@ export interface SetStatusInput {
   status: LeafStatus;
   actor: string;
   /**
+   * Why an **agent** overrides a status the owner set by hand (0.51.1).
+   * Required only in that case — see {@link requireOverrideReason}.
+   */
+  reason?: string;
+  /**
    * The revision the caller looked at (stage L8). When given, a write against
    * a newer row is refused with {@link StaleRevisionError} instead of silently
    * overwriting a change the caller never saw.
@@ -368,6 +374,22 @@ export interface SetGoalStatusInput {
   id: string;
   status: GoalStatus;
   actor: string;
+  /** See {@link SetStatusInput.reason}. */
+  reason?: string;
+  /** The revision the caller looked at: a concurrent write is refused. */
+  expectedRevision?: number;
+}
+
+/** `setBugStatus` input: an incident through `BUG_TRANSITIONS`. */
+export interface SetBugStatusInput {
+  projectKey: string;
+  id: string;
+  status: BugStatus;
+  actor: string;
+  /** See {@link SetStatusInput.reason}. */
+  reason?: string;
+  /** The revision the caller looked at: a concurrent write is refused. */
+  expectedRevision?: number;
 }
 
 /** `approveGoal` input: crosses the gate and materializes in one transaction. */
@@ -652,13 +674,50 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [createSchemaV1];
  * are integers from the same row.
  */
 function requireRevision(
-  entityType: "node" | "goal",
+  entityType: "node" | "goal" | "bug",
   id: string,
   current: number,
   expected: number | undefined,
 ): void {
   if (expected === undefined || expected === current) return;
   throw new StaleRevisionError(entityType, id, expected, current);
+}
+
+/**
+ * The reason an agent must give when it overrides an owner's decision
+ * (0.51.1).
+ *
+ * The trigger is narrow on purpose: the person's **last status move** on the
+ * row. That is the case the owner cannot reconstruct afterwards — they decided
+ * "defer this", the agent silently flipped it back, and the status no longer
+ * says what happened. Creating the row, renaming it or a reset that cascades
+ * from an approved plan are not status decisions, so they demand no prose (and
+ * a subtree the agent wrote explains itself).
+ *
+ * Returns the note to append to the audit row, or `null` when none is needed.
+ */
+function overrideNote(
+  entity: "node" | "goal" | "bug",
+  id: string,
+  actor: string,
+  previousStatusActor: string | null,
+  reason: string | undefined,
+): string | null {
+  if (actor === UI_ACTOR) return null;
+  if (previousStatusActor !== UI_ACTOR) return null;
+  const text = reason?.trim() ?? "";
+  if (text.length < 3) {
+    throw new Error(
+      `the owner set ${entity} ${id}'s status by hand; an agent override must say why — ` +
+        `pass \`reason\` (for example \"step 2 depends on step 1\")`,
+    );
+  }
+  return text;
+}
+
+/** An audit note for a status move, with the override reason when there is one. */
+function statusNote(from: string, to: string, reason: string | null): string {
+  return reason === null ? `${from} → ${to}` : `${from} → ${to} — ${reason}`;
 }
 
 /** node:sqlite throws a plain Error carrying "database is locked". */
@@ -685,7 +744,7 @@ function sleepSync(ms: number): void {
  */
 export class StaleRevisionError extends Error {
   constructor(
-    readonly entityType: "node" | "goal",
+    readonly entityType: "node" | "goal" | "bug",
     readonly entityId: string,
     readonly expected: number,
     readonly current: number,
@@ -1045,6 +1104,28 @@ export class LuckPlannerStore {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(projectKey, entityType, entityId, action, revision, actor, result, at);
+  }
+
+  /**
+   * Who performed the **last status move** on a row, or `null` when the last
+   * audit row is something else (a create, an approve, a rename). This is what
+   * {@link overrideNote} keys on: only a status the person set themselves must
+   * be explained when an agent moves it again.
+   */
+  private lastStatusActor(
+    entityType: HistoryEntityType,
+    entityId: string,
+  ): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT actor, action FROM history
+          WHERE entity_type = ? AND entity_id = ?
+          ORDER BY id DESC LIMIT 1`,
+      )
+      .get(entityType, entityId) as
+      | { actor: string | null; action: string }
+      | undefined;
+    return row !== undefined && row.action === "status" ? row.actor : null;
   }
 
   /** Creates a node; `parentId: null` is accepted for `root` nodes only. */
@@ -1410,6 +1491,13 @@ export class LuckPlannerStore {
               `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
           );
         }
+        const note = overrideNote(
+          "node",
+          row.id,
+          actor,
+          this.lastStatusActor("node", row.id),
+          input.reason,
+        );
         const now = Date.now();
         this.db
           .prepare(
@@ -1425,7 +1513,7 @@ export class LuckPlannerStore {
           "status",
           row.revision + 1,
           actor,
-          `${from} → ${to}`,
+          statusNote(from, to, note),
           now,
         );
         return rowToNode(this.requireRow(projectKey, row.id));
@@ -2088,6 +2176,64 @@ export class LuckPlannerStore {
   }
 
   /**
+   * Moves an **incident** through `BUG_TRANSITIONS` (0.51.1): the plain
+   * board's stop / resume / close for a bug, and the agent's
+   * `luck_tree_set_status` for one. Separate from {@link updateBug} because
+   * this is the write a person makes (it takes `expectedRevision`, like a leaf
+   * move) and because the agent-override reason belongs to a lifecycle move,
+   * not to a title edit.
+   */
+  setBugStatus(input: SetBugStatusInput): Bug {
+    const actor = requireText(input.actor, "actor");
+    const projectKey = requireText(input.projectKey, "project key");
+    const to = parseBugStatus(input.status);
+
+    return this.write(() =>
+      this.transaction(() => {
+        const row = this.requireBugRow(projectKey, input.id);
+        requireRevision("bug", row.id, row.revision, input.expectedRevision);
+        const from = parseBugStatus(row.status);
+        if (from === to) {
+          throw new Error(`bug ${row.id} already has status \"${from}\"`);
+        }
+        if (!canTransitionBug(from, to)) {
+          const allowed = BUG_TRANSITIONS[from];
+          throw new Error(
+            `invalid status transition ${from} → ${to} for bug ${row.id}; ` +
+              `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
+          );
+        }
+        const note = overrideNote(
+          "bug",
+          row.id,
+          actor,
+          this.lastStatusActor("bug", row.id),
+          input.reason,
+        );
+        const now = Date.now();
+        this.db
+          .prepare(
+            `UPDATE bugs SET status = ?, revision = revision + 1,
+                            updated_at = ?, updated_by = ?
+             WHERE project_key = ? AND id = ?`,
+          )
+          .run(to, now, actor, projectKey, row.id);
+        this.appendHistory(
+          projectKey,
+          "bug",
+          row.id,
+          "status",
+          row.revision + 1,
+          actor,
+          statusNote(from, to, note),
+          now,
+        );
+        return rowToBug(this.requireBugRow(projectKey, row.id));
+      }),
+    );
+  }
+
+  /**
    * Links one live leaf to the incident: the group membership grows by one.
    * The bug's revision bumps and a `link` row is appended — attachment is a
    * mutation **of the bug**; the leaf's own revision and history stay
@@ -2442,6 +2588,7 @@ export class LuckPlannerStore {
     return this.write(() =>
       this.transaction(() => {
         const row = this.requireGoalRow(projectKey, input.id);
+        requireRevision("goal", row.id, row.revision, input.expectedRevision);
         const from = parseGoalStatus(row.status);
         if (from === to) {
           throw new Error(`goal ${row.id} already has status \"${from}\"`);
@@ -2453,6 +2600,13 @@ export class LuckPlannerStore {
               `allowed from \"${from}\": ${allowed.length > 0 ? allowed.join(", ") : "none (terminal status)"}`,
           );
         }
+        const note = overrideNote(
+          "goal",
+          row.id,
+          actor,
+          this.lastStatusActor("goal", row.id),
+          input.reason,
+        );
         const now = Date.now();
         this.db
           .prepare(
@@ -2468,7 +2622,7 @@ export class LuckPlannerStore {
           "status",
           row.revision + 1,
           actor,
-          `${from} → ${to}`,
+          statusNote(from, to, note),
           now,
         );
         return rowToGoal(this.requireGoalRow(projectKey, row.id));

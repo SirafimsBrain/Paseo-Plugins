@@ -65,6 +65,14 @@ export function canHaveChild(
   return ALLOWED_CHILD_KINDS[parentKind].includes(childKind);
 }
 
+/**
+ * The actor recorded when a **person** writes: the dashboard and the native
+ * panel act on the owner's behalf. Lives here rather than in `rpc.ts` so the
+ * store can compare against it without importing the RPC/SDK layer (0.51.1
+ * added the agent-override reason rule, which the store enforces).
+ */
+export const UI_ACTOR = "user";
+
 // ── Leaf statuses (exact requirement vocabulary) ─────────────────────────
 
 export const leafStatusSchema = z.enum([
@@ -73,6 +81,7 @@ export const leafStatusSchema = z.enum([
   "claimed",
   "in_progress",
   "blocked",
+  "deferred",
   "done",
   "cancelled",
   "superseded",
@@ -83,17 +92,21 @@ export const LEAF_STATUSES = leafStatusSchema.options;
 /**
  * Allowed status transitions (ADR-6). The happy path is
  * draft → ready → claimed → in_progress → done; `blocked` hangs off
- * `in_progress` and resumes back to it. `cancelled` and `superseded` are
- * terminal. `done` may only be superseded (a confirmed fact is replaced by
+ * `in_progress` and resumes back to it. `deferred` (0.51.1) is the owner's
+ * "not now": any started-but-unfinished state can be set aside and picked up
+ * again, which `blocked` cannot express — a blocker is a fact about the work,
+ * a deferral is a decision about the schedule. `cancelled` and `superseded`
+ * are terminal. `done` may only be superseded (a confirmed fact is replaced by
  * a new plan, never silently cancelled), which is what the goal-replacement
  * cascade (stage C3) relies on.
  */
 export const LEAF_TRANSITIONS: Record<LeafStatus, readonly LeafStatus[]> = {
-  draft: ["ready", "cancelled", "superseded"],
-  ready: ["claimed", "cancelled", "superseded"],
-  claimed: ["in_progress", "cancelled", "superseded"],
-  in_progress: ["blocked", "done", "cancelled", "superseded"],
-  blocked: ["in_progress", "cancelled", "superseded"],
+  draft: ["ready", "deferred", "cancelled", "superseded"],
+  ready: ["claimed", "deferred", "cancelled", "superseded"],
+  claimed: ["in_progress", "deferred", "cancelled", "superseded"],
+  in_progress: ["blocked", "deferred", "done", "cancelled", "superseded"],
+  blocked: ["in_progress", "deferred", "cancelled", "superseded"],
+  deferred: ["ready", "claimed", "in_progress", "cancelled", "superseded"],
   done: ["superseded"],
   cancelled: [],
   superseded: [],

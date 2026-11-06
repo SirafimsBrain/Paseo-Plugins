@@ -37,6 +37,7 @@ export const STATUS_COLORS: Record<LeafStatus, string> = {
   claimed: "#b48ddb",
   in_progress: "#e0a84f",
   blocked: "#e05d5d",
+  deferred: "#b0a04f", // set aside by the owner: neither a blocker nor a fact
   done: "#4fa860",
   cancelled: "#5c6470",
   superseded: "#6b7280",
@@ -58,6 +59,7 @@ export const STATUS_LABELS: Record<LeafStatus, string> = {
   claimed: "Claimed",
   in_progress: "In progress",
   blocked: "Blocked",
+  deferred: "Deferred",
   done: "Done",
   cancelled: "Cancelled",
   superseded: "Superseded",
@@ -85,6 +87,7 @@ export const STATUS_PROGRESS: Record<LeafStatus, number> = {
   claimed: 0.5, // picked up
   in_progress: 0.7, // work underway
   blocked: 0.7, // stopped mid-work — the red colour says blocked, not the bar
+  deferred: 0.35, // paused on purpose; resumes from where it stood
   done: 1, // finished
   cancelled: 0.15, // abandoned where it stood
   superseded: 0.15, // replaced by a newer plan

@@ -40,6 +40,7 @@ export const MCP_TOOL_NAMES = [
   "luck_tree_find_goals",
   "luck_tree_approve_goal",
   "luck_tree_set_goal",
+  "luck_tree_set_status",
   "luck_tree_update_growth",
   "luck_tree_history",
   "luck_tree_export",
@@ -121,6 +122,13 @@ export const upsertLeafInputSchema = z.object({
   version: z.string().optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   status: leafStatusSchema.optional(),
+  /**
+   * Why an agent overrides a status the owner set by hand (0.51.1). Required
+   * only in that case: the store refuses the write without it, because the
+   * owner's decision must not be replaced silently. A leaf the agent still
+   * owns needs no explanation.
+   */
+  reason: z.string().optional(),
   actor: actorSchema.optional(),
 });
 export type UpsertLeafInput = z.infer<typeof upsertLeafInputSchema>;
@@ -205,6 +213,30 @@ export type ApproveGoalInput = z.infer<typeof approveGoalInputSchema>;
 export const setGoalActionSchema = z.enum(["create", "update", "propose"]);
 export type SetGoalAction = z.infer<typeof setGoalActionSchema>;
 
+/**
+ * `luck_tree_set_status`: one lifecycle move for any of the three entities the
+ * board shows (0.51.1).
+ *
+ * The owner moves statuses from the dashboard; an agent that has to move one
+ * (a dependency between two plan steps, a finished goal) uses this call and
+ * says why. `approved` is still unreachable here — only
+ * `luck_tree_approve_goal` crosses the gate.
+ */
+export const setStatusEntityTypeSchema = z.enum(["node", "bug", "goal"]);
+export type SetStatusEntityType = z.infer<typeof setStatusEntityTypeSchema>;
+
+export const setStatusInputSchema = z.object({
+  projectKey: projectKeySchema,
+  entityType: setStatusEntityTypeSchema,
+  entityId: idSchema,
+  /** Target status of that entity's own state machine (validated by type). */
+  status: z.string().min(1),
+  /** Required when the owner (the dashboard) set the current status by hand. */
+  reason: z.string().optional(),
+  actor: actorSchema.optional(),
+});
+export type SetStatusInput = z.infer<typeof setStatusInputSchema>;
+
 export const setGoalInputSchema = z.object({
   projectKey: projectKeySchema,
   action: setGoalActionSchema,
@@ -270,6 +302,8 @@ export const upsertNodeInputSchema = z.object({
   version: z.string().optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   status: leafStatusSchema.optional(),
+  /** See {@link upsertLeafInputSchema.shape.reason} (0.51.1). */
+  reason: z.string().optional(),
   actor: actorSchema.optional(),
 });
 export type UpsertNodeInput = z.infer<typeof upsertNodeInputSchema>;

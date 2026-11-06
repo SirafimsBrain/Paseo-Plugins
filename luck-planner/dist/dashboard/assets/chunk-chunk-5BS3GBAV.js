@@ -32156,17 +32156,19 @@ var leafStatusSchema = external_exports.enum([
   "claimed",
   "in_progress",
   "blocked",
+  "deferred",
   "done",
   "cancelled",
   "superseded"
 ]);
 var LEAF_STATUSES = leafStatusSchema.options;
 var LEAF_TRANSITIONS = {
-  draft: ["ready", "cancelled", "superseded"],
-  ready: ["claimed", "cancelled", "superseded"],
-  claimed: ["in_progress", "cancelled", "superseded"],
-  in_progress: ["blocked", "done", "cancelled", "superseded"],
-  blocked: ["in_progress", "cancelled", "superseded"],
+  draft: ["ready", "deferred", "cancelled", "superseded"],
+  ready: ["claimed", "deferred", "cancelled", "superseded"],
+  claimed: ["in_progress", "deferred", "cancelled", "superseded"],
+  in_progress: ["blocked", "deferred", "done", "cancelled", "superseded"],
+  blocked: ["in_progress", "deferred", "cancelled", "superseded"],
+  deferred: ["ready", "claimed", "in_progress", "cancelled", "superseded"],
   done: ["superseded"],
   cancelled: [],
   superseded: []
@@ -32231,6 +32233,15 @@ var goalStatusSchema = external_exports.enum([
   "superseded"
 ]);
 var GOAL_STATUSES = goalStatusSchema.options;
+var GOAL_TRANSITIONS = {
+  draft: ["proposed", "cancelled"],
+  proposed: ["approved", "draft", "cancelled"],
+  approved: ["in_progress", "cancelled", "superseded"],
+  in_progress: ["done", "cancelled", "superseded"],
+  done: ["superseded"],
+  cancelled: [],
+  superseded: []
+};
 function canApproveGoal(status) {
   return status === "proposed";
 }
@@ -32286,6 +32297,12 @@ var bugStatusSchema = external_exports.enum([
   "cancelled"
 ]);
 var BUG_STATUSES = bugStatusSchema.options;
+var BUG_TRANSITIONS = {
+  open: ["investigating", "resolved", "cancelled"],
+  investigating: ["open", "resolved", "cancelled"],
+  resolved: ["open"],
+  cancelled: ["open"]
+};
 var bugSchema = external_exports.object({
   id: idSchema,
   projectKey: projectKeySchema,
@@ -32378,6 +32395,8 @@ var STATUS_COLORS = {
   claimed: "#b48ddb",
   in_progress: "#e0a84f",
   blocked: "#e05d5d",
+  deferred: "#b0a04f",
+  // set aside by the owner: neither a blocker nor a fact
   done: "#4fa860",
   cancelled: "#5c6470",
   superseded: "#6b7280"
@@ -32395,6 +32414,7 @@ var STATUS_LABELS = {
   claimed: "Claimed",
   in_progress: "In progress",
   blocked: "Blocked",
+  deferred: "Deferred",
   done: "Done",
   cancelled: "Cancelled",
   superseded: "Superseded"
@@ -32417,6 +32437,8 @@ var STATUS_PROGRESS = {
   // work underway
   blocked: 0.7,
   // stopped mid-work — the red colour says blocked, not the bar
+  deferred: 0.35,
+  // paused on purpose; resumes from where it stood
   done: 1,
   // finished
   cancelled: 0.15,
@@ -34045,7 +34067,9 @@ export {
   LEAF_TRANSITIONS,
   nodeSchema,
   historyEntrySchema,
+  goalStatusSchema,
   GOAL_STATUSES,
+  GOAL_TRANSITIONS,
   canApproveGoal,
   goalStepSchema,
   goalSchema,
@@ -34055,7 +34079,9 @@ export {
   BEE_STATUSES,
   beeSchema,
   bugSeveritySchema,
+  bugStatusSchema,
   BUG_STATUSES,
+  BUG_TRANSITIONS,
   bugSchema,
   bugNodeSchema,
   beeCycleSchema,

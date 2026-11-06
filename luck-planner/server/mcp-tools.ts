@@ -1,4 +1,6 @@
-import type { Node, NodeKind } from "../shared/tree";
+import type { LeafStatus, Node, NodeKind } from "../shared/tree";
+import type { GoalStatus } from "../shared/goals";
+import type { BugStatus } from "../shared/links";
 import type {
   AddBeeInput,
   ApproveGoalInput,
@@ -14,6 +16,7 @@ import type {
   ReportBugInput,
   SearchInput,
   SetGoalInput,
+  SetStatusInput,
   UpdateGrowthInput,
   UpsertLeafInput,
   UpsertNodeInput,
@@ -33,6 +36,7 @@ import {
   reportBugInputSchema,
   searchInputSchema,
   setGoalInputSchema,
+  setStatusInputSchema,
   updateGrowthInputSchema,
   upsertLeafInputSchema,
   upsertNodeInputSchema,
@@ -276,6 +280,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
             "claimed",
             "in_progress",
             "blocked",
+            "deferred",
             "done",
             "cancelled",
             "superseded",
@@ -283,6 +288,9 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           description:
             "Desired leaf status; applied as a state-machine transition when it differs from the current one.",
         },
+        reason: str(
+          "Why you override a status the human set in the dashboard. Required only then (the store refuses the move without it).",
+        ),
         actor: str("Who performs the change (agent id)."),
       },
       required: ["projectKey"],
@@ -327,12 +335,16 @@ export const MCP_TOOLS: McpToolDefinition[] = [
             "claimed",
             "in_progress",
             "blocked",
+            "deferred",
             "done",
             "cancelled",
             "superseded",
           ],
           description: "Desired status (leaf state machine).",
         },
+        reason: str(
+          "Why you override a status the human set in the dashboard. Required only then.",
+        ),
         actor: str("Who performs the change (agent id)."),
       },
       required: ["projectKey"],
@@ -548,6 +560,41 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         actor: str("Who performs the change (agent id)."),
       },
       required: ["projectKey", "action"],
+    },
+  },
+  {
+    name: "luck_tree_set_status",
+    title: "Move a status with a reason",
+    description:
+      "Move one entity through its own state machine: a leaf (node), an " +
+      "incident (bug) or a high goal. Use it when the lifecycle moved for a " +
+      "reason the owner cannot see from the status alone — for example step 2 " +
+      "is deferred because it depends on step 1, or a goal is done. If the " +
+      "human set the current status in the dashboard, `reason` is required: " +
+      "the store refuses the override without it. A row the agent still owns " +
+      "needs no explanation. `approved` is not reachable here — only " +
+      "luck_tree_approve_goal crosses the approval gate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: PROJECT_KEY,
+        entityType: {
+          type: "string",
+          enum: ["node", "bug", "goal"],
+          description: "Which state machine the move belongs to.",
+        },
+        entityId: str("The leaf, incident or goal to move."),
+        status: {
+          type: "string",
+          description:
+            "Target status of that entity (leaf: draft|ready|claimed|in_progress|blocked|deferred|done|cancelled|superseded; bug: open|investigating|resolved|cancelled; goal: draft|proposed|in_progress|done|cancelled).",
+        },
+        reason: str(
+          "Why the status moves. Required when the human set the current status by hand.",
+        ),
+        actor: str("Who performs the change (agent id)."),
+      },
+      required: ["projectKey", "entityType", "entityId", "status"],
     },
   },
   {
@@ -802,6 +849,7 @@ export function dispatchMcpTool(
                   id: value.nodeId,
                   status: value.status,
                   actor,
+                  ...(value.reason === undefined ? {} : { reason: value.reason }),
                 });
           return text({ created: false, node });
         }
@@ -974,6 +1022,12 @@ export function dispatchMcpTool(
         const parsed = setGoalInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues);
         return dispatchSetGoal(store, parsed.data, actor);
+      }
+
+      case "luck_tree_set_status": {
+        const parsed = setStatusInputSchema.safeParse(input);
+        if (!parsed.success) return invalidInput(parsed.error.issues);
+        return dispatchSetStatus(store, parsed.data, actor);
       }
 
       case "luck_tree_update_growth": {
@@ -1238,6 +1292,44 @@ function capList<T>(
 }
 
 /** Upsert semantics: create under parentId, or update leafId in place. */
+/**
+ * `luck_tree_set_status` (0.51.1): one lifecycle move for a leaf, an incident
+ * or a goal. The reason rule is the store's — this dispatcher only forwards it,
+ * so the dashboard, the RPC and every tool share one policy.
+ */
+function dispatchSetStatus(
+  store: LuckPlannerStore,
+  value: SetStatusInput,
+  actor: string,
+): ToolResult {
+  const who = value.actor ?? actor;
+  const shared = {
+    projectKey: value.projectKey,
+    id: value.entityId,
+    actor: who,
+    ...(value.reason === undefined ? {} : { reason: value.reason }),
+  };
+  if (value.entityType === "node") {
+    const node = store.setStatus({
+      ...shared,
+      status: value.status as LeafStatus,
+    });
+    return text({ entityType: "node", node });
+  }
+  if (value.entityType === "bug") {
+    const bug = store.setBugStatus({
+      ...shared,
+      status: value.status as BugStatus,
+    });
+    return text({ entityType: "bug", bug });
+  }
+  const goal = store.setGoalStatus({
+    ...shared,
+    status: value.status as GoalStatus,
+  });
+  return text({ entityType: "goal", goal });
+}
+
 function dispatchUpsertLeaf(
   store: LuckPlannerStore,
   value: UpsertLeafInput,
@@ -1280,6 +1372,7 @@ function dispatchUpsertLeaf(
         id: value.leafId,
         status: value.status,
         actor,
+        ...(value.reason === undefined ? {} : { reason: value.reason }),
       });
     }
     return text({ created: false, leaf });

@@ -21,10 +21,15 @@ import {
   DASHBOARD_THEMES_PATH,
   DASHBOARD_TOKEN_PARAM,
   DASHBOARD_TREE_PATH,
+  DASHBOARD_BUG_PATH,
+  bugStatusRequestSchema,
   dashboardUrl,
   goalApproveRequestSchema,
+  goalStatusRequestSchema,
   leafStatusRequestSchema,
+  type BugStatusResponse,
   type GoalApproveResponse,
+  type GoalStatusResponse,
   type HealthResponse,
   type LeafStatusResponse,
   type NodeResponse,
@@ -47,7 +52,7 @@ import {
   buildExportDocument,
   exportZipBytes,
 } from "./export";
-import { UI_ACTOR } from "../shared/rpc";
+import { UI_ACTOR } from "../shared/tree";
 import { nodeBeeCycle } from "./bees";
 import { resolveThemesDir } from "./plugin-paths";
 import { defaultThemeDir, loadThemeCatalog } from "./themes";
@@ -103,10 +108,16 @@ const SSE_HEARTBEAT_MS = 15_000;
  */
 const MAX_WRITE_BODY_BYTES = 16 * 1024;
 
-/** The two writes the dashboard may make (stage L8). */
+/**
+ * The writes the dashboard may make (stage L8; goal/incident lifecycle in
+ * 0.51.1): a status move for each of the three entities the board shows, plus
+ * the goal approval, which is the only path that crosses the gate.
+ */
 type WriteRoute =
   | { readonly kind: "node-status"; readonly id: string }
-  | { readonly kind: "goal-approve"; readonly id: string };
+  | { readonly kind: "goal-approve"; readonly id: string }
+  | { readonly kind: "goal-status"; readonly id: string }
+  | { readonly kind: "bug-status"; readonly id: string };
 
 /** One path segment, decoded; `null` for an empty or malformed one. */
 function decodeSegment(raw: string): string | null {
@@ -121,38 +132,36 @@ function decodeSegment(raw: string): string | null {
 /**
  * Recognises a write route, or answers `null` for anything else.
  *
- * Deliberately **not** a generic router: the browser gets exactly two
- * decisions (a leaf's status, a goal's approval) and every other path stays on
- * the read-only side. A malformed id is not a route — it falls through to the
- * read path and is refused there.
+ * Deliberately **not** a generic router: the browser gets the lifecycle moves
+ * of the three entities the board shows plus the goal approval, and every
+ * other path stays on the read-only side. A malformed id is not a route — it
+ * falls through to the read path and is refused there.
  */
 function parseWriteRoute(pathname: string): WriteRoute | null {
   const statusSuffix = "/status";
-  if (
-    pathname.startsWith(`${DASHBOARD_NODE_PATH}/`) &&
-    pathname.endsWith(statusSuffix)
-  ) {
-    const id = decodeSegment(
-      pathname.slice(
-        DASHBOARD_NODE_PATH.length + 1,
-        pathname.length - statusSuffix.length,
-      ),
-    );
-    return id === null ? null : { kind: "node-status", id };
-  }
   const approveSuffix = "/approve";
-  if (
-    pathname.startsWith(`${DASHBOARD_GOAL_PATH}/`) &&
-    pathname.endsWith(approveSuffix)
-  ) {
-    const id = decodeSegment(
-      pathname.slice(
-        DASHBOARD_GOAL_PATH.length + 1,
-        pathname.length - approveSuffix.length,
-      ),
+  /** `<prefix>/<id><suffix>` → the id, or `null` when the shape is not that. */
+  const idBefore = (prefix: string, suffix: string): string | null => {
+    if (!pathname.startsWith(`${prefix}/`) || !pathname.endsWith(suffix)) {
+      return null;
+    }
+    return decodeSegment(
+      pathname.slice(prefix.length + 1, pathname.length - suffix.length),
     );
-    return id === null ? null : { kind: "goal-approve", id };
-  }
+  };
+
+  const nodeId = idBefore(DASHBOARD_NODE_PATH, statusSuffix);
+  if (nodeId !== null) return { kind: "node-status", id: nodeId };
+
+  const bugId = idBefore(DASHBOARD_BUG_PATH, statusSuffix);
+  if (bugId !== null) return { kind: "bug-status", id: bugId };
+
+  const approveId = idBefore(DASHBOARD_GOAL_PATH, approveSuffix);
+  if (approveId !== null) return { kind: "goal-approve", id: approveId };
+
+  const goalId = idBefore(DASHBOARD_GOAL_PATH, statusSuffix);
+  if (goalId !== null) return { kind: "goal-status", id: goalId };
+
   return null;
 }
 
@@ -735,6 +744,56 @@ export class DashboardHttpServer {
         });
         this.afterWrite(projectKey, watermark);
         const response: LeafStatusResponse = { ok: true, node };
+        this.sendJson(res, 200, response);
+        return;
+      }
+
+      if (route.kind === "bug-status") {
+        const parsed = bugStatusRequestSchema.safeParse(body);
+        if (!parsed.success) {
+          this.sendJson(res, 400, { error: issueMessage(parsed.error) });
+          return;
+        }
+        if (this.store.getBug(projectKey, route.id) === null) {
+          this.sendJson(res, 404, { error: "not found" });
+          return;
+        }
+        const bug = this.store.setBugStatus({
+          projectKey,
+          id: route.id,
+          status: parsed.data.status,
+          actor: UI_ACTOR,
+          ...(parsed.data.expectedRevision === undefined
+            ? {}
+            : { expectedRevision: parsed.data.expectedRevision }),
+        });
+        this.afterWrite(projectKey, watermark);
+        const response: BugStatusResponse = { ok: true, bug };
+        this.sendJson(res, 200, response);
+        return;
+      }
+
+      if (route.kind === "goal-status") {
+        const parsed = goalStatusRequestSchema.safeParse(body);
+        if (!parsed.success) {
+          this.sendJson(res, 400, { error: issueMessage(parsed.error) });
+          return;
+        }
+        if (this.store.getGoal(projectKey, route.id) === null) {
+          this.sendJson(res, 404, { error: "not found" });
+          return;
+        }
+        const goal = this.store.setGoalStatus({
+          projectKey,
+          id: route.id,
+          status: parsed.data.status,
+          actor: UI_ACTOR,
+          ...(parsed.data.expectedRevision === undefined
+            ? {}
+            : { expectedRevision: parsed.data.expectedRevision }),
+        });
+        this.afterWrite(projectKey, watermark);
+        const response: GoalStatusResponse = { ok: true, goal };
         this.sendJson(res, 200, response);
         return;
       }
