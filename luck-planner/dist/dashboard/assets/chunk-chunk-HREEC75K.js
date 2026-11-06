@@ -32150,6 +32150,7 @@ var nodeKindSchema = external_exports.enum([
   "leaf"
 ]);
 var NODE_KINDS = nodeKindSchema.options;
+var UI_ACTOR = "user";
 var leafStatusSchema = external_exports.enum([
   "draft",
   "ready",
@@ -32221,6 +32222,22 @@ var historyEntrySchema = external_exports.object({
   result: external_exports.string(),
   at: timestampSchema
 });
+var statusNoteSchema = external_exports.object({
+  entityType: historyEntityTypeSchema,
+  entityId: idSchema,
+  actor: actorSchema.nullable(),
+  revision: revisionSchema,
+  result: external_exports.string(),
+  at: timestampSchema
+});
+function statusOverrideReason(note) {
+  if (note.actor === UI_ACTOR) return null;
+  const separator = " \u2014 ";
+  const index = note.result.indexOf(separator);
+  if (index < 0) return null;
+  const reason = note.result.slice(index + separator.length).trim();
+  return reason.length > 0 ? reason : null;
+}
 
 // shared/goals.ts
 var goalStatusSchema = external_exports.enum([
@@ -34067,6 +34084,8 @@ export {
   LEAF_TRANSITIONS,
   nodeSchema,
   historyEntrySchema,
+  statusNoteSchema,
+  statusOverrideReason,
   goalStatusSchema,
   GOAL_STATUSES,
   GOAL_TRANSITIONS,

@@ -1294,6 +1294,47 @@ body {
   outline: none;
 }
 
+/* 0.51.2 — the same note inside the modal and the 2D details panel. */
+.lp-details-override-line {
+  margin: 0;
+  font-size: 12px;
+  color: var(--lp-text, #e6e9ef);
+}
+
+.lp-details-override-label {
+  color: var(--lp-accent, #5b9dff);
+}
+
+.lp-details-bug-open {
+  width: 100%;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  background: transparent;
+}
+
+.lp-details-bug-open:hover,
+.lp-details-bug-open:focus-visible {
+  border-color: var(--lp-accent, #5b9dff);
+  outline: none;
+}
+
+/* 0.51.2 — why an agent moved a status the owner had set. Visible on the
+   card, not only in the audit trail: the reason is the point of the rule. */
+.lp-plain-card-override {
+  margin-top: 4px;
+  padding: 4px 6px;
+  border-left: 2px solid var(--lp-accent, #5b9dff);
+  background: rgba(91, 157, 255, 0.08);
+  border-radius: 0 4px 4px 0;
+  font-size: 11px;
+  color: var(--lp-text, #e6e9ef);
+}
+
+.lp-plain-card-override-label {
+  color: var(--lp-accent, #5b9dff);
+}
+
 /* Подсказка «Следующий шаг» под карточкой, требующей внимания. */
 .lp-plain-card-nextstep {
   margin-top: 6px;
@@ -1472,4 +1513,59 @@ body {
   min-height: 0;
   padding: 12px;
   overflow-y: auto;
+}
+
+/* 0.51.2 — the 2D planning strip: goals (the frame appears only after the plan
+   materializes) and incidents no leaf can lead to. One row of chips so the
+   diagram can reach the same lifecycles the board offers. */
+.lp-planning-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--lp-border, #262b36);
+  background: var(--lp-surface, #171a21);
+}
+
+.lp-planning-strip-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lp-muted, #8b93a3);
+}
+
+.lp-planning-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 3px 8px;
+  border: 1px solid var(--lp-border, #262b36);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lp-text, #e6e9ef);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lp-planning-chip:hover,
+.lp-planning-chip:focus-visible {
+  border-color: var(--lp-accent, #5b9dff);
+  outline: none;
+}
+
+.lp-planning-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-planning-chip-status {
+  font-weight: 600;
+}
+
+.lp-planning-chip-override {
+  color: var(--lp-accent, #5b9dff);
 }

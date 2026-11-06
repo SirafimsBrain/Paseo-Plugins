@@ -31,6 +31,8 @@ import {
   PLAIN_ZONE_LABELS,
   PLAIN_ZONES,
   cardStatusActions,
+  overrideIndex,
+  overrideOf,
   plainReveal,
   plainVisibleCardCount,
   togglePlainSection,
@@ -738,5 +740,64 @@ describe("cardStatusActions", () => {
     for (const status of BUG_STATUSES) {
       expect(cardStatusActions("bug", status).length).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * The agent's reason on the card (0.51.2).
+ *
+ * `/api/tree` carries the newest status row per entity; the board turns it into
+ * a note only when the mover was an agent and the row carries a reason, so a
+ * person's own move never shows up as an "override".
+ */
+describe("overrideIndex / the card's reason", () => {
+  const notes = [
+    {
+      entityType: "node" as const,
+      entityId: "leaf-a",
+      actor: "agent:coder",
+      revision: 4,
+      result: "deferred → in_progress — step 2 depends on step 1",
+      at: T0,
+    },
+    {
+      entityType: "node" as const,
+      entityId: "leaf-b",
+      actor: "user",
+      revision: 3,
+      result: "in_progress → done — a human's own note",
+      at: T0,
+    },
+  ];
+
+  it("keeps only an agent's reasoned move", () => {
+    const index = overrideIndex(notes);
+    expect(overrideOf(index, "node", "leaf-a")).toEqual({
+      reason: "step 2 depends on step 1",
+      actor: "agent:coder",
+      at: T0,
+    });
+    expect(overrideOf(index, "node", "leaf-b")).toBeNull();
+    expect(overrideOf(index, "goal", "leaf-a")).toBeNull();
+  });
+
+  it("attaches the reason to the card and leaves the others alone", () => {
+    const board = buildPlainBoard(mktree(fixture().nodes, { statusNotes: notes }));
+    const cards = board.zones.flatMap((zone) =>
+      zone.groups.flatMap((group) => groupCards(group)),
+    );
+    expect(cards.find((card) => card.entityId === "leaf-a")?.override).toEqual({
+      reason: "step 2 depends on step 1",
+      actor: "agent:coder",
+      at: T0,
+    });
+    expect(cards.find((card) => card.entityId === "leaf-b")?.override).toBeNull();
+
+    // A payload without the field (an older server) simply has no notes.
+    const plain = buildPlainBoard(fixture());
+    const plainCards = plain.zones.flatMap((zone) =>
+      zone.groups.flatMap((group) => groupCards(group)),
+    );
+    expect(plainCards.every((card) => card.override === null)).toBe(true);
   });
 });

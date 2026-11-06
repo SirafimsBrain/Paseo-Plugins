@@ -442,6 +442,20 @@ function Card(props: {
           {nextStep}
         </div>
       ) : null}
+      {/*
+       * An agent moved a status the person had set by hand, so the store
+       * demanded a reason and the audit row carries it (0.51.2). The owner
+       * should not have to open the history to learn what happened.
+       */}
+      {card.override !== null ? (
+        <div
+          className="lp-plain-card-override"
+          title={`${card.override.actor} · ${new Date(card.override.at).toLocaleString()}`}
+        >
+          <span className="lp-plain-card-override-label">↺ Причина агента:</span>{" "}
+          <span className="lp-plain-card-override-reason">{card.override.reason}</span>
+        </div>
+      ) : null}
       {props.write.canWrite && actions.length > 0 ? (
         <div className="lp-plain-card-actions">
           {actions.map((action) => (

@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import type { Bug } from "../../../shared/links";
-import { cardStatusActions } from "../plain";
+import { cardStatusActions, type PlainStatusOverride } from "../plain";
 
 export interface BugDetailContentProps {
   readonly bug: Bug;
@@ -14,6 +14,8 @@ export interface BugDetailContentProps {
   readonly pendingStatus?: string | null;
   /** The last refusal, in the server's words (0.51.1). */
   readonly error?: string;
+  /** The agent's reason for the last status move on this incident (0.51.2). */
+  readonly override?: PlainStatusOverride | null;
 }
 
 export function BugDetailContent(props: BugDetailContentProps): ReactElement {
@@ -32,6 +34,18 @@ export function BugDetailContent(props: BugDetailContentProps): ReactElement {
           <span className="lp-details-row-value">{bug.status}</span>
         </div>
       </div>
+      {props.override !== undefined && props.override !== null ? (
+        <div className="lp-details-section lp-details-override">
+          <p className="lp-details-override-line">
+            <span className="lp-details-override-label">↺ Agent override:</span>{" "}
+            {props.override.reason}
+          </p>
+          <span className="lp-details-hint">
+            {props.override.actor} — the previous status was set by hand, so the
+            move came with a reason.
+          </span>
+        </div>
+      ) : null}
       {props.onSetStatus !== undefined && cardStatusActions("bug", bug.status).length > 0 ? (
         <div className="lp-details-section lp-details-write">
           <h3 className="lp-details-subtitle">Lifecycle</h3>

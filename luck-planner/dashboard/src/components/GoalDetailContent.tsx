@@ -2,7 +2,7 @@ import { useState, type ReactElement } from "react";
 import { canApproveGoal } from "../../../shared/goals";
 import type { Goal } from "../../../shared/goals";
 import { GOAL_STATUS_COLORS, GOAL_STATUS_LABELS } from "../colors";
-import { cardStatusActions } from "../plain";
+import { cardStatusActions, type PlainStatusOverride } from "../plain";
 
 /**
  * A high goal in the details modal (stage K2), with the approval gate (L8).
@@ -39,6 +39,8 @@ export interface GoalDetailContentProps {
   readonly onSetStatus?: (status: string) => void;
   /** Status of a write in flight, or `null` (0.51.1). */
   readonly pendingStatus?: string | null;
+  /** The agent's reason for the last status move on this goal (0.51.2). */
+  readonly override?: PlainStatusOverride | null;
 }
 
 export function GoalDetailContent(props: GoalDetailContentProps): ReactElement {
@@ -92,6 +94,18 @@ export function GoalDetailContent(props: GoalDetailContentProps): ReactElement {
           </span>
         </div>
       </div>
+      {props.override !== undefined && props.override !== null ? (
+        <div className="lp-details-section lp-details-override">
+          <p className="lp-details-override-line">
+            <span className="lp-details-override-label">↺ Agent override:</span>{" "}
+            {props.override.reason}
+          </p>
+          <span className="lp-details-hint">
+            {props.override.actor} — the previous status was set by hand, so the
+            move came with a reason.
+          </span>
+        </div>
+      ) : null}
       {props.onSetStatus !== undefined &&
       cardStatusActions("goal", goal.status).length > 0 ? (
         <div className="lp-details-section lp-details-write">

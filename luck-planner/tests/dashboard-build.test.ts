@@ -489,6 +489,69 @@ describe("source contracts the bundler cannot tell us", () => {
     expect(css).toContain(".lp-details-status-actions {");
     expect(css).toContain(".lp-plain-card-actions {");
   });
+  it("keeps the 2D diagram able to reach what the board can do", () => {
+    // 0.51.2: the plain board is primary, and the diagram must not fall behind
+    // it. A goal frame and an incident row now open their modal, which is where
+    // the goal and incident lifecycles live; the override reason is shown in
+    // both surfaces, from the same payload field.
+    const canvas = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "Canvas.tsx"),
+      "utf8",
+    );
+    expect(canvas).toContain('node.type === "goalFrame"');
+    expect(canvas).toContain("onSelectGoal");
+
+    const nodeDetail = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "NodeDetailContent.tsx"),
+      "utf8",
+    );
+    expect(nodeDetail).toContain("onSelectBug");
+    expect(nodeDetail).toContain("lp-details-override");
+
+    const app = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "app.tsx"),
+      "utf8",
+    );
+    expect(app).toContain("onSelectGoal={(goalId) => setModal({ kind: \"goal\", id: goalId })}");
+    expect(app).toContain("onSelectBug={onSelectBug}");
+    expect(app).toContain("overrideOf(overrides, \"node\"");
+    expect(app).toContain("<PlanningStrip");
+
+    // Goals without a materialized frame and incidents no leaf can lead to have
+    // no place on the diagram; the strip is how 2D reaches their lifecycles
+    // instead of leaving them to the board alone.
+    const strip = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "PlanningStrip.tsx"),
+      "utf8",
+    );
+    expect(strip).toContain("lp-planning-chip");
+    expect(strip).toContain("props.bugAttachments");
+    expect(strip).toContain("override");
+
+    const plainView = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "components", "PlainView.tsx"),
+      "utf8",
+    );
+    expect(plainView).toContain("lp-plain-card-override");
+
+    // `deferred` reaches the diagram through the one palette it shares with the
+    // board, and the legend lists statuses from that palette.
+    const colors = fs.readFileSync(
+      path.join(ROOT, "dashboard", "src", "colors.ts"),
+      "utf8",
+    );
+    expect(colors).toContain('deferred: "Deferred"');
+    expect(colors).toContain("STATUS_PROGRESS");
+
+    const js = fs.readFileSync(APP_JS, "utf8");
+    expect(js).toContain("lp-plain-card-override");
+    expect(js).toContain("goalFrame");
+    expect(js).toContain("lp-planning-strip");
+    const css = fs.readFileSync(APP_CSS, "utf8");
+    expect(css).toContain(".lp-plain-card-override {");
+    expect(css).toContain(".lp-details-override-line {");
+    expect(css).toContain(".lp-planning-strip {");
+  });
 });
 
 describe("the built SPA served by the real HTTP server", () => {

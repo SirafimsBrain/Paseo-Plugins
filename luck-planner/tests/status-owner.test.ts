@@ -16,7 +16,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LuckPlannerStore, StaleRevisionError } from "../server/store";
-import { UI_ACTOR, type Node } from "../shared/tree";
+import { buildTreeResponse } from "../server/http-server";
+import { treeResponseSchema } from "../shared/api";
+import {
+  UI_ACTOR,
+  statusOverrideReason,
+  type Node,
+} from "../shared/tree";
 import type { Bug } from "../shared/links";
 import type { Goal } from "../shared/goals";
 
@@ -306,5 +312,133 @@ describe("the lifecycle writers", () => {
       }),
     ).toThrow(StaleRevisionError);
     expect(store.getGoal(P, goal.id)?.status).toBe("proposed");
+  });
+});
+
+/**
+ * The note the board reads (0.51.2).
+ *
+ * `/api/tree` carries the newest status audit row per entity, and the dashboards
+ * turn `deferred → in_progress — step 2 depends on step 1` back into the reason.
+ * The parser is shared, so the card, the modal and the 2D panel cannot disagree
+ * about which half is the explanation.
+ */
+describe("the status note", () => {
+  it("extracts an agent's reason and ignores a person's move", () => {
+    expect(
+      statusOverrideReason({
+        entityType: "node",
+        entityId: "n1",
+        actor: "agent:coder",
+        revision: 3,
+        result: "deferred → in_progress — step 2 depends on step 1",
+        at: 1,
+      }),
+    ).toBe("step 2 depends on step 1");
+
+    expect(
+      statusOverrideReason({
+        entityType: "node",
+        entityId: "n1",
+        actor: UI_ACTOR,
+        revision: 3,
+        result: "deferred → in_progress — a human's own note",
+        at: 1,
+      }),
+    ).toBeNull();
+
+    expect(
+      statusOverrideReason({
+        entityType: "node",
+        entityId: "n1",
+        actor: "agent:coder",
+        revision: 3,
+        result: "draft → ready",
+        at: 1,
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps a reason that itself contains the separator", () => {
+    expect(
+      statusOverrideReason({
+        entityType: "bug",
+        entityId: "b1",
+        actor: "agent:coder",
+        revision: 2,
+        result: "open → investigating — blocked by schema — retry later",
+        at: 1,
+      }),
+    ).toBe("blocked by schema — retry later");
+  });
+
+  it("reports the newest status row per entity, and only status rows", () => {
+    const store = openStore();
+    const { leaf } = seed(store);
+    const bug = seedBug(store, leaf);
+    store.setStatus({ projectKey: P, id: leaf.id, status: "ready", actor: UI_ACTOR });
+    store.setStatus({
+      projectKey: P,
+      id: leaf.id,
+      status: "claimed",
+      actor: AGENT,
+      reason: "taking this one",
+    });
+    store.setStatus({
+      projectKey: P,
+      id: leaf.id,
+      status: "in_progress",
+      actor: AGENT,
+    });
+    store.setBugStatus({
+      projectKey: P,
+      id: bug.id,
+      status: "investigating",
+      actor: UI_ACTOR,
+    });
+    // A rename bumps the revision but is not a status row: it must not hide the
+    // status note the card shows.
+    store.updateNode({
+      projectKey: P,
+      id: leaf.id,
+      name: "retry failed charges (v2)",
+      actor: AGENT,
+    });
+
+    const notes = store.latestStatusNotes(P);
+    const leafNote = notes.find(
+      (note) => note.entityType === "node" && note.entityId === leaf.id,
+    )!;
+    expect(leafNote.result).toBe("claimed → in_progress");
+    expect(leafNote.actor).toBe(AGENT);
+    expect(leafNote.revision).toBe(4);
+    expect(
+      notes.find((note) => note.entityType === "bug" && note.entityId === bug.id),
+    ).toMatchObject({ result: "open → investigating", actor: UI_ACTOR });
+    // The bug's `create` row is not a status note, and neither is the rename.
+    expect(notes).toHaveLength(2);
+  });
+
+  it("carries the override reason into the tree payload", () => {
+    const store = openStore();
+    const { leaf } = seed(store);
+    store.setStatus({
+      projectKey: P,
+      id: leaf.id,
+      status: "deferred",
+      actor: UI_ACTOR,
+    });
+    store.setStatus({
+      projectKey: P,
+      id: leaf.id,
+      status: "in_progress",
+      actor: AGENT,
+      reason: "step 2 depends on step 1",
+    });
+
+    const tree = buildTreeResponse(store, P);
+    const parsed = treeResponseSchema.parse(tree);
+    const note = parsed.statusNotes!.find((entry) => entry.entityId === leaf.id)!;
+    expect(statusOverrideReason(note)).toBe("step 2 depends on step 1");
   });
 });

@@ -71,6 +71,7 @@ import {
   type LeafStatus,
   type Node,
   type NodeKind,
+  type StatusNote,
 } from "../shared/tree";
 
 /**
@@ -905,6 +906,48 @@ export class LuckPlannerStore {
       )
       .all(projectKey, entityId) as unknown as HistoryRow[];
     return rows.map(rowToHistory);
+  }
+
+  /**
+   * The newest **status** audit row per entity of one project (0.51.2).
+   *
+   * The board shows a short note per card ("an agent moved this, because …")
+   * and cannot afford one history page per card, so the tree payload carries
+   * exactly these rows: a window over `history` picks the latest row per
+   * `(entity_type, entity_id)` where the action is `status`. One indexed scan,
+   * ordered by entity so the answer is deterministic.
+   */
+  latestStatusNotes(projectKey: string): StatusNote[] {
+    const project = requireText(projectKey, "project key");
+    const rows = this.db
+      .prepare(
+        `SELECT entity_type, entity_id, actor, revision, result, at FROM (
+           SELECT entity_type, entity_id, actor, revision, result, at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY entity_type, entity_id ORDER BY id DESC
+                  ) AS rank
+             FROM history
+            WHERE project_key = ? AND action = 'status'
+         )
+         WHERE rank = 1
+         ORDER BY entity_type, entity_id`,
+      )
+      .all(project) as Array<{
+      entity_type: string;
+      entity_id: string;
+      actor: string | null;
+      revision: number;
+      result: string;
+      at: number;
+    }>;
+    return rows.map((row) => ({
+      entityType: row.entity_type as StatusNote["entityType"],
+      entityId: row.entity_id,
+      actor: row.actor,
+      revision: row.revision,
+      result: row.result,
+      at: row.at,
+    }));
   }
 
   /**

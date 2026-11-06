@@ -59,6 +59,13 @@ export interface CanvasProps {
   readonly selectedId: string | null;
   /** Sets/clears the selection when a node or the pane is clicked (G4). */
   readonly onSelectNode: (id: string | null) => void;
+  /**
+   * A goal frame was clicked (0.51.2). Frames are drawn as synthetic nodes
+   * whose id is `goal:<id>`, not a tree node, so selecting them as a node
+   * would fetch a detail that does not exist — the app opens the goal modal
+   * instead, which is where the goal's lifecycle lives.
+   */
+  readonly onSelectGoal?: (goalId: string) => void;
   /** Latest camera-focus request, or `null` (G4 search). */
   readonly focus: FocusRequest | null;
   /** Empty-state overrides — the app names filters as the reason (G4). */
@@ -215,7 +222,14 @@ export function Canvas(props: CanvasProps): ReactElement {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodeClick={(_event, node) => onSelectNode(node.id)}
+        onNodeClick={(_event, node) => {
+          if (node.type === "goalFrame") {
+            const goalId = (node.data as { goalId?: unknown }).goalId;
+            if (typeof goalId === "string") props.onSelectGoal?.(goalId);
+            return;
+          }
+          onSelectNode(node.id);
+        }}
         onPaneClick={() => onSelectNode(null)}
         // React Flow's own wrapper would add a second tab stop per node; the
         // roving tabindex on our node body is the one that counts (L9).

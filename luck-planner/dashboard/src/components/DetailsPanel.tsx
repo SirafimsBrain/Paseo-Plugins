@@ -20,6 +20,7 @@ import { NodeDetailContent } from "./NodeDetailContent";
 import type { ReactElement, ReactNode } from "react";
 import type { NodeResponse } from "../../../shared/api";
 import type { LeafStatus } from "../../../shared/tree";
+import type { PlainStatusOverride } from "../plain";
 import { growthProgress } from "../../../shared/growth";
 import {
   BEE_STATUS_COLORS,
@@ -59,6 +60,10 @@ export interface DetailsPanelProps {
   readonly pendingStatus?: LeafStatus | null;
   /** The last write refusal for the selected node (L8). */
   readonly writeError?: string;
+  /** The agent's reason for the last status move on this node (0.51.2). */
+  readonly override?: PlainStatusOverride | null;
+  /** Opens the incident modal from the incident list (0.51.2). */
+  readonly onSelectBug?: (bugId: string) => void;
 }
 
 /** "18.10.2026, 14:03" — short local timestamp for the history rows. */
@@ -180,6 +185,8 @@ export function DetailsPanel(props: DetailsPanelProps): ReactElement {
           onSetStatus={props.onSetStatus}
           pendingStatus={props.pendingStatus}
           writeError={props.writeError}
+          override={props.override}
+          onSelectBug={props.onSelectBug}
         />
       )}
     </aside>

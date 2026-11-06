@@ -186,3 +186,40 @@ export const historyEntrySchema = z.object({
   at: timestampSchema,
 });
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
+
+/**
+ * The latest **status** audit row of one entity (0.51.2).
+ *
+ * The board needs to say "an agent moved this, and here is why" without asking
+ * for one history page per card, so `/api/tree` carries the newest status row
+ * per entity: a handful of rows, not the whole trail. `result` keeps the store's
+ * exact wording (`deferred → in_progress — step 2 depends on step 1`), and
+ * {@link statusOverrideReason} is the one place that reads the reason out of it.
+ */
+export const statusNoteSchema = z.object({
+  entityType: historyEntityTypeSchema,
+  entityId: idSchema,
+  actor: actorSchema.nullable(),
+  revision: revisionSchema,
+  result: z.string(),
+  at: timestampSchema,
+});
+export type StatusNote = z.infer<typeof statusNoteSchema>;
+
+/**
+ * The reason an agent gave for a status move, or `null` when there is none.
+ *
+ * A person's own move never carries a reason (they answer to themselves), and
+ * the audit row is the authority on the rest: the store writes
+ * `<from> → <to> — <reason>` for an override, so the first em dash separates
+ * the transition from the explanation. A reason that itself contains the
+ * separator survives: only the first one is split on.
+ */
+export function statusOverrideReason(note: StatusNote): string | null {
+  if (note.actor === UI_ACTOR) return null;
+  const separator = " — ";
+  const index = note.result.indexOf(separator);
+  if (index < 0) return null;
+  const reason = note.result.slice(index + separator.length).trim();
+  return reason.length > 0 ? reason : null;
+}

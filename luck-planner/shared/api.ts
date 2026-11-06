@@ -15,6 +15,7 @@ import {
   leafStatusSchema,
   nodeSchema,
   projectKeySchema,
+  statusNoteSchema,
   timestampSchema,
   type HistoryEntry,
 } from "./tree";
@@ -265,6 +266,12 @@ export const treeResponseSchema = z.object({
   bugAttachments: z.array(bugNodeSchema),
   goals: z.array(goalSchema),
   growth: z.array(growthSchema),
+  /**
+   * The newest **status** audit row per entity (0.51.2), so a card can say
+   * "moved by an agent, because …" without a history request per card. Optional
+   * in the contract: an older server (or a hand-built fixture) still parses.
+   */
+  statusNotes: z.array(statusNoteSchema).optional(),
 });
 
 /**

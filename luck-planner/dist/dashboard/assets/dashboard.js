@@ -74,10 +74,12 @@ import {
   require_react_dom,
   require_with_selector,
   selectionHighlight,
+  statusNoteSchema,
+  statusOverrideReason,
   timestampSchema,
   toggleCollapsed,
   withAlpha
-} from "./chunk-chunk-5BS3GBAV.js";
+} from "./chunk-chunk-HREEC75K.js";
 import {
   __toESM
 } from "./chunk-chunk-IYTTBCGI.js";
@@ -656,7 +658,13 @@ var treeResponseSchema = external_exports.object({
   bugs: external_exports.array(bugSchema),
   bugAttachments: external_exports.array(bugNodeSchema),
   goals: external_exports.array(goalSchema),
-  growth: external_exports.array(growthSchema)
+  growth: external_exports.array(growthSchema),
+  /**
+   * The newest **status** audit row per entity (0.51.2), so a card can say
+   * "moved by an agent, because …" without a history request per card. Optional
+   * in the contract: an older server (or a hand-built fixture) still parses.
+   */
+  statusNotes: external_exports.array(statusNoteSchema).optional()
 });
 var leafStatusRequestSchema = external_exports.object({
   status: leafStatusSchema,
@@ -1310,6 +1318,23 @@ function breadcrumb(index2, node) {
   }
   return names.join(" \u203A ");
 }
+function overrideIndex(notes = []) {
+  const map = /* @__PURE__ */ new Map();
+  for (const note of notes) {
+    if (note.actor === null) continue;
+    const reason = statusOverrideReason(note);
+    if (reason === null) continue;
+    map.set(`${note.entityType}:${note.entityId}`, {
+      reason,
+      actor: note.actor,
+      at: note.at
+    });
+  }
+  return map;
+}
+function overrideOf(index2, entityType, entityId) {
+  return index2.get(`${entityType}:${entityId}`) ?? null;
+}
 function groupId(kind, status) {
   return `${kind}:${status}`;
 }
@@ -1386,6 +1411,7 @@ function buildPlainBoard(input, options = {}) {
   const surviving = matchingWithAncestors(input.nodes, options.filter, { index: index2 });
   const openBugs = openBugIdsByNode(input);
   const growth = growthRollups(input);
+  const overrides = overrideIndex(input.statusNotes ?? []);
   const beeCounts = /* @__PURE__ */ new Map();
   for (const bee of input.bees) {
     beeCounts.set(bee.sourceLeafId, (beeCounts.get(bee.sourceLeafId) ?? 0) + 1);
@@ -1415,7 +1441,8 @@ function buildPlainBoard(input, options = {}) {
       version: node.version,
       openBugCount: openBugs.get(node.id)?.length ?? 0,
       beeCount: beeCounts.get(node.id) ?? 0,
-      growth: growth.get(node.id) ?? null
+      growth: growth.get(node.id) ?? null,
+      override: overrides.get(`node:${node.id}`) ?? null
     };
     const group = groupOf("leaf", node.status);
     group.cards.push(card);
@@ -1434,7 +1461,8 @@ function buildPlainBoard(input, options = {}) {
       revision: goal.revision,
       formalText: goal.formalText,
       planSteps: goal.plan.length,
-      materializedNodeId: goal.materializedNodeId
+      materializedNodeId: goal.materializedNodeId,
+      override: overrides.get(`goal:${goal.id}`) ?? null
     };
     groupOf("goal", goal.status).cards.push(card);
   }
@@ -1457,7 +1485,8 @@ function buildPlainBoard(input, options = {}) {
       status: bug.status,
       revision: bug.revision,
       severity: bug.severity,
-      attachmentCount: attachmentCounts.get(bug.id) ?? 0
+      attachmentCount: attachmentCounts.get(bug.id) ?? 0,
+      override: overrides.get(`bug:${bug.id}`) ?? null
     };
     groupOf("bug", bug.status).cards.push(card);
   }
@@ -11279,7 +11308,14 @@ function Canvas(props) {
             edges,
             nodeTypes,
             edgeTypes,
-            onNodeClick: (_event, node) => onSelectNode(node.id),
+            onNodeClick: (_event, node) => {
+              if (node.type === "goalFrame") {
+                const goalId = node.data.goalId;
+                if (typeof goalId === "string") props.onSelectGoal?.(goalId);
+                return;
+              }
+              onSelectNode(node.id);
+            },
             onPaneClick: () => onSelectNode(null),
             nodesFocusable: false,
             fitView: true,
@@ -11323,7 +11359,7 @@ function Row(props) {
   ] });
 }
 function NodeDetailContent(props) {
-  const { detail, resolveName, onSetStatus, pendingStatus, writeError } = props;
+  const { detail, resolveName, onSetStatus, pendingStatus, writeError, override } = props;
   const { node, path, children: children2, bees, bugs, blockingBugs, history, growth, beeCycle } = detail;
   const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
   const allowed = node.kind === "leaf" && node.archivedAt === null ? LEAF_TRANSITIONS[node.status] : null;
@@ -11369,6 +11405,19 @@ function NodeDetailContent(props) {
         node.updatedBy ? ` \xB7 ${node.updatedBy}` : ""
       ] })
     ] }),
+    override !== void 0 && override !== null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section lp-details-override", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("p", { className: "lp-details-override-line", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-override-label", children: "\u21BA Agent override:" }),
+        " ",
+        override.reason
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-hint", children: [
+        override.actor,
+        " \xB7 ",
+        formatTime(override.at),
+        " \u2014 the previous status was set by hand, so the agent had to say why it moved it."
+      ] })
+    ] }) : null,
     allowed !== null && allowed.length > 0 && onSetStatus !== void 0 ? (
       /*
        * Stage L8: the only write a person makes while reading the diagram.
@@ -11472,31 +11521,40 @@ function NodeDetailContent(props) {
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "lp-details-list", children: bugs.map((bug) => {
         const isBlocking = blockingIds.has(bug.id);
-        return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
-          "li",
+        const body = /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+            "span",
+            {
+              className: "lp-details-bug-sev",
+              style: {
+                color: isBlocking ? BUG_BADGE_COLOR : void 0
+              },
+              children: bug.severity
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-bug-title", children: bug.title }),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-hint", children: bug.status })
+        ] });
+        const className = isBlocking ? "lp-details-bug lp-details-bug-blocking" : "lp-details-bug";
+        return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("li", { children: props.onSelectBug === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+          "div",
           {
-            className: isBlocking ? "lp-details-bug lp-details-bug-blocking" : "lp-details-bug",
-            style: {
-              borderColor: isBlocking ? BUG_BADGE_COLOR : void 0
-            },
+            className,
+            style: { borderColor: isBlocking ? BUG_BADGE_COLOR : void 0 },
             title: bug.description,
-            children: [
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-                "span",
-                {
-                  className: "lp-details-bug-sev",
-                  style: {
-                    color: isBlocking ? BUG_BADGE_COLOR : void 0
-                  },
-                  children: bug.severity
-                }
-              ),
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-bug-title", children: bug.title }),
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-hint", children: bug.status })
-            ]
-          },
-          bug.id
-        );
+            children: body
+          }
+        ) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+          "button",
+          {
+            type: "button",
+            className: `${className} lp-details-bug-open`,
+            style: { borderColor: isBlocking ? BUG_BADGE_COLOR : void 0 },
+            title: `${bug.description || bug.title} \u2014 open the incident to move its status`,
+            onClick: () => props.onSelectBug?.(bug.id),
+            children: body
+          }
+        ) }, bug.id);
       }) })
     ] }) : null,
     bees.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section", children: [
@@ -11647,7 +11705,9 @@ function DetailsPanel(props) {
         resolveName,
         onSetStatus: props.onSetStatus,
         pendingStatus: props.pendingStatus,
-        writeError: props.writeError
+        writeError: props.writeError,
+        override: props.override,
+        onSelectBug: props.onSelectBug
       }
     )
   ] });
@@ -11760,6 +11820,17 @@ function GoalDetailContent(props) {
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-row-value", children: goal.materializedNodeId === null ? "not yet" : props.resolveName?.(goal.materializedNodeId) ?? goal.materializedNodeId })
       ] })
     ] }),
+    props.override !== void 0 && props.override !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-override", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { className: "lp-details-override-line", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "lp-details-override-label", children: "\u21BA Agent override:" }),
+        " ",
+        props.override.reason
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "lp-details-hint", children: [
+        props.override.actor,
+        " \u2014 the previous status was set by hand, so the move came with a reason."
+      ] })
+    ] }) : null,
     props.onSetStatus !== void 0 && cardStatusActions("goal", goal.status).length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "lp-details-subtitle", children: "Lifecycle" }),
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "lp-details-status-actions", children: cardStatusActions("goal", goal.status).map((action) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
@@ -11859,6 +11930,17 @@ function BugDetailContent(props) {
         /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-details-row-value", children: bug.status })
       ] })
     ] }),
+    props.override !== void 0 && props.override !== null ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-details-section lp-details-override", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { className: "lp-details-override-line", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "lp-details-override-label", children: "\u21BA Agent override:" }),
+        " ",
+        props.override.reason
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "lp-details-hint", children: [
+        props.override.actor,
+        " \u2014 the previous status was set by hand, so the move came with a reason."
+      ] })
+    ] }) : null,
     props.onSetStatus !== void 0 && cardStatusActions("bug", bug.status).length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "lp-details-section lp-details-write", children: [
       /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { className: "lp-details-subtitle", children: "Lifecycle" }),
       /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "lp-details-status-actions", children: cardStatusActions("bug", bug.status).map((action) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
@@ -12242,6 +12324,18 @@ function Card(props) {
       " ",
       nextStep
     ] }) : null,
+    card.override !== null ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
+      "div",
+      {
+        className: "lp-plain-card-override",
+        title: `${card.override.actor} \xB7 ${new Date(card.override.at).toLocaleString()}`,
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-card-override-label", children: "\u21BA \u041F\u0440\u0438\u0447\u0438\u043D\u0430 \u0430\u0433\u0435\u043D\u0442\u0430:" }),
+          " ",
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-card-override-reason", children: card.override.reason })
+        ]
+      }
+    ) : null,
     props.write.canWrite && actions.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-actions", children: [
       actions.map((action) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
         "button",
@@ -12429,9 +12523,95 @@ function PlainView(props) {
   ] });
 }
 
+// dashboard/src/components/PlanningStrip.tsx
+var import_jsx_runtime12 = __toESM(require_jsx_runtime());
+function chipText(text) {
+  const first = text.split("\n")[0].trim();
+  return first.length > 64 ? `${first.slice(0, 63)}\u2026` : first;
+}
+function PlanningStrip(props) {
+  const attached = new Set(props.bugAttachments.map((link2) => link2.bugId));
+  const looseBugs = props.bugs.filter((bug) => !attached.has(bug.id));
+  const sortedGoals = [...props.goals].sort(
+    (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+  );
+  if (sortedGoals.length === 0 && looseBugs.length === 0) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(
+    "div",
+    {
+      className: "lp-planning-strip",
+      role: "group",
+      "aria-label": "Goals and incidents the diagram cannot draw",
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "lp-planning-strip-label", children: "Planning" }),
+        sortedGoals.map((goal) => {
+          const override = props.overrides.get(`goal:${goal.id}`);
+          return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(
+            "button",
+            {
+              type: "button",
+              className: "lp-planning-chip",
+              "data-kind": "goal",
+              "data-status": goal.status,
+              title: (override !== void 0 ? `\u21BA ${override.reason}
+` : "") + `${goal.formalText}
+${GOAL_STATUS_LABELS[goal.status]} \xB7 ${goal.plan.length} step(s)` + (goal.materializedNodeId === null ? " \xB7 not in the tree yet" : ""),
+              onClick: () => props.onSelectGoal(goal.id),
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { "aria-hidden": "true", children: "\u{1F3AF}" }),
+                /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "lp-planning-chip-text", children: chipText(goal.formalText) }),
+                /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+                  "span",
+                  {
+                    className: "lp-planning-chip-status",
+                    style: { color: GOAL_STATUS_COLORS[goal.status] },
+                    children: GOAL_STATUS_LABELS[goal.status]
+                  }
+                ),
+                override !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "lp-planning-chip-override", "aria-label": "An agent moved this status and said why", children: "\u21BA" }) : null
+              ]
+            },
+            goal.id
+          );
+        }),
+        looseBugs.map((bug) => {
+          const override = props.overrides.get(`bug:${bug.id}`);
+          return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(
+            "button",
+            {
+              type: "button",
+              className: "lp-planning-chip",
+              "data-kind": "bug",
+              "data-status": bug.status,
+              title: (override !== void 0 ? `\u21BA ${override.reason}
+` : "") + `${bug.title}
+${BUG_STATUS_LABELS[bug.status]} \xB7 ${bug.severity} \xB7 no leaf attached`,
+              onClick: () => props.onSelectBug(bug.id),
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { "aria-hidden": "true", children: "\u{1F41E}" }),
+                /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "lp-planning-chip-text", children: chipText(bug.title) }),
+                /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+                  "span",
+                  {
+                    className: "lp-planning-chip-status",
+                    style: { color: BUG_STATUS_COLORS[bug.status] },
+                    children: BUG_STATUS_LABELS[bug.status]
+                  }
+                ),
+                override !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "lp-planning-chip-override", "aria-label": "An agent moved this status and said why", children: "\u21BA" }) : null
+              ]
+            },
+            bug.id
+          );
+        })
+      ]
+    }
+  );
+}
+
 // dashboard/src/components/ThreeView.tsx
 var import_react11 = __toESM(require_react());
-var import_jsx_runtime12 = __toESM(require_jsx_runtime());
+var import_jsx_runtime13 = __toESM(require_jsx_runtime());
 function ThreeView(props) {
   const containerRef = (0, import_react11.useRef)(null);
   const handleRef = (0, import_react11.useRef)(null);
@@ -12489,7 +12669,7 @@ function ThreeView(props) {
   (0, import_react11.useEffect)(() => {
     handleRef.current?.setInteraction(props.interaction);
   }, [props.interaction]);
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
     "div",
     {
       className: "lp-scene3d",
@@ -12502,7 +12682,7 @@ function ThreeView(props) {
 
 // dashboard/src/components/Toolbar.tsx
 var import_react12 = __toESM(require_react());
-var import_jsx_runtime13 = __toESM(require_jsx_runtime());
+var import_jsx_runtime14 = __toESM(require_jsx_runtime());
 var LIVE_LABELS = {
   connecting: "connecting",
   live: "live",
@@ -12514,9 +12694,9 @@ var LIVE_HINTS = {
   offline: "The change stream is down and reconnecting; the data on screen may be stale. Reload the tab if the plugin was restarted."
 };
 function Counter(props) {
-  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("span", { className: "lp-counter", title: props.label, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-counter-value", children: props.value }),
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-counter-label", children: props.label })
+  return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("span", { className: "lp-counter", title: props.label, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "lp-counter-value", children: props.value }),
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "lp-counter-label", children: props.label })
   ] });
 }
 function Toolbar(props) {
@@ -12528,21 +12708,21 @@ function Toolbar(props) {
     const query = draft.trim();
     if (query.length > 0) props.onSearch(query);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("header", { className: "lp-toolbar", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-toolbar-identity", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
+  return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("header", { className: "lp-toolbar", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "lp-toolbar-identity", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "lp-toolbar-title", children: "luck-planner" }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "lp-toolbar-project", title: props.projectKey, children: props.projectKey || "no project" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "bees", value: stats2.bees }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "lp-toolbar-counters", "aria-label": "Project counters", children: stats2 === null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "lp-counter-hint", children: "Loading counters\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Counter, { label: "nodes", value: stats2.nodes.total }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Counter, { label: "in progress", value: stats2.leaves.inProgress }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Counter, { label: "done", value: stats2.leaves.done }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Counter, { label: "bees", value: stats2.bees }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Counter, { label: "open bugs", value: stats2.bugs.open }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Counter, { label: "goals", value: stats2.goals.approved })
     ] }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-toolbar-controls", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "lp-toolbar-controls", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("form", { className: "lp-toolbar-search-form", onSubmit: submit, role: "search", children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
         "input",
         {
           className: "lp-toolbar-search",
@@ -12553,7 +12733,7 @@ function Toolbar(props) {
           onChange: (event) => setDraft(event.target.value)
         }
       ) }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -12564,12 +12744,12 @@ function Toolbar(props) {
             kind: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "", children: "All kinds" }),
-            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: "", children: "All kinds" }),
+            NODE_KINDS.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: kind, children: KIND_LABELS[kind] }, kind))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter",
@@ -12580,12 +12760,12 @@ function Toolbar(props) {
             status: event.target.value
           }),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "", children: "All statuses" }),
-            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: "", children: "All statuses" }),
+            LEAF_STATUSES.map((status) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: status, children: STATUS_LABELS[status] }, status))
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
         "input",
         {
           className: "lp-toolbar-filter",
@@ -12601,7 +12781,7 @@ function Toolbar(props) {
           })
         }
       ),
-      props.view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      props.view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "lp-view-switch", role: "group", "aria-label": "Layer", title: "Status: kind shapes, status bars and badges. Growth heat: the same diagram tinted by growth progress.", children: GRAPH_LAYERS.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
         "button",
         {
           type: "button",
@@ -12612,8 +12792,8 @@ function Toolbar(props) {
         },
         candidate
       )) }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "lp-view-switch", role: "group", "aria-label": "View", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
           "button",
           {
             type: "button",
@@ -12624,7 +12804,7 @@ function Toolbar(props) {
             children: "Plain"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
           "button",
           {
             type: "button",
@@ -12634,7 +12814,7 @@ function Toolbar(props) {
             children: "2D"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
           "button",
           {
             type: "button",
@@ -12647,7 +12827,7 @@ function Toolbar(props) {
           }
         )
       ] }),
-      props.themes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
+      props.themes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
         "select",
         {
           className: "lp-toolbar-filter lp-toolbar-theme",
@@ -12656,19 +12836,19 @@ function Toolbar(props) {
           value: themeValue,
           onChange: (event) => props.onThemeChange(event.target.value),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "", children: "Match Paseo" }),
-            props.themes.map((theme) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: theme.id, children: theme.origin === "user" ? `${theme.name} (custom)` : theme.name }, theme.id))
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: "", children: "Match Paseo" }),
+            props.themes.map((theme) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: theme.id, children: theme.origin === "user" ? `${theme.name} (custom)` : theme.name }, theme.id))
           ]
         }
       ) : null,
-      props.roots.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
+      props.roots.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
         "div",
         {
           className: "lp-toolbar-roots",
           role: "group",
           "aria-label": "Trees of this project",
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
               "button",
               {
                 type: "button",
@@ -12679,7 +12859,7 @@ function Toolbar(props) {
                 children: "All trees"
               }
             ),
-            props.roots.map((root2) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+            props.roots.map((root2) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
               "button",
               {
                 type: "button",
@@ -12694,7 +12874,7 @@ function Toolbar(props) {
           ]
         }
       ) : null,
-      props.exportHref.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      props.exportHref.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
         "a",
         {
           className: "lp-toolbar-export",
@@ -12703,7 +12883,7 @@ function Toolbar(props) {
           title: "Download this project as a .json.zip: tree, bees, incidents, goals, growth and the audit trail.",
           children: "Export"
         }
-      ) : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      ) : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
         "span",
         {
           className: "lp-toolbar-export lp-toolbar-export-disabled",
@@ -12713,25 +12893,25 @@ function Toolbar(props) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "lp-toolbar-status", role: "status", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
         "span",
         {
           className: `lp-live lp-live-${props.live}`,
           title: LIVE_HINTS[props.live],
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "lp-live-dot", "aria-hidden": "true" }),
             LIVE_LABELS[props.live]
           ]
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "lp-toolbar-status-text", children: props.statusLine })
     ] })
   ] });
 }
 
 // dashboard/src/app.tsx
-var import_jsx_runtime14 = __toESM(require_jsx_runtime());
+var import_jsx_runtime15 = __toESM(require_jsx_runtime());
 function applyTheme(themeId, catalog) {
   const theme = catalog?.themes.find((entry) => entry.id === themeId) ?? null;
   if (theme === null) return;
@@ -13247,6 +13427,13 @@ function App() {
       rootName: rootNames.get(rootIdOf(nodes, node.id) ?? "") ?? ""
     }));
   }, [scopedTree, forest]);
+  const overrides = (0, import_react13.useMemo)(
+    () => overrideIndex(tree?.statusNotes ?? []),
+    [tree]
+  );
+  const onSelectBug = (0, import_react13.useCallback)((bugId) => {
+    setModal({ kind: "bug", id: bugId });
+  }, []);
   const defaultGoalBranch = (0, import_react13.useMemo)(() => {
     const decision = pickGoalParent(tree?.nodes ?? []);
     return decision.ok ? decision.branchId : null;
@@ -13264,8 +13451,8 @@ function App() {
     setDetailsWidth(DEFAULT_DETAILS_WIDTH);
     forgetDetailsWidth(detailsStorage());
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "lp-app", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime15.jsxs)("div", { className: "lp-app", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
       Toolbar,
       {
         projectKey: params.projectKey,
@@ -13290,7 +13477,7 @@ function App() {
         onRootChange: setRootFilter
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime15.jsxs)(
       "div",
       {
         className: view === "plain" ? "lp-body lp-body-plain" : "lp-body",
@@ -13298,7 +13485,7 @@ function App() {
           "--lp-details-width": `${detailsWidth}px`
         },
         children: [
-          view === "plain" ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+          view === "plain" ? /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
             PlainView,
             {
               board: plainBoard,
@@ -13321,7 +13508,7 @@ function App() {
             // Suspended in 0.40.9 (`THREE_VIEW_SUSPENDED`): kept, unreachable —
             // `planViewSwitch` never answers `3d`, so the lazy chunk is never
             // requested and this branch never mounts a renderer.
-            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
               ThreeView,
               {
                 webgl,
@@ -13333,20 +13520,34 @@ function App() {
                 onSceneState
               }
             )
-          ) : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
-            Canvas,
-            {
-              graph,
-              loaded: tree !== null,
-              onToggleNode,
-              selectedId,
-              onSelectNode: setSelectedId,
-              focus,
-              emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
-              emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
-            }
-          ),
-          view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+          ) : /* @__PURE__ */ (0, import_jsx_runtime15.jsxs)(import_jsx_runtime15.Fragment, { children: [
+            tree !== null ? /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
+              PlanningStrip,
+              {
+                goals: tree.goals,
+                bugs: tree.bugs,
+                bugAttachments: tree.bugAttachments,
+                overrides,
+                onSelectGoal: (goalId) => setModal({ kind: "goal", id: goalId }),
+                onSelectBug
+              }
+            ) : null,
+            /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
+              Canvas,
+              {
+                graph,
+                loaded: tree !== null,
+                onToggleNode,
+                selectedId,
+                onSelectNode: setSelectedId,
+                onSelectGoal: (goalId) => setModal({ kind: "goal", id: goalId }),
+                focus,
+                emptyTitle: filtersActive ? "No nodes match the filters" : void 0,
+                emptyText: filtersActive ? "Loosen or clear the kind/status/version filters to see the tree again." : void 0
+              }
+            )
+          ] }),
+          view === "plain" ? null : /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
             DetailsPanel,
             {
               detail,
@@ -13359,13 +13560,15 @@ function App() {
               onWidthReset: onDetailsWidthReset,
               onSetStatus: client === null ? void 0 : (status) => void setStatusAction(status),
               pendingStatus: writePending,
-              writeError
+              writeError,
+              override: detail === null ? null : overrideOf(overrides, "node", detail.node.id),
+              onSelectBug
             }
           )
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime15.jsxs)(
       DetailModal,
       {
         open: modal !== null,
@@ -13375,20 +13578,22 @@ function App() {
           setModal(null);
         },
         children: [
-          modal?.kind === "node" && detail !== null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+          modal?.kind === "node" && detail !== null ? /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
             NodeDetailContent,
             {
               detail,
               resolveName,
               onSetStatus: client === null ? void 0 : (status) => void setStatusAction(status),
               pendingStatus: writePending,
-              writeError
+              writeError,
+              override: overrideOf(overrides, "node", detail.node.id),
+              onSelectBug
             }
           ) : null,
-          modal?.kind === "node" && detail === null ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : null,
+          modal?.kind === "node" && detail === null ? /* @__PURE__ */ (0, import_jsx_runtime15.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : null,
           modal?.kind === "goal" && tree !== null ? (() => {
             const goal = tree.goals.find((g) => g.id === modal.id);
-            return goal ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+            return goal ? /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
               GoalDetailContent,
               {
                 goal,
@@ -13404,13 +13609,14 @@ function App() {
                   goal.revision,
                   status
                 ),
-                pendingStatus: cardPending === `goal:${goal.id}` ? goal.status : null
+                pendingStatus: cardPending === `goal:${goal.id}` ? goal.status : null,
+                override: overrideOf(overrides, "goal", goal.id)
               }
             ) : null;
           })() : null,
           modal?.kind === "bug" && tree !== null ? (() => {
             const bug = tree.bugs.find((b) => b.id === modal.id);
-            return bug ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+            return bug ? /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
               BugDetailContent,
               {
                 bug,
@@ -13421,23 +13627,24 @@ function App() {
                   status
                 ),
                 pendingStatus: cardPending === `bug:${bug.id}` ? bug.status : null,
-                error: cardWriteError
+                error: cardWriteError,
+                override: overrideOf(overrides, "bug", bug.id)
               }
             ) : null;
           })() : null
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(Legend, {})
+    /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(Legend, {})
   ] });
 }
 
 // dashboard/src/main.tsx
-var import_jsx_runtime15 = __toESM(require_jsx_runtime());
+var import_jsx_runtime16 = __toESM(require_jsx_runtime());
 var container = document.getElementById("root");
 if (container === null) {
   throw new Error("luck-planner dashboard: #root is missing from index.html");
 }
 (0, import_client.createRoot)(container).render(
-  /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(import_react14.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(import_react14.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(App, {}) })
 );

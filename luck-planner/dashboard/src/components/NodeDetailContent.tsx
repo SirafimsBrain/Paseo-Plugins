@@ -3,6 +3,7 @@ import type { NodeResponse } from "../../../shared/api";
 import { LEAF_TRANSITIONS, type LeafStatus } from "../../../shared/tree";
 import { beeCycleLabel } from "../../../shared/bees";
 import { growthProgress } from "../../../shared/growth";
+import type { PlainStatusOverride } from "../plain";
 import {
   BEE_STATUS_COLORS,
   BEE_STATUS_LABELS,
@@ -27,6 +28,14 @@ export interface NodeDetailContentProps {
   readonly pendingStatus?: LeafStatus | null;
   /** The last write refusal for this node, in the server's words (L8). */
   readonly writeError?: string;
+  /**
+   * The reason an agent gave when it last moved this node's status
+   * (0.51.2). Shown above the history, because the point of forcing a reason
+   * is that the owner reads it — not that it exists somewhere.
+   */
+  readonly override?: PlainStatusOverride | null;
+  /** Opens the incident modal from the incident list (0.51.2). */
+  readonly onSelectBug?: (bugId: string) => void;
 }
 
 function formatTime(ts: number): string {
@@ -49,7 +58,7 @@ function Row(props: { label: string; children: ReactNode }): ReactElement {
 }
 
 export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
-  const { detail, resolveName, onSetStatus, pendingStatus, writeError } = props;
+  const { detail, resolveName, onSetStatus, pendingStatus, writeError, override } = props;
   const { node, path, children, bees, bugs, blockingBugs, history, growth, beeCycle } =
     detail;
   const blockingIds = new Set(blockingBugs.map((bug) => bug.id));
@@ -95,6 +104,19 @@ export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
           {node.updatedBy ? ` · ${node.updatedBy}` : ""}
         </Row>
       </div>
+
+      {override !== undefined && override !== null ? (
+        <div className="lp-details-section lp-details-override">
+          <p className="lp-details-override-line">
+            <span className="lp-details-override-label">↺ Agent override:</span>{" "}
+            {override.reason}
+          </p>
+          <span className="lp-details-hint">
+            {override.actor} · {formatTime(override.at)} — the previous status
+            was set by hand, so the agent had to say why it moved it.
+          </span>
+        </div>
+      ) : null}
 
       {allowed !== null && allowed.length > 0 && onSetStatus !== undefined ? (
         /*
@@ -191,17 +213,8 @@ export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
           <ul className="lp-details-list">
             {bugs.map((bug) => {
               const isBlocking = blockingIds.has(bug.id);
-              return (
-                <li
-                  key={bug.id}
-                  className={
-                    isBlocking ? "lp-details-bug lp-details-bug-blocking" : "lp-details-bug"
-                  }
-                  style={{
-                    borderColor: isBlocking ? BUG_BADGE_COLOR : undefined,
-                  }}
-                  title={bug.description}
-                >
+              const body = (
+                <>
                   <span
                     className="lp-details-bug-sev"
                     style={{
@@ -212,6 +225,32 @@ export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
                   </span>
                   <span className="lp-details-bug-title">{bug.title}</span>
                   <span className="lp-details-hint">{bug.status}</span>
+                </>
+              );
+              const className = isBlocking
+                ? "lp-details-bug lp-details-bug-blocking"
+                : "lp-details-bug";
+              return (
+                <li key={bug.id}>
+                  {props.onSelectBug === undefined ? (
+                    <div
+                      className={className}
+                      style={{ borderColor: isBlocking ? BUG_BADGE_COLOR : undefined }}
+                      title={bug.description}
+                    >
+                      {body}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`${className} lp-details-bug-open`}
+                      style={{ borderColor: isBlocking ? BUG_BADGE_COLOR : undefined }}
+                      title={`${bug.description || bug.title} — open the incident to move its status`}
+                      onClick={() => props.onSelectBug?.(bug.id)}
+                    >
+                      {body}
+                    </button>
+                  )}
                 </li>
               );
             })}

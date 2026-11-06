@@ -19918,6 +19918,14 @@ var historyEntrySchema = external_exports.object({
   result: external_exports.string(),
   at: timestampSchema
 });
+var statusNoteSchema = external_exports.object({
+  entityType: historyEntityTypeSchema,
+  entityId: idSchema,
+  actor: actorSchema.nullable(),
+  revision: revisionSchema,
+  result: external_exports.string(),
+  at: timestampSchema
+});
 
 // shared/links.ts
 var beeStatusSchema = external_exports.enum([
@@ -20387,6 +20395,38 @@ var LuckPlannerStore = class {
       "SELECT * FROM history WHERE project_key = ? AND entity_id = ? ORDER BY id"
     ).all(projectKey, entityId);
     return rows.map(rowToHistory);
+  }
+  /**
+   * The newest **status** audit row per entity of one project (0.51.2).
+   *
+   * The board shows a short note per card ("an agent moved this, because …")
+   * and cannot afford one history page per card, so the tree payload carries
+   * exactly these rows: a window over `history` picks the latest row per
+   * `(entity_type, entity_id)` where the action is `status`. One indexed scan,
+   * ordered by entity so the answer is deterministic.
+   */
+  latestStatusNotes(projectKey) {
+    const project = requireText(projectKey, "project key");
+    const rows = this.db.prepare(
+      `SELECT entity_type, entity_id, actor, revision, result, at FROM (
+           SELECT entity_type, entity_id, actor, revision, result, at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY entity_type, entity_id ORDER BY id DESC
+                  ) AS rank
+             FROM history
+            WHERE project_key = ? AND action = 'status'
+         )
+         WHERE rank = 1
+         ORDER BY entity_type, entity_id`
+    ).all(project);
+    return rows.map((row) => ({
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      actor: row.actor,
+      revision: row.revision,
+      result: row.result,
+      at: row.at
+    }));
   }
   /**
    * Every audit row of one project, oldest first — the export path (stage L2).
@@ -26389,7 +26429,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.51.1";
+var SERVER_VERSION = "0.51.2";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

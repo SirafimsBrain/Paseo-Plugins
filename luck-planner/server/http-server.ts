@@ -235,6 +235,9 @@ export function buildTreeResponse(
     bugAttachments: store.listBugAttachments(projectKey),
     goals: store.listGoals(projectKey),
     growth: store.listGrowth(projectKey),
+    // 0.51.2: the newest status row per entity, so the board can name the
+    // reason an agent gave without a history request per card.
+    statusNotes: store.latestStatusNotes(projectKey),
   };
 }
 

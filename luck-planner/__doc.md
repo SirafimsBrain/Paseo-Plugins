@@ -3505,3 +3505,60 @@ bundle assertions for the new controls. One run reported
 `http-server.test.ts > streams /api/export as a zip download` failing while every other file
 passed; it passed in isolation and on the next full run, and it does not touch any code this
 version changed — recorded here as a pre-existing flake, not hidden.
+
+### 10.13 Version 0.51.2 — the reason on the card, and the 2D audit (2026-11-06)
+
+0.51.1 introduced the rule that an agent overriding the owner's status must give a reason,
+but the reason only existed in the audit trail. The owner asked for the obvious completion —
+show it where the decision is read — and, in the same pass, to check that the 0.51.1
+functionality actually exists in 2D.
+
+**Where the note comes from.** One field, not a request per card: `/api/tree` now carries
+`statusNotes`, the newest `status` audit row per `(entity_type, entity_id)` (a `ROW_NUMBER()`
+window over `history`, one indexed scan). `statusOverrideReason` (in `shared/tree.ts`) turns
+`deferred → in_progress — step 2 depends on step 1` back into the reason, splitting on the
+**first** em dash so a reason may contain another; a note whose actor is `user` is never an
+override. `dashboard/src/plain.ts` indexes the notes once per payload (`overrideIndex` /
+`overrideOf`), and the card, both modals and the 2D panel read the same index — one parser,
+one answer. The field is optional in the contract, so an older server or a hand-built fixture
+still parses and simply shows nothing.
+
+**The 2D audit.** What 0.51.1 shipped was checked surface by surface:
+
+| Capability (0.51.1) | In 2D before 0.51.2 | Now |
+| --- | --- | --- |
+| Leaf status moves (`deferred` included) | present — `NodeDetailContent` renders `LEAF_TRANSITIONS`, the panel passes `onSetStatus` | unchanged; the panel now also shows the override note |
+| `deferred` in colour, label, legend and the status filter | present — one palette (`colors.ts`) and `LEAF_STATUSES` drive all of them | verified in a live tab: *Deferred* in the filter and the legend |
+| Incident lifecycle | **missing** — an incident was a badge/list line; the list rendered plain `<li>`s | the incident rows are buttons that open the incident modal |
+| Goal lifecycle | **missing, and worse**: a goal frame is a synthetic React Flow node with id `goal:<id>`, and a click passed that id to `onSelectNode`, i.e. to a detail fetch for a node that does not exist | the frame opens the goal modal; goals *without* a materialized frame (draft, proposed) and incidents attached to no leaf are listed in a **planning strip** above the diagram |
+| The agent's reason | only in the node's history rows | the same `↺ Agent override` note in the node details, the goal/incident modals, and a `↺` marker with the reason in the strip's chips |
+
+The planning strip is deliberately not a second board: it lists the goals (the frame only
+exists after materialization) and the incidents no leaf can lead to — exactly the entities the
+diagram cannot draw — and each chip opens the modal both views share, so the write path stays
+single.
+
+**Live verification (not only tests).** A throwaway `DashboardHttpServer` on an ephemeral port
+with a temp database (one tree, one leaf moved `deferred` by `user` then `in_progress` by
+`agent:coder` with a reason, one proposed goal, one unattached incident) was opened in the
+browser:
+
+- `?view=2d` showed the planning strip (`ship billing retries · Proposed`, `queue stalls · Open`),
+  *Deferred* in the status filter and the legend; clicking the goal chip opened the goal modal
+  with **Lifecycle** (Back to draft, Cancel) and **Approval** (Approve under billing).
+- Searching the leaf selected it: the details panel showed `Status: In progress`,
+  `↺ Agent override: step 2 depends on step 1` with the actor and time, the move row including
+  **Deferred**, and the history row `deferred → in_progress — step 2 depends on step 1`.
+- The Plain view showed the same leaf card with the `↺` agent-reason note (`step 2 depends on
+  step 1`) and its action row (Stop, Defer, Close, Cancel), the goal card's actions, and the incident
+  card's actions.
+
+The server was stopped and the temp directory removed afterwards; the production daemon and its
+database were never touched.
+
+**Verification (tests).** `npm run typecheck` exit 0 (both configs); `npm test` — 54 suites /
+945 tests. New: four `the status note` cases in `tests/status-owner.test.ts` (the parser, the
+separator inside a reason, the newest-row window, the tree payload), two `overrideIndex` cases
+and the card attachment in `tests/dashboard-plain.test.ts`, and the `keeps the 2D diagram able
+to reach what the board can do` case in `tests/dashboard-build.test.ts` (goal-frame click,
+incident row, strip, the note in both surfaces, and the bundle/CSS markers).

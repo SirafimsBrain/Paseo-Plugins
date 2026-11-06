@@ -33,8 +33,17 @@ import { GOAL_STATUSES, GOAL_TRANSITIONS } from "../../shared/goals";
 import type { GoalStatus } from "../../shared/goals";
 import { BUG_STATUSES, BUG_TRANSITIONS } from "../../shared/links";
 import type { BugSeverity, BugStatus } from "../../shared/links";
-import { LEAF_STATUSES, LEAF_TRANSITIONS } from "../../shared/tree";
-import type { LeafStatus, Node as TreeNode, NodeKind } from "../../shared/tree";
+import {
+  LEAF_STATUSES,
+  LEAF_TRANSITIONS,
+  statusOverrideReason,
+} from "../../shared/tree";
+import type {
+  LeafStatus,
+  Node as TreeNode,
+  NodeKind,
+  StatusNote,
+} from "../../shared/tree";
 import {
   growthRollups,
   indexTree,
@@ -236,6 +245,20 @@ export function cardStatusActions(
 /** What kind of domain entity a card stands for. */
 export type PlainCardKind = "goal" | "leaf" | "bug";
 
+/**
+ * An agent's explanation for the last status move on this entity (0.51.2).
+ *
+ * The store refuses an override of the owner's decision without a reason, so
+ * this is exactly the case where a card has something to say: the person set a
+ * status, an agent moved it, and the plan should show why without making them
+ * open the history.
+ */
+export interface PlainStatusOverride {
+  readonly reason: string;
+  readonly actor: string;
+  readonly at: number;
+}
+
 /** Fields every card carries to the renderer. */
 interface PlainCardBase {
   /** Unique on the board — `<kind>:<entityId>` (also the React key). */
@@ -245,6 +268,8 @@ interface PlainCardBase {
   /** Domain status verbatim; the renderer maps it through `colors.ts`. */
   readonly status: string;
   readonly revision: number;
+  /** The agent's reason for the last move, or `null` (0.51.2). */
+  readonly override: PlainStatusOverride | null;
 }
 
 /** A planned fact: the work item of the board. */
@@ -393,6 +418,39 @@ function breadcrumb(index: TreeIndex, node: TreeNode): string {
   return names.join(" › ");
 }
 
+/**
+ * The status overrides of one payload, keyed `<entityType>:<entityId>`.
+ *
+ * `/api/tree` carries the newest status audit row per entity; a person's own
+ * move is not an override, so only a note with a reason lands here. Absent
+ * `statusNotes` (an older server, a fixture) simply means no card has one.
+ */
+export function overrideIndex(
+  notes: readonly StatusNote[] = [],
+): ReadonlyMap<string, PlainStatusOverride> {
+  const map = new Map<string, PlainStatusOverride>();
+  for (const note of notes) {
+    if (note.actor === null) continue;
+    const reason = statusOverrideReason(note);
+    if (reason === null) continue;
+    map.set(`${note.entityType}:${note.entityId}`, {
+      reason,
+      actor: note.actor,
+      at: note.at,
+    });
+  }
+  return map;
+}
+
+/** The override of one entity, from an index built by {@link overrideIndex}. */
+export function overrideOf(
+  index: ReadonlyMap<string, PlainStatusOverride>,
+  entityType: "node" | "bug" | "goal",
+  entityId: string,
+): PlainStatusOverride | null {
+  return index.get(`${entityType}:${entityId}`) ?? null;
+}
+
 /** Group id: `<kind>:<status>`. */
 function groupId(kind: PlainCardKind, status: string): string {
   return `${kind}:${status}`;
@@ -513,6 +571,7 @@ export function buildPlainBoard(
   const surviving = matchingWithAncestors(input.nodes, options.filter, { index });
   const openBugs = openBugIdsByNode(input);
   const growth = growthRollups(input);
+  const overrides = overrideIndex(input.statusNotes ?? []);
 
   const beeCounts = new Map<string, number>();
   for (const bee of input.bees) {
@@ -553,6 +612,7 @@ export function buildPlainBoard(
       openBugCount: openBugs.get(node.id)?.length ?? 0,
       beeCount: beeCounts.get(node.id) ?? 0,
       growth: growth.get(node.id) ?? null,
+      override: overrides.get(`node:${node.id}`) ?? null,
     };
     const group = groupOf("leaf", node.status);
     group.cards.push(card);
@@ -576,6 +636,7 @@ export function buildPlainBoard(
       formalText: goal.formalText,
       planSteps: goal.plan.length,
       materializedNodeId: goal.materializedNodeId,
+      override: overrides.get(`goal:${goal.id}`) ?? null,
     };
     groupOf("goal", goal.status).cards.push(card);
   }
@@ -604,6 +665,7 @@ export function buildPlainBoard(
       revision: bug.revision,
       severity: bug.severity,
       attachmentCount: attachmentCounts.get(bug.id) ?? 0,
+      override: overrides.get(`bug:${bug.id}`) ?? null,
     };
     groupOf("bug", bug.status).cards.push(card);
   }

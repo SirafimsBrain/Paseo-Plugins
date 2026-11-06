@@ -107,6 +107,8 @@ import {
   buildPlainBoard,
   defaultPlainCollapse,
   EMPTY_PLAIN_BOARD,
+  overrideIndex,
+  overrideOf,
   plainReveal,
   togglePlainSection,
   type PlainCardKind,
@@ -149,6 +151,7 @@ import { GoalDetailContent } from "./components/GoalDetailContent";
 import { BugDetailContent } from "./components/BugDetailContent";
 import { Legend } from "./components/Legend";
 import { PlainView } from "./components/PlainView";
+import { PlanningStrip } from "./components/PlanningStrip";
 import { ThreeView, type ThreeViewState } from "./components/ThreeView";
 import { Toolbar, type ToolbarFilters } from "./components/Toolbar";
 
@@ -954,6 +957,21 @@ export function App(): ReactElement {
       }));
   }, [scopedTree, forest]);
 
+  /**
+   * 0.51.2 — the reason agents gave per entity, from the tree's status notes.
+   * One index for the board, the 2D panel and both modals; the payload already
+   * carries the rows, so this costs a map, not a request.
+   */
+  const overrides = useMemo(
+    () => overrideIndex(tree?.statusNotes ?? []),
+    [tree],
+  );
+
+  /** Opens an incident's modal from anywhere an incident is listed (0.51.2). */
+  const onSelectBug = useCallback((bugId: string): void => {
+    setModal({ kind: "bug", id: bugId });
+  }, []);
+
   /** What the server's policy would pick for an unnamed approval (L10). */
   const defaultGoalBranch = useMemo(() => {
     const decision = pickGoalParent(tree?.nodes ?? []);
@@ -1049,12 +1067,26 @@ export function App(): ReactElement {
             onSceneState={onSceneState}
           />
         ) : (
+          <>
+            {/* 0.51.2 — what the diagram cannot draw, so the 2D view can reach
+                every lifecycle the board offers. */}
+            {tree !== null ? (
+              <PlanningStrip
+                goals={tree.goals}
+                bugs={tree.bugs}
+                bugAttachments={tree.bugAttachments}
+                overrides={overrides}
+                onSelectGoal={(goalId) => setModal({ kind: "goal", id: goalId })}
+                onSelectBug={onSelectBug}
+              />
+            ) : null}
           <Canvas
             graph={graph}
             loaded={tree !== null}
             onToggleNode={onToggleNode}
             selectedId={selectedId}
             onSelectNode={setSelectedId}
+            onSelectGoal={(goalId) => setModal({ kind: "goal", id: goalId })}
             focus={focus}
             emptyTitle={filtersActive ? "No nodes match the filters" : undefined}
             emptyText={
@@ -1063,6 +1095,7 @@ export function App(): ReactElement {
                 : undefined
             }
           />
+          </>
         )}
         {/* K1: the modal of stage K2 takes the panel's job on the board —
             the "click a node on the diagram" placeholder would only confuse. */}
@@ -1079,6 +1112,10 @@ export function App(): ReactElement {
             onSetStatus={client === null ? undefined : (status) => void setStatusAction(status)}
             pendingStatus={writePending}
             writeError={writeError}
+            override={
+              detail === null ? null : overrideOf(overrides, "node", detail.node.id)
+            }
+            onSelectBug={onSelectBug}
           />
         )}
       </div>
@@ -1107,6 +1144,8 @@ export function App(): ReactElement {
             }
             pendingStatus={writePending}
             writeError={writeError}
+            override={overrideOf(overrides, "node", detail.node.id)}
+            onSelectBug={onSelectBug}
           />
         ) : null}
         {modal?.kind === "node" && detail === null ? (
@@ -1143,6 +1182,7 @@ export function App(): ReactElement {
                   pendingStatus={
                     cardPending === `goal:${goal.id}` ? goal.status : null
                   }
+                  override={overrideOf(overrides, "goal", goal.id)}
                 />
               ) : null;
             })()
@@ -1168,6 +1208,7 @@ export function App(): ReactElement {
                     cardPending === `bug:${bug.id}` ? bug.status : null
                   }
                   error={cardWriteError}
+                  override={overrideOf(overrides, "bug", bug.id)}
                 />
               ) : null;
             })()
