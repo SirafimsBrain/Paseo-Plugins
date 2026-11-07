@@ -1,5 +1,27 @@
 # remote-control — план разработки (атомарные этапы)
 
+> **Статус 0.26.11 — рекомендации 0.15.0-прохода (2026-11-07):** новая
+> функциональность, бамп второй цифры (`0.25.11` → `0.26.11`, тег
+> `remote-control@0.26.11`). **1)** read-only *peek* в Sessions:
+> `TerminalService.capture()` = один `paseo.terminals.ref(id).capture({
+> stripAnsi: true })`, локальная нарезка хвоста (1..2000, по умолчанию 200),
+> `GET /api/terminals/:id/capture` (401 без токена, 405 не-GET, 400 с
+> сообщением даэмона), модалка с `<pre>` и *Refresh* только для local/ssh строк.
+> **2)** «restart host, keep terminals» — **закрыто как невыполнимое из
+> плагина**: `PluginHandlerContext` (и в `@getpaseo/plugin@0.13.0`, и в
+> `@0.15.0`) даёт только `paseo: PaseoApi`, а `PaseoApi` в обоих клиентах —
+> hosts/terminals/workspaces/projects/agents/providers/config/observeEvents/
+> dispose без `shutdownServer`; `ShutdownServerOptions.keepTerminals` живёт на
+> `DaemonClient`, до которого плагин не достаёт, а клиент 0.13.0 вообще
+> отбрасывает неизвестные опции shutdown. Потребность закрывает
+> `paseo plugin reload` (перезапуск плагина, не даэмона). **3)** оба
+> `as any` на `addWorkspacePanel` убраны — `tsc` зелёный на тех же типах.
+> **4)** `client/console-sidebar-item.tsx` подключён
+> (`addSidebarHeaderItem`, id `remote-control-console-row`) — новая поверхность,
+> отсюда второй бамп. Проверки: `tsc` оба проекта, **18 файлов / 193 теста**
+> (было 185), живой изолированный даэмон 0.15.3 (health 0.26.11, 401/405/400;
+> живой scrollback не проверен — до первого RPC консоли даэмон не даёт API).
+>
 > **Статус 0.25.11 — H3 и хвосты блока G (2026-11-07):** следующий
 > анонсированный этап и остатки G закрыты одной новой функциональностью
 > (бамп второй цифры: `0.24.11` → `0.25.11`, тег `remote-control@0.25.11`).

@@ -34,6 +34,10 @@ beforeEach(async () => {
       killedTerminals.push(id);
       return id === "term_1";
     },
+    capture: async (id: string, input: { lines?: number }) => {
+      if (id === "term_gone") throw new Error("Terminal term_gone not found");
+      return { id, text: "line A\nline B", lines: 2, totalLines: 9, requested: input.lines };
+    },
   } as unknown as TerminalService;
   server = new ConsoleHttpServer({ token: TOKEN, port: 0, terminals, sessions });
   await server.start();
@@ -114,6 +118,38 @@ describe("/api/sessions", () => {
     const res = await fetch(`${base}/api/sessions?token=${TOKEN}`);
     const body = (await res.json()) as { sessions: any[] };
     expect(body.sessions.some((s) => s.id === info.id)).toBe(false);
+  });
+});
+
+// Stage 0.26.11 (recommendation 1): the read-only scrollback peek.
+describe("/api/terminals/:id/capture", () => {
+  it("returns the tail with the daemon's total", async () => {
+    const res = await fetch(`${base}/api/terminals/term_1/capture?lines=200&token=${TOKEN}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      id: "term_1",
+      text: "line A\nline B",
+      lines: 2,
+      totalLines: 9,
+      requested: 200,
+    });
+  });
+
+  it("is read-only", async () => {
+    const res = await fetch(`${base}/api/terminals/term_1/capture?token=${TOKEN}`, { method: "POST" });
+    expect(res.status).toBe(405);
+  });
+
+  it("turns a capture failure into a 400 the console can render", async () => {
+    const res = await fetch(`${base}/api/terminals/term_gone/capture?token=${TOKEN}`);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/not found/);
+  });
+
+  it("requires the token like every other route", async () => {
+    const res = await fetch(`${base}/api/terminals/term_1/capture`);
+    expect(res.status).toBe(401);
   });
 });
 

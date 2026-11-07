@@ -27,6 +27,22 @@ export interface TerminalInfo {
   startedAt: number | null;
 }
 
+export interface TerminalCaptureInput {
+  /** Lines to return from the tail; default 200, clamped to 1..2000. */
+  lines?: number;
+}
+
+export interface TerminalCaptureResult {
+  /** Terminal whose scrollback was read. */
+  id: string;
+  /** The tail, oldest first, ANSI stripped. */
+  text: string;
+  /** Lines actually returned. */
+  lines: number;
+  /** Lines the daemon holds in total (0 when it reports none). */
+  totalLines: number;
+}
+
 export interface OpenTerminalInput {
   workspaceId?: string | null;
   connectionId?: string | null;
@@ -213,6 +229,28 @@ export class TerminalService {
     }
 
     return entries.map((entry) => this.info(entry.id, entry.workspaceId, entry.cwd, entry.name));
+  }
+
+  /**
+   * Read-only tail of a Paseo terminal's scrollback (stage 0.26.11, the first
+   * recorded recommendation). The console only *peeks*: the PTY, the tab and
+   * its lifetime stay the daemon's (ADR-5), so this is a single
+   * `capture({ stripAnsi: true })` per request and no stream subscription.
+   * `TerminalStreamEvent` is deliberately unused — its shape changes between
+   * SDK generations, and a peek has no need for it.
+   */
+  async capture(terminalId: string, input: TerminalCaptureInput = {}): Promise<TerminalCaptureResult> {
+    const requested = input.lines ?? 200;
+    const limit = Number.isFinite(requested) ? Math.min(2000, Math.max(1, Math.trunc(requested))) : 200;
+    const captured = await this.api().terminals.ref(terminalId).capture({ stripAnsi: true });
+    const all = Array.isArray(captured.lines) ? captured.lines : [];
+    const tail = all.length > limit ? all.slice(all.length - limit) : all.slice();
+    return {
+      id: terminalId,
+      text: tail.join("\n"),
+      lines: tail.length,
+      totalLines: typeof captured.totalLines === "number" ? captured.totalLines : all.length,
+    };
   }
 
   async kill(terminalId: string): Promise<boolean> {

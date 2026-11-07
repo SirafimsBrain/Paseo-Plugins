@@ -973,6 +973,81 @@ build step is needed. Linux-x64 only.
 - The native panel is a thin wrapper (status + "Open console"), polling the
   RPC; `state` now also reports `transport` and live `transportConnections`.
 
+## Implementing the recorded recommendations (stage 0.26.11, 2026-11-07)
+
+The four recommendations of the 0.15.0 pass, taken in order. Three shipped; the
+second is closed as not implementable from a plugin. Because *peek* and the
+sidebar row are new surfaces, the version moves `0.25.11` → `0.26.11` (second
+digit) and the result is tagged `remote-control@0.26.11`.
+
+| # | Recommendation | Outcome |
+| --- | --- | --- |
+| 1 | Read-only terminal mirror in Sessions | **Shipped** — *peek* modal, `TerminalService.capture()`, `GET /api/terminals/:id/capture` |
+| 2 | “Restart host and keep terminals” | **Closed** — a plugin cannot reach `DaemonClient.shutdownServer` (evidence below) |
+| 3 | Drop the two `as any` casts | **Shipped** — registrations are typed against `PluginWorkspacePanelContribution` again |
+| 4 | Wire up `client/console-sidebar-item.tsx` | **Shipped** — `addSidebarHeaderItem` row that opens the console screen |
+
+### The peek
+
+`TerminalService.capture(id, {lines})` calls
+`paseo.terminals.ref(id).capture({ stripAnsi: true })` exactly once per request
+— no `start`/`end` paging, because the daemon already answers with the whole
+retained buffer and its `totalLines`, so the tail is sliced locally. `lines` is
+clamped to `1..2000` and defaults to 200 in both the service and the route, so a
+hand-written query string cannot ask for an unbounded response. The route is
+`GET /api/terminals/:id/capture` (405 for anything else, 400 carrying the
+daemon's message so the modal can print it), and the failure path is the same
+`sendJson` shape as `kill`.
+
+In the console, *peek* appears only on `local`/`ssh` rows: RDP/VNC rows are
+desktop windows with no Paseo terminal behind them, and the button would have
+nothing to read. The modal is read-only by construction — it renders a `<pre>`
+from the JSON answer and has *Refresh*/*Close*, no input, no key handling, no
+SSE. That keeps ADR-5 intact and avoids `TerminalStreamEvent`, whose
+`snapshot`/`restore` → `replay` rename is exactly the kind of churn a peek does
+not need.
+
+### Why "restart host and keep terminals" is not in the console
+
+`ShutdownServerOptions.keepTerminals` and `requireTerminalKeepCapability` exist
+on `DaemonClient` (`@getpaseo/client@0.15.0`), and that is where the original
+recommendation stopped. A plugin is handed `PluginHandlerContext`, whose only
+field is `paseo: PaseoApi` — in `@getpaseo/plugin@0.13.0` **and**
+`@getpaseo/plugin@0.15.0` (`dist/server/contracts.d.ts`). `PaseoApi` is
+`hosts`, `terminals`, `workspaces`, `projects`, `agents`, `providers`, `config`,
+`observeEvents`, `dispose`; `shutdownServer` is not part of it, in either client
+version, and `PaseoHostActions` only lists/adds/updates/removes host
+registrations and opens sub-clients. The installed 0.13.0 client also drops
+unknown shutdown options on the floor (`SessionInboundMessageSchema.parse({ type:
+"shutdown_server_request", requestId })`), so a cast would produce a restart that
+silently kills terminals — the worst outcome of the three. Reloading plugin code
+without touching terminals is what `paseo plugin reload <name>` already does, so
+the need the recommendation was written for is covered; the button is not.
+
+### Verification
+
+- `tsc --noEmit` on both projects; the full suite is **18 files / 193 tests**
+  (was 18/185): new `capture` cases in `tests/terminals.test.ts` (whole buffer,
+  tail slicing with `totalLines`, clamping at both ends, failure propagation)
+  and `tests/sessions-http.test.ts` (200 shape, 405, 400, 401).
+- Live on an isolated 0.15.3 daemon (scratch home, port 6767, plugin installed
+  from the working tree): `/health` reports `0.26.11`, the route answers
+  **401** without the token and **405** on `POST`, and an unknown terminal is a
+  **400**. The plugin still refuses terminal work before its first RPC, so with
+  a console never opened from the app the capture answers `400 Paseo API is not
+  ready yet` (the documented lifecycle, not a regression) and the scratch
+  console's Sessions table is empty. The scrollback path itself is covered by
+  the service tests, which drive a fake `PaseoApi`.
+- `index.client.tsx` registers the sidebar row
+  (`addSidebarHeaderItem` with `remote-control-console-row`) and both workspace
+  panels without the removed casts; there is no separate client bundle to
+  inspect — the host compiles the TypeScript — so `tsc --noEmit` against the
+  real contribution types is the check. The console bundle (`dist/console`) is
+  rebuilt and contains the peek route.
+- Not verified live: the peek modal against a real terminal (needs the app's
+  first RPC), the RDP/VNC side of the Sessions table (no viewers on this host),
+  and a keep-terminals restart, which does not exist for plugins (see above).
+
 ## Paseo 0.15.0 — compatibility pass (2026-11-03)
 
 Audited against the stable `0.15.0` release (2026-11-03).
@@ -1021,42 +1096,49 @@ outcome and the same rationale as bunny-search's 0.14.0 pass.
 | Console end-to-end on 0.15.0 | **PASS** — `[remote-control] console listening on http://127.0.0.1:34135/?token=…`; `GET /` → 200 `text/html` (3 390 bytes), `GET /health` → `{"ok":true,"server":"remote-control","version":"0.24.11"}`, `/api/state` and `/api/connections` → 200 with the token (query **and** `Authorization: Bearer`), **401 without a token**, `/api/state?token=bad` → 401. |
 | Manifest | `requirements.paseo >=0.11.0` accepted by the real 0.15.0 gate (`assertPluginCompatibility` runs inside `compileDirectoryPlugin` before load) — the plugin reached `running`. |
 
-### Recommendations for improvement (recorded, not implemented)
+### Recommendations for improvement — outcome (stage 0.26.11, 2026-11-07)
 
-Ordered by value; 1 and 2 are the ones 0.15.0 actually makes possible or
-worthwhile.
+1, 3 and 4 shipped in **0.26.11**; 2 turned out to be impossible from inside a
+plugin, so the finding is recorded instead of a button that cannot work.
 
-1. **Read-only terminal mirror in the console's Sessions view.** Every row for
-   a Paseo terminal could show the last N lines through
-   `paseo.terminals.ref(id).capture({ start, end, stripAnsi: true })`, which
-   already exists in `@getpaseo/client` (unchanged in 0.15.0) and needs no new
-   dependency in the console bundle. 0.15.0 makes this genuinely useful — the
-   daemon now retains up to 10 000 scrollback lines and restores them after a
-   reconnect — and it is a *read* of host-owned state, so it does not break
-   ADR-5 (the PTY and the tab stay Paseo's; the console only peeks). Do **not**
-   build live streaming on `TerminalStreamEvent` for this: its shape changed in
-   0.15.0 (`snapshot`/`restore` → `replay`), so a stream-based viewer would
-   pin the plugin to one SDK generation for no gain.
-2. **"Restart host and keep terminals" action in the console.** With
-   `ShutdownServerOptions.keepTerminals` + `requireTerminalKeepCapability`
-   (`@getpaseo/client@0.15.0`, daemon capability
-   `features.terminalsSurviveRestart`) the console can offer the operation it is
-   already the natural home for — restart the daemon after a plugin update
-   without losing the SSH sessions listed right next to the button — and refuse
-   with `TerminalKeepUnsupportedError`'s message on an older host instead of
-   silently closing them. Needs a confirmation dialog; the action is
-   host-wide.
-3. **Drop the two `as any` casts on the `addWorkspacePanel` registrations.**
-   Verified on 0.15.0: with both casts removed `tsc --noEmit` still exits 0, so
-   they no longer buy anything and only hide future registration mistakes
-   (`locations`, `icon`, `Component` are all checked by the real
-   `PluginWorkspacePanelContribution`). Patch-level cleanup.
-4. **Retire or wire up `client/console-sidebar-item.tsx`.** It is the only
-   orphan in the package (already noted in `PLAN.md`): `RemoteControlSidebarItem`
-   is imported nowhere, so `addSidebarHeaderItem` — which is how a sidebar
-   entry is registered since 0.11 — never runs. Either register it (a sidebar
-   row opening the console screen, complementing the Explorer panel) or delete
-   the file. Registering it is a new surface → second-digit bump.
+1. **Read-only terminal mirror — shipped in 0.26.11.** *peek* on an SSH/local
+   row opens a read-only modal with the last 200 lines from a single
+   `paseo.terminals.ref(id).capture({ stripAnsi: true })` (`GET
+   /api/terminals/:id/capture?lines=N`, clamped to 1..2000, `totalLines` in the
+   answer so the title can say "last 200 of N"). `TerminalService.capture()` is
+   the whole implementation; no stream is subscribed, because
+   `TerminalStreamEvent`'s shape moves between SDK generations and a peek does
+   not need it. ADR-5 holds: the PTY and the tab stay Paseo's, the console only
+   reads.
+2. **"Restart host and keep terminals" — closed, not possible from a plugin.**
+   The recorded idea assumed the console could reach
+   `DaemonClient.shutdownServer(options)` with
+   `ShutdownServerOptions.keepTerminals` (`@getpaseo/client@0.15.0`). A plugin
+   never gets a `DaemonClient`: both `@getpaseo/plugin@0.13.0` and
+   `@getpaseo/plugin@0.15.0` hand handlers a `PluginHandlerContext` whose only
+   member is `paseo: PaseoApi`, and `PaseoApi` — identical in
+   `@getpaseo/client@0.13.0` and `@0.15.0` — exposes `hosts`, `terminals`,
+   `workspaces`, `projects`, `agents`, `providers`, `config`, `observeEvents`
+   and `dispose`, not `shutdownServer`. The 0.13.0 client's `shutdownServer`
+   also builds its message from `requestId` alone, so passing `keepTerminals`
+   through a cast would be silently dropped on the installed pin. There is no
+   honest plugin-side implementation short of shelling out to the `paseo` CLI
+   to restart the daemon the plugin runs in, which is the kind of host-side
+   hack this repository records rather than ships. The need behind the
+   recommendation — reload plugin code without losing terminals — is already
+   served by `paseo plugin reload <name>`, which restarts the plugin and
+   leaves the daemon and its terminals alone. A host that wants a
+   console-served keep-terminals restart must expose it to plugins first (for
+   example as an RPC on `PluginServerContext`).
+3. **The two `as any` casts are gone (0.26.11).** `tsc --noEmit` is green
+   without them, on the same 0.13.0 typings as before, so they were hiding
+   nothing but future mistakes.
+4. **`client/console-sidebar-item.tsx` is registered (0.26.11).**
+   `addSidebarHeaderItem({ id: "remote-control-console-row", title: "Remote
+   Control", Component: RemoteControlSidebarItem })` puts the terminal row in
+   the sidebar; it highlights while the console screen is open and opens it on
+   press. This is the new surface that made the version bump a second-digit
+   one.
 5. **`server.addHook` for the new 0.15.0 worktree hooks** is *not* recommended
    for this plugin: `worktree.create.before` / `worktree.create.after` would let
    it pre-seed an SSH config or a tunnel per worktree, but nothing in the

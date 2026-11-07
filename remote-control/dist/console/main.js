@@ -587,6 +587,44 @@ function sessionHint(session) {
   }
   return `${session.name}: terminal tab${session.workspaceId ? ` in workspace ${session.workspaceId}` : ""} in Paseo \u2014 open it in the app; the daemon owns the tab.`;
 }
+function openTerminalPeek(session) {
+  openModal((close) => {
+    const wrap = document.createElement("div");
+    const title = document.createElement("h2");
+    title.textContent = `${session.name} \u2014 scrollback`;
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    meta.textContent = "Last 200 lines, read-only (ANSI stripped).";
+    const pre = document.createElement("pre");
+    pre.className = "mono";
+    pre.style.maxHeight = "50vh";
+    pre.style.overflow = "auto";
+    pre.style.whiteSpace = "pre-wrap";
+    pre.textContent = "Loading\u2026";
+    const load = async () => {
+      try {
+        const body = await api(`/api/terminals/${encodeURIComponent(session.id)}/capture?lines=200`);
+        pre.textContent = typeof body.text === "string" && body.text.length > 0 ? body.text : "(no output captured yet)";
+        const total = typeof body.totalLines === "number" ? body.totalLines : 0;
+        meta.textContent = total > 200 ? `Last 200 of ${total} lines, read-only (ANSI stripped).` : `Last ${total} lines, read-only (ANSI stripped).`;
+      } catch (e) {
+        pre.textContent = `Could not read the terminal: ${String(e)}`;
+      }
+    };
+    const refresh = document.createElement("button");
+    refresh.textContent = "Refresh";
+    refresh.addEventListener("click", () => void load());
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", close);
+    const actions = document.createElement("div");
+    actions.className = "row";
+    actions.append(refresh, closeBtn);
+    wrap.append(title, meta, pre, actions);
+    void load();
+    return wrap;
+  });
+}
 async function killSession(session) {
   try {
     await api(`/api/sessions/${encodeURIComponent(session.id)}/kill`, { method: "POST" });
@@ -748,6 +786,13 @@ function sessionRow(session) {
     state.notice = sessionHint(session);
     render();
   });
+  if (session.kind !== "rdp" && session.kind !== "vnc") {
+    const peekBtn = document.createElement("button");
+    peekBtn.textContent = "peek";
+    peekBtn.title = "Read the last 200 lines of this terminal (read-only)";
+    peekBtn.addEventListener("click", () => openTerminalPeek(session));
+    actions.append(peekBtn);
+  }
   const killBtn = document.createElement("button");
   killBtn.className = "danger";
   killBtn.textContent = "kill";

@@ -12,15 +12,20 @@ interface FakePaseoOptions {
   workspaces?: string[];
   entries?: Array<{ id: string; workspaceId: string; cwd: string; name: string }>;
   killFails?: boolean;
+  captureLines?: string[];
+  captureTotal?: number;
+  captureFails?: boolean;
 }
 
 interface FakePaseo {
   api: PaseoApi;
   created: Array<Record<string, any>>;
+  captures: Array<{ id: string; options: Record<string, unknown> }>;
 }
 
 function fakePaseo(options: FakePaseoOptions = {}): FakePaseo {
   const created: Array<Record<string, any>> = [];
+  const captures: Array<{ id: string; options: Record<string, unknown> }> = [];
   const api = {
     terminals: {
       create: async (input: Record<string, any>) => {
@@ -44,13 +49,24 @@ function fakePaseo(options: FakePaseoOptions = {}): FakePaseo {
         kill: async () => {
           if (options.killFails) throw new Error(`Failed to kill terminal ${id}`);
         },
+        capture: async (captureOptions: Record<string, unknown>) => {
+          captures.push({ id, options: captureOptions });
+          if (options.captureFails) throw new Error(`Terminal ${id} not found`);
+          const lines = options.captureLines ?? [];
+          return {
+            terminalId: id,
+            lines: [...lines],
+            totalLines: options.captureTotal ?? lines.length,
+            requestId: "req",
+          };
+        },
       }),
     },
     workspaces: {
       list: async () => ({ entries: (options.workspaces ?? []).map((id) => ({ id })) }),
     },
   };
-  return { api: api as unknown as PaseoApi, created };
+  return { api: api as unknown as PaseoApi, created, captures };
 }
 
 function connection(overrides: Partial<Connection> = {}): Connection {
@@ -256,5 +272,41 @@ describe("TerminalService", () => {
   it("reports a failed kill as false", async () => {
     const { api } = fakePaseo({ workspaces: ["ws_a"], killFails: true });
     await expect(service(api).kill("term_x")).resolves.toBe(false);
+  });
+
+  // Stage 0.26.11 (recommendation 1): the console peeks at a terminal's
+  // scrollback through a single ANSI-stripped capture, never a stream.
+  it("captures the whole scrollback with ANSI stripped by default", async () => {
+    const { api, captures } = fakePaseo({ workspaces: ["ws_a"], captureLines: ["$ ls", "a  b"], captureTotal: 2 });
+    const result = await service(api).capture("term_1");
+
+    expect(captures).toEqual([{ id: "term_1", options: { stripAnsi: true } }]);
+    expect(result).toEqual({ id: "term_1", text: "$ ls\na  b", lines: 2, totalLines: 2 });
+  });
+
+  it("returns only the requested tail and keeps the daemon's total", async () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `line ${i + 1}`);
+    const { api } = fakePaseo({ workspaces: ["ws_a"], captureLines: lines, captureTotal: 900 });
+
+    const result = await service(api).capture("term_1", { lines: 2 });
+
+    expect(result.text).toBe("line 299\nline 300");
+    expect(result.lines).toBe(2);
+    expect(result.totalLines).toBe(900);
+  });
+
+  it("clamps the requested size instead of trusting the query string", async () => {
+    const lines = Array.from({ length: 2100 }, (_, i) => `l${i}`);
+    const { api } = fakePaseo({ workspaces: ["ws_a"], captureLines: lines, captureTotal: 2100 });
+    const svc = service(api);
+
+    await expect(svc.capture("term_1", { lines: 1_000_000 })).resolves.toMatchObject({ lines: 2000 });
+    await expect(svc.capture("term_1", { lines: 0 })).resolves.toMatchObject({ lines: 1 });
+    await expect(svc.capture("term_1", { lines: Number.NaN })).resolves.toMatchObject({ lines: 200 });
+  });
+
+  it("propagates a capture failure so the console can show it", async () => {
+    const { api } = fakePaseo({ workspaces: ["ws_a"], captureFails: true });
+    await expect(service(api).capture("term_gone")).rejects.toThrow(/not found/);
   });
 });

@@ -437,6 +437,23 @@ export class ConsoleHttpServer {
         this.sendJson(res, 405, { error: "method not allowed" });
         return;
       }
+      // /api/terminals/:id/capture — read-only tail of a Paseo terminal's
+      // scrollback (0.26.11). The console peeks; the tab and its PTY stay the
+      // daemon's.
+      const terminalCaptureMatch = /^\/api\/terminals\/(.+)\/capture$/.exec(url.pathname);
+      if (terminalCaptureMatch && this.terminals) {
+        if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        const captureId = decodeURIComponent(terminalCaptureMatch[1]);
+        const linesParam = Number(url.searchParams.get("lines") ?? "");
+        void this.terminals.capture(captureId, {
+          ...(Number.isFinite(linesParam) && linesParam > 0 ? { lines: linesParam } : {}),
+        }).then((result) => {
+          this.sendJson(res, 200, { ok: true, ...result });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
+        return;
+      }
       const terminalKillMatch = /^\/api\/terminals\/(.+)\/kill$/.exec(url.pathname);
       if (terminalKillMatch && this.terminals) {
         if (req.method !== "POST") {

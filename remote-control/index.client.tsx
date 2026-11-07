@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { RemoteControlPanel } from "./client/console-panel";
+import { RemoteControlSidebarItem } from "./client/console-sidebar-item";
 import { RemoteControlSettingsPanel } from "./client/console-settings-panel";
 import { RemoteControlScreen, SCREEN_ID } from "./client/console-screen";
 import { state, vaultLock } from "./shared/rpc";
@@ -13,7 +14,7 @@ export default function contribute(client: PluginClientContext): () => void {
     icon: "Terminal",
     locations: ["explorer"],
     Component: RemoteControlPanel,
-  } as any);
+  });
 
   // Workspace tab (workspace location): settings & configuration.
   client.addWorkspacePanel({
@@ -22,7 +23,16 @@ export default function contribute(client: PluginClientContext): () => void {
     icon: "Settings",
     locations: ["workspace"],
     Component: RemoteControlSettingsPanel,
-  } as any);
+  });
+
+  // Stage 0.26.11 (recommendation 4): the sidebar row that has existed in
+  // client/console-sidebar-item.tsx since 0.11 and was never registered. It
+  // opens the console screen; the Explorer panel stays the connection list.
+  client.addSidebarHeaderItem({
+    id: "remote-control-console-row",
+    title: "Remote Control",
+    Component: RemoteControlSidebarItem,
+  });
 
   // Global entry points.
   client.addScreen({
