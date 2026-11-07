@@ -15,6 +15,10 @@ export { SCREEN_ID };
 
 export function RemoteControlScreen(props: PluginScreenProps) {
   const { theme } = props;
+  // Stage 0.25.11 (G3): `/remote new` and the "New remote connection" item
+  // open the screen with `action=new`; the console then starts on the
+  // connection form instead of the Sessions list.
+  const action = props.params?.action ?? "";
   const stateRpc = useRpc(state);
   const consoleUrlRpc = useRpc(consoleUrl);
   const vaultSetupRpc = useRpc(vaultSetup);
@@ -55,18 +59,23 @@ export function RemoteControlScreen(props: PluginScreenProps) {
         setMessage("Console is not listening yet.");
         return;
       }
-      const outcome = await openConsoleUrl(result.url, {
-        openBrowser: props.navigation?.openBrowser,
-        openExternal: (u) => openExternalUrl(u),
-        listWorkspaceIds: async () => {
-          try {
-            const { entries } = await paseo.workspaces.list();
-            return entries.map((entry: { id: string }) => entry.id);
-          } catch {
-            return [];
-          }
+      const outcome = await openConsoleUrl(
+        result.url,
+        {
+          openBrowser: props.navigation?.openBrowser,
+          openExternal: (u) => openExternalUrl(u),
+          listWorkspaceIds: async () => {
+            try {
+              const { entries } = await paseo.workspaces.list();
+              return entries.map((entry: { id: string }) => entry.id);
+            } catch {
+              return [];
+            }
+          },
         },
-      });
+        undefined,
+        action.length > 0 ? { action } : {},
+      );
       setMessage(
         outcome.via === "browser"
           ? "Opened in a Paseo browser tab."
@@ -75,7 +84,7 @@ export function RemoteControlScreen(props: PluginScreenProps) {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [consoleUrlRpc, props.navigation, paseo]);
+  }, [consoleUrlRpc, props.navigation, paseo, action]);
 
   const [autoOpened, setAutoOpened] = useState(false);
   useEffect(() => {

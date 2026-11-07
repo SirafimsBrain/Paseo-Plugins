@@ -30,6 +30,9 @@ export interface ConsoleEndpointOptions {
   sessions?: import("./sessions").ExternalSessionRegistry;
   store?: import("./store").Store;
   vault?: import("./vault").VaultService;
+  settings?: import("./http-server").ConsoleHttpServerOptions["settings"];
+  sshConfigPath?: string;
+  sshExec?: import("./key-copy").SshExec;
   onServerStarted?: (server: ConsoleHttpServer) => void;
 }
 
@@ -91,6 +94,11 @@ export class ConsoleEndpoint {
     return this.server?.url ?? null;
   }
 
+  /** Pushes an SSE event to every open console (stage 0.25.11, G1). */
+  broadcast(eventName: string, data: unknown): void {
+    this.server?.broadcastSse(eventName, data);
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
     this.pending = null;
@@ -149,6 +157,10 @@ export class ConsoleEndpoint {
         sessions: this.options.sessions,
         store: this.options.store,
         vault: this.options.vault,
+        ...(this.options.settings ? { settings: this.options.settings } : {}),
+        ...(this.options.sshConfigPath ? { sshConfigPath: this.options.sshConfigPath } : {}),
+        ...(this.options.sshExec ? { sshExec: this.options.sshExec } : {}),
+        endpointStatus: () => this.status(),
       });
       await server.start();
       this.options.onServerStarted?.(server);

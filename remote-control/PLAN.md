@@ -1,5 +1,55 @@
 # remote-control — план разработки (атомарные этапы)
 
+> **Статус 0.25.11 — H3 и хвосты блока G (2026-11-07):** следующий
+> анонсированный этап и остатки G закрыты одной новой функциональностью
+> (бамп второй цифры: `0.24.11` → `0.25.11`, тег `remote-control@0.25.11`).
+> **H3:** `server/ssh-config.ts` — parse-and-preserve `~/.ssh/config`
+> (Include с рекурсией и защитой от циклов, wildcard/`Match` — правила, а не
+> хосты; управляемый блок помечен `# remote-control: <id>`; неизвестные
+> директивы внутри блока и весь остальной файл сохраняются побайтно),
+> маппинг подключение → `Host` (alias/`HostName`/`User`/`Port`/
+> `IdentityFile`/`ProxyJump`), атомарная запись (temp + fsync + rename, права,
+> отказ на symlink, backup `<config>.remote-control.bak`, `expectedRevision`),
+> обновление блока в том include-файле, где он живёт; чужой alias — явная
+> ошибка, а не перезапись. `server/key-copy.ts` — деплой публичного ключа в
+> `authorized_keys` с ssh-copy-id семантикой (ключ из `publicKeyPath` →
+> `identityFile.pub` → pub-часть ключа из хранилища через `ssh-keygen -y` →
+> `~/.ssh/id_*.pub`; askpass для сохранённого пароля, иначе `BatchMode=yes`;
+> `grep -qxF` + append, `SHA256:`-фингерпринт в ответе; 400 только за
+> некорректный запрос). REST: `GET /api/ssh-config`,
+> `POST /api/ssh-config/sync`, `POST /api/connections/:id/copy-key`; в консоли
+> — кнопки `ssh-config` и `copy key` у ssh-строк и блок «Sync all SSH
+> connections» в Settings. **G1:** фильтры (тип/подключение/текст),
+> группировка по подключению, выбор строк и массовый kill, колонка Surface с
+> подсказками (у Paseo нет API фокуса вкладки, окно принадлежит оконному
+> менеджеру — кнопка честно сообщает, где искать сессию), SSE-событие
+> `sessions` из реестра (`onChange` на register/kill/prune) и поллинг 5 с для
+> терминалов даэмона; `/api/sessions` больше не отвечает 400 без Paseo API, а
+> отдаёт внешние окна + `terminalError`. **G2:** экран Settings — порт
+> (перезапуск через дебаунс `ConsoleEndpoint`, `restart: true`), автолок
+> хранилища, путь стора (`vault.reconfigureStore`: lock → новый
+> `PASSWORD_STORE_DIR` → перечитать `.gpg-id`, без рестарта демона), override
+> RDP/VNC-бинарей (per-connection выбор сильнее), Lock now; всё видно в
+> `GET /api/state`. `POST /api/vault/lock` возвращён осознанно: это не
+> управление секретами (setup/unlock и `/api/secrets` остаются 404).
+> **G3:** `/remote console|new|lock`, пункты ⌘K «New remote connection» и
+> «Lock remote-control vault», deep-link `action=new` (экран → `consoleUrl` →
+> форма подключения); **дефект Apply закрыт** — кнопка слала на несуществующий
+> `/api/ghostty/import/apply`, теперь POST на обслуживаемый
+> `/api/ghostty/import`, регрессионный тест держит этот путь.
+> **G4:** живая приёмка в изолированном home (`.tmp/live-02511`, порт 6798,
+> `REMOTE_CONTROL_SSH_CONFIG` на фикстуру — настоящий `~/.ssh/config` не
+> тронут): install/reload, `plugin ready (version 0.25.11)`, консоль из
+> реального сборщика хоста, 401/200, `/api/state`, PATCH настроек, рестарт по
+> порту (старый origin закрыт, новый 200), sync ssh-config (создание →
+> обновление, backup, отказ на чужой alias), Apply=200 / `/apply`=404, lock.
+> **Не проверено живьём:** реальный деплой ключа (на машине нет sshd — ответ
+> `Connection refused` при корректно найденном ключе и фингерпринте), окна
+> RDP/VNC (нет клиентов и дисплейного прогона в этапе), ghostty-импорт с
+> реальным конфигом, первый мастер-пароль в приложении. Evidence: typecheck
+> (оба проекта) + vitest **18 наборов / 185 тестов**. Детали — `__doc.md`,
+> раздел «SSH config, key deployment, console settings and the live Sessions
+> feed (stage 0.25.11, 2026-11-07)».
 > **Статус: 0.24.11 — исправлен поиск dist/console при обновлении плагина:**
 > `server/paths.ts` теперь проверяет путь из `$PASEO_HOME/config.json` (где daemon хранит путь к checkout плагина) **перед** путем модуля сервера. Раньше при CommonJS-транспиляции хостом `import.meta.url` был пуст, `moduleDirectory()` возвращал `__dirname` из кэшированного старого кода, и сервер не находил `dist/console/index.html` — отдавал placeholder "run the plugin build". Теперь configured-путь имеет высший приоритет, и консоль открывается сразу после обновления. Также исправлено `resolvePluginVersion()` — читает версию из того же приоритизированного списка кандидатов.
 > **Статус 0.22.10 — создание RDP-подключений:** модалка соединения
@@ -767,7 +817,7 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 
 ### Блок G — Доведение консоли и приёмка
 
-**G1. Единый вид «Sessions» для всех типов** → `0.23.10` *(частично)*
+**G1. Единый вид «Sessions» для всех типов** → `0.23.10` *(частично; доведено в `0.25.11`)*
 - Все kind'ы в одной таблице, фильтры (тип/подключение/состояние), группировка
   по подключению, live-обновления по SSE, массовые действия, «open» для
   ssh/local и «focus window»-подсказка для rdp/vnc.
@@ -778,8 +828,16 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
   реестра (ID, Name, Kind, Target, Started, kill) с поллингом 3 с;
   `GET /api/sessions`, `POST /api/sessions/:id/kill`. Фильтры/группировка/
   массовые действия и «focus window»-подсказки не делались.
+- **Статус (факт 0.25.11):** доведено — фильтры (тип, подключение, текст),
+  группировка по подключению, выбор строк и «Kill selected», колонка Surface
+  и per-row «open»/«focus window» как честная подсказка (у SDK нет фокуса
+  вкладки, окно — у оконного менеджера), SSE `event: sessions` из
+  `ExternalSessionRegistry.onChange` (register/kill/prune), поллинг
+  терминалов 5 с; `/api/sessions` без Paseo API отдаёт внешние окна и
+  `terminalError` вместо 400. Тесты: `tests/sessions-http.test.ts` (7),
+  `tests/sessions.test.ts` (7), SSE-проверка в `tests/h3-http.test.ts`.
 
-**G2. Настройки плагина** → `0.25.0`
+**G2. Настройки плагина** → `0.25.0` *(выполнено в `0.25.11`; размер буфера вывода PTY снят — PTY в плагине нет с 0.17.9)*
 - Экран Settings в консоли: порт/статус сервера, авто-блокировка хранилища,
   путь стора (`PASSWORD_STORE_DIR`), override-бинарии RDP/VNC, размер
   буфера вывода PTY, импорт настроек ghostty (кнопка из B1) и «Lock now».
@@ -792,8 +850,19 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
   панелях/экране. Не вынесено в UI: порт (сервер всегда на ephemeral-порту),
   путь стора, override-бинарии, размер буфера PTY (PTY в плагине больше нет);
   перезапуск по смене порта не применим, пока порт не редактируется.
+- **Статус (факт 0.25.11):** выполнено — настройки в сторе
+  (`server/settings.ts`: `consolePort`, `autoLockMinutes`, `storeDir`,
+  `rdpBinary`, `vncBinary`), валидация с отказом на неизвестные ключи и
+  невалидные числа/относительные пути, `GET|PATCH /api/settings`, всё в
+  `/api/state`. Порт перезапускает листенер (дебаунс уже есть в
+  `ConsoleEndpoint`, фолбэк на ephemeral), смена стора — `vault.reconfigureStore`
+  (lock → новый `PASSWORD_STORE_DIR` → перечитать `.gpg-id`, без рестарта
+  демона), override RDP/VNC читаются на запуске (per-connection выбор
+  сильнее), «Lock now» → `POST /api/vault/lock`. Размер буфера PTY снят.
+  Evidence: живой прогон — PATCH автолока → `autoLockMs` 300000; смена порта
+  36888 → `restart: true`, старый origin закрыт, новый `/health` 200.
 
-**G3. Документация и команды** → `0.26.0`
+**G3. Документация и команды** → `0.26.0` *(выполнено в `0.25.11`, вместе с закрытием дефекта Apply)*
 - `README.md` плагина (English: что это, установка, экраны, безопасность,
   ограничения), `__doc.md` (English: ADR-1…ADR-13, схема, протоколы,
   результат спайка A3, caveat argv FreeRDP, таблица протоколов), запись в
@@ -808,6 +877,13 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
   ⌘K «Open terminal» удалён намеренно в 0.18.10). **Открытый дефект:** кнопка
   Apply импорта шлёт POST /api/ghostty/import/apply, сервер принимает только
   POST /api/ghostty/import → 404 (чинится патчем 0.18.x).
+- **Статус (факт 0.25.11):** выполнено. `/remote console|new|lock`,
+  ⌘K «New remote connection» и «Lock remote-control vault», deep-link
+  `params.action = new` (экран → `openConsoleUrl(url, openers, ws, params)` →
+  консоль открывает форму подключения). **Дефект закрыт в клиенте:** Apply
+  постит на обслуживаемый `POST /api/ghostty/import`; маршрута-алиаса не
+  добавлено, регрессионный тест сканирует `console/src/main.ts` на мёртвый
+  путь и проверяет, что `/api/ghostty/import/apply` остаётся 404.
 
 **G4. Приёмочная проверка на живом даэмоне** → без бампа
 - Установка из git-источника (`paseo plugin add …:remote-control`), статус
@@ -826,6 +902,18 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
   (0.17.9–0.18.10). **Не пройдено:** живой ssh-автологин из vault, живые
   RDP/VNC-окна (нет VNC-клиента; окно FreeRDP не поднималось), импорт ghostty
   на системе с/без ghostty, кнопка Apply (см. открытый дефект в G3).
+- **Статус (факт 0.25.11):** пройдено на изолированном демоне 0.15.3
+  (`.tmp/live-02511`, порт 6798, фикстурный `REMOTE_CONTROL_SSH_CONFIG`):
+  install из working tree + чистый reload → `running`, `plugin ready
+  (version 0.25.11)`; консоль из реального хост-сборщика (`/` 200, `/main.js`
+  свежий, `/health` 0.25.11); 401 без токена / 200 с токеном; `/api/state`;
+  PATCH настроек и рестарт по порту; sync ssh-config (create → update, backup,
+  отказ на чужой alias); copy-key — ключ и фингерпринт верно, деплой не прошёл
+  из-за отсутствия sshd (`Connection refused`); Apply 200 vs `/apply` 404;
+  lock 200. Вручную просмотрены все три вьюхи консоли и deep-link
+  `?action=new`. **Осталось непройденным:** реальный деплой ключа на живой
+  хост, живые RDP/VNC-окна, ghostty-импорт с реальным конфигом, мастер-пароль
+  первого запуска в приложении.
 
 ### Блок H — Перенос подключений и ssh-конфиг (по заказу заказчика)
 
@@ -880,7 +968,7 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 - Документация: README (service actions), `__doc.md` (контракт, семантика
   флага); корневой README не трогаем.
 
-**H3. Управление `~/.ssh/config` + копирование публичного ключа на хост** → `0.24.10` *(следующий)*
+**H3. Управление `~/.ssh/config` + копирование публичного ключа на хост** → `0.24.10` *(выполнено в `0.25.11`; номер этапа не совпал с фактическим — 0.24.x был занят исправлениями, этап получил вторую цифру за новую функциональность)*
 - Модель sshpilot (закреплено в `__doc.md`): конфиг пользователя —
   источник истины; парсер следует `Include`, различает подключаемые `Host`
   и wildcard/`Match`-правила; неизвестные директивы сохраняются
@@ -897,6 +985,21 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
   директивами не теряется), запись не трогает чужое, живой деплой ключа на
   тестовый хост, после импорта конфига подключения из H1 запускаются по
   `ssh <alias>`.
+- **Статус (факт 0.25.11, выполнено):** `server/ssh-config.ts` +
+  `server/key-copy.ts` + `GET /api/ssh-config`, `POST /api/ssh-config/sync`,
+  `POST /api/connections/:id/copy-key`; в консоли — `ssh-config` и `copy key` у
+  ssh-строк, «Sync all SSH connections» в Settings, поля Host alias /
+  Identity file / Jump host / Public key в «Advanced (SSH)». Модель: блок
+  помечен `# remote-control: <id>`, Include разворачиваются (глубина 8, защита
+  от циклов), wildcard/`Match` — правила; запись атомарная с backup и
+  `expectedRevision`, symlink запрещён, права сохраняются; чужой alias —
+  ошибка с файлом и строкой. Ключ: `publicKeyPath` → `identityFile.pub` →
+  pub-часть ключа из хранилища (`ssh-keygen -y`) → `~/.ssh/id_*.pub`; askpass
+  или `BatchMode=yes`; `grep -qxF` + append; ответ несёт `SHA256:`-фингерпринт.
+  Evidence: `tests/ssh-config.test.ts` (14) и `tests/key-copy.test.ts` (10) +
+  живой sync/backup/отказ на чужой alias и `Connection refused` при
+  отсутствии sshd; «запуск по `ssh <alias>`» живьём не проверялся — на этой
+  машине нет ssh-хоста.
 
 ---
 

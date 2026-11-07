@@ -153,7 +153,9 @@ describe("launchExternalWindow", () => {
     const capture = path.join(dir, "rdp-capture");
     writeFileSync(
       path.join(dir, "xfreerdp3"),
-      `#!/bin/sh\nprintf '%s\\n' "$@" > "${capture}.argv"\ncat > "${capture}.stdin"\n`,
+      // The stdin capture is renamed into place only after `cat` finished,
+      // so `waitForFile` cannot observe an empty half-written file.
+      `#!/bin/sh\nprintf '%s\\n' "$@" > "${capture}.argv"\ncat > "${capture}.stdin.tmp" && mv "${capture}.stdin.tmp" "${capture}.stdin"\n`,
       { mode: 0o755 },
     );
     const conn = connection({
@@ -231,5 +233,28 @@ describe("launchExternalWindow", () => {
     // window exits.
     await waitForRemoval(path.dirname(passwdFile));
     expect(existsSync(passwdFile)).toBe(false);
+  });
+});
+
+// Stage 0.25.11 (G2): a configured RDP client replaces PATH discovery, and a
+// bad path is reported before anything is spawned.
+describe("configured client overrides", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "remote-control-rdp-override-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("refuses a configured RDP client that is not executable", async () => {
+    await expect(
+      launchExternalWindow(connection(), {
+        rdpBinary: path.join(dir, "missing"),
+        pathEnv: "",
+      }),
+    ).rejects.toThrow(/not executable/);
   });
 });

@@ -74,7 +74,7 @@ function run(
 }
 
 export class VaultService {
-  readonly storeDir: string;
+  private _storeDir: string;
   readonly gnupgHome: string;
   private keyId: string | null = null;
   private passphrase: Buffer | null = null;
@@ -85,7 +85,7 @@ export class VaultService {
 
   constructor(options: VaultOptions = {}) {
     const home = options.paseoHome ?? process.env.PASEO_HOME ?? path.join(process.env.HOME ?? "", ".paseo");
-    this.storeDir = options.storeDir ?? path.join(home, "pass-store");
+    this._storeDir = options.storeDir ?? path.join(home, "pass-store");
     this.gnupgHome = options.gnupgHome ?? path.join(home, "pass-gnupg");
     this.autoLockMs = options.autoLockMs ?? 0;
     this.now = options.now ?? (() => Date.now());
@@ -106,8 +106,33 @@ export class VaultService {
     } catch {
       // ignore
     }
-    fs.mkdirSync(this.storeDir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(this._storeDir, { recursive: true, mode: 0o700 });
     this.loadKeyId();
+  }
+
+  /** PASSWORD_STORE_DIR of this vault. */
+  get storeDir(): string {
+    return this._storeDir;
+  }
+
+  /**
+   * Points the vault at another pass store (stage 0.25.11, G2). Locks first:
+   * a cached passphrase belongs to the old store, so switching without a
+   * relock would leave reads against a store the passphrase was never proven
+   * on. The GNUPGHOME (the plugin's own keyring) does not move — only the
+   * directory being decrypted changes.
+   */
+  reconfigureStore(storeDir: string): void {
+    if (!path.isAbsolute(storeDir)) {
+      throw new Error("the secret storage path must be absolute");
+    }
+    const next = path.normalize(storeDir);
+    if (next === this._storeDir) return;
+    this.lock();
+    this._storeDir = next;
+    fs.mkdirSync(next, { recursive: true, mode: 0o700 });
+    this.loadKeyId();
+    this.log(`[remote-control] secret storage moved to ${next} (locked)`);
   }
 
   private env(): NodeJS.ProcessEnv {

@@ -116,3 +116,36 @@ describe("/api/sessions", () => {
     expect(body.sessions.some((s) => s.id === info.id)).toBe(false);
   });
 });
+
+// Stage 0.25.11 (G1): a console opened without a Paseo API context still sees
+// the external windows the plugin owns — the terminal failure becomes a
+// warning, not a 400 that hides the RDP/VNC rows.
+describe("/api/sessions without a Paseo context", () => {
+  it("answers with the external rows and a warning", async () => {
+    const registry = new ExternalSessionRegistry({ isAlive: () => true });
+    const info = registry.register({
+      connection: { id: "conn_rdp", name: "rdp desktop", host: "10.0.0.7", port: 3389 },
+      protocol: "rdp",
+      pid: 55,
+      binary: "xfreerdp3",
+    });
+    const terminals = {
+      list: async () => {
+        throw new Error("Paseo API is not ready yet: open the Remote Control panel or console once");
+      },
+      kill: async () => false,
+    } as unknown as TerminalService;
+
+    const server = new ConsoleHttpServer({ token: TOKEN, port: 0, terminals, sessions: registry });
+    await server.start();
+    try {
+      const res = await fetch(`${server.origin}/api/sessions?token=${TOKEN}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { sessions: any[]; terminalError?: string };
+      expect(body.sessions.map((session) => session.id)).toEqual([info.id]);
+      expect(body.terminalError).toMatch(/Paseo API is not ready/);
+    } finally {
+      await server.stop();
+    }
+  });
+});

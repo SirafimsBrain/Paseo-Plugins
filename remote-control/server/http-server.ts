@@ -12,6 +12,10 @@ import {
 import { bundleHasSecrets, buildExportBundle, importBundle, openBundle } from "./transfer";
 import { testSshConnection } from "./probe";
 import type { SshProbe } from "./probe";
+import { copyPublicKey } from "./key-copy";
+import type { SshExec } from "./key-copy";
+import { defaultSshConfigPath, loadSshConfigTree, sshConfigView, syncConnectionToSshConfig } from "./ssh-config";
+import type { ConsoleSettings } from "./settings";
 import { nextCopyName } from "../shared/naming";
 import { validatePayload } from "../shared/protocols";
 import { discoverVncClients } from "./protocols/vnc";
@@ -60,6 +64,21 @@ export interface ConsoleHttpServerOptions {
   vault?: import("./vault").VaultService;
   /** Connection test (0.21.10): key-first probe, injectable in tests. */
   sshProbe?: SshProbe;
+  /**
+   * Settings bridge (0.25.11, G2): `load` for GET, `save` for PATCH — the
+   * bridge validates, persists and applies the side effects (endpoint restart,
+   * vault reconfigure) and reports whether the console origin moves.
+   */
+  settings?: {
+    load(): ConsoleSettings;
+    save(patch: unknown): { settings: ConsoleSettings; restart: boolean };
+  };
+  /** Console endpoint status for `/api/state` (port, bound port, fallback). */
+  endpointStatus?: () => unknown;
+  /** `~/.ssh/config` used by the H3 routes; `REMOTE_CONTROL_SSH_CONFIG` or the default. */
+  sshConfigPath?: string;
+  /** Key-deployment process runner, injectable in tests. */
+  sshExec?: SshExec;
 }
 
 export class ConsoleHttpServer {
@@ -73,6 +92,7 @@ export class ConsoleHttpServer {
   private readonly vault: import("./vault").VaultService | null;
   private readonly sshProbe: SshProbe;
   private readonly options: ConsoleHttpServerOptions;
+  private readonly sshConfigPath: string;
   private server: http.Server | null = null;
   private boundPort: number | null = null;
   private boundAddress: string | null = null;
@@ -101,6 +121,7 @@ export class ConsoleHttpServer {
     this.vault = options.vault ?? null;
     this.sshProbe =
       options.sshProbe ?? ((connection, vault) => testSshConnection(connection, { vault }));
+    this.sshConfigPath = options.sshConfigPath ?? defaultSshConfigPath();
   }
 
   get listening(): boolean {
@@ -185,10 +206,88 @@ export class ConsoleHttpServer {
         return;
       }
 
-      // /api/state
+      // /api/state — the console's single status document. Every settings
+      // change is visible here (G2 acceptance): console port/bound port, the
+      // vault's store and auto-lock, and the client overrides.
       if (url.pathname === "/api/state") {
         if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
-        this.sendJson(res, 200, { ok: true, listening: true });
+        const status = this.vault ? this.vault.status() : null;
+        this.sendJson(res, 200, {
+          ok: true,
+          listening: true,
+          version: this.version,
+          console: this.options.endpointStatus?.() ?? null,
+          vault: status
+            ? {
+                initialized: status.initialized,
+                unlocked: status.unlocked,
+                storeDir: status.storeDir,
+                autoLockMs: status.autoLockMs,
+              }
+            : null,
+          settings: this.options.settings?.load() ?? null,
+          sshConfigPath: this.sshConfigPath,
+        });
+        return;
+      }
+      // /api/settings — plugin settings (G2). PATCH validates, persists and
+      // applies; `restart` says the console origin is about to move.
+      if (url.pathname === "/api/settings") {
+        if (!this.options.settings) { this.sendJson(res, 503, { error: "settings unavailable" }); return; }
+        if (req.method === "GET") {
+          this.sendJson(res, 200, { settings: this.options.settings.load() });
+          return;
+        }
+        if (req.method === "PATCH") {
+          void this.readJsonBody(req).then((body) => {
+            const result = this.options.settings!.save(body);
+            this.sendJson(res, 200, { ok: true, ...result });
+          }).catch((cause) => {
+            this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          });
+          return;
+        }
+        this.sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      // /api/vault/lock — locking is a session action, not secret management
+      // (0.25.11): setup/unlock stay panel-only, but “Lock now” in the
+      // console settings must be able to drop the cached passphrase.
+      if (url.pathname === "/api/vault/lock") {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.vault) { this.sendJson(res, 503, { error: "vault unavailable" }); return; }
+        this.vault.lock();
+        this.sendJson(res, 200, { ok: true });
+        return;
+      }
+      // /api/ssh-config — the parsed ~/.ssh/config (H3): managed and
+      // hand-written hosts, includes and the root revision used by /sync.
+      if (url.pathname === "/api/ssh-config") {
+        if (req.method !== "GET") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        try {
+          this.sendJson(res, 200, { config: sshConfigView(loadSshConfigTree(this.sshConfigPath)) });
+        } catch (cause) {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        }
+        return;
+      }
+      // /api/ssh-config/sync — read-modify-write of the block owned by one
+      // connection: append when new, rewrite in place when already managed,
+      // refuse an alias the user typed by hand.
+      if (url.pathname === "/api/ssh-config/sync") {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        if (!this.store) { this.sendJson(res, 503, { error: "store unavailable" }); return; }
+        void this.readJsonBody(req).then((body) => {
+          const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+          const connectionId = typeof b.connectionId === "string" ? b.connectionId : "";
+          if (connectionId.length === 0) throw new Error("connectionId is required");
+          const connection = this.store!.getConnection(connectionId);
+          if (!connection) throw new Error(`connection not found: ${connectionId}`);
+          const result = syncConnectionToSshConfig(connection, { configPath: this.sshConfigPath });
+          this.sendJson(res, 200, { ok: true, ...result });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
         return;
       }
       // /api/events (SSE)
@@ -211,7 +310,6 @@ export class ConsoleHttpServer {
       if (
         url.pathname === "/api/vault/setup" ||
         url.pathname === "/api/vault/unlock" ||
-        url.pathname === "/api/vault/lock" ||
         url.pathname.startsWith("/api/secrets")
       ) {
         this.sendJson(res, 404, {
@@ -257,7 +355,26 @@ export class ConsoleHttpServer {
           ];
           this.sendJson(res, 200, { sessions });
         }).catch((cause) => {
-          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+          // The Paseo API is captured from an RPC context; a console opened
+          // directly (no panel call yet) has none. That must not hide the
+          // RDP/VNC windows the plugin itself tracks (0.25.11, G1): answer
+          // with the external rows and an explicit warning.
+          const message = cause instanceof Error ? cause.message : String(cause);
+          this.sendJson(res, 200, {
+            sessions: external.map((session) => ({
+              id: session.id,
+              kind: session.kind,
+              name: session.name,
+              workspaceId: null,
+              connectionId: session.connectionId,
+              target: session.target,
+              cwd: null,
+              pid: session.pid,
+              binary: session.binary,
+              startedAt: session.startedAt,
+            })),
+            terminalError: message,
+          });
         });
         return;
       }
@@ -521,6 +638,26 @@ export class ConsoleHttpServer {
             message: result.message,
             connection,
           });
+        }).catch((cause) => {
+          this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+        });
+        return;
+      }
+      // /api/connections/:id/copy-key — deploy the public key into the remote
+      // authorized_keys (0.25.11, H3). ssh-copy-id semantics over the plugin's
+      // own ssh launch path: identity and stored password are reused, the key
+      // is appended only when absent, and the response never echoes a secret.
+      const connectionCopyKeyMatch = /^\/api\/connections\/(.+)\/copy-key$/.exec(url.pathname);
+      if (connectionCopyKeyMatch && this.store) {
+        if (req.method !== "POST") { this.sendJson(res, 405, { error: "method not allowed" }); return; }
+        const copyKeyId = decodeURIComponent(connectionCopyKeyMatch[1]);
+        const copyKeyConnection = this.store.getConnection(copyKeyId);
+        if (!copyKeyConnection) { this.sendJson(res, 404, { error: "not found" }); return; }
+        void copyPublicKey(copyKeyConnection, {
+          vault: this.vault ?? null,
+          ...(this.options.sshExec ? { exec: this.options.sshExec } : {}),
+        }).then((result) => {
+          this.sendJson(res, 200, result);
         }).catch((cause) => {
           this.sendJson(res, 400, { error: cause instanceof Error ? cause.message : String(cause) });
         });

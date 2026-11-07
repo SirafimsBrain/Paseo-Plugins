@@ -2,7 +2,7 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { RemoteControlPanel } from "./client/console-panel";
 import { RemoteControlSettingsPanel } from "./client/console-settings-panel";
 import { RemoteControlScreen, SCREEN_ID } from "./client/console-screen";
-import { state } from "./shared/rpc";
+import { state, vaultLock } from "./shared/rpc";
 
 export default function contribute(client: PluginClientContext): () => void {
   // Right sidebar (explorer location): connection list with launch actions
@@ -39,6 +39,51 @@ export default function contribute(client: PluginClientContext): () => void {
     context: "global",
     async onSelect({ openScreen }) {
       openScreen({ screenId: SCREEN_ID });
+    },
+  });
+
+  // Stage 0.25.11 (G3): the two entries the plan asks for. "New connection"
+  // lands on the console's connection form; "Lock vault" drops the cached
+  // master password without opening the console at all.
+  client.addCommandCenterItem({
+    id: "remote-control-new-connection",
+    title: "New remote connection",
+    icon: "Server",
+    keywords: ["remote", "new", "connection", "ssh", "rdp", "vnc"],
+    context: "global",
+    async onSelect({ openScreen }) {
+      openScreen({ screenId: SCREEN_ID, params: { action: "new" } });
+    },
+  });
+
+  client.addCommandCenterItem({
+    id: "remote-control-lock-vault",
+    title: "Lock remote-control vault",
+    icon: "Lock",
+    keywords: ["remote", "vault", "lock", "secret"],
+    context: "global",
+    async onSelect({ rpc }) {
+      await rpc(vaultLock, {});
+    },
+  });
+
+  // `/remote` (stage 0.25.11, G3): the console, the connection form or the
+  // lock action without leaving the composer.
+  client.addSlashCommand({
+    name: "remote",
+    description: "Open the remote-control console, add a connection or lock the storage",
+    argumentHint: "console | new | lock",
+    context: "workspace",
+    async onSubmit({ args, rpc, openScreen }) {
+      const subcommand = args.trim().toLowerCase();
+      if (subcommand === "lock") {
+        await rpc(vaultLock, {});
+        return;
+      }
+      openScreen({
+        screenId: SCREEN_ID,
+        ...(subcommand === "new" ? { params: { action: "new" } } : {}),
+      });
     },
   });
 

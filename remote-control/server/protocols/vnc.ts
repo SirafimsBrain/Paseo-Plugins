@@ -71,6 +71,13 @@ export interface VncClientInfo {
 
 export interface VncDiscoveryOptions {
   pathEnv?: string;
+  /**
+   * Plugin-settings override (stage 0.25.11, G2): a viewer binary used when
+   * the connection itself pins neither a client nor a custom path. The
+   * per-connection choice always wins, so one connection can still use a
+   * different viewer than the machine-wide default.
+   */
+  binaryOverride?: string;
   /** Version probe override, mainly for tests. */
   versionOutput?: (binary: string) => Promise<string>;
   now?: () => number;
@@ -352,6 +359,12 @@ export async function resolveVncClient(
   const custom = typeof data.customBinary === "string" ? data.customBinary.trim() : "";
   if (custom.length > 0) {
     const binary = resolveCustomBinary(custom, options.pathEnv);
+    return { clientId: "custom", binary, displayName: path.basename(binary) || "custom" };
+  }
+
+  const override = options.binaryOverride?.trim() ?? "";
+  if (override.length > 0) {
+    const binary = resolveCustomBinary(override, options.pathEnv);
     return { clientId: "custom", binary, displayName: path.basename(binary) || "custom" };
   }
 

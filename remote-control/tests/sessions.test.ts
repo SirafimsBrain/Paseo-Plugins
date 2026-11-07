@@ -76,3 +76,45 @@ describe("ExternalSessionRegistry", () => {
     expect(registry.list()).toEqual([]);
   });
 });
+
+// Stage 0.25.11 (G1): the console's Sessions view is pushed over SSE, so the
+// registry reports every change instead of being polled only.
+describe("change notifications", () => {
+  const connection = { id: "conn_1", name: "desktop", host: "10.0.0.7", port: 3389 };
+
+  it("reports a registration, a kill and a pruned window", () => {
+    let alive = true;
+    const counts: number[] = [];
+    const registry = new ExternalSessionRegistry({
+      isAlive: () => alive,
+      signal: () => {},
+      onChange: (sessions) => counts.push(sessions.length),
+    });
+
+    const info = registry.register({ connection, protocol: "rdp", pid: 21, binary: "xfreerdp3" });
+    expect(counts).toEqual([1]);
+
+    expect(registry.kill(info.id)).toBe(true);
+    expect(counts).toEqual([1, 0]);
+
+    // A window that died on its own disappears on the next listing, and that
+    // too is a change the console should hear about.
+    registry.register({ connection, protocol: "vnc", pid: 22, binary: "vncviewer" });
+    alive = false;
+    expect(registry.list()).toEqual([]);
+    expect(counts).toEqual([1, 0, 1, 0]);
+  });
+
+  it("survives a throwing listener", () => {
+    const registry = new ExternalSessionRegistry({
+      isAlive: () => true,
+      onChange: () => {
+        throw new Error("listener boom");
+      },
+    });
+    expect(() =>
+      registry.register({ connection, protocol: "rdp", pid: 23, binary: "xfreerdp3" }),
+    ).not.toThrow();
+    expect(registry.list()).toHaveLength(1);
+  });
+});

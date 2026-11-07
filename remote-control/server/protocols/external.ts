@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Connection } from "../../shared/connections";
-import { findExecutable } from "./discovery";
+import { findExecutable, isExecutable } from "./discovery";
 import { prepareVncLaunch } from "./vnc";
 import type { ExternalSessionRegistry } from "../sessions";
 
@@ -29,6 +29,10 @@ export interface ExternalLaunchOptions {
   runDirBase?: string;
   /** PATH override, mainly for tests. */
   pathEnv?: string;
+  /** Explicit RDP client from the plugin settings (stage 0.25.11, G2). */
+  rdpBinary?: string | null;
+  /** Explicit VNC viewer from the plugin settings; per-connection choices win. */
+  vncBinary?: string | null;
   /** Session registry: RDP/VNC windows become killable "Sessions" rows. */
   sessions?: ExternalSessionRegistry | null;
   log?: (message: string) => void;
@@ -263,7 +267,11 @@ export async function launchExternalWindow(
   const password = await connectionPassword(connection, options.vault);
 
   if (connection.protocol === "rdp") {
-    const binary = findExecutable(RDP_BINARIES, options.pathEnv);
+    const configured = options.rdpBinary?.trim() ?? "";
+    if (configured.length > 0 && !isExecutable(configured)) {
+      throw new Error(`the configured RDP client is not executable: ${configured} (check the plugin settings)`);
+    }
+    const binary = configured.length > 0 ? configured : findExecutable(RDP_BINARIES, options.pathEnv);
     if (!binary) {
       throw new Error(`RDP client not found (tried ${RDP_BINARIES.join(", ")}): install FreeRDP.`);
     }
@@ -292,6 +300,7 @@ export async function launchExternalWindow(
   const prepared = await prepareVncLaunch(connection, password, {
     pathEnv: options.pathEnv,
     runDirBase: options.runDirBase,
+    ...(options.vncBinary?.trim() ? { binaryOverride: options.vncBinary.trim() } : {}),
     log,
   });
   const pid = spawnWindow(

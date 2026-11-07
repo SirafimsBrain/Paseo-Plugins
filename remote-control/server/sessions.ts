@@ -40,6 +40,8 @@ export interface RegisterExternalSessionInput {
 
 export interface ExternalSessionRegistryOptions {
   now?: () => number;
+  /** Change listener (see {@link ExternalSessionRegistry.onChange}). */
+  onChange?: (sessions: ExternalSessionInfo[]) => void;
   /** Liveness probe, injectable for tests. */
   isAlive?: (pid: number) => boolean;
   /** Signal delivery, injectable for tests. */
@@ -91,12 +93,33 @@ export class ExternalSessionRegistry {
   private readonly isAlive: (pid: number) => boolean;
   private readonly signal: (pid: number, signal: NodeJS.Signals) => void;
   private readonly cleanup: (runDir: string) => void;
+  private notifying = false;
+
+  /**
+   * Called after a window is registered, killed or pruned (stage 0.25.11,
+   * G1). The HTTP endpoint uses it to push a `sessions` SSE event, so the
+   * console updates without waiting for its poll.
+   */
+  onChange: ((sessions: ExternalSessionInfo[]) => void) | null = null;
 
   constructor(options: ExternalSessionRegistryOptions = {}) {
     this.now = options.now ?? (() => Date.now());
     this.isAlive = options.isAlive ?? pidIsAlive;
     this.signal = options.signal ?? signalProcess;
     this.cleanup = options.cleanup ?? removeRunDir;
+    this.onChange = options.onChange ?? null;
+  }
+
+  private notify(): void {
+    if (this.notifying || this.onChange === null) return;
+    this.notifying = true;
+    try {
+      this.onChange(this.list());
+    } catch {
+      // a broken listener must never break the registry
+    } finally {
+      this.notifying = false;
+    }
   }
 
   register(input: RegisterExternalSessionInput): ExternalSessionInfo {
@@ -111,16 +134,20 @@ export class ExternalSessionRegistry {
       startedAt: this.now(),
     };
     this.sessions.set(info.id, { ...info, runDir: input.runDir ?? null });
+    this.notify();
     return info;
   }
 
   /** Live external sessions, oldest first; dead pids are dropped. */
   list(): ExternalSessionInfo[] {
+    let pruned = false;
     for (const [id, session] of [...this.sessions]) {
       if (this.isAlive(session.pid)) continue;
       if (session.runDir) this.cleanup(session.runDir);
       this.sessions.delete(id);
+      pruned = true;
     }
+    if (pruned) this.notify();
     return [...this.sessions.values()]
       .sort((a, b) => a.startedAt - b.startedAt)
       .map(({ runDir: _runDir, ...info }) => info);
@@ -149,6 +176,7 @@ export class ExternalSessionRegistry {
     }
     if (session.runDir) this.cleanup(session.runDir);
     this.sessions.delete(id);
+    this.notify();
     return true;
   }
 

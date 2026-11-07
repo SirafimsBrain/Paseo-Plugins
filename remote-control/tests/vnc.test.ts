@@ -262,3 +262,55 @@ describe("VNC password material", () => {
     await expect(writeVncPasswdFile(vncpasswd, "secret", path.join(dir, "run"))).rejects.toThrow(/boom/);
   });
 });
+
+// Stage 0.25.11 (G2): the plugin-settings viewer override is a machine-wide
+// default; a connection that pins a client or a custom path keeps winning.
+describe("settings viewer override", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "remote-control-vnc-override-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function executable(name: string): string {
+    const file = path.join(dir, name);
+    writeFileSync(file, "#!/bin/sh\n");
+    chmodSync(file, 0o755);
+    return file;
+  }
+
+  it("uses the configured viewer when the connection pins none", async () => {
+    const viewer = executable("settings-viewer");
+    const resolved = await resolveVncClient(connection(), {
+      pathEnv: "",
+      useCache: false,
+      binaryOverride: viewer,
+    });
+    expect(resolved.clientId).toBe("custom");
+    expect(resolved.binary).toBe(viewer);
+  });
+
+  it("lets the per-connection custom path win", async () => {
+    const settingsViewer = executable("settings-viewer");
+    const connectionViewer = executable("connection-viewer");
+    const resolved = await resolveVncClient(
+      connection({ payload: { customBinary: connectionViewer } }),
+      { pathEnv: "", useCache: false, binaryOverride: settingsViewer },
+    );
+    expect(resolved.binary).toBe(connectionViewer);
+  });
+
+  it("rejects a configured viewer that is not executable", async () => {
+    await expect(
+      resolveVncClient(connection(), {
+        pathEnv: "",
+        useCache: false,
+        binaryOverride: path.join(dir, "missing"),
+      }),
+    ).rejects.toThrow(/does not exist or is not executable/);
+  });
+});

@@ -469,12 +469,56 @@ function vncForm(initial) {
   };
   return { element: root, read };
 }
+function sshForm(initial) {
+  const stored = initial && initial.protocol === "ssh" && initial.payload ? initial.payload : {};
+  const base = { ...stored };
+  const str = (key) => typeof base[key] === "string" ? base[key] : "";
+  const aliasI = input(str("sshAlias"), "text", "alias in ~/.ssh/config (empty = name slug)");
+  const identityI = input(str("identityFile"), "text", "IdentityFile, e.g. ~/.ssh/id_ed25519 (optional)");
+  const jumpI = input(str("proxyJump"), "text", "ProxyJump, e.g. user@gateway (optional)");
+  const publicI = input(str("publicKeyPath"), "text", "public key to deploy, e.g. ~/.ssh/id_ed25519.pub (optional)");
+  const adv = document.createElement("details");
+  adv.className = "rdp-advanced";
+  const summary = document.createElement("summary");
+  summary.textContent = "Advanced (SSH)";
+  adv.append(
+    summary,
+    field("Host alias", aliasI),
+    field("Identity file", identityI),
+    field("Jump host", jumpI),
+    field("Public key", publicI)
+  );
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.textContent = 'The alias is the Host token of the managed ~/.ssh/config block; the plugin never rewrites blocks it did not create. "Copy key" deploys the public key into the remote authorized_keys.';
+  adv.append(note);
+  const root = document.createElement("div");
+  root.className = "rdp-fields";
+  root.append(adv);
+  const read = () => {
+    const out = { ...base };
+    const put = (key, value) => {
+      if (value.length === 0) delete out[key];
+      else out[key] = value;
+    };
+    put("sshAlias", aliasI.value.trim());
+    put("identityFile", identityI.value.trim());
+    put("proxyJump", jumpI.value.trim());
+    put("publicKeyPath", publicI.value.trim());
+    return out;
+  };
+  return { element: root, read };
+}
 var state = {
   view: "sessions",
   sessions: [],
   connections: [],
   groups: [],
-  notice: null
+  notice: null,
+  terminalError: null,
+  selected: /* @__PURE__ */ new Set(),
+  live: false,
+  sessionFilters: { kind: "all", connectionId: "", query: "", group: false }
 };
 var NAV = [
   { id: "sessions", label: "Sessions" },
@@ -510,59 +554,210 @@ async function refreshSessions() {
     const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
     const body = await api(`/api/sessions${query}`);
     state.sessions = body.sessions ?? [];
+    state.terminalError = typeof body.terminalError === "string" ? body.terminalError : null;
+    for (const id of [...state.selected]) {
+      if (!state.sessions.some((session) => session.id === id)) state.selected.delete(id);
+    }
     if (state.view === "sessions") render();
   } catch (e) {
     console.error(e);
   }
 }
+function connectionLabel(connectionId) {
+  if (!connectionId) return null;
+  return state.connections.find((connection) => connection.id === connectionId)?.name ?? connectionId;
+}
+function visibleSessions() {
+  const filters = state.sessionFilters;
+  const query = filters.query.trim().toLowerCase();
+  return state.sessions.filter((session) => {
+    if (filters.kind !== "all" && session.kind !== filters.kind) return false;
+    if (filters.connectionId !== "" && (session.connectionId ?? "") !== filters.connectionId) return false;
+    if (query.length === 0) return true;
+    const haystack = `${session.name} ${session.id} ${session.target ?? ""} ${session.kind} ${connectionLabel(session.connectionId) ?? ""}`.toLowerCase();
+    return haystack.includes(query);
+  });
+}
+function sessionSurface(session) {
+  return session.kind === "rdp" || session.kind === "vnc" ? "desktop window" : "Paseo tab";
+}
+function sessionHint(session) {
+  if (session.kind === "rdp" || session.kind === "vnc") {
+    return `${session.name}: ${session.binary ?? "viewer"} window on the desktop (pid ${session.pid ?? "?"}) \u2014 bring it forward with your window manager.`;
+  }
+  return `${session.name}: terminal tab${session.workspaceId ? ` in workspace ${session.workspaceId}` : ""} in Paseo \u2014 open it in the app; the daemon owns the tab.`;
+}
+async function killSession(session) {
+  try {
+    await api(`/api/sessions/${encodeURIComponent(session.id)}/kill`, { method: "POST" });
+    state.notice = null;
+  } catch (e) {
+    state.notice = `${session.name}: ${String(e)}`;
+  }
+}
+async function killSelectedSessions() {
+  const ids = [...state.selected];
+  if (ids.length === 0) return;
+  for (const id of ids) {
+    const session = state.sessions.find((entry) => entry.id === id);
+    if (session) await killSession(session);
+  }
+  state.selected.clear();
+  state.notice = `${ids.length} session${ids.length === 1 ? "" : "s"} stopped.`;
+  await refreshSessions();
+}
 function sessionsView(main) {
-  const row = document.createElement("div");
-  row.className = "row";
+  const header = document.createElement("div");
+  header.className = "row";
   const hint = document.createElement("span");
   hint.className = "muted";
   hint.textContent = workspaceId ? `Workspace ${workspaceId} \u2014 Paseo terminal tabs and the RDP/VNC windows opened from this plugin.` : "Paseo terminal tabs and the RDP/VNC windows opened from this plugin.";
-  row.append(hint);
-  main.append(row);
+  const live = document.createElement("span");
+  live.className = "muted";
+  live.textContent = state.live ? "live (SSE)" : "polling";
+  header.append(hint, live);
+  main.append(header);
+  if (state.terminalError) {
+    const warning = document.createElement("p");
+    warning.className = "muted";
+    warning.textContent = `Paseo terminals are unavailable right now: ${state.terminalError}`;
+    main.append(warning);
+  }
   if (state.notice) {
     const notice = document.createElement("p");
     notice.className = "muted";
     notice.textContent = state.notice;
     main.append(notice);
   }
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>ID</th><th>Name</th><th>Kind</th><th>Target</th><th>Started</th><th>Actions</th></tr>";
-  table.append(thead);
-  const tbody = document.createElement("tbody");
-  for (const t of state.sessions) {
-    const tr = document.createElement("tr");
-    const started = t.startedAt ? new Date(t.startedAt).toLocaleTimeString() : "-";
-    tr.innerHTML = `<td class="mono">${t.id}</td><td>${t.name}</td><td>${t.kind}</td><td class="mono">${t.target || "-"}</td><td>${started}</td>`;
-    const actions = document.createElement("td");
-    const killBtn = document.createElement("button");
-    killBtn.className = "danger";
-    killBtn.textContent = "kill";
-    killBtn.addEventListener("click", async () => {
-      try {
-        await api(`/api/sessions/${encodeURIComponent(t.id)}/kill`, { method: "POST" });
-        state.notice = null;
-      } catch (e) {
-        state.notice = `${t.name}: ${String(e)}`;
-      }
-      await refreshSessions();
-    });
-    actions.append(killBtn);
-    tr.append(actions);
-    tbody.append(tr);
+  const filters = document.createElement("div");
+  filters.className = "row";
+  const kindSel = selectEl(
+    [
+      ["all", "All kinds"],
+      ["local", "local"],
+      ["ssh", "ssh"],
+      ["rdp", "rdp"],
+      ["vnc", "vnc"]
+    ],
+    state.sessionFilters.kind
+  );
+  kindSel.addEventListener("change", () => {
+    state.sessionFilters.kind = kindSel.value;
+    render();
+  });
+  const connectionOptions = [["", "Any connection"]];
+  for (const c of state.connections) connectionOptions.push([String(c.id), String(c.name)]);
+  const connectionSel = selectEl(connectionOptions, state.sessionFilters.connectionId);
+  connectionSel.addEventListener("change", () => {
+    state.sessionFilters.connectionId = connectionSel.value;
+    render();
+  });
+  const queryI = input(state.sessionFilters.query, "text", "filter by name, target or id (Enter)");
+  queryI.addEventListener("change", () => {
+    state.sessionFilters.query = queryI.value;
+    render();
+  });
+  queryI.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    state.sessionFilters.query = queryI.value;
+    render();
+  });
+  const [groupRow, groupI] = checkField("Group by connection", state.sessionFilters.group);
+  groupI.addEventListener("change", () => {
+    state.sessionFilters.group = groupI.checked;
+    render();
+  });
+  filters.append(kindSel, connectionSel, queryI, groupRow);
+  main.append(filters);
+  const rows = visibleSessions();
+  const selectAllRow = document.createElement("div");
+  selectAllRow.className = "row";
+  const counter = document.createElement("span");
+  counter.className = "muted";
+  counter.textContent = `${rows.length} of ${state.sessions.length} session${state.sessions.length === 1 ? "" : "s"}`;
+  const selectAll = document.createElement("button");
+  selectAll.textContent = state.selected.size === rows.length && rows.length > 0 ? "Deselect all" : "Select all visible";
+  selectAll.disabled = rows.length === 0;
+  selectAll.addEventListener("click", () => {
+    if (state.selected.size === rows.length) state.selected.clear();
+    else for (const s of rows) state.selected.add(s.id);
+    render();
+  });
+  const killSelected = document.createElement("button");
+  killSelected.className = "danger";
+  killSelected.textContent = `Kill selected (${state.selected.size})`;
+  killSelected.disabled = state.selected.size === 0;
+  killSelected.addEventListener("click", () => void killSelectedSessions());
+  selectAllRow.append(counter, selectAll, killSelected);
+  main.append(selectAllRow);
+  const buildTable = (entries) => {
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th></th><th>ID</th><th>Name</th><th>Kind</th><th>Connection</th><th>Target</th><th>Surface</th><th>Started</th><th>Actions</th></tr>";
+    table.append(thead);
+    const tbody = document.createElement("tbody");
+    for (const session of entries) {
+      tbody.append(sessionRow(session));
+    }
+    table.append(tbody);
+    return table;
+  };
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = state.sessions.length === 0 ? "No sessions yet." : "No session matches these filters.";
+    main.append(empty);
+    return;
   }
-  table.append(tbody);
-  main.append(table);
-  if (state.sessions.length === 0) {
-    const p = document.createElement("p");
-    p.className = "muted";
-    p.textContent = "No sessions yet.";
-    main.append(p);
+  if (state.sessionFilters.group) {
+    const groups = /* @__PURE__ */ new Map();
+    for (const session of rows) {
+      const key = session.connectionId ?? "";
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(session);
+      else groups.set(key, [session]);
+    }
+    for (const [key, entries] of groups) {
+      const heading = document.createElement("h2");
+      heading.textContent = `${key === "" ? "(no connection)" : connectionLabel(key) ?? key} \u2014 ${entries.length}`;
+      main.append(heading, buildTable(entries));
+    }
+    return;
   }
+  main.append(buildTable(rows));
+}
+function sessionRow(session) {
+  const tr = document.createElement("tr");
+  const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "-";
+  const connection = connectionLabel(session.connectionId) ?? "-";
+  tr.innerHTML = `<td></td><td class="mono">${session.id}</td><td>${session.name}</td><td>${session.kind}</td><td>${connection === "-" ? '<span class="muted">-</span>' : connection}</td><td class="mono">${session.target || "-"}</td><td>${sessionSurface(session)}</td><td>${started}</td>`;
+  const checkCell = tr.firstElementChild;
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = state.selected.has(session.id);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) state.selected.add(session.id);
+    else state.selected.delete(session.id);
+    render();
+  });
+  checkCell.append(checkbox);
+  const actions = document.createElement("td");
+  const hintBtn = document.createElement("button");
+  hintBtn.textContent = session.kind === "rdp" || session.kind === "vnc" ? "focus window" : "open";
+  hintBtn.addEventListener("click", () => {
+    state.notice = sessionHint(session);
+    render();
+  });
+  const killBtn = document.createElement("button");
+  killBtn.className = "danger";
+  killBtn.textContent = "kill";
+  killBtn.addEventListener("click", async () => {
+    await killSession(session);
+    await refreshSessions();
+  });
+  actions.append(hintBtn, killBtn);
+  tr.append(actions);
+  return tr;
 }
 function openConnectionForm(initial, opts = {}) {
   const duplicateOf = opts.duplicateOf;
@@ -602,6 +797,7 @@ function openConnectionForm(initial, opts = {}) {
   }
   const rdp = rdpForm(initial);
   const vnc = vncForm(initial);
+  const ssh = sshForm(initial);
   openModal((close) => {
     const m = document.createElement("div");
     m.innerHTML = `<h3>${duplicateOf ? "Duplicate connection" : isNew ? "New connection" : "Edit connection"}</h3>`;
@@ -617,11 +813,13 @@ function openConnectionForm(initial, opts = {}) {
       field("Port", portI),
       field("Username", userI),
       field(isNew ? "Password" : "New password", passI),
+      ssh.element,
       rdp.element,
       vnc.element,
       err
     );
     const syncProtocol = () => {
+      ssh.element.style.display = protoI.value === "ssh" ? "" : "none";
       rdp.element.style.display = protoI.value === "rdp" ? "" : "none";
       vnc.element.style.display = protoI.value === "vnc" ? "" : "none";
     };
@@ -653,6 +851,8 @@ function openConnectionForm(initial, opts = {}) {
           body.payload = rdp.read();
         } else if (protoI.value === "vnc") {
           body.payload = vnc.read();
+        } else {
+          body.payload = ssh.read();
         }
         if (duplicateOf) {
           body.duplicateOf = duplicateOf;
@@ -915,6 +1115,40 @@ function connectionRow(c) {
       await refreshConnections();
     });
     actions.append(testBtn);
+    const configBtn = document.createElement("button");
+    configBtn.textContent = "ssh-config";
+    configBtn.title = "Write or update this connection's Host block in ~/.ssh/config";
+    configBtn.addEventListener("click", async () => {
+      configBtn.disabled = true;
+      try {
+        const r = await api("/api/ssh-config/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionId: c.id })
+        });
+        state.notice = `${c.name}: Host ${r.alias} ${r.action} in ${r.path} (backup: ${r.backup ?? "none"}).`;
+      } catch (e) {
+        state.notice = `${c.name}: ${String(e)}`;
+      }
+      configBtn.disabled = false;
+      render();
+    });
+    actions.append(configBtn);
+    const keyBtn = document.createElement("button");
+    keyBtn.textContent = "copy key";
+    keyBtn.title = "Deploy this connection's public key into the remote authorized_keys";
+    keyBtn.addEventListener("click", async () => {
+      keyBtn.disabled = true;
+      try {
+        const r = await api(`/api/connections/${encodeURIComponent(c.id)}/copy-key`, { method: "POST" });
+        state.notice = r.ok ? `${c.name}: ${r.message}${r.fingerprint ? ` (${r.fingerprint})` : ""}${r.source ? ` \u2014 ${r.source}` : ""}.` : `${c.name}: copy key failed \u2014 ${r.message}`;
+      } catch (e) {
+        state.notice = `${c.name}: ${String(e)}`;
+      }
+      keyBtn.disabled = false;
+      render();
+    });
+    actions.append(keyBtn);
   }
   const dupBtn = document.createElement("button");
   dupBtn.textContent = "duplicate";
@@ -1059,43 +1293,195 @@ function importModal(filename, fileText) {
     return m;
   });
 }
-function settingsView(main) {
+function cardEl(title) {
   const card = document.createElement("div");
   card.className = "card";
-  const status = document.createElement("pre");
-  status.textContent = "loading\u2026";
-  card.append(status);
+  const body = document.createElement("div");
+  if (title) {
+    const h = document.createElement("h2");
+    h.textContent = title;
+    card.append(h);
+  }
+  card.append(body);
+  return { card, body };
+}
+function preEl(text = "") {
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  return pre;
+}
+function settingsView(main) {
+  const { card, body } = cardEl("Server and storage");
+  const status = preEl("loading\u2026");
+  const portI = input("0", "number", "0 = ephemeral port");
+  const autoLockI = input("0", "number", "0 = never lock automatically");
+  const storeDirI = input("", "text", "/path/to/pass-store");
+  const rdpI = input("", "text", "xfreerdp3 (empty = PATH discovery)");
+  const vncI = input("", "text", "vncviewer (empty = per-connection / discovery)");
+  const message = document.createElement("p");
+  message.className = "muted";
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "primary";
+  saveBtn.textContent = "Save settings";
+  const lockBtn = document.createElement("button");
+  lockBtn.textContent = "Lock now";
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.append(saveBtn, lockBtn);
+  body.append(
+    status,
+    field("Console port", portI),
+    field("Vault auto-lock (minutes)", autoLockI),
+    field("Secret storage directory (PASSWORD_STORE_DIR)", storeDirI),
+    field("RDP client override", rdpI),
+    field("VNC viewer override", vncI),
+    actions,
+    message
+  );
   main.append(card);
-  void (async () => {
+  const refreshStatus = async () => {
     try {
-      const vs = await api("/api/vault/status");
-      status.textContent = JSON.stringify({ vault: vs, sessions: state.sessions.length }, null, 2);
+      const [stateBody, settingsBody] = await Promise.all([api("/api/state"), api("/api/settings")]);
+      status.textContent = JSON.stringify(
+        {
+          version: stateBody.version,
+          console: stateBody.console,
+          vault: stateBody.vault,
+          settings: stateBody.settings,
+          sshConfigPath: stateBody.sshConfigPath
+        },
+        null,
+        2
+      );
+      const settings = settingsBody.settings ?? {};
+      portI.value = String(settings.consolePort ?? 0);
+      autoLockI.value = String(settings.autoLockMinutes ?? 0);
+      storeDirI.value = String(settings.storeDir ?? "");
+      rdpI.value = String(settings.rdpBinary ?? "");
+      vncI.value = String(settings.vncBinary ?? "");
     } catch (e) {
       status.textContent = String(e);
     }
-  })();
-  const gcard = document.createElement("div");
-  gcard.className = "card";
-  gcard.innerHTML = "<h2>Ghostty settings import</h2>";
+  };
+  void refreshStatus();
+  saveBtn.addEventListener("click", async () => {
+    message.textContent = "";
+    try {
+      const patch = {
+        consolePort: Number(portI.value || 0),
+        autoLockMinutes: Number(autoLockI.value || 0),
+        storeDir: storeDirI.value.trim(),
+        rdpBinary: rdpI.value.trim(),
+        vncBinary: vncI.value.trim()
+      };
+      const result = await api("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      });
+      if (result.restart) {
+        message.textContent = "Saved. The console port changed: this tab's origin is about to stop serving \u2014 reopen the console from the Remote Control panel.";
+      } else {
+        message.textContent = "Saved.";
+      }
+      await refreshStatus();
+    } catch (e) {
+      message.textContent = String(e);
+    }
+  });
+  lockBtn.addEventListener("click", async () => {
+    try {
+      await api("/api/vault/lock", { method: "POST" });
+      message.textContent = "Secret storage locked.";
+    } catch (e) {
+      message.textContent = String(e);
+    }
+    await refreshStatus();
+  });
+  const { card: gcard, body: gbody } = cardEl("Ghostty settings import");
   const previewBtn = document.createElement("button");
   previewBtn.textContent = "Preview import";
   const applyBtn = document.createElement("button");
   applyBtn.className = "primary";
   applyBtn.textContent = "Apply";
   applyBtn.disabled = true;
-  const gresult = document.createElement("pre");
-  gcard.append(previewBtn, applyBtn, gresult);
+  const gresult = preEl("");
+  gbody.append(previewBtn, applyBtn, gresult);
   main.append(gcard);
   let lastSettings = {};
   previewBtn.addEventListener("click", async () => {
-    const preview = await api("/api/ghostty/import");
-    gresult.textContent = JSON.stringify(preview, null, 2);
-    lastSettings = preview.settings;
-    applyBtn.disabled = !preview.found;
+    try {
+      const preview = await api("/api/ghostty/import");
+      gresult.textContent = JSON.stringify(preview, null, 2);
+      lastSettings = preview.settings;
+      applyBtn.disabled = !preview.found;
+    } catch (e) {
+      gresult.textContent = String(e);
+    }
   });
   applyBtn.addEventListener("click", async () => {
-    const r = await api("/api/ghostty/import/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: lastSettings }) });
-    gresult.textContent = JSON.stringify(r, null, 2);
+    try {
+      const r = await api("/api/ghostty/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: lastSettings })
+      });
+      gresult.textContent = JSON.stringify(r, null, 2);
+    } catch (e) {
+      gresult.textContent = String(e);
+    }
+  });
+  const { card: scard, body: sbody } = cardEl("~/.ssh/config");
+  const sresult = preEl("loading\u2026");
+  const reloadBtn = document.createElement("button");
+  reloadBtn.textContent = "Reload";
+  const syncAllBtn = document.createElement("button");
+  syncAllBtn.textContent = "Sync all SSH connections";
+  sbody.append(reloadBtn, syncAllBtn, sresult);
+  main.append(scard);
+  const loadSshConfig = async () => {
+    try {
+      const body2 = await api("/api/ssh-config");
+      const config = body2.config ?? {};
+      const hosts = Array.isArray(config.hosts) ? config.hosts : [];
+      const managed = hosts.filter((host) => host.managedConnectionId);
+      sresult.textContent = JSON.stringify(
+        {
+          path: config.path,
+          exists: config.exists,
+          revision: String(config.revision ?? "").slice(0, 12),
+          hosts: hosts.length,
+          managed: managed.map((host) => `${host.alias} \u2192 ${host.managedConnectionId}`),
+          includes: config.includes,
+          warnings: config.warnings
+        },
+        null,
+        2
+      );
+    } catch (e) {
+      sresult.textContent = String(e);
+    }
+  };
+  void loadSshConfig();
+  reloadBtn.addEventListener("click", () => void loadSshConfig());
+  syncAllBtn.addEventListener("click", async () => {
+    syncAllBtn.disabled = true;
+    const sshConnections = state.connections.filter((c) => c.protocol === "ssh");
+    const lines = [];
+    for (const connection of sshConnections) {
+      try {
+        const r = await api("/api/ssh-config/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionId: connection.id })
+        });
+        lines.push(`${connection.name}: ${r.alias} ${r.action}`);
+      } catch (e) {
+        lines.push(`${connection.name}: ${String(e)}`);
+      }
+    }
+    sresult.textContent = lines.length > 0 ? lines.join("\n") : "No SSH connections yet.";
+    syncAllBtn.disabled = false;
   });
 }
 var VIEWS = {
@@ -1105,14 +1491,31 @@ var VIEWS = {
 };
 function startLiveUpdates() {
   try {
-    new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    const events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    events.onopen = () => {
+      state.live = true;
+      if (state.view === "sessions") render();
+    };
+    events.onerror = () => {
+      state.live = false;
+    };
+    events.addEventListener("sessions", () => {
+      if (state.view === "sessions") void refreshSessions();
+    });
   } catch {
   }
   setInterval(() => {
     if (state.view === "sessions") void refreshSessions();
-  }, 3e3);
+  }, 5e3);
 }
+var initialAction = params.get("action") ?? "";
 render();
 void refreshSessions();
-void refreshConnections();
+void refreshConnections().then(() => {
+  if (initialAction === "new") {
+    state.view = "connections";
+    render();
+    openConnectionForm(null);
+  }
+});
 startLiveUpdates();

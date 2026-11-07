@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { PaseoApi } from "@getpaseo/client";
 import { ConsoleEndpoint } from "./server/http-lifecycle";
@@ -16,10 +17,23 @@ import { ExternalSessionRegistry } from "./server/sessions";
 import { Store } from "./server/store";
 import { TerminalService } from "./server/terminals";
 import { VaultService } from "./server/vault";
+import { defaultSshConfigPath } from "./server/ssh-config";
+import { loadSettings, saveSettings, validateSettingsPatch } from "./server/settings";
 
 export default function contribute(server: PluginServerContext): () => void {
-  const vault = new VaultService({ log: (m) => console.log(m) });
-  const store = new Store({ dbPath: `${process.env.PASEO_HOME ?? (process.env.HOME + "/.paseo")}/plugins/remote-control/remote-control.db` });
+  const paseoHome = process.env.PASEO_HOME ?? path.join(process.env.HOME ?? "", ".paseo");
+  const store = new Store({ dbPath: `${paseoHome}/plugins/remote-control/remote-control.db` });
+
+  // Settings live in the store (stage 0.25.11, G2): the console port, the
+  // vault auto-lock, the pass store directory and the client overrides are
+  // read once here and kept in `currentSettings`; every save applies them.
+  let currentSettings = loadSettings(store, { storeDir: path.join(paseoHome, "pass-store") });
+
+  const vault = new VaultService({
+    storeDir: currentSettings.storeDir,
+    autoLockMs: currentSettings.autoLockMinutes * 60_000,
+    log: (m) => console.log(m),
+  });
 
   // The Paseo SDK (terminals, workspaces) reaches plugin code only through
   // the RPC handler context. Every handler below refreshes it, and the
@@ -47,9 +61,30 @@ export default function contribute(server: PluginServerContext): () => void {
     sessions,
     store,
     vault,
+    sshConfigPath: defaultSshConfigPath(),
+    settings: {
+      load: () => currentSettings,
+      save: (patch) => {
+        const previous = currentSettings;
+        const next = saveSettings(store, validateSettingsPatch(previous, patch));
+        currentSettings = next;
+        vault.setAutoLockMs(next.autoLockMinutes * 60_000);
+        if (next.storeDir !== previous.storeDir) vault.reconfigureStore(next.storeDir);
+        const restart = next.consolePort !== previous.consolePort;
+        if (restart) {
+          // ConsoleEndpoint debounces and restarts the listener (0.25.11).
+          endpoint.sync({ enabled: true, port: next.consolePort, accessToken: "" });
+        }
+        return { settings: next, restart };
+      },
+    },
   });
 
-  endpoint.sync({ enabled: true, port: 0, accessToken: "" });
+  // Live Sessions view (G1): a registered/killed/pruned RDP or VNC window is
+  // pushed over SSE, so the table updates without waiting for its poll.
+  sessions.onChange = (list) => endpoint.broadcast("sessions", { sessions: list });
+
+  endpoint.sync({ enabled: true, port: currentSettings.consolePort, accessToken: "" });
   void endpoint.settled();
 
   server.handle(consoleUrl, (input, context) => {
@@ -114,6 +149,8 @@ export default function contribute(server: PluginServerContext): () => void {
     const launched = await launchExternalWindow(connection, {
       vault,
       sessions,
+      rdpBinary: currentSettings.rdpBinary,
+      vncBinary: currentSettings.vncBinary,
       log: (message) => console.log(message),
     });
     return {

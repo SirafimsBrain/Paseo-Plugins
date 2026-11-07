@@ -33,10 +33,28 @@ export function withWorkspaceParam(url: string, workspaceId: string): string {
   }
 }
 
+/**
+ * Extra console params (stage 0.25.11, G3): the screen passes the action it
+ * was opened with — `/remote new` and the "New remote connection" Command
+ * Center item land on the connection form instead of the Sessions list.
+ */
+export function withConsoleParams(url: string, params: Record<string, string> = {}): string {
+  try {
+    const parsed = new URL(url);
+    for (const [key, value] of Object.entries(params)) {
+      if (value.length > 0) parsed.searchParams.set(key, value);
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export async function openConsoleUrl(
   url: string,
   openers: ConsoleOpeners,
   preferredWorkspaceId?: string,
+  params: Record<string, string> = {},
 ): Promise<ConsoleOpenOutcome> {
   if (!isOpenableConsoleUrl(url)) {
     throw new Error(`refusing to open a non-http console URL: ${url}`);
@@ -47,7 +65,7 @@ export async function openConsoleUrl(
     const workspaceId = await resolveWorkspaceId(openers, preferredWorkspaceId);
     if (workspaceId !== null) {
       try {
-        openBrowser({ url: withWorkspaceParam(url, workspaceId), workspaceId });
+        openBrowser({ url: withConsoleParams(withWorkspaceParam(url, workspaceId), params), workspaceId });
         return { via: "browser", workspaceId };
       } catch {
         // fall through
@@ -55,7 +73,7 @@ export async function openConsoleUrl(
     }
   }
 
-  await openers.openExternal(url);
+  await openers.openExternal(withConsoleParams(url, params));
   return { via: "external", workspaceId: null };
 }
 

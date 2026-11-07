@@ -42,6 +42,202 @@ call site and the full `addMissingEntityTabs()` body were not read directly in t
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## SSH config, key deployment, console settings and the live Sessions feed (stage 0.25.11, 2026-11-07)
+
+This stage implements the announced **H3** (`~/.ssh/config` management plus
+public-key deployment) and the remains of block G: G1 (one Sessions view with
+filters/grouping/bulk actions and live updates), G2 (the console Settings
+screen), G3 (commands and the ghostty Apply defect) and G4 (live acceptance).
+It is a **new-capability** stage, so the version moved to `0.25.11` (second
+digit, per the project rule); tag `remote-control@0.25.11`.
+
+### `~/.ssh/config`: parse-and-preserve (`server/ssh-config.ts`)
+
+The sshpilot model is kept literally: the user's config is the source of
+truth, the plugin never regenerates it, and it edits exactly one block.
+
+- **Path.** `REMOTE_CONTROL_SSH_CONFIG` when set (tests and the isolated live
+  check), otherwise `~/.ssh/config`.
+- **Parsing.** `parseStatement` accepts both `Key value` and `Key=value`;
+  `scanBlocks` splits a file into `Host` blocks and treats `Match` as the start
+  of a rule region (no Host block), so directives under `Match` are preserved
+  and never become connectable hosts. A block whose patterns contain only
+  wildcards/negations is marked `wildcard`/not `connectable`.
+- **Ownership marker.** A managed block is the `Host` line preceded directly
+  by `# remote-control: <connection id>`. Only such a block is rewritten;
+  every other line is left byte for byte (a test asserts that appending a
+  block keeps the previous text as an exact prefix).
+- **Includes.** `Include` patterns are expanded (`*`/`?` per path segment,
+  `~`, absolute, or relative to the directory of the root config — what
+  ssh_config(5) calls the ssh directory), recursion is depth-limited (8) and
+  cycle-guarded. A managed block that lives in an included file is updated in
+  **that** file; the root config is then untouched.
+- **Mapping.** Alias = `payload.sshAlias` when set, else a slug of the
+  connection name, else `rc-<host slug>`; the alias must match
+  `^[A-Za-z0-9][A-Za-z0-9._-]*$`, so it can never turn into a wildcard rule.
+  The block writes `HostName`, `User` (when non-empty), `Port` (only when it
+  is not 22), `IdentityFile` and `ProxyJump` from `payload.identityFile` /
+  `payload.proxyJump`.
+- **Update semantics.** The five managed directives are regenerated in a
+  fixed order; unknown directives, comments and blank lines inside the block
+  are kept after them. A connection whose port returns to 22 loses its `Port`
+  line instead of leaving a stale one.
+- **Collision policy.** A hand-written block that already uses the alias is an
+  error listing the file and line — the plugin never takes over an entry the
+  user typed. The HTTP layer returns it as a 400 with the actionable message
+  ("set another alias on the connection").
+- **Atomic write.** `writeSshConfigFile` refuses a symlink and a non-regular
+  file, keeps the mode, copies the previous content to
+  `<config>.remote-control.bak`, writes a same-directory temp file, `fsync`s
+  it, renames it over the target and restores the mode. A stale
+  `expectedRevision` (sha256 of the text that was read) aborts with "changed on
+  disk" so a concurrent hand edit is never lost.
+- **Tests.** `tests/ssh-config.test.ts` (14): hand-written blocks/wildcard/Match
+  separation, marker detection, Include globs, append-preserves-bytes, rewrite
+  with unknown directive kept, alias collision, mode+backup+revision,
+  stale-revision and symlink refusal, slug rules, create→update idempotency,
+  update in the owning include, and the hand-written-alias error.
+
+### Copy key to server (`server/key-copy.ts`)
+
+- **Key resolution** in priority order: `payload.publicKeyPath`, a file, its
+  `payload.identityFile` + `.pub`, the public half of the identity stored in
+  the vault (`ssh-keygen -y` on a materialised private key), then
+  `~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`, `id_rsa.pub`. Nothing found is an
+  error that names all four options; agent keys are never touched.
+- **Transport.** `buildSshArgv` (the same builder the terminal launch and the
+  connection test use) plus `ConnectTimeout`, `StrictHostKeyChecking=accept-new`
+  unless the connection pins it, and either the askpass helper with the stored
+  password (`NumberOfPasswordPrompts=1`) or `BatchMode=yes`. The remote command
+  is a single `sh` script argument: `umask 077`, `mkdir -p ~/.ssh` (700),
+  `touch`/`chmod 600 authorized_keys`, read the key from stdin, `grep -qxF` it,
+  append only when missing and print `REMOTE_CONTROL_ADDED` or
+  `REMOTE_CONTROL_PRESENT`. Because ssh joins the arguments after the target
+  with spaces, a multi-line script as one argument is executed by the remote
+  shell as written.
+- **Result.** `{ ok, added, message, keyType, fingerprint, source }`; the
+  fingerprint is the standard `SHA256:<base64 without padding>` over the key
+  blob. No secret or private material is echoed, and the response is the same
+  200 shape for success and failure (the console prints `message`), with 400
+  only for a malformed request.
+- **Tests.** `tests/key-copy.test.ts` (10): explicit key over ssh with the
+  exact script shape, idempotent PRESENT path, default-key fallback, derivation
+  from a stored identity, the no-key message, askpass + `NumberOfPasswordPrompts`
+  with the password absent from argv/stdin, locked vault → `BatchMode`, stderr
+  tail on failure, non-ssh rejection and fingerprint stability.
+
+### Console settings (`server/settings.ts`, G2)
+
+- **Storage and schema.** The existing `settings` table holds `consolePort`
+  (0–65535, 0 = ephemeral), `autoLockMinutes` (0–1440, 0 = off), `storeDir`
+  (absolute; `~` expanded), `rdpBinary` and `vncBinary` (empty = discovery).
+  `loadSettings` falls back to defaults for a corrupted value; a patch refuses
+  unknown keys, non-integers, out-of-range values and relative paths, so a typo
+  cannot silently do nothing.
+- **Apply (in `index.server.ts`).** A port change re-syncs the
+  `ConsoleEndpoint` (which already debounces and restarts, falling back to an
+  ephemeral port if the requested one is taken); the auto-lock value goes to
+  `vault.setAutoLockMs`; a store-path change calls `vault.reconfigureStore`,
+  which **locks first** (a cached passphrase belongs to the old store), moves
+  `PASSWORD_STORE_DIR`, re-reads `.gpg-id` and leaves the plugin's `GNUPGHOME`
+  in place; the client overrides are read at launch time. The response says
+  `restart: true` when the console origin is about to move, and the Settings
+  view tells the user to reopen the console from the panel.
+- **Launch overrides.** `launchExternalWindow` takes `rdpBinary` / `vncBinary`:
+  a configured RDP client must be executable or the launch fails with that
+  message before anything is spawned; the VNC override is passed to
+  `resolveVncClient` as `binaryOverride` and acts as a machine-wide custom
+  binary **only when the connection pins neither a client nor a custom path**,
+  so a per-connection choice keeps winning.
+- **`POST /api/vault/lock` — a deliberate revision of the 0.19.10 rule.** That
+  stage removed the vault setup/unlock/lock routes so secrets could not be
+  managed from the console. G2 requires a *Lock now* button, and locking is the
+  opposite of managing secrets: it drops the cached passphrase and nothing
+  else. Only `lock` came back (setup, unlock and `/api/secrets*` stay 404 with
+  the panel guidance); the test that asserted all three were 404 now asserts
+  lock is 200 and the status turns `unlocked: false`.
+- **`GET /api/state`** is the one status document: `version`, the console
+  endpoint status (port, bound port, url, fallback, SSE subscribers), a shallow
+  vault summary (initialized/unlocked/storeDir/autoLockMs — no secret list),
+  the settings and the resolved ssh config path. The port, store and overrides
+  are therefore visible exactly where the acceptance criteria look for them.
+- **Tests.** `tests/settings.test.ts` (6) plus the `/api/settings`, `/api/state`
+  and lock cases in `tests/h3-http.test.ts`, and the two override tests in
+  `tests/vnc.test.ts` / `tests/external-launch.test.ts`.
+
+### Sessions view and the live feed (G1)
+
+- **One list, filtered.** Kind (`all`/`local`/`ssh`/`rdp`/`vnc`), connection,
+  and free text over name/target/id/connection name. The filter applies to one
+  flat list; grouping by connection is a presentation choice on top, so the
+  counter (`N of M sessions`) always describes the same rows.
+- **Bulk actions.** A checkbox per row, *Select all visible* / *Deselect all*
+  and *Kill selected (n)*, which walks the selection sequentially and reports
+  how many were stopped. Selection is pruned on every refresh so a vanished
+  window cannot be killed twice.
+- **Surfaces.** SSH/local rows are Paseo tabs, RDP/VNC rows are desktop
+  windows. The per-row action is *open* or *focus window* and states the facts
+  the plugin actually has (workspace id for a tab; pid and viewer binary for a
+  window), because neither API exists: `@getpaseo/client` exposes
+  `terminals.{create,list,ref}` with `write/sendKeys/capture/kill` and no
+  "focus", and a desktop window belongs to the window manager. The button
+  therefore reports where to look instead of pretending to move focus.
+- **Live updates.** `ExternalSessionRegistry` gained an `onChange` listener
+  (fired on register, kill and prune, guarded against re-entrancy and against
+  a throwing listener); `index.server.ts` forwards it to
+  `endpoint.broadcast("sessions", …)`, and the console refreshes on the SSE
+  event. Paseo terminals are still polled every 5 s (down from 3 s) because the
+  daemon has no change event for them.
+- **Degraded console.** `/api/sessions` used to answer 400 when the Paseo API
+  had not been captured yet (a console opened directly, without a panel RPC),
+  which hid the RDP/VNC rows too. It now answers 200 with the external rows and
+  a `terminalError`, and the view shows a muted warning above the table.
+
+### Commands and the ghostty defect (G3)
+
+- `/remote console|new|lock` (workspace slash command), *New remote connection*
+  and *Lock remote-control vault* Command Center items, next to the existing
+  *Open remote-control console*.
+- Deep link: the screen reads `params.action`; `openConsoleUrl` gained a params
+  argument and puts `action=new` on the console URL. The console then lands on
+  the Connections view with the *New connection* dialog open — the same landing
+  for the slash command and the Command Center item.
+- **Defect (from 0.18.10, open since):** the Settings view's ghostty *Apply*
+  button posted to `/api/ghostty/import/apply`, which the server never served,
+  so every Apply was a 404 while *Preview* worked. Fixed in the client (it now
+  posts to the served `POST /api/ghostty/import`), with a regression test that
+  scans `console/src/main.ts` for the dead path and asserts the removed route
+  stays 404 — the server surface did not grow a second alias.
+
+### Live acceptance on the daemon (G4)
+
+Isolated, production home untouched: scratch home `.tmp/live-02511` with
+`pluginsEnabled: true` and `daemon.listen 127.0.0.1:6798`, the plugin installed
+from the working tree (`paseo plugin add <dir> --home …`), the scratch daemon
+started with `REMOTE_CONTROL_SSH_CONFIG` pointing at a **fixture** config (so
+no real `~/.ssh/config` was read or written).
+
+| Check | Result |
+| --- | --- |
+| Install + reload | **PASS** — `running`, `[paseo] Plugin ready`, `[remote-control] plugin ready (version 0.25.11)`, no plugin error in the daemon log; a clean `paseo plugin reload` restarts it the same way |
+| Console served by the real host build | **PASS** — `/health` reports `0.25.11`; `/` returns the console HTML, `/main.js` the fresh bundle |
+| Token required | **PASS** — `/api/state` 401 without a token, 200 with it |
+| `/api/state` | **PASS** — console endpoint, vault summary, settings and the fixture ssh path in one document |
+| Settings PATCH | **PASS** — auto-lock 5 min → `vault.autoLockMs` 300000; RDP override persisted and visible in `/api/state` |
+| Port change restarts the listener | **PASS** — `consolePort: 36888` → `restart: true`, old origin closed (`000`), new origin `/health` 200 |
+| `~/.ssh/config` sync | **PASS** — created `# remote-control: conn_… / Host live-box` after the hand-written block, backup written; a second sync is `updated` with still one marker; a connection whose alias collides with the hand-written block is refused with file+line |
+| Copy key | **PARTIAL** — key resolution and fingerprint verified live, remote deployment answered `ssh: connect to host 127.0.0.1 port 22: Connection refused` (no sshd on this machine) |
+| Ghostty Apply | **PASS** — `POST /api/ghostty/import` 200, the old `/apply` path 404 (regression test) |
+| Lock now | **PASS** — `POST /api/vault/lock` 200; setup/unlock stay 404 |
+| Console views | **PASS (manual)** — Sessions renders with the SSE badge and the degraded-API warning, Connections shows the new `ssh-config` / `copy key` actions and their notices, Settings shows the status document, the five fields, *Lock now*, ghostty and the ssh-config summary; `?action=new` opens the connection dialog with *Advanced (SSH)* |
+
+Not verified live, and why: **real key deployment** (no sshd on the target
+host), **RDP/VNC windows** (no viewer/FreeRDP client and no display round trip
+is part of this stage), **ghostty import with a real Ghostty config** (the
+route was exercised with empty settings; the parser/mapper itself is covered by
+its own suite), and the **first-run master password in the real app** (the
+0.19.10 baseline route, unchanged by this stage).
+
 ## VNC, external sessions and the Sessions view (stage 0.23.10, 2026-10-31)
 
 Three customer requests landed together, because they share one lifecycle: the

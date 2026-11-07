@@ -198,18 +198,24 @@ describeIf("connection passwords via the secret storage (gpg available)", () => 
     await expect(vault.get(`connections/${id}/password`)).rejects.toThrow(/not found/);
   });
 
-  it("keeps manual secret management out of the API", async () => {
+  it("keeps manual secret management out of the API but allows locking", async () => {
     const list = await get(base, "/api/secrets");
     expect(list.status).toBe(404);
     const setup = await post(base, "/api/vault/setup", { password: "x" });
     expect(setup.status).toBe(404);
     const unlock = await post(base, "/api/vault/unlock", { password: "x" });
     expect(unlock.status).toBe(404);
-    const lock = await post(base, "/api/vault/lock", {});
-    expect(lock.status).toBe(404);
     // Status stays: the Settings screen reads it.
     const status = await get(base, "/api/vault/status");
     expect(status.status).toBe(200);
     expect(status.body.unlocked).toBe(true);
+
+    // Locking is a session action, not secret management (0.25.11, G2): the
+    // console's "Lock now" drops the cached passphrase and nothing else.
+    const lock = await post(base, "/api/vault/lock", {});
+    expect(lock.status).toBe(200);
+    expect(lock.body.ok).toBe(true);
+    const after = await get(base, "/api/vault/status");
+    expect(after.body.unlocked).toBe(false);
   });
 });

@@ -40,6 +40,15 @@ export const sshPayloadSchema = z.looseObject({
   passwordSecret: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
   strictHostKeyChecking: z.boolean().optional(),
+  // Stage 0.25.11 (H3) — `~/.ssh/config` and public-key deployment.
+  // Alias of the managed Host block (defaults to a slug of the name).
+  sshAlias: z.string().optional(),
+  // IdentityFile written into the managed block and used by key deployment.
+  identityFile: z.string().optional(),
+  // Public key deployed by "copy key to server" (defaults to ~/.ssh keys).
+  publicKeyPath: z.string().optional(),
+  // ProxyJump written into the managed block.
+  proxyJump: z.string().optional(),
 });
 export type SshPayload = z.infer<typeof sshPayloadSchema>;
 
