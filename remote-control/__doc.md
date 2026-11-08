@@ -42,6 +42,62 @@ call site and the full `addMissingEntityTabs()` body were not read directly in t
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## Release and maintenance policy (1.0.0, 2026-11-08)
+
+`remote-control` is at **1.0.0** and in **bugfix-only** mode: the functional
+scope is frozen, new features are paused, and only fixes ship while the plugin
+is in live use. The roadmap stops at stages E1–E3; the plan announces no new
+stage.
+
+### What counts as a bugfix
+
+- a deviation from behaviour this README or `__doc.md` already promises — a
+  launch that fails, a secret that reaches argv, `ps`, environment or logs, a
+  wrong option, a crash, a wrong status;
+- a defect observed in live use, including the acceptance gaps listed below;
+- finishing a promised acceptance that needs no new surface (verifying a real
+  RDP window and fixing what the verification exposes, for example).
+
+Not a bugfix: a new screen, field, protocol, command, RPC or HTTP route, or a
+change to an existing contract. Such a request requires the customer to lift the
+freeze explicitly; then the plan gets a new stage and the version moves to
+`1.1.0` (second digit), never silently inside `1.0.x`.
+
+### Versioning and tags
+
+- Patches are `1.0.0 → 1.0.1` (third digit), each on its own commit with an
+  annotated `remote-control@1.0.1` tag pushed to origin.
+- The first digit is not reset by an ordinary release any more; `2.0.0` would
+  mean a new compatibility contract.
+- Every fix records symptom → cause → fix → verification in `PLAN.md`, and the
+  affected `__doc.md` / `README.md` sections move in the same commit.
+
+### Known limitations carried into the release
+
+These are candidates for `1.0.x` once a host with the matching service exists,
+not promises of new functionality:
+
+- no live RDP/xrdp connection and therefore no native FreeRDP window has ever
+  been opened here, so risk R7 (`DISPLAY`/`WAYLAND_DISPLAY` inherited from the
+  daemon) is still unverified;
+- no live RD Gateway — the argv and the two-line stdin contract are proven from
+  the FreeRDP 3.15.0 sources and fake clients only;
+- no VNC viewer is installed on the development machine, so VNC launches have
+  unit coverage and no live run;
+- public-key deployment never reached a real sshd (`Connection refused` on this
+  machine), and `ssh <alias>` after an import of `~/.ssh/config` was not run;
+- the ghostty import was never exercised against a real system config, and the
+  *peek* modal against a real terminal;
+- the first master password was confirmed in the app on 2026-10-27 (baseline
+  acceptance), not re-run since.
+
+### Evidence required for a patch
+
+`npm run typecheck` (both projects) and the vitest suite green; a live check
+when the defect is environment-dependent, recorded in the plan status as the
+earlier stages did; documentation updated in the same commit; the annotated tag
+pushed to origin.
+
 ## RD Gateway (stage 0.29.11, stage E3, 2026-11-08)
 
 Stage E3 was deferred in 0.22.10 because rdp-pilot supplies the gateway

@@ -2,6 +2,8 @@
 
 Local-only remote control console for Paseo: groups and connections for SSH/RDP/VNC whose logins and passwords live in a pass-backed secret storage, with every session launched from the Paseo sidebar.
 
+**Status: 1.0.0 — released, bugfix-only.** The functional scope is frozen after stages E1–E3 (FreeRDP 3 discovery, exit codes for closed windows, RD Gateway), and the plugin is in live use: new functionality is paused and only fixes ship, as `1.0.x` patches. The freeze rules are in `PLAN.md` §8 and the maintenance policy in `__doc.md`; known limitations are listed below and in `__doc.md`.
+
 Terminals are **Paseo workspace terminals**. `remote-control` asks the daemon for one with `paseo.terminals.create()` and the app opens it as a terminal tab of that workspace — the same model Orca uses for its terminal tabs (host-owned PTY, terminal view owned by the tab). The plugin runs no PTY of its own and renders no terminal in a browser page: there is no terminal emulator code in this package.
 
 What it does:
@@ -78,8 +80,8 @@ working tree into an isolated 0.15.0 daemon** (scratch home, own loopback
 port) where it reported `running`, `[remote-control] plugin ready`, all seven
 RPC methods, and a working console — `GET /` 200 HTML, `/health`
 `{"ok":true,…}`, `/api/state` and `/api/connections` 200 with the token (query
-or `Authorization: Bearer`) and **401 without it**. The plugin has since moved
-on to **0.29.11** (H3, the G1–G3 console tails, the ghostty Apply fix, the
-telemetry-free *peek* and sidebar row, then stages E1–E3: FreeRDP 3 discovery,
-exit codes for closed windows, RD Gateway); the current check is
-**20 suites / 223 tests**.
+or `Authorization: Bearer`) and **401 without it**. The plugin has since
+shipped **1.0.0** (H3, the G1–G3 console tails, the ghostty Apply fix, the
+read-only *peek* and sidebar row, then stages E1–E3: FreeRDP 3 discovery, exit
+codes for closed windows, RD Gateway) and is now in bugfix-only mode; the
+current check is **20 suites / 223 tests**.
