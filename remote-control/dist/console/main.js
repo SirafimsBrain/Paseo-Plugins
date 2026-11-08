@@ -58,6 +58,11 @@ var RDP_CHOICES = {
     ["1", "Play on remote computer"],
     ["2", "Do not play"]
   ],
+  gatewayUsageMethod: [
+    ["", "Automatic"],
+    ["direct", "Direct (always use the gateway)"],
+    ["detect", "Detect (let the server decide)"]
+  ],
   jpegQuality: [
     ["", "Default"],
     ["50", "50 - Low quality / small size"],
@@ -329,6 +334,15 @@ function rdpForm(initial) {
   addSelect("Protocol security", "sec", RDP_CHOICES.sec);
   addCheck("Ignore certificate errors", "certIgnore", true);
   addText("Certificate name", "certName", "accept only this name (optional)");
+  group("RD Gateway");
+  addText("Gateway host", "gatewayHost", "gateway host, e.g. rdp.example.com (optional)");
+  const gwPortI = input(has("gatewayPort") ? String(base.gatewayPort) : "", "number", "gateway port (empty = default)");
+  adv.append(field("Gateway port", gwPortI));
+  addText("Gateway user", "gatewayUser", "gateway login (empty = reuse the connection login)");
+  addText("Gateway domain", "gatewayDomain", "gateway domain (optional)");
+  addSelect("Gateway usage", "gatewayUsageMethod", RDP_CHOICES.gatewayUsageMethod);
+  const gwPassI = input("", "password", "gateway password (stored in the secret storage)");
+  adv.append(field("Gateway password", gwPassI));
   group("Keyboard");
   addText("Layout", "kbdLayout", "e.g. 0x409 or 'US' (optional)");
   addSelect("Type", "kbdType", RDP_CHOICES.kbdType);
@@ -356,9 +370,14 @@ function rdpForm(initial) {
     const h = Number(heightI.value);
     put("width", Number.isInteger(w) && w > 0 ? w : void 0);
     put("height", Number.isInteger(h) && h > 0 ? h : void 0);
+    const gatewayPort = Number(gwPortI.value);
+    put(
+      "gatewayPort",
+      gwPortI.value.trim() !== "" && Number.isInteger(gatewayPort) && gatewayPort >= 1 && gatewayPort <= 65535 ? gatewayPort : void 0
+    );
     return out;
   };
-  return { element: root, read };
+  return { element: root, read, gatewayPassword: () => gwPassI.value };
 }
 function vncForm(initial) {
   const stored = initial && initial.protocol === "vnc" && initial.payload ? initial.payload : {};
@@ -908,6 +927,8 @@ function openConnectionForm(initial, opts = {}) {
         }
         if (protoI.value === "rdp") {
           body.payload = rdp.read();
+          const gatewayPassword = rdp.gatewayPassword();
+          if (gatewayPassword !== "") body.gatewayPassword = gatewayPassword;
         } else if (protoI.value === "vnc") {
           body.payload = vnc.read();
         } else {

@@ -131,7 +131,12 @@ function checkField(label: string, checked: boolean): [HTMLElement, HTMLInputEle
  * keys at their "Automatic"/empty value are dropped, keys the form does not
  * manage (payload.auth, values from an imported backup) pass through.
  */
-function rdpForm(initial: any | null): { element: HTMLElement; read: () => Record<string, unknown> } {
+function rdpForm(initial: any | null): {
+  element: HTMLElement;
+  read: () => Record<string, unknown>;
+  /** Gateway password typed in this dialog (never part of the payload). */
+  gatewayPassword: () => string;
+} {
   const stored = initial && initial.protocol === "rdp" && initial.payload ? initial.payload : {};
   const base: Record<string, any> = { ...RDP_PAYLOAD_DEFAULTS, ...stored };
   const has = (k: string): boolean => base[k] !== undefined && base[k] !== null;
@@ -212,6 +217,19 @@ function rdpForm(initial: any | null): { element: HTMLElement; read: () => Recor
   addCheck("Ignore certificate errors", "certIgnore", true);
   addText("Certificate name", "certName", "accept only this name (optional)");
 
+  // RD Gateway (stage 0.29.11, E3): the host/user/domain go to the payload
+  // and argv, the password goes to the secret storage and from there to
+  // FreeRDP's stdin — never to argv.
+  group("RD Gateway");
+  addText("Gateway host", "gatewayHost", "gateway host, e.g. rdp.example.com (optional)");
+  const gwPortI = input(has("gatewayPort") ? String(base.gatewayPort) : "", "number", "gateway port (empty = default)");
+  adv.append(field("Gateway port", gwPortI));
+  addText("Gateway user", "gatewayUser", "gateway login (empty = reuse the connection login)");
+  addText("Gateway domain", "gatewayDomain", "gateway domain (optional)");
+  addSelect("Gateway usage", "gatewayUsageMethod", RDP_CHOICES.gatewayUsageMethod);
+  const gwPassI = input("", "password", "gateway password (stored in the secret storage)");
+  adv.append(field("Gateway password", gwPassI));
+
   group("Keyboard");
   addText("Layout", "kbdLayout", "e.g. 0x409 or 'US' (optional)");
   addSelect("Type", "kbdType", RDP_CHOICES.kbdType);
@@ -243,10 +261,17 @@ function rdpForm(initial: any | null): { element: HTMLElement; read: () => Recor
     const h = Number(heightI.value);
     put("width", Number.isInteger(w) && w > 0 ? w : undefined);
     put("height", Number.isInteger(h) && h > 0 ? h : undefined);
+    const gatewayPort = Number(gwPortI.value);
+    put(
+      "gatewayPort",
+      gwPortI.value.trim() !== "" && Number.isInteger(gatewayPort) && gatewayPort >= 1 && gatewayPort <= 65535
+        ? gatewayPort
+        : undefined,
+    );
     return out;
   };
 
-  return { element: root, read };
+  return { element: root, read, gatewayPassword: () => gwPassI.value };
 }
 
 /**
@@ -933,6 +958,10 @@ function openConnectionForm(initial: any | null, opts: { duplicateOf?: string } 
         }
         if (protoI.value === "rdp") {
           body.payload = rdp.read();
+          // A gateway password typed here goes to the secret storage, an
+          // empty field keeps whatever is stored (edit) or stores nothing.
+          const gatewayPassword = rdp.gatewayPassword();
+          if (gatewayPassword !== "") body.gatewayPassword = gatewayPassword;
         } else if (protoI.value === "vnc") {
           body.payload = vnc.read();
         } else {

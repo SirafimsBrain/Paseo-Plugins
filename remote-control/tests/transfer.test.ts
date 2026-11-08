@@ -218,6 +218,57 @@ describe("import", () => {
     }
   });
 
+  // Stage 0.29.11 (E3): the RD Gateway password is a second secret and must
+  // travel with the bundle like the connection password.
+  it("carries the RD Gateway password with the connection", async () => {
+    if (!gpgAvailable) return;
+    const vault = await makeVault("gw-source");
+    store.createConnection({
+      id: "conn_gated",
+      groupId: null,
+      name: "gated",
+      protocol: "rdp",
+      host: "10.0.0.40",
+      port: 3389,
+      username: "alice",
+      payload: { gatewayHost: "gw.example.com", gatewayUser: "gw-user" },
+      secretRefs: {
+        passwordSecret: "connections/conn_gated/password",
+        gatewayPasswordSecret: "connections/conn_gated/gateway-password",
+      },
+      sortOrder: 0,
+    });
+    await vault.set("connections/conn_gated/password", "target-pass");
+    await vault.set("connections/conn_gated/gateway-password", "gateway-pass");
+
+    const exported = await buildExportBundle(store, vault, { pluginVersion: "0.29.11" });
+    const bundle = openBundle(exported.content);
+    const row = bundle.connections.find((c) => c.id === "conn_gated")!;
+    expect(row.secrets).toEqual({ password: "target-pass", gatewayPassword: "gateway-pass" });
+    expect(row.payload).not.toHaveProperty("gatewayPasswordSecret");
+
+    const target = new Store({ dbPath: path.join(dir, "gw-target.db") });
+    const targetVault = new VaultService({
+      paseoHome: path.join(dir, "gw-target-home"),
+      autoLockMs: 0,
+      log: () => {},
+    });
+    await targetVault.setup("another-master");
+    await targetVault.unlock("another-master");
+    try {
+      const report = await importBundle(target, targetVault, bundle, { mode: "merge" });
+      expect(report.passwords).toBe(1);
+      const imported = target.listConnections().find((c) => c.name === "gated")!;
+      expect(imported.secretRefs.gatewayPasswordSecret).toBeTruthy();
+      expect(await targetVault.get(imported.secretRefs.gatewayPasswordSecret!)).toBe("gateway-pass");
+      expect(await targetVault.get(imported.secretRefs.passwordSecret!)).toBe("target-pass");
+    } finally {
+      target.close();
+      targetVault.lock();
+      vault.lock();
+    }
+  });
+
   it("replace wipes existing data first, merge keeps it", async () => {
     const sourceVault = await makeVault("src2-home");
     seedTree(store);

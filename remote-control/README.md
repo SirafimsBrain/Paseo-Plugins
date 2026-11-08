@@ -8,7 +8,7 @@ What it does:
 
 - **The secret storage is the foundation, opened once.** On first run the *Remote Control* sidebar panel asks you to **create the master password**; afterwards it only shows an unlock field when the storage is locked. Groups with their connections appear in the panel **only after** the storage is open, and while it stays open nothing asks for anything (auto-lock is off by default). The panel and the connection form never collect the master password — first run and unlock are the only places it is typed.
 - **Connections carry their credentials.** The *New connection* / *Edit connection* dialogs in the console take group, name, protocol, host, port, login **and password** — no master-password field: the storage must already be open, otherwise the save is refused with a message pointing at the panel (before any row is written). The password goes to the storage under `connections/<id>/password`; the database and every API response stay free of values. On edit the login and settings change like any column, and the password can be replaced (empty field = keep) or cleared (`password: ""`).
-- **RDP connections carry the full FreeRDP 3 option set.** Choosing *RDP* in the connection dialog shows the domain plus collapsed *Advanced (RDP)* groups — display, performance, redirection, security, keyboard, network and codecs — ported from `rdp-pilot` with its defaults (new connections pre-fill them). The options are validated against the protocol schema before anything is stored, and a launch maps them onto argv group by group; connections created before this keep exactly their previous command line, and no option ever carries a secret.
+- **RDP connections carry the full FreeRDP 3 option set.** Choosing *RDP* in the connection dialog shows the domain plus collapsed *Advanced (RDP)* groups — display, performance, redirection, security, RD Gateway (host, port, gateway login/domain, usage method, and a gateway password that lives in the secret storage and reaches FreeRDP on stdin as the second line after the connection password — never in argv), keyboard, network and codecs — ported from `rdp-pilot` with its defaults (new connections pre-fill them). A gateway with its own login refuses to launch until its password is stored, and a gateway without one reuses the connection credentials. The options are validated against the protocol schema before anything is stored, and a launch maps them onto argv group by group; connections created before this keep exactly their previous command line, and no option ever carries a secret.
 - **VNC connections are the vnc-pilot port.** Choosing *VNC* shows the VNC field groups: viewer, display number, custom binary, view-only/fullscreen/shared, quality, compression, encoding and colour depth, the TigerVNC/TurboVNC groups and an extra-arguments line. Nine viewers are supported — TigerVNC, TurboVNC, TightVNC, RealVNC, Remmina, KRDC, Vinagre, gvncviewer and a custom binary. The viewer list is discovered on this machine: a shared `vncviewer` is identified by its version output, so TigerVNC/TurboVNC/TightVNC/RealVNC are never launched with another product's flags. Targets follow vnc-pilot (`host:display` when a display number is set, otherwise `host::port`, `vnc://host:port` for GUI clients, IPv6 in brackets), and each viewer gets only the options it really supports. A display number wins over the port; a port embedded in the host wins over the connection row.
 - **Secrets cannot be managed manually.** There is no Secrets screen and no `/api/secrets` API: creating, replacing or removing a secret happens only through a connection's create/edit form; setup and unlock happen only in the panel and native surfaces (RPC). Locking is the one exception: *Lock now* in the console's Settings and the *Lock remote-control vault* Command Center item drop the cached passphrase without touching any secret (`POST /api/vault/lock`).
 - **`~/.ssh/config` is managed read-modify-write, never regenerated.** The console's *ssh-config* action on an SSH row writes one `Host` block for that connection — `HostName`, `User`, `Port`, optional `IdentityFile` and `ProxyJump`, with the alias from *Advanced (SSH)* or a slug of the connection name — marked by a `# remote-control: <connection id>` comment above the `Host` line. Everything else in the file survives byte for byte: hand-written blocks, wildcard rules, `Match` blocks, unknown directives, comments. `Include`s are followed, and a block that already lives in an included file is updated there. Writes are atomic (same-directory temp file, rename, mode preserved), refuse a symlink, keep the previous file as `<config>.remote-control.bak`, and are revision-checked — a hand edit made while the console was open is reported instead of overwritten. A hand-written block that already uses the alias is **refused**, never taken over; pick another alias. *Sync all SSH connections* in Settings does the same for every SSH row.
@@ -55,29 +55,31 @@ scrollback — so an SSH tab no longer comes back empty after an app reload.
 Plugin screens also keep their local state across temporary host
 disconnections.
 
-**Recommendations for improvement — recorded, not implemented**
-([`__doc.md`](./__doc.md#recommendations-for-improvement-recorded-not-implemented)):
+**Recommendations from that pass — outcome**
+([`__doc.md`](./__doc.md#recommendations-for-improvement--outcome-stage-02611-2026-11-07)):
 
-1. **Read-only terminal mirror** in the console's Sessions view via
-   `paseo.terminals.ref(id).capture({ stripAnsi: true })` — now worthwhile
-   because 0.15.0 retains far more scrollback, and it only *reads* host-owned
-   state, so ADR-5 (the PTY and tab stay Paseo's) still holds.
-2. **"Restart host and keep terminals"** action in the console, using
-   `ShutdownServerOptions.keepTerminals` + `requireTerminalKeepCapability`
-   (new in `@getpaseo/client@0.15.0`), which refuses cleanly with
-   `TerminalKeepUnsupportedError` on an older daemon instead of silently
-   closing the sessions.
-3. Drop the two now-unnecessary `as any` casts on the `addWorkspacePanel`
-   registrations (verified: `tsc --noEmit` passes without them on 0.15.0), and
-   either register or delete the orphaned `client/console-sidebar-item.tsx`.
+1. **Read-only terminal mirror** — shipped in **0.26.11** as *peek* on
+   SSH/local rows (last 200 scrollback lines through a single
+   `paseo.terminals.ref(id).capture({ stripAnsi: true })`; the PTY and the tab
+   stay Paseo's, ADR-5).
+2. **"Restart host and keep terminals"** — closed as impossible from a plugin:
+   `PluginHandlerContext` only exposes `PaseoApi`, which has no
+   `shutdownServer`; `paseo plugin reload` covers the need (restart the plugin,
+   not the daemon). The finding is recorded instead of a button that cannot
+   work.
+3. **The two `as any` casts** are gone and the sidebar row is registered
+   (`addSidebarHeaderItem`, `remote-control-console-row`) — both in **0.26.11**.
 
-**Verification:** `npm run typecheck` (both projects) exit 0 and
-**14 suites / 137 tests** pass against `@getpaseo/plugin@0.15.0`; the compiled
+**Verification (0.15.0 pass):** `npm run typecheck` (both projects) exit 0 and
+**14 suites / 137 tests** passed against `@getpaseo/plugin@0.15.0`; the compiled
 client and server bundles contain **zero** deprecated markers (with a negative
 control proving the scan works); and the plugin was installed **from the
 working tree into an isolated 0.15.0 daemon** (scratch home, own loopback
-port) where it reported `running`, `[remote-control] plugin ready (version
-0.24.11)`, all seven RPC methods, and a working console — `GET /` 200 HTML,
-`/health` `{"ok":true,…,"version":"0.24.11"}`, `/api/state` and
-`/api/connections` 200 with the token (query or `Authorization: Bearer`) and
-**401 without it**.
+port) where it reported `running`, `[remote-control] plugin ready`, all seven
+RPC methods, and a working console — `GET /` 200 HTML, `/health`
+`{"ok":true,…}`, `/api/state` and `/api/connections` 200 with the token (query
+or `Authorization: Bearer`) and **401 without it**. The plugin has since moved
+on to **0.29.11** (H3, the G1–G3 console tails, the ghostty Apply fix, the
+telemetry-free *peek* and sidebar row, then stages E1–E3: FreeRDP 3 discovery,
+exit codes for closed windows, RD Gateway); the current check is
+**20 suites / 223 tests**.

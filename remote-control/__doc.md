@@ -42,6 +42,82 @@ call site and the full `addMissingEntityTabs()` body were not read directly in t
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## RD Gateway (stage 0.29.11, stage E3, 2026-11-08)
+
+Stage E3 was deferred in 0.22.10 because rdp-pilot supplies the gateway
+password as `/gateway:...p:<password>`, which this plugin's contract forbids,
+and the stdin path was not proven. It is proven now, from the FreeRDP 3.15.0
+sources, and implemented without a password in argv.
+
+### The proof (`client/common/cmdline.c`, FreeRDP 3.15.0)
+
+After parsing, `freerdp_client_settings_parse_command_line_arguments()` runs a
+`promptForPassword` block (set by `/from-stdin:force`) that does exactly this:
+
+1. if `FreeRDP_Password` is unset — `freerdp_passphrase_read(..., "Password: ",
+   buffer, ..., 1)`, i.e. read one line from stdin;
+2. if `FreeRDP_GatewayEnabled` **and not** `FreeRDP_GatewayUseSameCredentials`
+   and `FreeRDP_GatewayPassword` is unset — read another line as the gateway
+   password.
+
+The flag itself is decided by the gateway parser: `/gateway:g:<host>` sets
+`GatewayUseSameCredentials = TRUE`, while `u:`, `d:` or `p:` clear it. So a
+gateway that logs in with its own user/domain needs **two** stdin lines in
+this order — target password, then gateway password — and a gateway that reuses
+the connection credentials needs one. The same file's gateway authentication
+callback (`client_cli_authenticate_raw`, `GW_AUTH_*`) prompts
+"GatewayUsername/GatewayDomain/GatewayPassword" through the same stdin
+mechanism, which is the second confirmation that the value was never meant to
+require argv.
+
+### argv (`rdpGatewayOption`)
+
+`/gateway:g:<host>[:<port>][,u:<user>][,d:<domain>][,usage-method:<direct|detect>]`
+is emitted after the security group, in rdp-pilot's order. FreeRDP parses the
+value as CSV sub-options, so values go through `rdpCsvValue()` (same quoting as
+`/kbd:`), and IPv6 gateway hosts are bracketed. **`p:` is never emitted.**
+
+### Password path
+
+- The secret lives in the pass store as `connections/<id>/gateway-password`
+  and the database only keeps `secretRefs.gatewayPasswordSecret`.
+- `launchExternalWindow` resolves it only when the gateway has a separate
+  login (`gatewayNeedsSeparateCredentials`: a gateway host plus `gatewayUser`
+  or `gatewayDomain`), builds the stdin payload with `rdpStdinPayload()`
+  (target password first, gateway second) and passes `withPassword` only when
+  that payload exists.
+- Two refusals happen **before** anything is spawned, because half a credential
+  pair would either hang on a prompt or fail silently inside the window:
+  a separate gateway login with no stored gateway password, and a separate
+  gateway login with no stored connection password (the second line cannot be
+  read without the first). Both messages name the fix.
+- A gateway that reuses the connection login reads no gateway line at all; a
+  stored gateway password is then ignored, exactly as FreeRDP's
+  `GatewayUseSameCredentials` post-processing does.
+
+### HTTP, transfer and form
+
+`POST /api/connections` and `PATCH /api/connections/:id` accept
+`gatewayPassword` for RDP rows with the same semantics as `password`
+(non-empty stores, empty clears, absent keeps). `payload.gatewayPassword` is
+deleted before any write — a client that puts the secret in the payload does
+not get it into the database. Export/import maps `secrets.gatewayPassword`
+(`SECRET_REF_FIELD`), so the bundle carries it like the connection password,
+and duplicate copies it under the new id. The console's *Advanced (RDP)* now
+has an **RD Gateway** group (host, port, user, domain, usage method) plus a
+separate password field that feeds `body.gatewayPassword`, never the payload.
+
+### Verification
+
+`tsc --noEmit` (both projects) and **20 suites / 223 tests**. New:
+`tests/rdp-gateway.test.ts` (14) — exact `/gateway:` argv including CSV quoting
+and IPv6, schema accept/reject, stdin ordering, both refusals, a fake client
+capturing two stdin lines and asserting no secret in argv, plus a gpg-backed
+REST test (vault entry created, payload scrubbed, empty PATCH clears, absent
+PATCH keeps). `tests/transfer.test.ts` gained a gateway-password round-trip
+into a fresh store. Not verified live: no RD Gateway and no RDP host on this
+machine, so the real handshake and the native window (risk R7) remain open.
+
 ## External windows keep their exit code (stage 0.28.11, stage E2, 2026-11-08)
 
 Stage E2's remaining acceptance criterion was "the process is visible in the
@@ -541,14 +617,15 @@ keyboard → network → codecs → `extraArgs` last.
 
 ### Deliberately not in this stage
 
-- **RD Gateway** (`/gateway:g:,u:,d:,p:`): rdp-pilot puts the gateway
-  password into argv, which our contract forbids, and FreeRDP 3 has no
-  stdin path for it. The whole group is deferred until a safe mechanism is
-  chosen — half support would hang a detached window on a prompt.
-- Binary discovery (`wlfreerdp3`, `REMOTE_CONTROL_RDP_BIN` override) stays
-  stage E1; the launcher keeps its plain PATH search.
+- **RD Gateway** (`/gateway:g:,u:,d:,p:`) was deferred here because rdp-pilot
+  puts the gateway password into argv and the stdin path was unproven. Both
+  halves landed in **0.29.11 (E3)**: the group is emitted without `p:`, and
+  the password travels on stdin as the second line (see the section above).
+- Binary discovery (`wlfreerdp3`, `REMOTE_CONTROL_RDP_BIN` override) moved to
+  stage E1 and shipped in **0.27.11** (`protocols/freerdp.ts`).
 - The console still shows no Launch button for RDP rows (unchanged): RDP
-  launches come from the sidebar panel (stage 0.18.10).
+  launches come from the sidebar panel (stage 0.18.10). Gateway rows launch
+  the same way since 0.29.11.
 
 ### Tests
 

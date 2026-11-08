@@ -577,19 +577,27 @@ export class ConsoleHttpServer {
               protocol,
               (b.payload as Record<string, unknown>) ?? (source ? { ...source.payload } : {}),
             );
+            // The gateway password is a secret, never a payload field: a
+            // client that puts it into the payload does not get it stored in
+            // the database (stage 0.29.11, E3).
+            delete payload.gatewayPassword;
             const id = `conn_${Math.random().toString(36).slice(2)}`;
             let secretRefs: Record<string, string> = {
               ...((source?.secretRefs ?? {}) as Record<string, string>),
               ...((b.secretRefs as Record<string, string>) ?? {}),
             };
             const password = typeof b.password === "string" ? b.password : "";
+            // RD Gateway secret (stage 0.29.11, E3); RDP only.
+            const gatewayPassword =
+              protocol === "rdp" && typeof b.gatewayPassword === "string" ? b.gatewayPassword : "";
             // Duplicate: copy every stored secret under the new id (a password
             // given in the body replaces the copied one instead).
             if (source && Object.keys(source.secretRefs ?? {}).length > 0) {
               this.requireOpenVault();
               for (const [key, oldName] of Object.entries(source.secretRefs ?? {})) {
                 const isPassword = key === "passwordSecret" || key === "password";
-                if (isPassword && password.length > 0) {
+                const isGateway = key === "gatewayPasswordSecret" || key === "gatewayPassword";
+                if ((isPassword && password.length > 0) || (isGateway && gatewayPassword.length > 0)) {
                   delete secretRefs[key];
                   continue;
                 }
@@ -617,6 +625,15 @@ export class ConsoleHttpServer {
               const secretName = `connections/${id}/password`;
               await this.vault!.set(secretName, password);
               secretRefs = { ...secretRefs, passwordSecret: secretName };
+            }
+            // The gateway password of an RDP connection is a second secret:
+            // never a payload field, never in argv (it reaches FreeRDP on
+            // stdin).
+            if (gatewayPassword.length > 0) {
+              this.requireOpenVault();
+              const secretName = `connections/${id}/gateway-password`;
+              await this.vault!.set(secretName, gatewayPassword);
+              secretRefs = { ...secretRefs, gatewayPasswordSecret: secretName };
             }
             const conn = this.store!.createConnection({
               id, groupId, name, protocol, host, port, username,
@@ -707,6 +724,7 @@ export class ConsoleHttpServer {
             if ("payload" in b) {
               const effectiveProtocol = "protocol" in b ? String(b.protocol) : existing.protocol;
               patch.payload = validatePayload(effectiveProtocol, b.payload);
+              delete patch.payload!.gatewayPassword;
             }
             if ("secretRefs" in b) patch.secretRefs = b.secretRefs as Record<string, string>;
             // A changed target invalidates the recorded auth method (0.21.10):
@@ -747,6 +765,37 @@ export class ConsoleHttpServer {
                 const next: Record<string, string> = {};
                 for (const [key, entryValue] of Object.entries(refs)) {
                   if (key !== "password" && key !== "passwordSecret") next[key] = entryValue;
+                }
+                patch.secretRefs = next;
+              }
+            }
+            // RD Gateway password edits mirror the connection password: a
+            // non-empty value stores it, an empty one clears it, absence keeps
+            // it. Only meaningful for an RDP connection.
+            const protocolAfter = "protocol" in b ? String(b.protocol) : existing.protocol;
+            if ("gatewayPassword" in b && protocolAfter === "rdp") {
+              const refs = existing.secretRefs ?? {};
+              const value =
+                b.gatewayPassword === null || b.gatewayPassword === undefined ? "" : String(b.gatewayPassword);
+              if (value.length > 0) {
+                this.requireOpenVault();
+                const secretName =
+                  refs.gatewayPasswordSecret ?? refs.gatewayPassword ?? `connections/${id}/gateway-password`;
+                await this.vault!.set(secretName, value);
+                const next: Record<string, string> = {};
+                for (const [key, entryValue] of Object.entries(refs)) {
+                  if (key !== "gatewayPassword") next[key] = entryValue;
+                }
+                next.gatewayPasswordSecret = secretName;
+                patch.secretRefs = next;
+              } else {
+                const secretName = refs.gatewayPasswordSecret ?? refs.gatewayPassword;
+                if (secretName && this.vault) {
+                  try { await this.vault.delete(secretName); } catch { /* already gone */ }
+                }
+                const next: Record<string, string> = {};
+                for (const [key, entryValue] of Object.entries(refs)) {
+                  if (key !== "gatewayPassword" && key !== "gatewayPasswordSecret") next[key] = entryValue;
                 }
                 patch.secretRefs = next;
               }

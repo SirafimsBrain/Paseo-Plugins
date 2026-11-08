@@ -75,11 +75,15 @@ const envelopeSchema = z.object({
 const SECRET_REF_FIELD: Record<string, string> = {
   password: "passwordSecret",
   identity: "identitySecret",
+  // Stage 0.29.11 (E3): the RD Gateway password travels with the bundle like
+  // every other stored secret.
+  gatewayPassword: "gatewayPasswordSecret",
 };
 
 function secretFieldSemantic(field: string): string {
   if (field === "passwordSecret") return "password";
   if (field === "identitySecret") return "identity";
+  if (field === "gatewayPasswordSecret") return "gatewayPassword";
   return field;
 }
 

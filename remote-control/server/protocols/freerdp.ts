@@ -191,6 +191,66 @@ export function rdpTarget(connection: Connection): string {
 }
 
 /**
+ * `/gateway:...` value (stage 0.29.11, E3), or null when no gateway is set.
+ * FreeRDP parses the value as CSV sub-options, so each value is quoted the
+ * same way `/kbd:` values are. `p:` is deliberately absent: the gateway
+ * password arrives on stdin, never in argv.
+ */
+export function rdpGatewayOption(connection: Connection): string | null {
+  const payload = connection.payload ?? {};
+  const host = typeof payload.gatewayHost === "string" ? payload.gatewayHost.trim() : "";
+  if (host.length === 0) return null;
+
+  const port = typeof payload.gatewayPort === "number" ? payload.gatewayPort : null;
+  const target = port === null ? formatRdpHost(host) : `${formatRdpHost(host)}:${port}`;
+  const parts = [`g:${rdpCsvValue(target)}`];
+
+  const user = typeof payload.gatewayUser === "string" ? payload.gatewayUser.trim() : "";
+  if (user.length > 0) parts.push(`u:${rdpCsvValue(user)}`);
+  const domain = typeof payload.gatewayDomain === "string" ? payload.gatewayDomain.trim() : "";
+  if (domain.length > 0) parts.push(`d:${rdpCsvValue(domain)}`);
+  const usage = typeof payload.gatewayUsageMethod === "string" ? payload.gatewayUsageMethod : "";
+  if (usage === "direct" || usage === "detect") parts.push(`usage-method:${usage}`);
+
+  return `/gateway:${parts.join(",")}`;
+}
+
+/**
+ * True when the gateway logs in with its own user/domain instead of reusing
+ * the connection credentials. FreeRDP only asks stdin for a gateway password
+ * in that case (`GatewayUseSameCredentials` is cleared by `u:`/`d:`), which is
+ * why the launcher sends two lines exactly then.
+ */
+export function gatewayNeedsSeparateCredentials(connection: Connection): boolean {
+  const payload = connection.payload ?? {};
+  const host = typeof payload.gatewayHost === "string" ? payload.gatewayHost.trim() : "";
+  if (host.length === 0) return false;
+  const user = typeof payload.gatewayUser === "string" ? payload.gatewayUser.trim() : "";
+  const domain = typeof payload.gatewayDomain === "string" ? payload.gatewayDomain.trim() : "";
+  return user.length > 0 || domain.length > 0;
+}
+
+/**
+ * Bytes for FreeRDP's stdin under `/from-stdin:force`. FreeRDP 3.15 reads the
+ * target password first and, when the gateway has separate credentials, the
+ * gateway password second (`client/common/cmdline.c`), so this order is part
+ * of the contract. Returns null when there is no password to pipe, which also
+ * means `/from-stdin:force` must not be emitted.
+ */
+export function rdpStdinPayload(input: {
+  password: string | null;
+  gatewayPassword: string | null;
+  gatewaySeparate: boolean;
+}): string | null {
+  // Without a target password there is nothing FreeRDP would read first, so
+  // a gateway password alone cannot be piped (the launcher refuses instead).
+  if (input.password === null) return null;
+  const lines = [input.password];
+  if (input.gatewaySeparate) lines.push(input.gatewayPassword ?? "");
+  return `${lines.join("\n")}\n`;
+}
+
+/**
  * Quotes a value only for FreeRDP's comma-separated sub-option parser
  * (`/kbd:` and friends): those run through a whitespace/quote-aware
  * tokenizer, while plain scalar options (`/u:`, `/t:`, `/d:`) are taken
@@ -288,6 +348,10 @@ export function buildRdpArgs(connection: Connection, options: { withPassword?: b
     const certName = str("certName");
     if (certName) args.push(`/cert:name:${certName}`);
   }
+
+  // RD Gateway — after the security group, in rdp-pilot's order.
+  const gateway = rdpGatewayOption(connection);
+  if (gateway !== null) args.push(gateway);
 
   // Keyboard — FreeRDP 3 compound option, CSV values quoted when needed.
   const kbdLayout = str("kbdLayout");

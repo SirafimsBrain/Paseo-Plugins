@@ -1,5 +1,30 @@
 # remote-control — план разработки (атомарные этапы)
 
+> **Статус 0.29.11 — этап E3: RD Gateway и gateway-пароль через stdin
+> (2026-11-08):** новая функциональность, бамп второй цифры (`0.28.11` →
+> `0.29.11`, тег `remote-control@0.29.11`). **Спайк закрыт по исходникам
+> FreeRDP 3.15.0** (`client/common/cmdline.c`): при `/from-stdin:force`
+> клиент читает из stdin **сначала `Password`, затем `GatewayPassword`**, причём
+> второе — только когда шлюз включён и `GatewayUseSameCredentials` снят;
+> `/gateway:g:` ставит этот флаг в TRUE, а `u:`/`d:`/`p:` — в FALSE. Значит,
+> пароль шлюза можно не отдавать в argv: две строки идут ровно тогда, когда у
+> шлюза отдельный логин. **Схема:** `gatewayHost`, `gatewayPort` (1–65535),
+> `gatewayUser`, `gatewayDomain`, `gatewayUsageMethod` (`direct`/`detect`);
+> argv — `/gateway:g:[host][:port],u:,d:,usage-method:` после группы
+> безопасности, значения CSV-кавычатся как у `/kbd:`, `p:` отсутствует вовсе.
+> **Секрет:** `connections/<id>/gateway-password` → `secretRefs.gatewayPasswordSecret`;
+> `payload.gatewayPassword` вычищается HTTP-слоем, экспорт/импорт несёт
+> `secrets.gatewayPassword`, duplicate копирует секрет под новым id. **Отказы
+> до спавна:** отдельный логин без сохранённого gateway-пароля и отдельный
+> логин без пароля подключения (вторую строку нельзя передать без первой) —
+> с текстом «сохраните пароль или уберите gateway user/domain». **UI:** группа
+> RD Gateway в «Advanced (RDP)» (хост, порт, логин, домен, usage, отдельное
+> поле пароля → `body.gatewayPassword`). Проверки: `tsc` оба проекта,
+> **20 файлов / 223 теста** (было 208), включая `tests/rdp-gateway.test.ts`
+> (14: argv/CSV/IPv6, schema, stdin-порядок, отказы, REST + экспорт/импорт
+> секрета) и круг gateway-пароля в `tests/transfer.test.ts`. Живого шлюза на
+> машине нет — argv и stdin проверены фейковым клиентом, не реальным RDP.
+>
 > **Статус 0.28.11 — этап E2: exit-код внешних окон в Sessions (2026-11-08):**
 > новая функциональность, бамп второй цифры (`0.27.11` → `0.28.11`, тег
 > `remote-control@0.28.11`). Реестр внешних окон больше не выбрасывает строку
@@ -603,8 +628,10 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 `0.21.10` — сервисный слой консоли: группировка, duplicate, test (Блок H2),
 `0.22.10` — создание RDP-подключений: схема, валидация, поля модалки, argv
 (часть E3; см. Блок E).
-**Следующий этап — с `0.29.11` (E3: RD Gateway и gateway-пароль через stdin);
-версии E1…G3 в заголовках этапов ниже — исторические.**
+**Этапы E1–E3 закрыты в `0.27.11`–`0.29.11`. Анонсированных этапов в плане
+больше нет: остались только живые приёмки (G4, окна RDP/VNC, реальный
+gateway) на машине с соответствующими сервисами и клиентами. Версии E1…G3 в
+заголовках этапов ниже — исторические.**
 
 ### Блок A — Фундамент и снятие рисков
 
@@ -792,9 +819,13 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 
 ### Блок E — RDP (перенос rdp-pilot, только FreeRDP 3)
 
+> **Статус 0.29.11 — E3 закрыт:** gateway-поля в схеме и форме, `/gateway:` в
+> argv без `p:`, gateway-пароль из хранилища второй строкой stdin (порядок
+> доказан по исходникам FreeRDP 3.15.0), экспорт/импорт и duplicate его несут.
+>
 > **Статус 0.27.11 — E1 выполнен** (`server/protocols/freerdp.ts`: discovery
 > с `REMOTE_CONTROL_RDP_BIN`, `wlfreerdp3` по `WAYLAND_DISPLAY`, кэш версии и
-> гейт FreeRDP 3; argv-конструктор всех групп §1.1, кроме gateway).
+> гейт FreeRDP 3; argv-конструктор всех групп §1.1).
 >
 > **Статус 0.22.10 — E3 (поля RDP в консоли) выполнен как этап создания
 > подключения:** полная схема payload + валидация на REST + поля в модалке +
@@ -847,13 +878,18 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
   ничего не сигналит. Живого RDP-сервера на машине нет — exit-код проверен
   фейковым клиентом с `exit 7`, окно не поднималось (риск R7 — открыт).
 
-**E3. Поля RDP в консоли** → `0.18.0`
+**E3. Поля RDP в консоли** → `0.29.11` *(выполнено 2026-11-08; живой RD Gateway — вне машины разработки)*
 - Zod-схема полей RDP (display, bpp, security, cert, gateway, kbd, clipboard,
   sound, drives, network/codec) в `shared/protocols.ts`, модалка подключения
   рисует их из реестра, дефолты — как в rdp-pilot.
 - Приёмка: параметры из модалки действительно доходят до argv (тест
   «форма → launch»), каждая группа опций покрыта; консоль по-прежнему
   лаконичная (расширенные поля — в свёрнутой секции модалки).
+- **Статус (факт 0.29.11, выполнено):** gateway-группа добавлена к полям
+  0.22.10 (`gatewayHost/gatewayPort/gatewayUser/gatewayDomain/gatewayUsageMethod`
+  + отдельное поле пароля), argv-маппинг и stdin-путь — в `freerdp.ts` /
+  `external.ts`, секрет — в хранилище. Детали и доказательство по исходникам
+  FreeRDP — в `__doc.md`, раздел «RD Gateway (stage 0.29.11, E3)».
 
 ### Блок F — VNC (перенос vnc-pilot)
 

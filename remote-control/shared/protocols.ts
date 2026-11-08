@@ -10,7 +10,16 @@
 // (group order in server/protocols/external.ts mirrors its build_spawn()).
 
 import { z } from "zod";
-import { RDP_BPP, RDP_GDI, RDP_JPEG_QUALITY, RDP_KBD_TYPES, RDP_NETWORK, RDP_SEC, RDP_SOUND_MODES } from "./rdp-fields";
+import {
+  RDP_BPP,
+  RDP_GATEWAY_USAGE_METHODS,
+  RDP_GDI,
+  RDP_JPEG_QUALITY,
+  RDP_KBD_TYPES,
+  RDP_NETWORK,
+  RDP_SEC,
+  RDP_SOUND_MODES,
+} from "./rdp-fields";
 import {
   VNC_CLIENT_IDS,
   VNC_COLOR_DEPTHS,
@@ -91,6 +100,15 @@ export const rdpPayloadSchema = z.looseObject({
   certIgnore: z.boolean().optional(),
   certName: z.string().optional(),
   cert: z.string().optional(),
+  // --- RD Gateway (stage 0.29.11, E3) ---
+  // The gateway password is never a payload field: it lives in the secret
+  // storage under secretRefs.gatewayPasswordSecret and reaches FreeRDP on
+  // stdin (see server/protocols/freerdp.ts).
+  gatewayHost: z.string().optional(),
+  gatewayPort: z.number().int().min(1).max(65535).optional(),
+  gatewayUser: z.string().optional(),
+  gatewayDomain: z.string().optional(),
+  gatewayUsageMethod: z.enum(RDP_GATEWAY_USAGE_METHODS).optional(),
   // --- Keyboard ---
   kbdLayout: z.string().optional(),
   kbdType: z.enum(RDP_KBD_TYPES).optional(),
@@ -154,7 +172,7 @@ export const PROTOCOLS: Record<string, ProtocolDefinition> = {
     defaultPort: 3389,
     label: "RDP",
     payloadSchema: rdpPayloadSchema,
-    secretFields: ["passwordSecret"],
+    secretFields: ["passwordSecret", "gatewayPasswordSecret"],
     launchable: false,
   },
   vnc: {

@@ -24,6 +24,12 @@ export const RDP_NETWORK = ["modem", "broadband-low", "broadband-high", "wan", "
 /** Audio mode, `/audio-mode:` — "0" play here, "1" remotely, "2" do not play. */
 export const RDP_SOUND_MODES = ["0", "1", "2"] as const;
 
+/**
+ * RD Gateway usage method, `/gateway:...,usage-method:` (stage 0.29.11, E3).
+ * An empty choice omits the sub-option and lets FreeRDP detect it.
+ */
+export const RDP_GATEWAY_USAGE_METHODS = ["direct", "detect"] as const;
+
 /** JPEG quality, `/jpeg-quality:` (empty = FreeRDP default → omitted). */
 export const RDP_JPEG_QUALITY = [
   "50",
@@ -82,6 +88,11 @@ export const RDP_CHOICES: Record<string, readonly (readonly [string, string])[]>
     ["0", "Play on this computer"],
     ["1", "Play on remote computer"],
     ["2", "Do not play"],
+  ],
+  gatewayUsageMethod: [
+    ["", "Automatic"],
+    ["direct", "Direct (always use the gateway)"],
+    ["detect", "Detect (let the server decide)"],
   ],
   jpegQuality: [
     ["", "Default"],

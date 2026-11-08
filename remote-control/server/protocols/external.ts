@@ -12,7 +12,12 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Connection } from "../../shared/connections";
-import { buildRdpArgs, discoverRdpClient } from "./freerdp";
+import {
+  buildRdpArgs,
+  discoverRdpClient,
+  gatewayNeedsSeparateCredentials,
+  rdpStdinPayload,
+} from "./freerdp";
 import { prepareVncLaunch } from "./vnc";
 import type {
   ExternalSessionInfo,
@@ -67,6 +72,21 @@ export async function connectionPassword(
   if (!name) return null;
   if (!vault) throw new Error("Vault unavailable: cannot resolve the stored password.");
   // Throws "vault is locked" when the vault is locked.
+  return await vault.get(name);
+}
+
+/**
+ * The stored RD Gateway password of a connection, or null when it has none
+ * (stage 0.29.11, E3). A locked vault throws, like the connection password.
+ */
+export async function storedGatewayPassword(
+  connection: Connection,
+  vault: ExternalVault | null | undefined,
+): Promise<string | null> {
+  const refs = connection.secretRefs ?? {};
+  const name = refs.gatewayPasswordSecret ?? refs.gatewayPassword;
+  if (!name) return null;
+  if (!vault) throw new Error("Vault unavailable: cannot resolve the stored RD Gateway password.");
   return await vault.get(name);
 }
 
@@ -179,14 +199,35 @@ export async function launchExternalWindow(
       ...(options.discoveryEnv !== undefined ? { env: options.discoveryEnv } : {}),
       binary: options.rdpBinary ?? null,
     });
+    // RD Gateway (stage 0.29.11, E3): FreeRDP reads the gateway password from
+    // stdin right after the target password, but only when the gateway has its
+    // own login — and it can only do that if there is a first line to read.
+    const gatewaySeparate = gatewayNeedsSeparateCredentials(connection);
+    const gatewayPassword = gatewaySeparate
+      ? await storedGatewayPassword(connection, options.vault)
+      : null;
+    if (gatewaySeparate && gatewayPassword === null) {
+      throw new Error(
+        "the RD Gateway uses its own login, but this connection has no stored gateway password: " +
+          "save the gateway password, or clear the gateway user/domain to reuse the connection credentials",
+      );
+    }
+    if (gatewaySeparate && password === null) {
+      throw new Error(
+        "the RD Gateway password can only be piped after the connection password, and this connection has no stored password: " +
+          "save the connection password as well, or clear the gateway user/domain to reuse the connection credentials",
+      );
+    }
+    const stdin = rdpStdinPayload({ password, gatewayPassword, gatewaySeparate });
+
     const binary = client.binary;
-    const args = buildRdpArgs(connection, { withPassword: password !== null });
+    const args = buildRdpArgs(connection, { withPassword: stdin !== null });
     const { pid, session } = spawnTracked(
       {
         binary,
         args,
         env: process.env,
-        ...(password !== null ? { stdin: `${password}\n` } : {}),
+        ...(stdin !== null ? { stdin } : {}),
       },
       log,
       options.sessions,
