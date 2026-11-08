@@ -19,6 +19,31 @@ import type { ConsoleSettings } from "./settings";
 import { nextCopyName } from "../shared/naming";
 import { validatePayload } from "../shared/protocols";
 import { discoverVncClients } from "./protocols/vnc";
+import type { ExternalSessionInfo } from "./sessions";
+
+/**
+ * One external-window row for `/api/sessions` (stage 0.28.11, E2): the
+ * registry's state/exit fields travel with the list, so the console can show a
+ * closed window as `exited (code)` instead of forgetting it.
+ */
+function externalSessionRow(session: ExternalSessionInfo): Record<string, unknown> {
+  return {
+    id: session.id,
+    kind: session.kind,
+    name: session.name,
+    workspaceId: null,
+    connectionId: session.connectionId,
+    target: session.target,
+    cwd: null,
+    pid: session.pid,
+    binary: session.binary,
+    startedAt: session.startedAt,
+    state: session.state,
+    exitCode: session.exitCode,
+    signal: session.signal,
+    exitedAt: session.exitedAt,
+  };
+}
 
 export const DEFAULT_CONSOLE_HOST = "127.0.0.1";
 
@@ -328,18 +353,7 @@ export class ConsoleHttpServer {
         const terminalPromise = this.terminals ? this.terminals.list(workspaceId) : Promise.resolve([]);
         void terminalPromise.then((terminals) => {
           const sessions = [
-            ...external.map((session) => ({
-              id: session.id,
-              kind: session.kind,
-              name: session.name,
-              workspaceId: null,
-              connectionId: session.connectionId,
-              target: session.target,
-              cwd: null,
-              pid: session.pid,
-              binary: session.binary,
-              startedAt: session.startedAt,
-            })),
+            ...external.map(externalSessionRow),
             ...terminals.map((terminal) => ({
               id: terminal.id,
               kind: terminal.kind,
@@ -361,18 +375,7 @@ export class ConsoleHttpServer {
           // with the external rows and an explicit warning.
           const message = cause instanceof Error ? cause.message : String(cause);
           this.sendJson(res, 200, {
-            sessions: external.map((session) => ({
-              id: session.id,
-              kind: session.kind,
-              name: session.name,
-              workspaceId: null,
-              connectionId: session.connectionId,
-              target: session.target,
-              cwd: null,
-              pid: session.pid,
-              binary: session.binary,
-              startedAt: session.startedAt,
-            })),
+            sessions: external.map(externalSessionRow),
             terminalError: message,
           });
         });

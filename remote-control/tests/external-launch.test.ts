@@ -13,6 +13,7 @@ import {
   launchExternalWindow,
   rdpTarget,
 } from "../server/protocols/external";
+import { ExternalSessionRegistry } from "../server/sessions";
 
 function connection(overrides: Partial<Connection> = {}): Connection {
   return {
@@ -183,6 +184,30 @@ describe("launchExternalWindow", () => {
     expect(argv).toContain("/from-stdin:force");
     expect(argv).not.toContain("hunter2");
     expect(readFileSync(`${capture}.stdin`, "utf8").trim()).toBe("hunter2");
+  });
+
+  // Stage 0.28.11 (E2): the window's exit code must reach the Sessions view,
+  // so a crashing client is not a row that silently disappears.
+  it("records the exit code of a finished window in the registry", async () => {
+    writeFileSync(
+      path.join(dir, "xfreerdp3"),
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "This is FreeRDP version 3.15.0 (n/a)"; exit 0; fi\nexit 7\n`,
+      { mode: 0o755 },
+    );
+    const registry = new ExternalSessionRegistry({ isAlive: () => true, cleanup: () => {} });
+
+    const result = await launchExternalWindow(connection(), {
+      pathEnv: dir,
+      sessions: registry,
+      log: () => {},
+    });
+    expect(result.sessionId).toBeTruthy();
+
+    const id = String(result.sessionId);
+    for (let i = 0; i < 150 && registry.get(id)?.state !== "exited"; i += 1) {
+      await sleep(20);
+    }
+    expect(registry.get(id)).toMatchObject({ state: "exited", exitCode: 7 });
   });
 
   it("gives FreeRDP no password pipe when the connection has none", async () => {

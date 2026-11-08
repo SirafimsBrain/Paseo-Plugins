@@ -18,7 +18,7 @@ describe("ExternalSessionRegistry", () => {
     expect(registry.list()).toEqual([info]);
   });
 
-  it("drops sessions whose process exited and cleans their run dir", () => {
+  it("marks a dead process as exited without losing the row", () => {
     let alive = true;
     const cleaned: string[] = [];
     const registry = new ExternalSessionRegistry({
@@ -28,9 +28,50 @@ describe("ExternalSessionRegistry", () => {
     const info = registry.register({ connection, protocol: "vnc", pid: 7, binary: "vncviewer", runDir: "/run/x" });
     expect(registry.list()).toHaveLength(1);
     alive = false;
-    expect(registry.list()).toEqual([]);
+    const [row] = registry.list();
+    expect(row).toMatchObject({ id: info.id, state: "exited", exitCode: null });
     expect(cleaned).toEqual(["/run/x"]);
-    expect(registry.get(info.id)).toBeNull();
+    expect(registry.get(info.id)).toMatchObject({ state: "exited" });
+  });
+
+  // Stage 0.28.11 (E2): the exclamation of the shell — the window's exit code
+  // must survive in the Sessions view after the window is gone.
+  it("keeps the exit code of a finished window", () => {
+    const registry = new ExternalSessionRegistry({ now: () => 500, isAlive: () => false });
+    const info = registry.register({ connection, protocol: "rdp", pid: 31, binary: "xfreerdp3" });
+    expect(registry.markExited(info.id, { code: 3, signal: null })).toBe(true);
+    expect(registry.list()).toEqual([
+      { ...info, state: "exited", exitCode: 3, signal: null, exitedAt: 500 },
+    ]);
+    // Recording the same exit twice is a no-op, not a second event.
+    expect(registry.markExited(info.id, { code: 0 })).toBe(false);
+  });
+
+  it("keeps a bounded number of finished rows", () => {
+    let tick = 0;
+    const registry = new ExternalSessionRegistry({
+      now: () => (tick += 1),
+      isAlive: () => true,
+      maxExited: 2,
+    });
+    const ids = [1, 2, 3].map((pid) =>
+      registry.register({ connection, protocol: "rdp", pid, binary: "xfreerdp3" }).id,
+    );
+    for (const id of ids) registry.markExited(id, { code: 0 });
+    expect(registry.list().map((session) => session.id)).toEqual(ids.slice(1));
+  });
+
+  it("dismisses a finished row without signalling anything", () => {
+    const signals: unknown[] = [];
+    const registry = new ExternalSessionRegistry({
+      isAlive: () => true,
+      signal: (...args) => signals.push(args),
+    });
+    const info = registry.register({ connection, protocol: "rdp", pid: 33, binary: "xfreerdp3" });
+    registry.markExited(info.id, { code: 1 });
+    expect(registry.kill(info.id)).toBe(true);
+    expect(signals).toEqual([]);
+    expect(registry.list()).toEqual([]);
   });
 
   it("kills the process group and forgets the session", () => {
@@ -97,12 +138,12 @@ describe("change notifications", () => {
     expect(registry.kill(info.id)).toBe(true);
     expect(counts).toEqual([1, 0]);
 
-    // A window that died on its own disappears on the next listing, and that
-    // too is a change the console should hear about.
+    // A window that died on its own turns into an `exited` row on the next
+    // listing, and that is a change the console should hear about.
     registry.register({ connection, protocol: "vnc", pid: 22, binary: "vncviewer" });
     alive = false;
-    expect(registry.list()).toEqual([]);
-    expect(counts).toEqual([1, 0, 1, 0]);
+    expect(registry.list()).toHaveLength(1);
+    expect(counts).toEqual([1, 0, 1, 1]);
   });
 
   it("survives a throwing listener", () => {

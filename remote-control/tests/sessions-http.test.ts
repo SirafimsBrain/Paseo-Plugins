@@ -107,17 +107,27 @@ describe("/api/sessions", () => {
     expect(kill.status).toBe(200);
   });
 
-  it("drops sessions whose window has exited", async () => {
+  it("keeps a window that exited, with its state (stage 0.28.11, E2)", async () => {
     const info = sessions.register({
       connection: { id: "conn_rdp", name: "rdp desktop", host: "10.0.0.7", port: 3389 },
       protocol: "rdp",
       pid: 44,
       binary: "xfreerdp3",
     });
-    alive = false;
+    expect(info.state).toBe("running");
+    sessions.markExited(info.id, { code: 0 });
     const res = await fetch(`${base}/api/sessions?token=${TOKEN}`);
     const body = (await res.json()) as { sessions: any[] };
-    expect(body.sessions.some((s) => s.id === info.id)).toBe(false);
+    expect(body.sessions.find((s) => s.id === info.id)).toMatchObject({
+      state: "exited",
+      exitCode: 0,
+      signal: null,
+    });
+
+    // "remove" on a finished row only drops it from the list.
+    const kill = await fetch(`${base}/api/sessions/${info.id}/kill?token=${TOKEN}`, { method: "POST" });
+    expect(kill.status).toBe(200);
+    expect(sessions.get(info.id)).toBeNull();
   });
 });
 

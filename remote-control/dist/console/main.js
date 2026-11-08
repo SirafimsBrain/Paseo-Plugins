@@ -581,6 +581,14 @@ function visibleSessions() {
 function sessionSurface(session) {
   return session.kind === "rdp" || session.kind === "vnc" ? "desktop window" : "Paseo tab";
 }
+function sessionStateLabel(session) {
+  if (session.state === "exited") {
+    if (typeof session.exitCode === "number") return `exited (${session.exitCode})`;
+    if (typeof session.signal === "string" && session.signal.length > 0) return `exited (${session.signal})`;
+    return "exited";
+  }
+  return "running";
+}
 function sessionHint(session) {
   if (session.kind === "rdp" || session.kind === "vnc") {
     return `${session.name}: ${session.binary ?? "viewer"} window on the desktop (pid ${session.pid ?? "?"}) \u2014 bring it forward with your window manager.`;
@@ -731,7 +739,7 @@ function sessionsView(main) {
   const buildTable = (entries) => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
-    thead.innerHTML = "<tr><th></th><th>ID</th><th>Name</th><th>Kind</th><th>Connection</th><th>Target</th><th>Surface</th><th>Started</th><th>Actions</th></tr>";
+    thead.innerHTML = "<tr><th></th><th>ID</th><th>Name</th><th>Kind</th><th>State</th><th>Connection</th><th>Target</th><th>Surface</th><th>Started</th><th>Actions</th></tr>";
     table.append(thead);
     const tbody = document.createElement("tbody");
     for (const session of entries) {
@@ -768,7 +776,8 @@ function sessionRow(session) {
   const tr = document.createElement("tr");
   const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "-";
   const connection = connectionLabel(session.connectionId) ?? "-";
-  tr.innerHTML = `<td></td><td class="mono">${session.id}</td><td>${session.name}</td><td>${session.kind}</td><td>${connection === "-" ? '<span class="muted">-</span>' : connection}</td><td class="mono">${session.target || "-"}</td><td>${sessionSurface(session)}</td><td>${started}</td>`;
+  const stateLabel = sessionStateLabel(session);
+  tr.innerHTML = `<td></td><td class="mono">${session.id}</td><td>${session.name}</td><td>${session.kind}</td><td${session.state === "exited" ? ' class="muted"' : ""}>${stateLabel}</td><td>${connection === "-" ? '<span class="muted">-</span>' : connection}</td><td class="mono">${session.target || "-"}</td><td>${sessionSurface(session)}</td><td>${started}</td>`;
   const checkCell = tr.firstElementChild;
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
@@ -780,27 +789,32 @@ function sessionRow(session) {
   });
   checkCell.append(checkbox);
   const actions = document.createElement("td");
-  const hintBtn = document.createElement("button");
-  hintBtn.textContent = session.kind === "rdp" || session.kind === "vnc" ? "focus window" : "open";
-  hintBtn.addEventListener("click", () => {
-    state.notice = sessionHint(session);
-    render();
-  });
-  if (session.kind !== "rdp" && session.kind !== "vnc") {
-    const peekBtn = document.createElement("button");
-    peekBtn.textContent = "peek";
-    peekBtn.title = "Read the last 200 lines of this terminal (read-only)";
-    peekBtn.addEventListener("click", () => openTerminalPeek(session));
-    actions.append(peekBtn);
+  const exited = session.state === "exited";
+  if (!exited) {
+    const hintBtn = document.createElement("button");
+    hintBtn.textContent = session.kind === "rdp" || session.kind === "vnc" ? "focus window" : "open";
+    hintBtn.addEventListener("click", () => {
+      state.notice = sessionHint(session);
+      render();
+    });
+    if (session.kind !== "rdp" && session.kind !== "vnc") {
+      const peekBtn = document.createElement("button");
+      peekBtn.textContent = "peek";
+      peekBtn.title = "Read the last 200 lines of this terminal (read-only)";
+      peekBtn.addEventListener("click", () => openTerminalPeek(session));
+      actions.append(peekBtn);
+    }
+    actions.append(hintBtn);
   }
   const killBtn = document.createElement("button");
-  killBtn.className = "danger";
-  killBtn.textContent = "kill";
+  killBtn.className = exited ? "" : "danger";
+  killBtn.textContent = exited ? "remove" : "kill";
+  killBtn.title = exited ? "Remove this finished window from the list" : "Stop the window";
   killBtn.addEventListener("click", async () => {
     await killSession(session);
     await refreshSessions();
   });
-  actions.append(hintBtn, killBtn);
+  actions.append(killBtn);
   tr.append(actions);
   return tr;
 }

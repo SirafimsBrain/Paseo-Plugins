@@ -541,6 +541,20 @@ function sessionSurface(session: any): string {
 }
 
 /**
+ * Process state (stage 0.28.11, E2): a window that ended keeps its row with
+ * the exit code, a daemon-owned terminal is running by definition of being
+ * listed.
+ */
+function sessionStateLabel(session: any): string {
+  if (session.state === "exited") {
+    if (typeof session.exitCode === "number") return `exited (${session.exitCode})`;
+    if (typeof session.signal === "string" && session.signal.length > 0) return `exited (${session.signal})`;
+    return "exited";
+  }
+  return "running";
+}
+
+/**
  * The plugin cannot focus a Paseo tab or another application's window —
  * neither API exists (the session is a daemon tab; the RDP/VNC window belongs
  * to the window manager) — so the action gives the facts needed to find it.
@@ -719,7 +733,7 @@ function sessionsView(main: HTMLElement): void {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     thead.innerHTML =
-      "<tr><th></th><th>ID</th><th>Name</th><th>Kind</th><th>Connection</th><th>Target</th><th>Surface</th><th>Started</th><th>Actions</th></tr>";
+      "<tr><th></th><th>ID</th><th>Name</th><th>Kind</th><th>State</th><th>Connection</th><th>Target</th><th>Surface</th><th>Started</th><th>Actions</th></tr>";
     table.append(thead);
     const tbody = document.createElement("tbody");
     for (const session of entries) {
@@ -760,7 +774,10 @@ function sessionRow(session: any): HTMLTableRowElement {
   const tr = document.createElement("tr");
   const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "-";
   const connection = connectionLabel(session.connectionId) ?? "-";
-  tr.innerHTML = `<td></td><td class="mono">${session.id}</td><td>${session.name}</td><td>${session.kind}</td><td>${
+  const stateLabel = sessionStateLabel(session);
+  tr.innerHTML = `<td></td><td class="mono">${session.id}</td><td>${session.name}</td><td>${session.kind}</td><td${
+    session.state === "exited" ? ' class="muted"' : ""
+  }>${stateLabel}</td><td>${
     connection === "-" ? '<span class="muted">-</span>' : connection
   }</td><td class="mono">${session.target || "-"}</td><td>${sessionSurface(session)}</td><td>${started}</td>`;
 
@@ -776,27 +793,34 @@ function sessionRow(session: any): HTMLTableRowElement {
   checkCell.append(checkbox);
 
   const actions = document.createElement("td");
-  const hintBtn = document.createElement("button");
-  hintBtn.textContent = session.kind === "rdp" || session.kind === "vnc" ? "focus window" : "open";
-  hintBtn.addEventListener("click", () => {
-    state.notice = sessionHint(session);
-    render();
-  });
-  if (session.kind !== "rdp" && session.kind !== "vnc") {
-    const peekBtn = document.createElement("button");
-    peekBtn.textContent = "peek";
-    peekBtn.title = "Read the last 200 lines of this terminal (read-only)";
-    peekBtn.addEventListener("click", () => openTerminalPeek(session));
-    actions.append(peekBtn);
+  const exited = session.state === "exited";
+  // A closed window has nothing to focus and nothing to signal: the row only
+  // offers to leave the list (stage 0.28.11, E2).
+  if (!exited) {
+    const hintBtn = document.createElement("button");
+    hintBtn.textContent = session.kind === "rdp" || session.kind === "vnc" ? "focus window" : "open";
+    hintBtn.addEventListener("click", () => {
+      state.notice = sessionHint(session);
+      render();
+    });
+    if (session.kind !== "rdp" && session.kind !== "vnc") {
+      const peekBtn = document.createElement("button");
+      peekBtn.textContent = "peek";
+      peekBtn.title = "Read the last 200 lines of this terminal (read-only)";
+      peekBtn.addEventListener("click", () => openTerminalPeek(session));
+      actions.append(peekBtn);
+    }
+    actions.append(hintBtn);
   }
   const killBtn = document.createElement("button");
-  killBtn.className = "danger";
-  killBtn.textContent = "kill";
+  killBtn.className = exited ? "" : "danger";
+  killBtn.textContent = exited ? "remove" : "kill";
+  killBtn.title = exited ? "Remove this finished window from the list" : "Stop the window";
   killBtn.addEventListener("click", async () => {
     await killSession(session);
     await refreshSessions();
   });
-  actions.append(hintBtn, killBtn);
+  actions.append(killBtn);
   tr.append(actions);
   return tr;
 }

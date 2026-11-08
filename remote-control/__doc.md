@@ -42,6 +42,56 @@ call site and the full `addMissingEntityTabs()` body were not read directly in t
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## External windows keep their exit code (stage 0.28.11, stage E2, 2026-11-08)
+
+Stage E2's remaining acceptance criterion was "the process is visible in the
+console with an exit code after the window closes". The in-memory registry
+used to delete a row as soon as its pid was gone, which lost exactly that
+information.
+
+### Registry (`server/sessions.ts`)
+
+`ExternalSessionInfo` now carries `state` (`running` | `exited`), `exitCode`,
+`signal` and `exitedAt`. `markExited(id, { code, signal })` records the end of
+a process, removes its run directory and keeps the row. `list()` turns a
+running row whose pid vanished without an observed `exit` into `exited` with
+`exitCode: null` instead of dropping it, so a window killed from outside the
+plugin is still visible as "exited" (the old behaviour hid it). Finished rows
+are capped at `maxExited` (default 20, oldest exited dropped first) so a long
+session does not grow the registry without bound. `kill()` signals only a
+running row; on a finished row it just dismisses it from the list, which the
+console exposes as *remove*.
+
+### Wiring (`server/protocols/external.ts`)
+
+`spawnWindow` takes an `onExit` callback (Node's `exit` event with code and
+signal). `spawnTracked` registers the session after the spawn and, when the
+process exits **before** `register` returned (a client that fails instantly),
+queues the exit and applies it right after the registration, so a fast failure
+still ends up as `exited (code)` rather than a row that never learns its fate.
+Both the RDP and the VNC branch use it.
+
+### HTTP and console
+
+`/api/sessions` maps external rows through one helper that includes `state`,
+`exitCode`, `signal` and `exitedAt` (both on the normal path and on the
+`terminalError` fallback). The console's Sessions table gained a **State**
+column (`running`, `exited (0)`, `exited (SIGTERM)`, `exited` when unknown);
+finished rows hide *open*/*peek*/*focus window* (there is nothing left to
+focus) and show *remove* instead of *kill*.
+
+### Verification
+
+`tsc --noEmit` (both projects) and **19 suites / 208 tests**. New cases: the
+registry keeps the exit code and its timestamp, a dead pid becomes `exited`
+with an unknown code, finished rows are bounded by `maxExited`, `kill` on a
+finished row sends no signal, the change feed still fires when a row turns
+`exited`, `/api/sessions` returns the new fields and a `remove` works, and a
+real fake client exiting with code 7 appears as `exited (7)` through
+`launchExternalWindow`. Not verified live: a real RDP window on an xrdp host
+(no server on this machine), so risk R7 (`DISPLAY`/`WAYLAND_DISPLAY`
+inheritance) stays open.
+
 ## RDP discovery and the argv module (stage 0.27.11, stage E1, 2026-11-08)
 
 The RDP side of `protocols/external.ts` moved into **`server/protocols/freerdp.ts`**

@@ -14,7 +14,11 @@ import * as path from "node:path";
 import type { Connection } from "../../shared/connections";
 import { buildRdpArgs, discoverRdpClient } from "./freerdp";
 import { prepareVncLaunch } from "./vnc";
-import type { ExternalSessionRegistry } from "../sessions";
+import type {
+  ExternalSessionInfo,
+  ExternalSessionRegistry,
+  RegisterExternalSessionInput,
+} from "../sessions";
 
 export { findExecutable } from "./discovery";
 export { buildVncArgs } from "./vnc";
@@ -84,7 +88,16 @@ interface SpawnPlan {
   runDir?: string;
 }
 
-function spawnWindow(plan: SpawnPlan, log: (message: string) => void): number {
+interface WindowExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+function spawnWindow(
+  plan: SpawnPlan,
+  log: (message: string) => void,
+  onExit?: (exit: WindowExit) => void,
+): number {
   const short = path.basename(plan.binary);
   const child = spawn(plan.binary, plan.args, {
     detached: true,
@@ -98,12 +111,13 @@ function spawnWindow(plan: SpawnPlan, log: (message: string) => void): number {
   child.on("error", (cause) => {
     log(`[remote-control] ${short} failed to start: ${cause instanceof Error ? cause.message : String(cause)}`);
   });
-  child.on("exit", (code) => {
+  child.on("exit", (code, signal) => {
     if (plan.runDir) cleanupRunDir(plan.runDir);
     const tail = stderrTail.trim();
     if (code !== null && code !== 0 && tail.length > 0) {
       log(`[remote-control] ${short} exited with code ${code}: ${tail}`);
     }
+    onExit?.({ code, signal });
   });
   if (plan.stdin !== undefined) child.stdin?.end(plan.stdin);
   child.unref();
@@ -111,6 +125,37 @@ function spawnWindow(plan: SpawnPlan, log: (message: string) => void): number {
     throw new Error(`failed to spawn ${short}`);
   }
   return child.pid;
+}
+
+/**
+ * Spawns a window and registers it, so its exit code survives in the Sessions
+ * view (stage 0.28.11, E2). A process that exits before `register` returned is
+ * queued and applied right after, so a fast-failing client still shows up as
+ * `exited (code)` instead of a row that never learns its fate.
+ */
+function spawnTracked(
+  plan: SpawnPlan,
+  log: (message: string) => void,
+  sessions: ExternalSessionRegistry | null | undefined,
+  register: (pid: number) => RegisterExternalSessionInput,
+): { pid: number; session: ExternalSessionInfo | null } {
+  const state: { sessionId: string | null; pending: WindowExit | null } = {
+    sessionId: null,
+    pending: null,
+  };
+  const pid = spawnWindow(plan, log, (exit) => {
+    if (state.sessionId === null) {
+      state.pending = exit;
+      return;
+    }
+    sessions?.markExited(state.sessionId, { code: exit.code, signal: exit.signal });
+  });
+  const session = sessions ? sessions.register(register(pid)) : null;
+  state.sessionId = session?.id ?? null;
+  if (session && state.pending !== null) {
+    sessions?.markExited(session.id, { code: state.pending.code, signal: state.pending.signal });
+  }
+  return { pid, session };
 }
 
 /**
@@ -136,7 +181,7 @@ export async function launchExternalWindow(
     });
     const binary = client.binary;
     const args = buildRdpArgs(connection, { withPassword: password !== null });
-    const pid = spawnWindow(
+    const { pid, session } = spawnTracked(
       {
         binary,
         args,
@@ -144,13 +189,9 @@ export async function launchExternalWindow(
         ...(password !== null ? { stdin: `${password}\n` } : {}),
       },
       log,
+      options.sessions,
+      (childPid) => ({ connection, protocol: "rdp", pid: childPid, binary: path.basename(binary) }),
     );
-    const session = options.sessions?.register({
-      connection,
-      protocol: "rdp",
-      pid,
-      binary: path.basename(binary),
-    });
     return { protocol: "rdp", binary: path.basename(binary), pid, ...(session ? { sessionId: session.id } : {}) };
   }
 
@@ -163,7 +204,8 @@ export async function launchExternalWindow(
     ...(options.vncBinary?.trim() ? { binaryOverride: options.vncBinary.trim() } : {}),
     log,
   });
-  const pid = spawnWindow(
+  const binary = path.basename(prepared.binary);
+  const { pid, session } = spawnTracked(
     {
       binary: prepared.binary,
       args: prepared.argv,
@@ -171,14 +213,14 @@ export async function launchExternalWindow(
       ...(prepared.runDir ? { runDir: prepared.runDir } : {}),
     },
     log,
+    options.sessions,
+    (childPid) => ({
+      connection,
+      protocol: "vnc",
+      pid: childPid,
+      binary,
+      runDir: prepared.runDir,
+    }),
   );
-  const binary = path.basename(prepared.binary);
-  const session = options.sessions?.register({
-    connection,
-    protocol: "vnc",
-    pid,
-    binary,
-    runDir: prepared.runDir,
-  });
   return { protocol: "vnc", binary, pid, ...(session ? { sessionId: session.id } : {}) };
 }
