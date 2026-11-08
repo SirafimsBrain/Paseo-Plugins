@@ -30,58 +30,8 @@ Requires a Paseo daemon with workspace terminals (>= 0.7.3) and Linux for the sh
 
 See `__doc.md` for the technical design and `PLAN.md` for the roadmap.
 
-## Paseo 0.15.0 compatibility
+## Compatibility
 
-Verified against the **stable Paseo 0.15.0** release (2026-11-03).
-Full evidence: [`__doc.md`](./__doc.md#paseo-0150--compatibility-pass-2026-11-03).
-**Compatible as-is — no deprecated API is used anywhere in this plugin, so
-nothing was migrated, no code changed and the version stays `0.24.11`** (no
-bump, no tag). `requirements.paseo` stays `>=0.11.0` and the dev pin stays where it is: the host
-supplies the SDK at bundle and run time and no 0.15.0 API is needed.
+Paseo **0.15.0 (2026-11-03)** verified, `requirements.paseo >=0.11.0`, SDK `@getpaseo/plugin 0.13.0` — compatible as-is; no deprecated API used.
 
-**Deprecated in 0.15.0 and *not* used here:** `server.before(...)` /
-`server.on(...)` (removal after 2027-04-30 — the plugin registers no lifecycle
-hooks at all, only seven RPC handlers), `addSurface` / `addSidebarItem` /
-`openSurface` (the plugin already registers `addWorkspacePanel` / `addScreen` /
-`addCommandCenterItem`), `SettingsGroup`, the `client/react-native` UI entry,
-the `addWorkspacePanel` `context` field (panels only *receive*
-`PluginWorkspacePanelProps`; the registrations never pass `context`) and
-`CreateAgentRequestOptions.git` / `worktreeName`. The SDK diff from the pinned version to 0.15.0 leaves **`dist/client/` byte-identical**, so the panel, screen, sidebar row and
-Command Center item cannot have moved.
-
-**0.15.0 works in this plugin's favour:** SSH sessions are
-`paseo.terminals.create` terminals, and terminal programs now survive daemon
-restarts, crashes and supported updates (the first upgrade from 0.14.0 still
-closes them once), while reconnecting restores up to 10 000 lines of retained
-scrollback — so an SSH tab no longer comes back empty after an app reload.
-Plugin screens also keep their local state across temporary host
-disconnections.
-
-**Recommendations from that pass — outcome**
-([`__doc.md`](./__doc.md#recommendations-for-improvement--outcome-stage-02611-2026-11-07)):
-
-1. **Read-only terminal mirror** — shipped in **0.26.11** as *peek* on
-   SSH/local rows (last 200 scrollback lines through a single
-   `paseo.terminals.ref(id).capture({ stripAnsi: true })`; the PTY and the tab
-   stay Paseo's, ADR-5).
-2. **"Restart host and keep terminals"** — closed as impossible from a plugin:
-   `PluginHandlerContext` only exposes `PaseoApi`, which has no
-   `shutdownServer`; `paseo plugin reload` covers the need (restart the plugin,
-   not the daemon). The finding is recorded instead of a button that cannot
-   work.
-3. **The two `as any` casts** are gone and the sidebar row is registered
-   (`addSidebarHeaderItem`, `remote-control-console-row`) — both in **0.26.11**.
-
-**Verification (0.15.0 pass):** `npm run typecheck` (both projects) exit 0 and
-**14 suites / 137 tests** passed against `@getpaseo/plugin@0.15.0`; the compiled
-client and server bundles contain **zero** deprecated markers (with a negative
-control proving the scan works); and the plugin was installed **from the
-working tree into an isolated 0.15.0 daemon** (scratch home, own loopback
-port) where it reported `running`, `[remote-control] plugin ready`, all seven
-RPC methods, and a working console — `GET /` 200 HTML, `/health`
-`{"ok":true,…}`, `/api/state` and `/api/connections` 200 with the token (query
-or `Authorization: Bearer`) and **401 without it**. The plugin has since
-shipped **1.0.0** (H3, the G1–G3 console tails, the ghostty Apply fix, the
-read-only *peek* and sidebar row, then stages E1–E3: FreeRDP 3 discovery, exit
-codes for closed windows, RD Gateway) and is now in bugfix-only mode; the
-current check is **20 suites / 223 tests**.
+Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
