@@ -155,7 +155,10 @@ describe("launchExternalWindow", () => {
       path.join(dir, "xfreerdp3"),
       // The stdin capture is renamed into place only after `cat` finished,
       // so `waitForFile` cannot observe an empty half-written file.
-      `#!/bin/sh\nprintf '%s\\n' "$@" > "${capture}.argv"\ncat > "${capture}.stdin.tmp" && mv "${capture}.stdin.tmp" "${capture}.stdin"\n`,
+      // `--version` is the discovery probe (stage 0.27.11, E1) and must not
+      // leave a capture file behind, or the assertions would read the probe.
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "This is FreeRDP version 3.15.0 (n/a)"; exit 0; fi\n` +
+        `printf '%s\\n' "$@" > "${capture}.argv"\ncat > "${capture}.stdin.tmp" && mv "${capture}.stdin.tmp" "${capture}.stdin"\n`,
       { mode: 0o755 },
     );
     const conn = connection({
@@ -186,7 +189,8 @@ describe("launchExternalWindow", () => {
     const capture = path.join(dir, "rdp-nopass");
     writeFileSync(
       path.join(dir, "xfreerdp3"),
-      `#!/bin/sh\nprintf '%s\\n' "$@" > "${capture}.argv"\nprintf '' > "${capture}.stdin"\n`,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "This is FreeRDP version 3.15.0 (n/a)"; exit 0; fi\n` +
+        `printf '%s\\n' "$@" > "${capture}.argv"\nprintf '' > "${capture}.stdin"\n`,
       { mode: 0o755 },
     );
 

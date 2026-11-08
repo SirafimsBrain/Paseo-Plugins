@@ -42,6 +42,58 @@ call site and the full `addMissingEntityTabs()` body were not read directly in t
 `reconcileWorkspaceTabs` input path); the multi-session claim was verified
 code-wise, not by spawning live sessions.
 
+## RDP discovery and the argv module (stage 0.27.11, stage E1, 2026-11-08)
+
+The RDP side of `protocols/external.ts` moved into **`server/protocols/freerdp.ts`**
+and grew the discovery and the FreeRDP 3 gate the plan's E1 asked for. The
+launcher's public surface did not move for callers: `external.ts` still exports
+`buildRdpArgs`, `rdpTarget`, `rdpCsvValue`, `RDP_BINARIES` (and now
+`RDP_BINARY_ENV`), so the panel, the tests written for 0.22.10/0.25.11 and the
+grep test keep working.
+
+### Discovery (`discoverRdpClient`)
+
+Order, highest first:
+
+1. the explicit client from the plugin settings (`rdpBinary`, G2);
+2. `REMOTE_CONTROL_RDP_BIN` (rdp-pilot's variable);
+3. PATH candidates.
+
+Candidate order depends on the display server, exactly as rdp-pilot does it:
+with `WAYLAND_DISPLAY` set — `wlfreerdp3`, `xfreerdp3`, `xfreerdp`; otherwise
+`xfreerdp3`, `wlfreerdp3`, `xfreerdp`. `xfreerdp` is kept last because several
+distributions symlink it to `xfreerdp3`; the name alone never decides.
+
+**FreeRDP 3 gate.** Every candidate is fingerprinted with `<binary> --version`
+(`timeout` 5 s, result cached per path for 30 s, injectable `probe`/`now` for
+tests). A client that reports `FreeRDP version 2.x` is **refused** with an
+error naming the binary, the reported version, `REMOTE_CONTROL_RDP_BIN` and the
+Settings override — the v2 option conversions (`-cert-ignore`, `-kbd:`, `/g:`,
+`flatpak-spawn`) are deliberately absent, so a v2 client cannot be silently
+mis-configured. A client whose version cannot be read (custom wrapper) is
+accepted when its name ends with `3`; PATH scanning skips a v2 candidate and
+reports it only when no genuine FreeRDP 3 client exists. "Nothing installed"
+names every tried candidate.
+
+### argv (`buildRdpArgs`)
+
+The constructor itself is unchanged from stage 0.22.10 — target/title/domain,
+then display, performance, redirection, security, keyboard, network and codec
+groups in rdp-pilot's order, `extraArgs` last, `/from-stdin:force` only when a
+password will be piped (no `/p:` anywhere). Gateway is still not emitted: that
+is stage E3.
+
+### Verification
+
+`tsc --noEmit` (both projects) and **19 suites / 204 tests**: the new
+`tests/freerdp-discovery.test.ts` covers the Wayland ordering, the settings/env
+precedence, the v2 refusal, the skip-a-v2-candidate path, the unprobeable
+name-suffix case, the "nothing installed" message and the probe cache; the
+existing launcher fixtures now answer `--version` so the probe cannot be
+mistaken for a launch. Not verified live: no RDP host/window was opened on this
+machine (that remains E2's live acceptance), so `DISPLAY`/`WAYLAND_DISPLAY`
+inheritance (risk R7) is still open.
+
 ## SSH config, key deployment, console settings and the live Sessions feed (stage 0.25.11, 2026-11-07)
 
 This stage implements the announced **H3** (`~/.ssh/config` management plus

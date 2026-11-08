@@ -205,10 +205,13 @@ describe("buildRdpArgs — full FreeRDP 3 option set", () => {
 
 describe("FreeRDP 2 conversion branches are absent", () => {
   it("contains only FreeRDP 3 option syntax", () => {
-    const source = readFileSync(
-      new URL("../server/protocols/external.ts", import.meta.url),
-      "utf8",
-    );
+    // Stage 0.27.11 (E1) moved the argv constructor and discovery into
+    // `protocols/freerdp.ts`; both files are scanned so a v2 branch cannot
+    // creep back into the launcher either.
+    const source = [
+      readFileSync(new URL("../server/protocols/external.ts", import.meta.url), "utf8"),
+      readFileSync(new URL("../server/protocols/freerdp.ts", import.meta.url), "utf8"),
+    ].join("\n");
     // v2 forms rdp-pilot converts to when it detects FreeRDP 2 (plan E1:
     // the port is FreeRDP 3 only, so no branch may survive).
     for (const v2 of ["/cert-ignore", "/cert-name:", "/kbd-type:", "/gu:", "/gp:", "flatpak-spawn"]) {

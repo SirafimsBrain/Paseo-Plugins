@@ -1,5 +1,23 @@
 # remote-control — план разработки (атомарные этапы)
 
+> **Статус 0.27.11 — этап E1: discovery FreeRDP 3 и argv-модуль (2026-11-08):**
+> новая функциональность, бамп второй цифры (`0.26.11` → `0.27.11`, тег
+> `remote-control@0.27.11`). **`server/protocols/freerdp.ts`** — argv-конструктор
+> rdp-pilot целиком (дисплей, производительность, перенаправление, безопасность,
+> клавиатура, сеть, кодеки; gateway по-прежнему вне — это E3) и discovery:
+> приоритет «настройка плагина → `REMOTE_CONTROL_RDP_BIN` → PATH», порядок
+> кандидатов по дисплейному серверу (`wlfreerdp3` первым при `WAYLAND_DISPLAY`,
+> иначе `xfreerdp3`, `xfreerdp` — последним), фингерпринт версии через
+> `--version` с кэшем 30 с и **гейт FreeRDP 3**: бинарь, который представляется
+> FreeRDP 2, отвергается с явной ошибкой (v2-конвертации опций не существует),
+> а `xfreerdp` проходит только тогда, когда это FreeRDP 3 или версия не
+> определяется и имя оканчивается на `3`. `external.ts` реэкспортирует прежнюю
+> поверхность (`buildRdpArgs`/`rdpTarget`/`rdpCsvValue`/`RDP_BINARIES`), поэтому
+> остальные вызывающие не менялись. Проверки: `tsc` оба проекта, **19 файлов /
+> 204 теста** (было 18/193; новый `tests/freerdp-discovery.test.ts` — 11 тестов),
+> grep-тест сканирует оба файла и держит v2-формы вне кода. Следующий этап —
+> E2 (трекинг окна с exit-кодом в Sessions), затем E3 (RD Gateway + поля формы).
+>
 > **Статус 0.26.11 — рекомендации 0.15.0-прохода (2026-11-07):** новая
 > функциональность, бамп второй цифры (`0.25.11` → `0.26.11`, тег
 > `remote-control@0.26.11`). **1)** read-only *peek* в Sessions:
@@ -316,7 +334,7 @@ import»: `src/main/ghostty/{discovery,parser,mapper,index}.ts` (+ тесты) �
 | **ADR-5** | **Терминал = терминал Paseo во вкладке рабочей области (0.17.9).** Плагин вызывает `paseo.terminals.create({ workspaceId, cwd?, name?, command?, args? })`: даэмон поднимает PTY, а приложение само открывает для него вкладку (`addMissingEntityTabs` в `workspace-layout-actions.ts` открывает вкладку для каждого «сиротского» терминала без вкладки). Своего PTY, рендерера и моста ввода/вывода в плагине больше нет. | Это и есть требуемый заказчиком «терминал в вкладке как в Orca»: host-owned PTY + терминальная view во вкладке. Рендерить терминал в консоли нельзя (клиентский код — React Native без DOM/canvas, §1.5), а ghostty как приложение не встраивается в чужую вкладку; Paseo уже владеет и PTY, и вкладкой. |
 | **ADR-6** | **Транспорт терминала — отменён (0.17.9).** Мост `/term` (WS, спайк A3) и адаптеры `server/transport.ts` / `console/src/transport.ts` удалены вместе с браузерным терминалом: ввод/вывод PTY идёт между даэмоном Paseo и его же приложением, плагин в этот поток не встраивается. | Спайк A3 доказал, что WS в workspace browser работает (см. `__doc.md` § Transport, история), но сам терминал теперь живёт во вкладке Paseo, а не в веб-странице консоли — транспорт стал ненужным. |
 | **ADR-7** | **SSH: `ssh` запускается внутри терминала Paseo**, argv собирается из профиля подключения (`server/protocols/ssh.ts`). Ключевые данные: identity-файл из хранилища материализуется в `$PASEO_HOME/run/<session>/id` (0600), пароль — через `SSH_ASKPASS`-хелпер (секрет не попадает ни в argv, ни в переменные окружения процесса-вызывающего). Так как запрос на создание терминала не умеет передавать `env`, запуск идёт как `sh -c '<обёртка>'`: обёртка экспортирует `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE`/`DISPLAY`, выполняет экранированный argv, удаляет каталог сессии и выходит с кодом ssh. | Требование «вызов ssh клиента в терминале». argv/env — то, что видит `ps`/`/proc`; askpass-канал устраняет обе утечки и переиспользует уже готовый vault; обёртка закрывает отсутствие `env` в API создания терминала. |
-| **ADR-8** | **RDP — точный перенос rdp-pilot, FreeRDP 3 только.** Свои discovery (`xfreerdp3`/`wlfreerdp3` + override `REMOTE_CONTROL_RDP_BIN`), конструктор argv (таблицы опций §1.1) и секреты из vault; **v2-fallback, конвертеры опций и Flatpak-обвязка не переносятся**. Сессия = дочерний процесс с нативным окном FreeRDP, трекается в реестре сессий (kill/reconnect/exit-code), а не рисуется в консоли. | Решение заказчика: точный перенос протестированной базы. Заявленный «перенос из Python» = перенос семантики argv/validation/discovery (и его pytest-набора), а не изобретение framebuffer-конвейера. **Статус 0.18.10 — минимальный лаунчер:** `server/protocols/external.ts` ищет по PATH только `xfreerdp3`/`xfreerdp`, пароль идёт через `/from-stdin:force` (никакого `/p:`, argv чист), `/cert:ignore` с переопределением через `payload.cert`, запуск — detached-окном из RPC панели, stderr-хвост попадает в `paseo plugin logs`. **Не сделано (остаётся E1/E3):** discovery с override и `wlfreerdp*`, таблица опций §1.1, поля RDP в модалке, трекинг окна в реестре (реестр отменён ADR-11), gateway-пароль. |
+| **ADR-8** | **RDP — точный перенос rdp-pilot, FreeRDP 3 только.** Свои discovery (`xfreerdp3`/`wlfreerdp3` + override `REMOTE_CONTROL_RDP_BIN`), конструктор argv (таблицы опций §1.1) и секреты из vault; **v2-fallback, конвертеры опций и Flatpak-обвязка не переносятся**. Сессия = дочерний процесс с нативным окном FreeRDP, трекается в реестре сессий (kill/reconnect/exit-code), а не рисуется в консоли. | Решение заказчика: точный перенос протестированной базы. Заявленный «перенос из Python» = перенос семантики argv/validation/discovery (и его pytest-набора), а не изобретение framebuffer-конвейера. **Статус 0.18.10 — минимальный лаунчер:** `server/protocols/external.ts` ищет по PATH только `xfreerdp3`/`xfreerdp`, пароль идёт через `/from-stdin:force` (никакого `/p:`, argv чист), `/cert:ignore` с переопределением через `payload.cert`, запуск — detached-окном из RPC панели, stderr-хвост попадает в `paseo plugin logs`. **Не сделано (остаётся E3):** gateway-пароль и live-приёмка; **E1 закрыт в 0.27.11** (`protocols/freerdp.ts`: discovery с override/Wayland/гейтом FreeRDP 3 и argv всех групп). |
 | **ADR-9** | **VNC — точный перенос vnc-pilot.** Discovery viewer'ов с фингерпринтом версии и кэшем, argv-билдеры per viewer, форматирование цели (`host:display` / `host::port` / `vnc://` / IPv6), пароль через `vncpasswd -f` → 0600-временный файл в `$PASEO_HOME/run/` с обязательной уборкой, в argv пароль не попадает. Сессия = процесс viewer'а, трекается как RDP. | Как ADR-8; особенно важен жизненный цикл временных файлов (в оригинале чистятся на deactivate/exit — у нас это cleanup плагина + окончание сессии). **Статус 0.23.10 — перенос выполнен (F1–F3):** discovery с фингерпринтом и кэшем 30 с, argv-билдеры девяти viewer'ов, форматирование цели, усечение пароля до 8 символов, `vncpasswd -f` → 0600-файл (Remmina — профиль 0600), env-фолбэк `VNC_PASSWORD`/`VNC_USERNAME` только для TigerVNC/TurboVNC, трекинг сессии с kill. На целевой машине VNC-клиент не установлен — живого запуска по-прежнему не было (юнит-тесты на фейковых бинарях). |
 | **ADR-10** | **Реестр протоколов.** `shared/protocols.ts` — zod-схема полей протокола + `defaultPort` + capabilities; `server/protocols/registry.ts` — `buildLaunch(ctx)`/`discover()`. SSH реализует интерфейс первым (блок D), RDP (E) и VNC (F) подключаются без изменения ядра консоли: модалка подключения рисует поля из схемы протокола. | Прямое требование «в перспективе будет расширение протоколов удалённого доступа» — новый протокол = один модуль + запись в реестре, без правок консоли. **Факт 0.18.10:** внешний запуск rdp/vnc идёт мимо `buildLaunch` — RPC `connections.launch` направляет не-ssh в `protocols/external.ts`; `launchable: false` для rdp/vnc сохранён, поскольку флаг означает «запуск во вкладке-терминале». |
 | **ADR-11** | ~~Реестр сессий~~ **Отменён в 0.17.9.** Единый реестр сессий (`server/sessions.ts`) и события `session-updated` в SSE удалены вместе с PTY-слоем: у плагина больше нет своих сессий — терминалами владеет даэмон Paseo (список/kill — вид «Terminals»), внешние окна rdp/vnc (0.18.10) живут как detached-процессы без реестра. **Ревизия 0.23.10:** для внешних окон введён узкий in-memory `ExternalSessionRegistry` (`server/sessions.ts`) — только pid/kind/target/kill, без PTY и SSE-событий; терминалы по-прежнему принадлежат даэмону. | Отмена следует из ADR-5: если PTY и вкладка — сторонние, реестр сессий плагину не нужен; kill/reconnect для ssh — это kill терминала Paseo. |
@@ -567,8 +585,8 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 `0.21.10` — сервисный слой консоли: группировка, duplicate, test (Блок H2),
 `0.22.10` — создание RDP-подключений: схема, валидация, поля модалки, argv
 (часть E3; см. Блок E).
-**Следующий этап — с `0.23.10` (`~/.ssh/config` + публичный ключ, H3);
-версии E1…G3 в заголовках этапов ниже — исторические.**
+**Следующий этап — с `0.28.11` (E2: exit-код внешних окон в Sessions, затем
+E3: RD Gateway); версии E1…G3 в заголовках этапов ниже — исторические.**
 
 ### Блок A — Фундамент и снятие рисков
 
@@ -756,10 +774,14 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 
 ### Блок E — RDP (перенос rdp-pilot, только FreeRDP 3)
 
+> **Статус 0.27.11 — E1 выполнен** (`server/protocols/freerdp.ts`: discovery
+> с `REMOTE_CONTROL_RDP_BIN`, `wlfreerdp3` по `WAYLAND_DISPLAY`, кэш версии и
+> гейт FreeRDP 3; argv-конструктор всех групп §1.1, кроме gateway).
+>
 > **Статус 0.22.10 — E3 (поля RDP в консоли) выполнен как этап создания
 > подключения:** полная схема payload + валидация на REST + поля в модалке +
 > argv-маппинг всех групп, кроме gateway. Лаунчер с `0.18.10` остаётся
-> (`server/protocols/external.ts`), discovery по-прежнему простой PATH-поиск.
+> (`server/protocols/external.ts`), discovery — в `freerdp.ts` с 0.27.11.
 >
 > **Статус 0.18.10 — частично:** лаунчер готов в минимальном виде
 > (`server/protocols/external.ts`): PATH-поиск `xfreerdp3`/`xfreerdp`, пароль
@@ -770,7 +792,7 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
 > (реестр отменён ADR-11 — kill только вручную), живое подключение к xrdp.
 > Версии заголовков этапов (0.16.0/0.17.0/0.18.0) заняты — переназначаются с 0.19.0.
 
-**E1. Discovery FreeRDP 3 + конструктор argv** → `0.16.0`
+**E1. Discovery FreeRDP 3 + конструктор argv** → `0.27.11` *(выполнено 2026-11-08)*
 - `server/protocols/discovery.ts` (PATH + override `REMOTE_CONTROL_RDP_BIN`,
   только `xfreerdp3`/`wlfreerdp3` — v2-кандидаты и Flatpak-обвязка не
   переносятся) и `server/protocols/freerdp.ts` — полная таблица опций §1.1
@@ -780,6 +802,14 @@ GET  /api/ghostty/import      preview   POST /api/ghostty/import (apply)
   `/sec:`, `/cert:`, `/gateway:`, `/kbd:`, дефолты дисплея/производительности.
 - Приёмка: тесты — построчное сравнение argv с эталонами из Python-тестов;
   ни одна ветка v2-конверсий не существует в коде (grep-тест).
+- **Статус (факт 0.27.11, выполнено):** `server/protocols/freerdp.ts` —
+  discovery (`RDP_BINARY_ENV` override, порядок кандидатов по
+  `WAYLAND_DISPLAY`, кэш версии 30 с, инъектируемый probe) и argv всех групп,
+  кроме gateway; `external.ts` реэкспортирует прежние имена.
+  Evidence: `tests/freerdp-discovery.test.ts` (11), `tests/rdp-create.test.ts`
+  (argv-эталон + grep по обоим файлам), `tests/external-launch.test.ts`
+  (фейковые клиенты отвечают на `--version`). Живого подключения к RDP-хосту
+  по-прежнему не было — это остаётся за E2.
 
 **E2. Секреты RDP и запуск сессии** → `0.17.0`
 - Пароли RDP/gateway берутся из vault (`secret_refs`), секрет **не** пишется

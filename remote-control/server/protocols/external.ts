@@ -12,12 +12,16 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Connection } from "../../shared/connections";
-import { findExecutable, isExecutable } from "./discovery";
+import { buildRdpArgs, discoverRdpClient } from "./freerdp";
 import { prepareVncLaunch } from "./vnc";
 import type { ExternalSessionRegistry } from "../sessions";
 
 export { findExecutable } from "./discovery";
 export { buildVncArgs } from "./vnc";
+// The RDP argv/discovery moved to `protocols/freerdp.ts` in stage 0.27.11
+// (E1); the re-exports keep the launcher's public surface where callers and
+// the earlier test suite expect it.
+export { buildRdpArgs, rdpCsvValue, rdpTarget, RDP_BINARIES, RDP_BINARY_ENV } from "./freerdp";
 
 export interface ExternalVault {
   get: (name: string) => Promise<string>;
@@ -31,6 +35,8 @@ export interface ExternalLaunchOptions {
   pathEnv?: string;
   /** Explicit RDP client from the plugin settings (stage 0.25.11, G2). */
   rdpBinary?: string | null;
+  /** Environment used for RDP discovery (`REMOTE_CONTROL_RDP_BIN`, Wayland). */
+  discoveryEnv?: NodeJS.ProcessEnv;
   /** Explicit VNC viewer from the plugin settings; per-connection choices win. */
   vncBinary?: string | null;
   /** Session registry: RDP/VNC windows become killable "Sessions" rows. */
@@ -45,150 +51,6 @@ export interface ExternalLaunchResult {
   pid: number;
   /** Registry id of the window; absent when no registry was supplied. */
   sessionId?: string;
-}
-
-/** Candidate RDP client binaries, in preference order (distribution-dependent). */
-export const RDP_BINARIES = ["xfreerdp3", "xfreerdp"];
-
-function extraArgs(connection: Connection): string[] {
-  const extra = connection.payload?.extraArgs;
-  return Array.isArray(extra) ? extra.map(String) : [];
-}
-
-/** Host ready for FreeRDP's `/v:` — IPv6 literals wrapped in brackets. */
-function formatRdpHost(host: string): string {
-  if (host.startsWith("[")) return host;
-  return host.split(":").length >= 3 ? `[${host}]` : host;
-}
-
-/** `host:port` for FreeRDP's `/v:` target. */
-export function rdpTarget(connection: Connection): string {
-  return `${formatRdpHost(connection.host)}:${connection.port ?? 3389}`;
-}
-
-/**
- * Quotes a value only for FreeRDP's comma-separated sub-option parser
- * (`/kbd:` and friends): those run through a whitespace/quote-aware
- * tokenizer, while plain scalar options (`/u:`, `/t:`, `/d:`) are taken
- * verbatim and quotes would become part of the value. Port of rdp-pilot's
- * `_csv_value`.
- */
-export function rdpCsvValue(value: string): string {
-  if (!value || !/[ \t,"'\\]/.test(value)) return value;
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
-/**
- * FreeRDP 3 argv, ported from rdp-pilot's `build_spawn()`: target, title,
- * domain, then the option groups in the Python order (display, performance,
- * redirection, security, keyboard, network, codecs), `extraArgs` last.
- * `/from-stdin:force` is only added when a password will be piped, so a
- * connection without a stored password keeps FreeRDP's own behaviour and no
- * secret ever reaches argv. Certificates default to `/cert:ignore` because a
- * detached launch has nobody to answer FreeRDP's interactive prompt; a
- * payload `cert` value (e.g. "tofu") overrides it. Fields absent from the
- * payload emit nothing, so rows created before stage 0.22.10 launch exactly
- * as they did before (stage 0.22.10).
- */
-export function buildRdpArgs(connection: Connection, options: { withPassword?: boolean } = {}): string[] {
-  const payload = connection.payload ?? {};
-  const str = (key: string): string | undefined => {
-    const value = payload[key];
-    return typeof value === "string" && value.length > 0 ? value : undefined;
-  };
-  const bool = (key: string): boolean | undefined =>
-    typeof payload[key] === "boolean" ? payload[key] : undefined;
-
-  const args: string[] = [];
-  if (options.withPassword) args.push("/from-stdin:force");
-  args.push(`/v:${rdpTarget(connection)}`);
-  if (connection.username.length > 0) args.push(`/u:${connection.username}`);
-  // Window title = connection name, so several open windows stay tellable
-  // instead of all showing the host FreeRDP picks by default.
-  const title = connection.name.trim();
-  if (title.length > 0) args.push(`/t:${title}`);
-  const domain = str("domain");
-  if (domain) args.push(`/d:${domain}`);
-
-  // Display
-  if (bool("dynamicResolution") === true) args.push("+dynamic-resolution");
-  if (bool("fullscreen") === true) {
-    args.push("/f");
-  } else if (typeof payload.width === "number" && typeof payload.height === "number") {
-    args.push(`/size:${payload.width}x${payload.height}`);
-  }
-  const bpp = str("bpp");
-  if (bpp) args.push(`/bpp:${bpp}`);
-  if (bool("workarea") === true) args.push("/workarea");
-  if (bool("multimon") === true) args.push("/multimon");
-
-  // Performance
-  const fonts = bool("fonts");
-  if (fonts !== undefined) args.push(fonts ? "+fonts" : "-fonts");
-  if (bool("aero") === true) args.push("+aero");
-  if (bool("windowDrag") === true) args.push("+window-drag");
-  if (bool("menuAnims") === true) args.push("+menu-anims");
-  const themes = bool("themes");
-  if (themes !== undefined) args.push(themes ? "+themes" : "-themes");
-  const wallpaper = bool("wallpaper");
-  if (wallpaper !== undefined) args.push(wallpaper ? "+wallpaper" : "-wallpaper");
-  const gdi = str("gdi");
-  if (gdi) args.push(`/gdi:${gdi}`);
-
-  // Redirection
-  const clipboard = bool("clipboard");
-  if (clipboard !== undefined) args.push(clipboard ? "+clipboard" : "-clipboard");
-  if (bool("drives") === true) args.push("+drives");
-  if (bool("homeDrive") === true) args.push("+home-drive");
-  if (bool("printers") === true) args.push("/printer");
-  if (bool("smartcards") === true) args.push("/smartcard");
-  const serial = str("serial");
-  if (serial) args.push(`/serial:${serial}`);
-  const sound = str("sound");
-  if (sound) {
-    // rdp-pilot's audio-mode: "0" play on this computer, "1" play on the
-    // remote one, "2" do not play (then /sound is pointless).
-    if (sound !== "2") args.push("/sound");
-    args.push(`/audio-mode:${sound}`);
-  }
-  if (bool("microphone") === true) args.push("/microphone");
-
-  // Security
-  const sec = str("sec");
-  if (sec) args.push(`/sec:${sec}`);
-  const cert = str("cert");
-  if (cert) {
-    args.push(`/cert:${cert}`);
-  } else {
-    if (bool("certIgnore") !== false) args.push("/cert:ignore");
-    const certName = str("certName");
-    if (certName) args.push(`/cert:name:${certName}`);
-  }
-
-  // Keyboard — FreeRDP 3 compound option, CSV values quoted when needed.
-  const kbdLayout = str("kbdLayout");
-  const kbdType = str("kbdType");
-  if (kbdLayout || kbdType) {
-    const parts: string[] = [];
-    if (kbdLayout) parts.push(`layout:${rdpCsvValue(kbdLayout)}`);
-    if (kbdType) parts.push(`type:${kbdType}`);
-    args.push(`/kbd:${parts.join(",")}`);
-  }
-
-  // Network
-  const network = str("network");
-  if (network) args.push(`/network:${network}`);
-  if (bool("compression") === false) args.push("-compression");
-
-  // Codecs
-  if (bool("rfx") === true) args.push("/rfx");
-  if (bool("nsc") === true) args.push("/nsc");
-  if (bool("jpeg") === true) args.push("/jpeg");
-  const jpegQuality = str("jpegQuality");
-  if (jpegQuality) args.push(`/jpeg-quality:${jpegQuality}`);
-
-  args.push(...extraArgs(connection));
-  return args;
 }
 
 /** The stored password of a connection, or null when it has none. */
@@ -267,14 +129,12 @@ export async function launchExternalWindow(
   const password = await connectionPassword(connection, options.vault);
 
   if (connection.protocol === "rdp") {
-    const configured = options.rdpBinary?.trim() ?? "";
-    if (configured.length > 0 && !isExecutable(configured)) {
-      throw new Error(`the configured RDP client is not executable: ${configured} (check the plugin settings)`);
-    }
-    const binary = configured.length > 0 ? configured : findExecutable(RDP_BINARIES, options.pathEnv);
-    if (!binary) {
-      throw new Error(`RDP client not found (tried ${RDP_BINARIES.join(", ")}): install FreeRDP.`);
-    }
+    const client = discoverRdpClient({
+      ...(options.pathEnv !== undefined ? { pathEnv: options.pathEnv } : {}),
+      ...(options.discoveryEnv !== undefined ? { env: options.discoveryEnv } : {}),
+      binary: options.rdpBinary ?? null,
+    });
+    const binary = client.binary;
     const args = buildRdpArgs(connection, { withPassword: password !== null });
     const pid = spawnWindow(
       {
