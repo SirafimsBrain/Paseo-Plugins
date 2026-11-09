@@ -8,6 +8,11 @@ connected to Paseo, so old transcripts stop filling the disk.
 - **Workspace panel** titled "Agent sessions" (available in the `workspace` and
   `explorer` panel locations).
 - **Command Center item** ("Open agent sessions") that opens the panel on demand.
+- **Sidebar status row** — a footer entry point ("Agent sessions") that opens a
+  summary popover: session counts per provider, whole-store sizes, the number of
+  sessions due for cleanup and the number that need a forced delete. The scan
+  runs when the popover opens (never at app start) and reuses the server-side
+  listing cache, so the panel opens on the same data.
 - **One list per agent** — Cline, OpenCode, Kilo, Qwen Code, Kimi Code, and the standalone
   `acpx` ACP store are scanned in one pass and labelled per provider.
 - **Filtering** — by provider and by age (`> 1 day`, `> 7 days`, `> 30 days`),
@@ -49,10 +54,12 @@ plugin never has to understand private database schemas. When a CLI cannot be
 found the provider is reported as unavailable for deletion instead of the plugin
 editing the store directly.
 
-The server exposes four RPCs (`session-manager.list`,
+The server exposes five RPCs (`session-manager.list`,
 `session-manager.delete`, `session-manager.delete-batch`,
-`session-manager.export`) implemented in `server/` and consumed by the
-client panel.
+`session-manager.export`, `session-manager.refresh`) implemented in `server/`
+and consumed by the client panel and the sidebar status row. The row adds no
+RPC of its own: it reads `session-manager.list` and derives its counts with
+`shared/session-summary.ts`, the same module the panel's cleanup hint uses.
 
 ## Install
 
@@ -75,21 +82,23 @@ installation. Updates: `paseo plugin update session-manager`.
   The real host enforces it (a manifest with a higher floor is rejected by
   `assertPluginCompatibility` before the plugin loads).
 - Verified against Paseo `0.15.0` (2026-11-03, SDK `@getpaseo/plugin@^0.15.0`,
-  installed with `npm install` so the lockfile carries it): `npm run typecheck`
-  and `npm test` (10 suites / 85 tests) pass, the `agent.close.after` hook fires
-  on the real daemon, and the plugin is `running` in an isolated 0.15.0 daemon —
-  see [__compatibility.md](./__compatibility.md). Earlier: Paseo `0.12.0` /
-  SDK 0.12.0 (2026-10-21), Paseo `0.10.3` / SDK 0.10.1.
+  installed with `npm install` so the lockfile carries it): the plugin is
+  `running` in an isolated 0.15.0 daemon and the `agent.close.after` hook fires
+  on the real daemon. As of 0.5.0 (2026-11-09) `npm run typecheck` and
+  `npm test` (11 suites / 94 tests) pass. Earlier: Paseo `0.12.0` /
+  SDK 0.12.0 (2026-10-21), Paseo `0.10.3` / SDK 0.10.1. See
+  [__compatibility.md](./__compatibility.md).
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
   `cline`, `opencode`, `kilo`. Qwen Code, Kimi Code and `acpx` are read and
   written as files and need no CLI for listing or deletion (Kimi only needs its
   CLI for `kimi export`).
 - `npm test` (vitest) and `npm run typecheck` run the server-side test suites;
-  the tests build throwaway stores under the OS temp directory and never touch
-  the real home stores.
+  the tests build throwaway stores under the OS temp directory and stub every
+  provider adapter, so a run never touches the real home stores and never spawns
+  a vendor CLI.
 
 ## Compatibility
 
-Paseo **0.15.0 (2026-11-03)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.0` — compatible after migration to `server.addHook("agent.close.after")` (0.3.4).
+Paseo **0.15.0 (2026-11-03)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.0` — compatible after migration to `server.addHook("agent.close.after")` (0.3.4). Current plugin version: **0.5.0** (Kimi Code provider since 0.4.0; sidebar status row since 0.5.0).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

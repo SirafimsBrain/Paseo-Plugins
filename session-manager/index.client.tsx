@@ -2,6 +2,7 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { SessionManagerPanel } from "./client/session-manager-panel";
 import { SessionManagerSettingsScreen } from "./client/settings-screen";
 import { setSessionManagerIntent } from "./client/intent";
+import { SessionManagerSidebarItem } from "./client/sidebar-item";
 import { refreshSession } from "./shared/session-manager";
 
 const SETTINGS_SCREEN_ID = "session-manager-settings";
@@ -19,6 +20,15 @@ export default function contribute(client: PluginClientContext) {
     title: "Agent session cleanup",
     icon: "Database",
     Component: SessionManagerSettingsScreen,
+  });
+  // 0.5.0 sidebar entry point (§19.3 item 3): a footer status/count row. It
+  // opens a summary popover, not the workspace panel: a sidebar item gets
+  // `openPopover`/`openScreen` and no `openPanel`, so the panel keeps the
+  // destructive flow and the row is the read-only overview.
+  client.addSidebarFooterItem({
+    id: "session-manager-status",
+    title: "Agent sessions",
+    Component: SessionManagerSidebarItem,
   });
   client.addCommandCenterItem({
     id: "open-session-manager",

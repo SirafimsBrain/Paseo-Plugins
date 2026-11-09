@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { AgentSession, SessionTarget } from "../shared/session-manager";
 import { deleteSessions, exportSession, listSessions } from "../shared/session-manager";
 import { DEFAULT_SETTINGS, sessionManagerSettings } from "../shared/settings";
+import { formatBytes, isOldEnough, needsForce } from "../shared/session-summary";
 import {
   clearSessionManagerIntent,
   getSessionManagerIntent,
@@ -82,31 +83,8 @@ function ageLabel(iso: string | null): string {
   return `${Math.max(1, Math.floor(ms / 60_000))}m ago`;
 }
 
-function formatBytes(bytes: number | null): string | null {
-  if (bytes === null || bytes <= 0) return null;
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value < 10 && unit > 0 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
-}
-
 function sessionKey(session: AgentSession): string {
   return `${session.provider}:${session.id}`;
-}
-
-function isOldEnough(session: AgentSession, days: number): boolean {
-  if (days <= 0) return true;
-  if (!session.updatedAt) return true;
-  const ms = Date.now() - new Date(session.updatedAt).getTime();
-  return Number.isNaN(ms) || ms >= days * 86_400_000;
-}
-
-function needsForce(session: AgentSession): boolean {
-  return session.running || (session.paseoAgent !== null && !session.paseoAgent.archived);
 }
 
 function filterSessions(sessions: AgentSession[], filters: Filters): AgentSession[] {

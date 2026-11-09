@@ -1,12 +1,34 @@
 # Compatibility — session-manager
 
-Current: plugin **0.4.0**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.0`.
+Current: plugin **0.5.0**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
 ## Summary (former root README row)
 
 | [session-manager](./README.md) | **0.15.0 (2026-11-03)** ⁵, **0.14.0 (2026-10-30)** ² | `@getpaseo/plugin@^0.15.0` (pin `^0.15.0`, `requirements.paseo >=0.15.0`) | **0.15.0: compatible after a mandatory migration — shipped as 0.3.4** (patch bump, tag `session-manager@0.3.4`): the plugin's single lifecycle hook moved from the `@deprecated` `server.on("agent.closed")` to `server.addHook("agent.close.after")` — same payload, same body, the handler only became `async` because `HookHandlers` is typed to return a `Promise`; the floor followed the API (`addHook` does not exist on 0.14.0) and `dist/client/` is byte-identical 0.14.0 → 0.15.0, so the panel, settings screen, four Command Center items and `useTabState` filters are untouched. It is unaffected by the OpenCode shared-service finding (it injects no MCP). Evidence: typecheck + vitest **9 suites / 74 tests** against SDK 0.15.0, no `server.on(` / `server.before(` left in the plugin, `running` in an isolated 0.15.0 daemon with `[paseo] Plugin ready`, zero `Unknown lifecycle hook` errors, and the hook proven to fire on a real agent stop and delete (`[session-manager] agent closed (<id>): listing cache invalidated`). **0.3.5** implements the first [§19.3](./__doc.md#193-recommendations-for-improvement) recommendation — the listing cache is dropped on `agent.archive.after` and `workspace.archive.after` as well, so an archived agent cannot linger with stale "still running" / "due for cleanup" hints until the 30 s TTL ages out (patch bump, tag `session-manager@0.3.5`; vitest 9 suites / 77 tests, both archive hooks observed firing on an isolated 0.15.0 daemon); the remaining recommendations stay recorded. **0.14.0: compatible, and both deprecations Paseo left in it are now migrated — shipped as 0.2.3, with §18.3's recommendations implemented the same day as 0.3.3.** The panel imports `ScrollView` / `useToast` from `@getpaseo/plugin/client/ui` instead of the `client/react-native` entry that goes away on 2027-04-20, and `addWorkspacePanel` no longer passes the `@deprecated` `context: "workspace"` field — the shipped renderer accepts `undefined` and normalises it to `"workspace"`, so behaviour is identical (verified by reading the 0.14.0 bundle, not assumed); the `context` fields on the four `addCommandCenterItem` calls stay, because there it is a required union discriminant. The floor follows the API actually used: `requirements.paseo` moved off `>=0.8.0` to the first host release whose `client/ui` exports those two symbols; the real 0.14.0 host rejects the manifest for a 0.12.0 daemon and accepts 0.14.0. Evidence: typecheck + vitest **8 suites / 70 tests** against SDK 0.14.0, both entries built by the real 0.14.0 host compiler (`compileDirectoryPlugin`) with zero deprecated calls — plus a negative control that *does* find the old specifier — and `running` in an isolated 0.14.0 daemon with `[paseo] Plugin ready` and seven RPC methods registered. **0.3.3** implements three of the four §18.3 recommendations — the listing cache is dropped on the new `agent.closed` event instead of ageing out after 30 s, a `context: "agent"` Command Center action reopens the session through the new `agents.ref(id).reload()` and rescans with a cold cache, and the panel's three filters moved to `useTabState` so they survive a reload. The fourth ("stop runtime, keep the session") was investigated and **cannot be built from a plugin**: `session.can_stop_runtime` is answered inside the provider protocol and consumed by the host's own idle-runtime cleanup, and `PaseoApi` exposes no stop/close/release call — evidence in [§18.5](./__doc.md#185-implementation-of-183-2026-10-30-shipped-as-033). Because `reload()` does not exist in the client of the release before it, the floor moved to `>=0.14.0` (the real host rejects the manifest for an older daemon and accepts 0.14.0); evidence for 0.3.3: typecheck + vitest **9 suites / 74 tests** and both entries built by the real 0.14.0 host compiler with `deprecatedHits: []`. No install-time build step. Details: [Compatibility](./__doc.md#compatibility), [§18](./__doc.md#18-paseo-0140--compatibility-pass-2026-10-30). |
+
+## Plugin 0.4.0 and 0.5.0 (2026-11-09) — no Paseo API change
+
+Both releases are internal to the plugin: neither adds a host API, a manifest
+requirement or a deprecation, so the verified Paseo release and the evidence
+below still apply unchanged.
+
+| Version | Change | Evidence |
+| --- | --- | --- |
+| **0.4.0** | Kimi Code (`@moonshot-ai/kimi-code`) added as the sixth provider: `server/providers/kimi.ts` reads `~/.kimi-code/sessions/<workDirKey>/<id>/`, treats `locks/sessions/<id>` as "running", prunes `session_index.jsonl` on delete and exports through `kimi export` (ZIP). No CLI is needed for list/delete. | `tests/kimi.test.ts` 8 tests; typecheck clean; [`__doc.md`](./__doc.md) §20 |
+| **0.5.0** | The last open improvement idea (§19.3 item 3) implemented: `addSidebarFooterItem` + `SidebarRow` footer status row with a summary popover (per-provider counts, store sizes, due/risky counts, Rescan). `shared/session-summary.ts` now holds the due/size helpers shared by the row and the panel. | typecheck clean; 11 suites / 94 tests; [`__doc.md`](./__doc.md) §21 |
+
+**Test isolation fixed.** `tests/hooks.test.ts` used to stub only the first
+adapter while `listAgentSessions()` scanned the whole registry against the
+machine's real home stores, which spawned `cline`/`opencode`/`kilo` on every run
+and pushed three cache assertions past vitest's 5 s timeout. Every adapter is
+now stubbed; the suite runs in 560 ms instead of 20.5 s and the repository's
+claim that tests never touch real stores is accurate.
+
+**Not verified in this pass:** the sidebar footer row was not rendered against a
+running daemon — it is checked against the 0.15.0 typings only. Everything about
+0.15.0 compatibility recorded in the sections below is unchanged.
 
 ## Details moved from this plugin's README.md
 
@@ -55,8 +77,8 @@ provider adapters that shell out onto `spawnProcess` / `terminateProcess` stays
 a **long-term prospect**: its benefits (`.cmd` / `.bat` resolution, a
 host-owned process tree) are Windows-shaped, and Windows support is not a
 priority for this plugin right now — `node:child_process` is legal in `server/`
-and works on the macOS / Linux hosts in use. An `addSidebarFooterItem` status
-row remains an open idea as well.
+and works on the macOS / Linux hosts in use. The second idea, an
+`addSidebarFooterItem` status row, shipped in **0.5.0** (see the section above).
 
 **Verification:** typecheck clean (`tsc --noEmit`) and vitest **9 suites / 77
 tests** green against `@getpaseo/plugin@^0.15.0` (74 at the 0.3.4 pass; 0.3.5

@@ -131,6 +131,7 @@ session-manager/
 ├── index.client.tsx             # Client entry: panel, settings screen, Command Center items
 ├── shared/
 │   ├── session-manager.ts       # Zod schemas + defineRpc contracts
+│   ├── session-summary.ts       # Due/risky/size aggregation shared by panel + sidebar row
 │   ├── settings.ts              # Host-scoped settings definition
 │   └── host-fonts.ts            # Host Appearance settings parsing + font scale math
 ├── server/
@@ -147,11 +148,14 @@ session-manager/
 │       ├── opencode.ts
 │       ├── kilo.ts
 │       ├── qwen.ts
+│       ├── kimi.ts              # Kimi Code CLI (0.4.0)
 │       └── acpx.ts
 ├── client/
 │   ├── session-manager-panel.tsx
 │   ├── settings-screen.tsx      # Editor for the host-scoped settings
+│   ├── sidebar-item.tsx         # Footer status row + summary popover (0.5.0)
 │   ├── intent.ts                # Panel filters handed over by Command Center items
+│   ├── web.ts                   # The only client module allowed DOM globals
 │   └── use-host-typography.ts   # hook: host font settings → scale + families
 └── tests/                       # vitest suites (`npm test`)
 ```
@@ -184,22 +188,27 @@ Storage strategy per adapter:
   Cline falls back to scanning `~/.cline/data/sessions` for listing when its CLI
   is missing, but then reports `deletable: false` instead of editing the SQLite
   history by hand.
-- **File-backed** (`qwen-code`, `acpx`): transcripts and records are removed
-  directly, because neither agent offers a delete command.
+- **File-backed** (`qwen-code`, `kimi`, `acpx`): transcripts and records are
+  removed directly, because none of these agents offers a delete command.
 - **Exports**: every adapter implements `exportSession`. The CLI factory uses
   the vendor command when one exists (`opencode export` / `kilo export` print
   JSON on stdout, `cline history export --output` writes an HTML transcript);
   the file adapters copy the raw transcript (`*.jsonl` for Qwen, record + stream
-  `.ndjson` for acpx). Verified 2026-09-21 against the installed CLIs
-  (`cline@3.x`, `opencode-ai@1.18.x`, `@kilocode/cli@7.7.x`).
+  `.ndjson` for acpx) and Kimi shells out to `kimi export <id> -o <path>` for a
+  ZIP (`exportExtension: "zip"`, §20). Verified 2026-09-21 against the
+  installed CLIs (`cline@3.x`, `opencode-ai@1.18.x`, `@kilocode/cli@7.7.x`).
 - **Qwen sidecars**: deleting a session removes the transcript, `plans/<id>.md`,
   `todos/<id>.json`, and `file-history/<id>/`. The `file-history` directories
   are keyed by session id (verified against `chats/<id>.jsonl` on a live store),
   and Qwen itself cleans that tree with its own `.file-history-cleanup` marker,
   so removing the session's own directory is the documented behaviour, not a
   guess. The runtime registry `~/.qwen/sessions/<pid>.json` is never touched.
+- **Kimi index**: deleting a Kimi session removes the session directory under
+  `sessions/<workDirKey>/<id>/` and then rewrites `session_index.jsonl` without
+  that id (best effort: a failed prune is swallowed because the directory
+  removal already decided, §20).
 - **Sizes**: file-backed stores report an exact `sizeBytes` per row (transcript
-  plus sidecars). OpenCode and Kilo keep transcripts in SQLite tables, where
+  plus sidecars, the whole session directory for Kimi). OpenCode and Kilo keep transcripts in SQLite tables, where
   per-session attribution is only possible by reading the private schema, which
   this plugin refuses to do; rows report `sizeBytes: null` and the panel shows
   the whole database size (`opencode.db` + `-wal` + `-shm`) under "Stores".
@@ -220,8 +229,9 @@ prints an ASCII banner).
 Before deleting, the handler reads the provider's session list and refuses when:
 
 1. the session is still **running** — detected from Cline's `status`/`pid`,
-   Qwen's `~/.qwen/sessions/<pid>.json` registry with a `kill(pid, 0)` check, or
-   an open (not closed) acpx record; or
+   Qwen's `~/.qwen/sessions/<pid>.json` registry with a `kill(pid, 0)` check,
+   Kimi's occupancy lock directory `~/.kimi-code/locks/sessions/<id>`, or an
+   open (not closed) acpx record; or
 2. a Paseo agent record references the session id and is **not archived** —
    deleting it would break resume for that agent in Paseo.
 
@@ -250,6 +260,7 @@ stale data:
 | `session-manager.delete` | `{ provider, id, force? }` | `{ deleted, error }` |
 | `session-manager.delete-batch` | `{ targets: [{ provider, id }], force? }` | `{ deleted, failures }` |
 | `session-manager.export` | `{ provider, id }` | `{ exported, path, bytes, error }` |
+| `session-manager.refresh` | `{ agentId }` | `{ ok, error }` (0.3.3: `agents.ref(id).reload()` + listing-cache invalidation) |
 
 `list` runs every adapter in parallel with `Promise.all`; a failing adapter
 degrades to a provider entry with an `error` instead of failing the whole scan.
@@ -304,8 +315,36 @@ automation — the reminder only highlights and pre-selects, the user confirms.
   scrolling uses the host `ScrollView` from `@getpaseo/plugin/client/ui`.
 - The confirm block lists the risks and switches the action label to
   "Yes, delete anyway" when force is required.
-- All colors come from `theme.colors`; padding follows `layout.compact`;
-  scrolling uses the host `ScrollView` from `@getpaseo/plugin/client/ui`.
+
+### Sidebar footer row (`client/sidebar-item.tsx`, 0.5.0)
+
+`client.addSidebarFooterItem({ id: "session-manager-status", title: "Agent
+sessions", Component })` adds a read-only entry point at the bottom of the
+sidebar. The host passes `openScreen` / `openPopover` — **not** `openPanel`,
+which exists only on the `PluginClientContext` and on Command Center callbacks
+— so the row cannot open the workspace panel itself. It renders a `SidebarRow`
+(icon `Database`, title as label) whose press opens a summary popover:
+
+| Element | Source |
+| --- | --- |
+| Trailing badge (total, plus `· N due` when due > 0) | `summarizeSessions(...)` from `shared/session-summary.ts`; warning color while sessions are due |
+| "X sessions in Y stores · Z known" | `session-manager.list` response (`sessions`, `providers`, per-session `sizeBytes`) |
+| Due count / "Cleanup hint is off" | `useSettings(sessionManagerSettings).cleanupDays`, the same setting the panel reads |
+| "N need force delete" | sessions with `running` or a non-archived Paseo agent |
+| One row per detected provider | `ProviderStatus`: label, count, due count, whole-store size or "size unknown", and its error line |
+| "Rescan" | `listRpc({ refresh: true })`, bypassing the 30 s listing cache |
+| Footer hint | points at the workspace panel, which owns delete/export |
+
+The listing is fetched **only when the popover opens** (`useEffect` in the
+popover, not on mount): every scan spawns the vendor CLIs for `cline`,
+`opencode` and `kilo`, and an always-visible footer row must not pay that on app
+start. The popover writes the last summary back to the row, so the badge
+survives closing it. Because the server caches listings for 30 s, a scan started
+here is reused by the panel when it opens right after.
+
+The "due" definition lives in `shared/session-summary.ts`
+(`isOldEnough` + `needsForce` + `formatBytes`), imported by both the panel and
+the row so the two surfaces cannot drift; `tests/summary.test.ts` pins it.
 
 ## Extending to a new coding agent
 
@@ -326,10 +365,11 @@ Client panel ──useRpc──▶ shared contracts ──▶ index.server.ts `s
                                                    ▼
                           server/session-manager.ts (guards + aggregation)
                                                    │
-                    ┌──────────────────────────────┼───────────────────────────┐
-                    ▼                              ▼                           ▼
-        providers/cline|opencode|kilo        providers/qwen            providers/acpx
-             (vendor CLI)                 (~/.qwen/projects/…)     (~/.acpx/sessions)
+        ┌────────────────────┼───────────────────────┬──────────────────────────┐
+        ▼                    ▼                       ▼                          ▼
+ providers/cline|         providers/qwen          providers/kimi            providers/acpx
+ opencode|kilo            (~/.qwen/projects/…)    (~/.kimi-code/sessions)   (~/.acpx/sessions)
+ (vendor CLI)             file store + sidecars   file store + NDJSON index record + stream
 ```
 
 ## Local development
@@ -353,8 +393,16 @@ paseo plugin logs session-manager
   private SQLite schema, which the plugin refuses to do; the panel shows the
   whole `*.db` store size instead.
 - Sizes are only computed where cheap: Cline session directories, Qwen
-  transcripts with their sidecars, and acpx record + stream files. CLI-listed
-  agents (OpenCode, Kilo) report `null`, shown as "size unknown".
+  transcripts with their sidecars, Kimi session directories, and acpx record +
+  stream files. CLI-listed agents (OpenCode, Kilo) report `null`, shown as
+  "size unknown".
+- Kimi sessions are discovered from the `sessions/<workDirKey>/<id>/`
+  directories, not from the index: an index line without a directory is not
+  listed, and pruning the index on delete is best effort. Listing and deletion
+  need no `kimi` binary; only export does.
+- The sidebar status row shows counts from a full scan when its popover opens
+  and cannot open the workspace panel (the host gives sidebar items no
+  `openPanel`); the panel remains the only surface for delete and export.
 - The process-level listing cache serves repeated reads for at most 30 seconds;
   any delete invalidates the affected provider, and "Rescan" bypasses it.
 - The plugin never archives or deletes Paseo agent records; use the Paseo UI for
@@ -714,7 +762,9 @@ no new capability → last digit), annotated tag `session-manager@0.3.4`.
    semantics that `execFile` cannot express.
 3. **Extra sidebar entry points** (carried from §18.3): `addSidebarFooterItem`
    and multi-row `SidebarRow` / `SidebarSeparator` for a status or count row.
-   New capability → second-digit bump.
+   New capability → second-digit bump. **Implemented in 0.5.0** as a footer
+   status row with a summary popover (§21). `SidebarSeparator` was not needed:
+   the row opens one popover instead of rendering several sidebar rows.
 4. **`defineAgentTool` stays deliberately unused** — unchanged decision: it
    would offer destructive delete operations to agent processes (§18.5).
 
@@ -766,3 +816,99 @@ Verification (2026-11-03, this machine):
 | Live, isolated 0.15.0 daemon (scratch home, own loopback port, `pluginsEnabled: true`, production home untouched) | plugin `running`, `[paseo] Plugin ready`, no `Unknown lifecycle hook` — the new hook names are accepted by the shipped host |
 | `paseo workspace archive <id>` on that daemon | `[session-manager] workspace archived (wks_…): listing cache invalidated` |
 | `paseo archive <agent-id>` on that daemon | `[session-manager] agent archived (…): listing cache invalidated` — followed by `agent closed (…): listing cache invalidated` from the existing hook, both in the daemon log |
+
+## 20. Kimi Code provider (0.4.0, 2026-11-09)
+
+Kimi Code CLI (`@moonshot-ai/kimi-code`) was added as the sixth provider. The
+change is server-only — `server/providers/kimi.ts` plus one line in
+`server/providers/registry.ts` — and needs **no new Paseo API**, so the manifest
+floor (`>=0.15.0`) and the SDK pin (`^0.15.0`) did not move. New capability →
+second digit: `0.3.5` → `0.4.0`, annotated tag `session-manager@0.4.0`.
+
+### 20.1 Store and paths
+
+Root is `$KIMI_CODE_HOME`, defaulting to `~/.kimi-code`:
+
+| Path | Use |
+| --- | --- |
+| `sessions/<workDirKey>/<sessionId>/` | one directory per session, holding `state.json` and the transcript files |
+| `session_index.jsonl` | master NDJSON index: one JSON object per line, may carry `id`/`sessionId`, `title`, `cwd`, timestamps |
+| `locks/sessions/<sessionId>` | occupancy lock directory: its presence means the session is open in a live Kimi process |
+
+There is **no `session list` / `session delete` CLI**, so listing and deletion
+read and write the store directly (the same strategy as Qwen Code and acpx).
+Only export goes through the vendor binary.
+
+### 20.2 Adapter behaviour
+
+| Operation | Implementation |
+| --- | --- |
+| `list()` | `discoverSessions()` walks `sessions/*/*/`, reads each `state.json`, joins the matching index line, and maps via `mapSession()`. `detected` is `isDirectory(sessions/<…>)`; `detail` is the sessions directory; `storeBytes` is `pathSize(~/.kimi-code)`; `deletable: true`. A malformed index line is skipped, never fatal. |
+| Timestamps | `state.json` first (`createdAt`/`startedAt`, `lastActivity`/`updatedAt`/`lastUpdate`), then the index line, then the directory mtime for `updatedAt`. Formatting goes through `toIso`. |
+| `running` | `true` while `locks/sessions/<id>` exists. A lock whose name matches no session directory is ignored, so a stale lock cannot invent a row. |
+| `sizeBytes` | `directorySize(sessionDir)` — the whole session directory, which is exact and cheap. |
+| `delete(ids)` | Resolves each id to its `sessions/<workDirKey>/<id>/` directory, removes it, then rewrites `session_index.jsonl` without those ids (`pruneIndex`). Directory removal decides the result; a failed prune is swallowed. A missing directory is reported per id as `session directory not found`. |
+| `exportSession()` | `resolveBinary("kimi")` + `kimi export <id> -o <path>` (ZIP, `exportExtension: "zip"`, 120 s timeout). Without the CLI it returns `CLI "kimi" not found; cannot export`; an unwritten output file is reported as a failure. |
+
+Because `running` is part of the standard `ProviderSession`, the universal safety
+guard ("running sessions need an explicit force delete") works for Kimi without
+an adapter-specific branch in `server/session-manager.ts`.
+
+### 20.3 Verification (2026-11-09)
+
+| Check | Result |
+| --- | --- |
+| `tests/kimi.test.ts` | **8 tests pass** — disk listing and state mapping, mtime fallback, lock-based `running`, foreign lock names ignored, missing store, directory+index deletion, already-gone session, export without the CLI |
+| `npm run typecheck` | **exit 0** |
+| `npm test` | **11 suites / 94 tests pass** (the whole suite, see §21.3) |
+| Live daemon | **not re-run for 0.4.0** — the provider is covered by its unit suite against throwaway stores; no host API changed, so the 0.3.5 live evidence in §19.5 still describes the plugin/host contract |
+
+## 21. Version 0.5.0 — sidebar status row and test isolation (2026-11-09)
+
+Implements §19.3 item 3 (`addSidebarFooterItem` + `SidebarRow`), which was the
+last open improvement idea, and closes the test-isolation defect found in the
+0.4.0 audit. New capability → second digit: `0.4.0` → `0.5.0`, annotated tag
+`session-manager@0.5.0`. No Paseo API moved: `addSidebarFooterItem` and
+`SidebarRow` exist in the 0.15.0 SDK the plugin already requires.
+
+### 21.1 The footer row
+
+See *Sidebar footer row* above for the element table. Two design decisions are
+worth recording:
+
+1. **A popover, not the panel.** `PluginSidebarItemProps` exposes `openScreen`
+   and `openPopover` only — `openPanel` lives on `PluginClientContext` and on
+   Command Center callbacks. A sidebar row therefore cannot open the Agent
+   sessions workspace panel; registering a duplicate screen would fork the whole
+   900-line panel. The popover answers "what is on this disk, and how much of it
+   is due?" and the footer text says where the destructive flow lives.
+2. **Lazy scan.** The listing runs when the popover opens, never on mount. A
+   full scan spawns `cline`, `opencode` and `kilo`; measured on this machine it
+   costs ~0.5–2.3 s per CLI provider. The row shows a badge only after the first
+   successful scan and keeps it after the popover closes.
+
+`shared/session-summary.ts` is new and holds the pure aggregation shared with
+the panel (`formatBytes`, `isOldEnough`, `needsForce`, `summarizeSessions`); the
+panel's local copies were removed so the two surfaces cannot drift.
+
+### 21.2 Test isolation fix
+
+`tests/hooks.test.ts` primed the listing cache with the real `listAgentSessions()`
+while stubbing only `providers[0]`. Every other adapter still read the machine's
+home stores and spawned vendor CLIs, so the three cache assertions needed 2–3
+full scans (~7 s) and hit vitest's 5 s timeout — the suite was red on this
+machine even though the plugin logic was fine (measured per scan: `cline`
+1245 ms, `kilo` 2266 ms, `opencode` 467 ms, `qwen-code` 8 ms, `kimi` 5 ms,
+`acpx` 1 ms). `beforeEach` now stubs **every** adapter: `providers[0]` counts
+calls, the rest resolve an empty listing instantly. The suite went from 20.5 s
+with 4 failures to 560 ms with all green, and the README's claim that the tests
+never touch the real home stores is now true.
+
+### 21.3 Verification (2026-11-09, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) | **exit 0** |
+| `npm test` | **11 suites / 94 tests pass**, 560 ms — `hooks.test.ts` back to 7 fast tests, plus the new `tests/summary.test.ts` (9 tests: `formatBytes`, `isOldEnough`, `needsForce`, `summarizeSessions` incl. `cleanupDays: 0` and unknown sizes) |
+| Version files | `package.json` and `package-lock.json` both `0.5.0` (the lockfile still said `0.3.5`, a leftover from the 0.4.0 bump, now corrected) |
+| Footer row on a live daemon | **not exercised in this pass** — it is a client contribution; typecheck proves the `addSidebarFooterItem` / `SidebarRow` / `PluginPopoverProps` usage against the 0.15.0 typings, and the host's own sidebar renderer was not started. Open the sidebar footer once against a real daemon to confirm the row and the popover. |

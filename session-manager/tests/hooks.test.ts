@@ -99,6 +99,14 @@ beforeEach(() => {
   // cache is about, and spying on the shared registry object is visible to the
   // module-internal `readListing()`.
   listSpy = vi.spyOn(providers[0], "list").mockResolvedValue({ ...EMPTY_LISTING });
+  // Every other adapter must be stubbed too. `listAgentSessions()` scans the whole
+  // registry, and the real adapters read the machine's home stores and spawn the
+  // vendor CLIs (`cline`, `opencode`, `kilo`), which made these cache assertions
+  // depend on the host's disk and blew the 5 s timeout. The tests only assert the
+  // first adapter's call count, so the rest resolve to an empty listing instantly.
+  for (const provider of providers.slice(1)) {
+    vi.spyOn(provider, "list").mockResolvedValue({ ...EMPTY_LISTING });
+  }
 });
 
 afterEach(() => {
