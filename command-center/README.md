@@ -7,9 +7,10 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 ## What it does
 
 - **Command library** — every command is a `{{...}}`-templated snippet stored on the daemon host in `$PASEO_HOME/plugins/command-center/commands.json`. Favorites float to the top.
-- **Two command types**
+- **Three command types**
   - `prompt` → renders the template and either sends it to an existing agent or creates a new agent (optionally branching off into a fresh git worktree of the target workspace).
   - `shell` → renders the template into a command line and writes it into a new terminal of the selected workspace.
+  - `workflow` → runs an ordered chain of saved prompt/shell commands against the same target, each step gated by `always`, `on success` or `on failure` relative to the step before it. Steps keep their own provider, MCP servers and template defaults, and the whole chain records one history entry with a per-step summary.
 - **Template tokens**
   - `{{input:name}}` / `{{input:name|default}}` — prompted at run time; the run dialog builds a form from them automatically.
   - `{{workspace.name}}`, `{{workspace.path}}` — resolved from the target workspace.
@@ -38,7 +39,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center
 ```
 
-Requires Paseo ≥ 0.14.0 (verified against the stable 0.14.0 release, 2026-11-01). Version 0.6.0 uses 0.14.0-only surface — the `agent.session_open` tool/MCP maps and `agents.ref(id).reload()` — so the real host gate rejects older daemons; earlier versions raised the floor to the first release whose `client/ui` exported `Modal` / `useToast`.
+Requires Paseo ≥ 0.15.0 (verified against the stable 0.15.0 release, 2026-11-09). Version 0.7.0 registers all four lifecycle hooks through `server.addHook`, which does not exist on 0.14.0, so the real host gate rejects older daemons; the 0.14.0-only surface adopted in 0.6.0 (the `agent.open.before` tool/MCP maps and `agents.ref(id).reload()`) is in use as well, and earlier versions raised the floor to the first release whose `client/ui` exported `Modal` / `useToast`.
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/command-center/<revision>/checkout/command-center`, together with its dependencies. It talks to the standard Paseo scheduler through the low-level `@getpaseo/client` daemon client, which Paseo does **not** supply to plugins — so the manifest runs `npm ci` as its install-time build step, and the daemon installs the dependencies before bundling. That means the host needs npm-registry access at install and update time. Updates: `paseo plugin update command-center`.
 
@@ -61,6 +62,36 @@ $PASEO_HOME/plugins/command-center/
 ├── history.json     # the last N runs (settings.historyLimit)
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
+
+## Version 0.7.0 — Paseo 0.15.0 and workflows (2026-11-09)
+
+Closes the two open stage items: the mandatory 0.15.0 hook migration and
+roadmap item 1 (workflows). Full design notes and evidence: [__doc.md](./__doc.md)
+§14. New functionality → second-digit bump; `requirements.paseo` raised to
+`>=0.15.0`, both SDK pins to `^0.15.3`.
+
+- **Lifecycle hooks migrated** — `server.on` / `server.before` are deprecated
+  in 0.15.0 (removed after 2027-04-30), so all four registrations now use
+  `server.addHook`: `agent.turn.after`, `workspace.create.after`,
+  `agent.archive.after` and `agent.open.before`. Bodies and payloads are
+  unchanged (the request hook still receives `{ request }` and returns it).
+- **Workflows** — a `workflow` command is an ordered chain of saved
+  prompt/shell commands with `always` / `on success` / `on failure`
+  conditions, edited as step cards in the command form and shown as
+  `A → B → C` in the library. Steps are validated before anything runs
+  (no self-reference, no missing command, no nesting), run sequentially
+  against the same workspace, keep their own provider and MCP servers, and
+  produce one history entry with a per-step summary. Workflows are local,
+  unscheduled and not offered as composer attachments, and steps do not chain
+  output (see [__doc.md](./__doc.md) §14.3).
+
+**Verification:** typecheck clean, vitest **14 suites / 159 tests**, no
+`server.on(` / `server.before(` left in the plugin, and the fake server in the
+RPC tests exposes `addHook` only. Live on an isolated 0.15.3 daemon (scratch
+home, its own loopback port, production `~/.paseo` untouched): installed from
+the working tree, status `running`, `[paseo] Plugin ready`, 21 RPC methods, no
+`Unknown lifecycle hook` errors — the four `addHook` names are accepted by the
+shipped host.
 
 ## Version 0.6.0 — the §12.3 recommendations (2026-11-01)
 
@@ -95,6 +126,6 @@ methods** in an isolated 0.14.0 daemon.
 
 ## Compatibility
 
-Paseo **0.14.0 (2026-11-01)** verified, `requirements.paseo >=0.14.0`, SDK `@getpaseo/plugin ^0.14.0` + `@getpaseo/client ^0.14.0` — compatible; 0.14.0 surface in use (0.6.0).
+Paseo **0.15.0 (2026-11-09)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.3` + `@getpaseo/client ^0.15.3` — compatible after the `addHook` migration; 0.14.0 surface stays in use (0.7.0).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

@@ -9,6 +9,7 @@ function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition 
     type: "prompt",
     template: "Review {{input:pr}} and summarize {{workspace.name}}",
     variables: [{ name: "pr", prompt: "Pull request number", defaultValue: "123" }],
+    steps: [],
     scope: "global",
     favorite: false,
     createdAt: "2026-01-01T00:00:00.000Z",

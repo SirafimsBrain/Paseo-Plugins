@@ -26,6 +26,7 @@ function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition 
     type: "prompt",
     template: "Review {{input:pr|main}}",
     variables: [],
+    steps: [],
     scope: "global",
     provider: "claude/opus-4.6",
     favorite: false,

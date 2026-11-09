@@ -1,6 +1,6 @@
 # Compatibility — command-center
 
-Current: plugin **0.6.0**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`, `@getpaseo/client ^0.14.0`.
+Current: plugin **0.7.0**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.3`, `@getpaseo/client ^0.15.3`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
@@ -9,6 +9,50 @@ This file holds the extended compatibility information that no longer lives in t
 | [command-center](./README.md) | **0.14.0 (2026-11-01)** ³ | `@getpaseo/plugin@^0.14.0` + `@getpaseo/client@^0.14.0` (pins `^0.14.0`, `requirements.paseo >=0.14.0`) | **0.14.0: compatible, and the one deprecation Paseo left in it is now migrated — shipped as 0.5.3** (patch bump; with this, no live deprecated call remains anywhere in this repository), **and all four §12.3 recommendations are implemented the same day as 0.6.0**: a `command_center_run` agent tool via `defineAgentTool` (delivered through the session-open `tools` map — the SDK has no global tool registration), session-open MCP re-derivation for runs against an existing agent (per-agent registry, collision-checked against the daemon's own agent record, every unknown state fails safe to skip), a "Refresh Command Center tools on this agent" action on `agents.ref(id).reload()`, turn-aware dispatch (`activeTurnBehavior` is `interrupt`/`steer` — the protocol has no `queue` value), and `view`/`command`/`schedule` deep links through screen params used by `/cc` and the tabs' "Show command" actions. Because the 0.14.0 surface is now a hard requirement, the floor moved to `>=0.14.0` (the real host gate rejects 0.12.0 and accepts 0.14.0); evidence for 0.6.0: typecheck + vitest **13 suites / 149 tests**, both entries built by the real 0.14.0 host compiler with zero deprecated strings (negative control included), and `running` in an isolated 0.14.0 daemon with `[paseo] Plugin ready` and **21 RPC methods** after a clean reload — details in [§13](./__doc.md#13-version-060--implementing-the-123-recommendations-2026-11-01). Evidence for the 0.5.3 migration: `client/command-center-surface.tsx` imports `Modal` / `useToast` from `@getpaseo/plugin/client/ui` instead of the `client/react-native` entry that goes away on 2027-04-20 — both symbols exist in `client/ui` (verified in the npm tarballs), so the floor follows the API actually used: `requirements.paseo` moved off `>=0.11.0` to the first release whose `client/ui` exports them; the real 0.14.0 host gate (`assertPluginCompatibility`) rejects the manifest for a 0.12.0 daemon and accepts 0.14.0. The pins are real this time (`^0.14.0`, lockfile updated): `@getpaseo/client` is not host-supplied, so the scheduler bridge is bundled from the plugin's own `node_modules` and now ships 0.14.0's daemon client. The bridge itself is untouched by the SDK diff — all nine `schedule*` methods keep **byte-identical** option/payload types across that release — and the `agent.turn_ended` automation still reads only `event.outcome`. Evidence: typecheck + vitest **9 suites / 98 tests** against SDK 0.14.0, both entries built by the real 0.14.0 host compiler (`compileDirectoryPlugin`) with zero deprecated strings — plus a negative control that *does* find the old specifier — and `running` in an isolated 0.14.0 daemon (scratch home) with `[paseo] Plugin ready`, 20 RPC methods registered and a clean reload. **Recommendations recorded, not implemented** ([§12.3](./__doc.md#123-recommendations-for-improvement-recorded-not-implemented)): a native `command_center_run` agent tool via `defineAgentTool`, session-open MCP re-derivation for runs against an existing agent plus a "refresh command tools" action on `agents.ref(id).reload()`, turn-aware dispatch (`activeTurnBehavior`), and deep links through screen params. Details: [Compatibility](./__doc.md#6-compatibility), [§12](./__doc.md#12-paseo-0140--compatibility-pass-2026-11-01). |
 
 ## Details moved from this plugin's README.md
+
+## Paseo 0.15.0 compatibility (0.7.0, 2026-11-09)
+
+Verified against the **stable Paseo 0.15.0** release (2026-11-03). Full evidence:
+[`__doc.md`](./__doc.md) §14.1.
+
+**One mandatory migration:** 0.15.0 marks `server.on(...)` and
+`server.before(...)` `@deprecated` ("Use addHook with the renamed hook.
+Removed after 2027-04-30"). All four registrations this plugin owned used the
+deprecated spelling and moved to `server.addHook`:
+
+| Before | After | Payload |
+| --- | --- | --- |
+| `server.on("agent.turn_ended")` | `addHook("agent.turn.after")` | same (`outcome.kind`) |
+| `server.on("workspace.created")` | `addHook("workspace.create.after")` | same (`workspace.id`) |
+| `server.on("agent.archived")` | `addHook("agent.archive.after")` | same (`agent.id`); handler became `async` by type |
+| `server.before("agent.session_open")` | `addHook("agent.open.before")` | same (`{ request }` in, request out) |
+
+Bodies are untouched — `PluginHookPayload` wraps request hooks in `{ request }`
+and `HookHandlers` returns `Promise<PluginHookResult>`. The 0.14.0 surface the
+plugin adopted in 0.6.0 (`defineAgentTool` through `request.tools`, the request
+`mcpServers` map, `agents.ref(id).reload()`) is unchanged in 0.15.0 and still
+in use, and the nine `schedule*` methods the scheduler bridge calls are present
+in `@getpaseo/client@0.15.3`.
+
+Because `addHook` does not exist on 0.14.0, the floor moved to
+`requirements.paseo >=0.15.0`; both SDK pins moved to `^0.15.3` (0.15.x patch
+resolved by npm; the client pin is shipped because the bridge bundles its own
+`DaemonClient`). Not adopted: `worktree.create.before` / `.after` — the plugin
+creates branch-off worktrees but has no need to control their location, and
+workflows deliberately do not branch off.
+
+**Version 0.7.0 also ships workflows** — see [`__doc.md`](./__doc.md) §14.2 and
+the "Deliberately limited" list in §14.3 (local-only, unscheduled, no output
+chaining, no nesting).
+
+**Verification:** typecheck clean and vitest **14 suites / 159 tests** against
+`@getpaseo/plugin@0.15.3` + `@getpaseo/client@0.15.3`, no `server.on(` /
+`server.before(` left in the plugin, and a fake server that exposes only
+`addHook`. **Live:** installed from the working tree into an isolated 0.15.3
+daemon (scratch home, own loopback port, `pluginsEnabled: true`, production
+`~/.paseo` untouched) — `running`, `[paseo] Plugin ready`, 21 RPC methods,
+zero `Unknown lifecycle hook` errors. Evidence detail: [`__doc.md`](./__doc.md)
+§14.4.
 
 ## Paseo 0.14.0 compatibility
 

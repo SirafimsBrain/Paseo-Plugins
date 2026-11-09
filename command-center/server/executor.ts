@@ -1,9 +1,9 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { ActiveTurnBehavior, CommandDefinition, HistoryEntry, RunResult, RunTarget } from "../shared/commands";
-import { isFullModelRef } from "../shared/commands";
+import { defaultValuesForCommand, isFullModelRef } from "../shared/commands";
 import { renderTemplate, worktreeBranchFor } from "../shared/template";
 import { forgetAgentMcp, rememberAgentMcp } from "./agent-mcp";
-import { appendHistory, loadHistory } from "./store";
+import { appendHistory, loadCommands, loadHistory } from "./store";
 
 /** Workspace fields the executor and the template context rely on. */
 interface WorkspaceLike {
@@ -107,6 +107,11 @@ export async function executeCommand(
      * the daemon default (`interrupt`).
      */
     activeTurnBehavior?: ActiveTurnBehavior;
+    /**
+     * Internal: a workflow step runs through the same dispatch path but the
+     * workflow records one history entry for the whole chain, not one per step.
+     */
+    recordHistory?: boolean;
   },
   deps: RunDeps,
 ): Promise<RunResult> {
@@ -116,6 +121,10 @@ export async function executeCommand(
   const batchId = input.batchId ?? null;
 
   try {
+    if (command.type === "workflow") {
+      return await executeWorkflow(command, input, deps);
+    }
+
     if (command.type === "shell") {
       const workspace = await resolveWorkspace(paseo, input.workspaceId);
       if (!workspace) {
@@ -143,7 +152,7 @@ export async function executeCommand(
         values: { ...input.values },
         batchId,
       };
-      appendHistory(loadHistory(), entry);
+      if (input.recordHistory !== false) appendHistory(loadHistory(), entry);
       return {
         ok: true,
         kind: "terminal",
@@ -197,17 +206,19 @@ export async function executeCommand(
         rendered,
         input.activeTurnBehavior ? { activeTurnBehavior: input.activeTurnBehavior } : undefined,
       );
-      recordHistory(
-        command,
-        rendered,
-        "existing-agent",
-        contextWorkspace?.id ?? null,
-        input.agentId,
-        true,
-        null,
-        now,
-        { provider, values: input.values, batchId },
-      );
+      if (input.recordHistory !== false) {
+        recordHistory(
+          command,
+          rendered,
+          "existing-agent",
+          contextWorkspace?.id ?? null,
+          input.agentId,
+          true,
+          null,
+          now,
+          { provider, values: input.values, batchId },
+        );
+      }
       return {
         ok: true,
         kind: "existing-agent",
@@ -235,17 +246,19 @@ export async function executeCommand(
           labels: { source: "command-center" },
         });
 
-    recordHistory(
-      command,
-      rendered,
-      "new-agent",
-      input.newWorktree ? (workspace?.id ?? null) : (contextWorkspace?.id ?? null),
-      created.id,
-      true,
-      null,
-      now,
-      { provider, values: input.values, batchId },
-    );
+    if (input.recordHistory !== false) {
+      recordHistory(
+        command,
+        rendered,
+        "new-agent",
+        input.newWorktree ? (workspace?.id ?? null) : (contextWorkspace?.id ?? null),
+        created.id,
+        true,
+        null,
+        now,
+        { provider, values: input.values, batchId },
+      );
+    }
     return {
       ok: true,
       kind: "new-agent",
@@ -259,6 +272,161 @@ export async function executeCommand(
     const message = error instanceof Error ? error.message : String(error);
     return failure(command.type === "shell" ? "terminal" : "new-agent", message);
   }
+}
+
+type WorkflowStepSummary = NonNullable<HistoryEntry["steps"]>[number];
+
+/**
+ * Runs a `workflow` command: its steps in order, all against the same target.
+ *
+ * Conditions: `always` runs unconditionally, `on-success` only while no
+ * executed step has failed yet, `on-failure` only when the immediately
+ * previous executed step failed. A
+ * failing step does not abort the chain, because a follow-up `always` step is
+ * exactly how a cleanup/notify action is expressed; the workflow's overall
+ * result is false when any executed step failed.
+ *
+ * The whole chain records **one** history entry (with the per-step summary in
+ * `steps`), so a five-step workflow does not flood the history tab; each step
+ * dispatches through the same code path as a direct run, with per-step history
+ * disabled.
+ */
+async function executeWorkflow(
+  command: CommandDefinition,
+  input: {
+    values: Record<string, string>;
+    workspaceId?: string;
+    agentId?: string;
+    newWorktree: boolean;
+    activeTurnBehavior?: ActiveTurnBehavior;
+    batchId?: string | null;
+  },
+  deps: RunDeps,
+): Promise<RunResult> {
+  const now = deps.now ?? (() => new Date());
+  const steps = command.steps ?? [];
+  const library = loadCommands();
+  const byId = new Map(library.map((entry) => [entry.id, entry]));
+  const batchId = input.batchId ?? null;
+
+  const finish = (ok: boolean, error: string | null, summary: WorkflowStepSummary[], last: RunResult | null): RunResult => {
+    appendHistory(loadHistory(), {
+      id: `h_${now().getTime()}_${Math.random().toString(36).slice(2, 8)}`,
+      commandId: command.id,
+      commandName: command.name,
+      rendered:
+        summary.length > 0
+          ? summary
+              .map((step) => `${step.skipped ? "–" : step.ok ? "✓" : "✗"} ${step.commandName} (${step.condition})`)
+              .join("\n")
+          : "(no steps ran)",
+      targetWorkspaceId: input.workspaceId ?? last?.workspaceId ?? null,
+      targetAgentId: input.agentId ?? last?.agentId ?? null,
+      kind: "workflow",
+      ok,
+      error,
+      at: now().toISOString(),
+      provider: null,
+      values: { ...input.values },
+      batchId,
+      steps: summary,
+    });
+    return {
+      ok,
+      kind: "workflow",
+      workspaceId: input.workspaceId ?? last?.workspaceId ?? null,
+      agentId: last?.agentId ?? null,
+      terminalId: last?.terminalId ?? null,
+      title: commandTitle(command),
+      error,
+    };
+  };
+
+  if (steps.length === 0) {
+    return finish(false, "The workflow has no steps.", [], null);
+  }
+
+  // Validate the whole chain before dispatching anything: a deleted or nested
+  // step halfway through would otherwise leave a half-executed workflow.
+  for (const [index, step] of steps.entries()) {
+    const target = byId.get(step.commandId);
+    if (!target) {
+      return finish(false, `Step ${index + 1} references a command that no longer exists.`, [], null);
+    }
+    if (target.type === "workflow") {
+      return finish(false, `Step ${index + 1} is a workflow; workflows cannot be nested.`, [], null);
+    }
+  }
+
+  const summary: WorkflowStepSummary[] = [];
+  let previousOk: boolean | null = null;
+  let anyFailed = false;
+  let firstError: string | null = null;
+  let last: RunResult | null = null;
+  let executed = 0;
+  let succeeded = 0;
+
+  for (const step of steps) {
+    const stepCommand = byId.get(step.commandId)!;
+    const conditionMet =
+      step.condition === "always" ||
+      (step.condition === "on-success" ? previousOk === true && !anyFailed : previousOk === false);
+
+    if (!conditionMet) {
+      summary.push({
+        commandId: stepCommand.id,
+        commandName: stepCommand.name,
+        condition: step.condition,
+        kind: stepCommand.type === "shell" ? "terminal" : "new-agent",
+        ok: false,
+        error: null,
+        skipped: true,
+      });
+      continue;
+    }
+
+    const result = await executeCommand(
+      stepCommand,
+      {
+        // Workflow-level values override a step's stored defaults, so `/cc`,
+        // the agent tool and a history repeat can fill the same names.
+        values: { ...defaultValuesForCommand(stepCommand), ...input.values },
+        workspaceId: input.workspaceId,
+        agentId: input.agentId,
+        newWorktree: false,
+        activeTurnBehavior: input.activeTurnBehavior,
+        batchId,
+        recordHistory: false,
+      },
+      deps,
+    );
+    executed += 1;
+    if (result.ok) succeeded += 1;
+    else firstError ??= result.error;
+    summary.push({
+      commandId: stepCommand.id,
+      commandName: stepCommand.name,
+      condition: step.condition,
+      kind: result.kind,
+      ok: result.ok,
+      error: result.error,
+      skipped: false,
+    });
+    if (!result.ok) anyFailed = true;
+    previousOk = result.ok;
+    last = result;
+  }
+
+  if (executed === 0) {
+    return finish(
+      false,
+      "No step ran — the first step's condition needs a previous step outcome.",
+      summary,
+      last,
+    );
+  }
+
+  return finish(firstError === null, firstError, summary, last);
 }
 
 /**

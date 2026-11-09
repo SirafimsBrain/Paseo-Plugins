@@ -239,7 +239,7 @@ The host already supplies a full `PluginTheme` (colors, appearance) to plugin su
 
 ### Workflows (multi-step chained commands) — deferred
 
-The schema extension (a `workflow` command type with conditional steps `always | on-success | on-failure`) is straightforward and does not require new SDK APIs — the executor already runs batches sequentially and knows per-target success/failure. Deferred as a scope decision: 0.5.0 was already large, and a workflow editor UI (step ordering, conditions, failure handling) plus per-step state in the store is a feature-sized change on its own. Natural candidate for 0.6.0.
+The schema extension (a `workflow` command type with conditional steps `always | on-success | on-failure`) is straightforward and does not require new SDK APIs — the executor already runs batches sequentially and knows per-target success/failure. Deferred as a scope decision: 0.5.0 was already large, and a workflow editor UI (step ordering, conditions, failure handling) plus per-step state in the store is a feature-sized change on its own. Natural candidate for 0.6.0 — it actually shipped in **0.7.0** (§14.2), after 0.6.0 spent its scope on the §12.3 recommendations.
 
 ### Web dashboard / remote access — deferred
 
@@ -303,14 +303,14 @@ The same defect existed in three sibling plugins and was fixed the same way — 
 
 ## 6. Compatibility
 
-Current: **verified on 2026-11-01 against Paseo `0.14.0`**, shipped as
-`0.6.0` with `@getpaseo/plugin@^0.14.0` + `@getpaseo/client@^0.14.0` — the
-§12.3 recommendations are now implemented (§13), which makes the 0.14.0
-surface (`defineAgentTool` delivery via `request.tools`, the
-`agent.session_open` request maps, `agents.ref(id).reload()`) a hard
-requirement: `requirements.paseo` is `>=0.14.0` and the real host gate
-rejects older daemons. The deprecated `client/react-native` UI entry was
-migrated in 0.5.3 (§12).
+Current: **verified on 2026-11-09 against Paseo `0.15.0`**, shipped as
+`0.7.0` with `@getpaseo/plugin@^0.15.3` + `@getpaseo/client@^0.15.3` — the
+four lifecycle hooks moved from the deprecated `server.on` / `server.before`
+to `server.addHook` (§14.1), which makes `requirements.paseo >=0.15.0` a hard
+requirement (`addHook` does not exist on a 0.14.0 host). The 0.14.0 surface
+adopted in 0.6.0 (`defineAgentTool` delivery via `request.tools`, the
+`agent.open.before` request maps, `agents.ref(id).reload()`) is unchanged, and
+the deprecated `client/react-native` UI entry stays migrated from 0.5.3 (§12).
 
 Earlier, on 2026-11-01 against Paseo `0.14.0` with
 `@getpaseo/plugin@^0.14.0` + `@getpaseo/client@^0.14.0` (a real pin bump) —
@@ -356,13 +356,16 @@ The plugin's manifest range was `>=0.8.0` through 0.5.1, which covered 0.10.x. T
 - **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required. `list`/`history` only open the surface: the slash context has no message channel to print into.
 - **Automation is best-effort.** Auto-run/bootstrap commands execute with template defaults and swallow errors (§5d); a failing automation never blocks the triggering event, and failures are only visible via the run history.
 - **Installation needs the npm registry.** The manifest build step is `npm ci`, because the scheduler bridge depends on `@getpaseo/client`, which Paseo does not supply to plugins (§5f). A host without registry access cannot install or update this plugin; the other four plugins in this repository have no such requirement. (Paseo 0.12.0's `#7023` relaxed this for *type-only* `@getpaseo/protocol/*` imports — erased at compile time, no local install needed — but `@getpaseo/client` is imported for its **runtime** `DaemonClient`, so it must still be installed.)
-- **No deep links yet.** `PluginScreenProps.params` (0.11+) lets history, schedules and `/cc` open an exact command or schedule; the surface does not read `params` yet, so `/cc` still only opens the Command Center (§10 item 2).
+- **Workflows are a chain, not a pipeline.** Steps do not receive each other's output; each step dispatches through the normal command path against the same target workspace. Workflow-level `values` are applied by variable name to every step template.
+- **Workflows are local and unscheduled.** They are rejected for remote-host targets (the step library lives on this daemon), are not offered in the schedule dialog or the composer attachment source (no template to insert), and cannot be nested.
+- **Workflow steps ignore worktree mode.** Branch-off would create one worktree per prompt step, so the run dialog hides the toggle and the executor forces `newWorktree: false` for steps.
+- **A workflow records one history entry.** Per-step outcomes live in its `steps` summary; the entry cannot be repeated step-by-step, only as a whole workflow.
 
 ## 8. Roadmap
 
 Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger automation) and 9 (MCP injection) of the previous roadmap were delivered in 0.5.0 (§5d) and removed from this list.
 
-1. **Workflows** — a `workflow` command type chaining several steps with `always | on-success | on-failure` conditions (§5e): the executor already runs batches sequentially, so the runtime is close; the work is the schema, per-step state, and a workflow editor UI.
+1. **Workflows — delivered in 0.7.0 (§14.2)** and removed from this list: a `workflow` command type chaining saved commands with `always | on-success | on-failure` conditions, an executor pass, per-step history summaries and a step editor.
 2. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration (not present in 0.10.x), otherwise emulable via Command Center items only.
 3. **Import/export & sharing** — export `commands.json` selections as a shareable JSON or install from a git repo (mirroring how Paseo plugins are distributed).
 4. **Multi-agent fan-out** — done for workspaces/hosts via `run-batch` + client dispatch; per-agent (N existing agents as targets) fan-out is still open.
@@ -643,3 +646,115 @@ map, and `agents.ref(id).reload()`); the SDK pins stay `^0.14.0`.
 | Real 0.14.0 host compiler (`compileDirectoryPlugin` + `readPluginManifest` from the installed `app.asar`) | Manifest accepted with `>=0.14.0`; `clientBundle` 149,071 bytes and `serverBundle` 8,932,342 bytes with **zero** deprecated strings; negative control (old `client/react-native` import restored) **does** produce the hit. |
 | Floor enforced by the daemon's own `assertPluginCompatibility` | `0.12.0`: REJECTED (the floor is now a real API requirement, not just the `client/ui` exports); `0.14.0`: ACCEPTED. |
 | Live, isolated 0.14.0 daemon (scratch home, `127.0.0.1:16767`, production untouched) | **PASS** — installed from the working tree: `running`, `[paseo] Plugin ready`, **21 RPC methods** (18 `command-center.*` incl. the new `command-center.agent-reload`, + 3 `settings.command-center.*`), no plugin errors, and a clean `paseo plugin reload`. |
+
+## 14. Version 0.7.0 — Paseo 0.15.0 and workflows (2026-11-09)
+
+One release closes the two open stage items: the mandatory 0.15.0 hook
+migration (§14.1) and roadmap item 1, workflows (§14.2). New functionality →
+second-digit bump `0.6.0 → 0.7.0`, annotated tag `command-center@0.7.0`.
+
+### 14.1 Paseo 0.15.0 — the four lifecycle hooks migrated
+
+0.15.0 marks `server.on(...)` and `server.before(...)` as `@deprecated`
+("Use addHook with the renamed hook. Removed after 2027-04-30") on
+`PluginLifecycleRegistration`. All four registrations in `index.server.ts` used
+the deprecated spelling, so the migration is mandatory rather than optional.
+
+| Before (0.6.0) | After (0.7.0) | Payload used |
+| --- | --- | --- |
+| `server.on("agent.turn_ended", async (event, { paseo }) => …)` | `server.addHook("agent.turn.after", async (event, { paseo }) => …)` | `event.outcome.kind` (unchanged shape) |
+| `server.on("workspace.created", …)` | `server.addHook("workspace.create.after", …)` | `event.workspace.id` |
+| `server.on("agent.archived", (event) => …)` | `server.addHook("agent.archive.after", async (event) => …)` | `event.agent.id`; the handler is `async` because `HookHandlers` returns a `Promise` |
+| `server.before("agent.session_open", async ({ request }, { paseo }) => …)` | `server.addHook("agent.open.before", async ({ request }, { paseo }) => …)` | the request is still wrapped in `{ request }`; the return is still the request |
+
+The bodies are untouched: `HookHandlers` is typed `(payload, context) =>
+Promise<PluginHookResult>`, and `PluginHookPayload` wraps request hooks in
+`{ request }`, so the session-open contribution keeps its `tools` /
+`mcpServers` edits verbatim. `pluginHookRegistry` proves the host does not
+await the three event hooks (`waits: false`) but does await
+`agent.open.before` (`waits: true`), which the request-return contract needs.
+
+`requirements.paseo`: `>=0.14.0 → >=0.15.0` (`addHook` does not exist on a
+0.14.0 host). Pins: `@getpaseo/plugin` and `@getpaseo/client`
+`^0.14.0 → ^0.15.3` (the installed 0.15.x patch; the client pin is shipped
+because the scheduler bridge bundles its own `DaemonClient`, §5f). The nine
+`schedule*` methods the bridge calls are still present in
+`@getpaseo/client@0.15.3` with the same signatures (checked by string and by
+the green schedule suites).
+
+**Not adopted from 0.15.0:** `worktree.create.before` / `worktree.create.after`.
+The plugin does create branch-off worktrees (prompt runs), but controlling
+their location or running setup inside them is a behaviour change without a
+current need, and workflows deliberately do not branch off at all (§14.3).
+
+### 14.2 Workflows
+
+`commandTypeSchema` gained `workflow`, and a stored workflow carries
+`steps: [{ commandId, condition }]` (`condition: always | on-success |
+on-failure`, max 20). A workflow has no template of its own; `template`
+defaults to `""` and the per-type requirement moved into
+`validateCommandForSave(command, library)` (shared, pure, used by the save
+handler and `tests/commands.test.ts`): prompt/shell need a template, a
+workflow needs at least one step, no self-reference, no missing command, no
+nested workflow.
+
+Execution (`executeWorkflow` in `server/executor.ts`) validates the whole
+chain before dispatching anything, then runs the steps in order against the
+same target:
+
+| Condition | Runs when |
+| --- | --- |
+| `always` | every time |
+| `on-success` | the immediately previous executed step succeeded **and** no earlier step failed (so a successful cleanup does not re-arm it; a first step never runs) |
+| `on-failure` | the immediately previous executed step failed |
+
+A failure does not abort the chain — `always` / `on-failure` steps after it are
+exactly how cleanup or notification is expressed — and the workflow's overall
+`ok` is true only when every executed step succeeded. Each step runs through
+the normal `executeCommand` path with per-step history disabled, so steps keep
+their own type, provider, MCP servers and template defaults; workflow-level
+`values` override a step's defaults by variable name.
+
+The chain appends **one** history entry (`kind: "workflow"`) whose `steps`
+array carries `{ commandId, commandName, condition, kind, ok, error, skipped }`
+per step; `rendered` is the one-line-per-step summary shown in the history tab.
+`RunResult` gained the same `workflow` kind, and the agent tool reports
+`workflow run in workspace …` as its dispatch target.
+
+Client surface:
+
+- **Editor** (`client/command-form.tsx`): third type chip, step cards with
+  command name, condition chips, ↑/↓/remove, and an "Add step" chip row built
+  from the saved prompt/shell commands (the workflow itself and other
+  workflows are excluded). Validation mirrors `validateCommandForSave`.
+- **Library card**: badge `workflow · N steps`, body `A → B → C` with names
+  resolved from the loaded library.
+- **Run dialog**: shows the step list (with `[on success]` / `[on failure]`
+  markers) instead of a template preview, hides inputs, the provider picker and
+  the worktree toggle, keeps workspace targeting, the existing-agent picker and
+  the busy-turn choice. The run label is `Run workflow`.
+- **Not offered:** the Schedule button (server also refuses: "Workflows cannot
+  be scheduled — schedule their steps instead.") and the composer attachment
+  source (nothing to insert).
+
+### 14.3 Deliberately limited
+
+1. **No output chaining** — steps are independent dispatches, not a pipeline;
+   a step cannot consume the previous step's terminal output.
+2. **Local only** — a remote-host target is rejected in the run dialog path,
+   because the step library lives on this daemon.
+3. **No worktree mode** — `newWorktree` is forced off for steps (one worktree
+   per step would be wrong), and the dialog hides the toggle.
+4. **No scheduling and no attachment insertion** — see §7.
+5. **No nesting** — rejected by both the editor and the executor.
+
+### 14.4 Verification (2026-11-09, this machine)
+
+| Check | Result |
+| --- | --- |
+| SDK installation | `npm install --save-dev @getpaseo/plugin@^0.15.0 @getpaseo/client@^0.15.0` resolved **0.15.3** and updated `package.json` + the shipped `package-lock.json`. |
+| `npm run typecheck` (`tsc --noEmit`) | **exit 0** |
+| `npm test` | **14 suites / 159 tests pass** — 149 from 0.6.0 + `tests/workflows.test.ts` (6: order and one history entry, condition matrix incl. `always` after a failure, missing step pre-flight, nested rejection, all-skipped, value pass-through) + 4 new `validateCommandForSave` cases (the two obsolete schema tests were replaced: the schema now parses an empty template by design). |
+| Deprecated-call scan | no `server.on(` / `server.before(` left in the plugin; the fake server in `tests/server-rpc.test.ts` exposes `addHook` only. |
+| Live daemon | **PASS** — installed from the working tree into an isolated **0.15.3** daemon (scratch home under `.tmp/`, `127.0.0.1:16768`, `pluginsEnabled: true`, production `~/.paseo` untouched): status `running`, `[paseo] Plugin ready`, **21 RPC methods** registered, **zero** `Unknown lifecycle hook` errors — the host validates `addHook` names at registration, so the four migrated names are proven accepted. Only the benign `DEP0176 fs.F_OK` warning from the bundled dependency chain appears (§12.1). The scratch home was stopped and removed; the production home was never touched. |
+| Workflow execution | Covered by `tests/workflows.test.ts` against throwaway stores; the workflow path was not exercised through the app UI (the client surface was not rendered). |

@@ -453,6 +453,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
           name: form.name,
           type: form.type,
           template: form.template,
+          steps: form.steps,
           provider: form.provider ?? undefined,
           terminalName: form.terminalName ?? undefined,
           scope: form.scope,
@@ -573,7 +574,12 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
       workspaceName: workspace?.name ?? "Best-guess workspace",
       hostLabel: workspace?.hostLabel ?? "",
       ok: false,
-      kind: input.command.type === "shell" ? "terminal" : "new-agent",
+      kind:
+        input.command.type === "shell"
+          ? "terminal"
+          : input.command.type === "workflow"
+            ? "workflow"
+            : "new-agent",
       error: null,
     }));
     resolved.forEach(({ target }, index) => {
@@ -617,6 +623,18 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
     }
 
     // 2. Remote targets — client-side dispatch per host, history reported back.
+    // A workflow cannot cross hosts: its steps live in this daemon's library
+    // and the remote daemon's session-open hooks know nothing about them.
+    if (input.command.type === "workflow") {
+      for (const index of remoteIndices) {
+        outcomes[index] = {
+          ...outcomes[index]!,
+          ok: false,
+          error: "Workflows run on the daemon that owns the command library; pick a local workspace.",
+        };
+      }
+      remoteIndices.length = 0;
+    }
     for (const index of remoteIndices) {
       const { target, workspace, serverId, workspaceId } = resolved[index]!;
       try {
@@ -669,7 +687,12 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
 
     const succeeded = outcomes.filter((outcome) => outcome.ok).length;
     if (succeeded === outcomes.length && outcomes.length > 0) {
-      if (input.command.type === "shell") {
+      if (input.command.type === "workflow") {
+        toast.show(
+          outcomes.length === 1 ? "Workflow finished" : `Workflow finished on ${outcomes.length} targets`,
+          { variant: "success" },
+        );
+      } else if (input.command.type === "shell") {
         toast.show(
           outcomes.length === 1 ? "Command written to a new terminal" : `Written to terminals on ${outcomes.length} targets`,
           { variant: "success" },
@@ -694,6 +717,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
         <Text style={[styles.heading, { color: foreground }]}>{editing ? "Edit command" : "New command"}</Text>
         <CommandForm
           initial={editing}
+          commands={commands ?? []}
           providers={providers}
           modelsLoading={modelsLoading}
           multiHost={hosts.length > 1}
@@ -855,7 +879,11 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
                   </Text>
                 ) : null}
                 <Text style={[styles.badge, { color: foreground, fontSize: font(10) }]}>
-                  {command.type === "shell" ? "shell" : command.provider ?? "prompt"}
+                  {command.type === "shell"
+                    ? "shell"
+                    : command.type === "workflow"
+                      ? `workflow · ${command.steps.length} ${command.steps.length === 1 ? "step" : "steps"}`
+                      : command.provider ?? "prompt"}
                 </Text>
               </View>
               <Text
@@ -867,7 +895,14 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
                 ]}
                 numberOfLines={2}
               >
-                {command.template}
+                {command.type === "workflow"
+                  ? command.steps
+                      .map((step) =>
+                        (commands ?? []).find((candidate) => candidate.id === step.commandId)?.name ??
+                        "missing command",
+                      )
+                      .join(" → ") || "No steps"
+                  : command.template}
               </Text>
               <View style={styles.cardActions}>
                 <Pressable
@@ -881,15 +916,17 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
                 <Pressable style={styles.actionButton} onPress={() => setEditing(command)}>
                   <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Edit</Text>
                 </Pressable>
-                <Pressable
-                  style={styles.actionButton}
-                  onPress={() => {
-                    setScheduleError(null);
-                    setScheduling(command);
-                  }}
-                >
-                  <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Schedule</Text>
-                </Pressable>
+                {command.type === "workflow" ? null : (
+                  <Pressable
+                    style={styles.actionButton}
+                    onPress={() => {
+                      setScheduleError(null);
+                      setScheduling(command);
+                    }}
+                  >
+                    <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Schedule</Text>
+                  </Pressable>
+                )}
                 <Pressable style={styles.actionButton} onPress={() => void handleDelete(command)}>
                   <Text style={[styles.actionText, styles.deleteText, { fontSize: font(12) }]}>Delete</Text>
                 </Pressable>
@@ -972,6 +1009,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
           {running ? (
             <RunDialog
               command={running}
+              library={commands ?? []}
               workspaces={workspaces}
               agents={agents}
               providers={providers}
@@ -984,7 +1022,13 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
               initialAgentId={repeatPreset?.agentId}
               onCancel={closeRunDialog}
               onRun={(input) => handleRunBatch({ command: running, values: input.values, targets: input.targets })}
-              onSchedule={(input) => handleCreateSchedule({ command: running, ...input })}
+              // Workflows are not schedulable (the schedule bridge cannot model
+              // per-step conditions); the card hides the button for the same reason.
+              onSchedule={
+                running.type === "workflow"
+                  ? undefined
+                  : (input) => handleCreateSchedule({ command: running, ...input })
+              }
             />
           ) : null}
         </Modal.Content>

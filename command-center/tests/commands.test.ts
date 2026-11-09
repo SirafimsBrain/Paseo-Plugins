@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   commandSchema,
   defaultValuesForCommand,
+  validateCommandForSave,
   fullModelRef,
   historyEntrySchema,
   isFullModelRef,
@@ -25,6 +26,7 @@ describe("commandSchema", () => {
       type: "prompt",
       scope: "global",
       variables: [],
+      steps: [],
       favorite: false,
       useCount: 0,
     });
@@ -49,7 +51,7 @@ describe("commandSchema", () => {
       commandSchema.parse({
         id: "cmd_bad",
         name: "Bad",
-        type: "workflow",
+        type: "scheduled",
         template: "…",
         createdAt: "2026-09-22T00:00:00.000Z",
         updatedAt: "2026-09-22T00:00:00.000Z",
@@ -57,16 +59,85 @@ describe("commandSchema", () => {
     ).toThrow(z.ZodError);
   });
 
-  it("rejects an empty template", () => {
-    expect(() =>
-      commandSchema.parse({
-        id: "cmd_empty",
-        name: "Empty",
-        template: "",
-        createdAt: "2026-09-22T00:00:00.000Z",
-        updatedAt: "2026-09-22T00:00:00.000Z",
-      }),
-    ).toThrow(z.ZodError);
+  it("parses an empty template and an empty steps list", () => {
+    // The per-type requirement moved to `validateCommandForSave`: the schema has
+    // to parse stored workflow records, which have no template of their own.
+    const parsed = commandSchema.parse({
+      id: "cmd_empty",
+      name: "Empty",
+      template: "",
+      createdAt: "2026-09-22T00:00:00.000Z",
+      updatedAt: "2026-09-22T00:00:00.000Z",
+    });
+    expect(parsed.template).toBe("");
+    expect(parsed.steps).toEqual([]);
+  });
+});
+
+describe("validateCommandForSave", () => {
+  function stored(overrides: Partial<ReturnType<typeof commandSchema.parse>>) {
+    return commandSchema.parse({
+      id: "cmd_1",
+      name: "One",
+      template: "Do it",
+      createdAt: "2026-09-22T00:00:00.000Z",
+      updatedAt: "2026-09-22T00:00:00.000Z",
+      ...overrides,
+    });
+  }
+
+  it("requires a template for prompt and shell commands", () => {
+    expect(validateCommandForSave(stored({ template: "" }), [])).toBe("Template is required.");
+    expect(validateCommandForSave(stored({ template: "git status", type: "shell" }), [])).toBeNull();
+  });
+
+  it("requires at least one step for a workflow", () => {
+    expect(
+      validateCommandForSave(stored({ id: "wf", type: "workflow", template: "" }), []),
+    ).toBe("A workflow needs at least one step.");
+  });
+
+  it("accepts steps that reference saved prompt/shell commands", () => {
+    const step = stored({ id: "step", name: "Step" });
+    const workflow = stored({
+      id: "wf",
+      type: "workflow",
+      template: "",
+      steps: [{ commandId: "step", condition: "on-success" }],
+    });
+    expect(validateCommandForSave(workflow, [step])).toBeNull();
+  });
+
+  it("rejects self-reference, missing commands and nested workflows", () => {
+    const self = stored({
+      id: "wf",
+      type: "workflow",
+      template: "",
+      steps: [{ commandId: "wf", condition: "always" }],
+    });
+    expect(validateCommandForSave(self, [])).toContain("itself");
+
+    const missing = stored({
+      id: "wf",
+      type: "workflow",
+      template: "",
+      steps: [{ commandId: "gone", condition: "always" }],
+    });
+    expect(validateCommandForSave(missing, [])).toContain("no longer exists");
+
+    const nested = stored({
+      id: "wf",
+      type: "workflow",
+      template: "",
+      steps: [{ commandId: "other", condition: "always" }],
+    });
+    const other = stored({
+      id: "other",
+      type: "workflow",
+      template: "",
+      steps: [{ commandId: "step", condition: "always" }],
+    });
+    expect(validateCommandForSave(nested, [other])).toContain("cannot be nested");
   });
 });
 

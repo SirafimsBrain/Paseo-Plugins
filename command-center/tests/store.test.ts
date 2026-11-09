@@ -35,6 +35,7 @@ function command(id: string): CommandDefinition {
     type: "prompt",
     template: "Hello {{input:who}}",
     variables: [],
+    steps: [],
     scope: "global",
     provider: "claude/opus-4.6",
     favorite: false,

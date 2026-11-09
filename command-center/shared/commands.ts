@@ -7,7 +7,30 @@ import { inputVariablesOf } from "./template";
  * executes on the daemon by itself: the client resolves the target workspace
  * and agent, then the daemon-side API creates the agent or sends the prompt.
  */
-export const commandTypeSchema = z.enum(["prompt", "shell"]);
+export const commandTypeSchema = z.enum(["prompt", "shell", "workflow"]);
+
+/**
+ * When a workflow step runs. `always` runs unconditionally; `on-success` only
+ * when the immediately previous executed step succeeded and no earlier step
+ * failed (so a cleanup step that succeeds does not re-arm it, and a first step
+ * never runs under this condition); `on-failure` only when the immediately
+ * previous executed step failed.
+ */
+export const workflowStepConditionSchema = z.enum(["always", "on-success", "on-failure"]);
+
+export type WorkflowStepCondition = z.output<typeof workflowStepConditionSchema>;
+
+/**
+ * One step of a `workflow` command: another saved command plus its condition.
+ * Steps reference prompt/shell commands only — nesting a workflow is rejected,
+ * because it would make conditions and history summaries recursive.
+ */
+export const workflowStepSchema = z.object({
+  commandId: z.string().min(1),
+  condition: workflowStepConditionSchema.default("always"),
+});
+
+export type WorkflowStep = z.infer<typeof workflowStepSchema>;
 
 /**
  * `{{input:name}}` / `{{input:name|default}}` — prompted at run time.
@@ -24,8 +47,15 @@ export const commandSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   type: commandTypeSchema.default("prompt"),
-  template: z.string().min(1),
+  /**
+   * Prompt text or shell line. Empty for `workflow` commands, which have no
+   * template of their own; the editor and `validateCommandForSave` enforce the
+   * per-type requirement (prompt/shell need a template, a workflow needs steps).
+   */
+  template: z.string().default(""),
   variables: z.array(commandVariableSchema).max(12).default([]),
+  /** Workflow commands only: the ordered steps (max 20). Empty otherwise. */
+  steps: z.array(workflowStepSchema).max(20).default([]),
   /** `agent` commands run against one workspace and never target a new one. */
   scope: z.enum(["global", "workspace"]).default("global"),
   /** Shell commands only: a title for the created terminal. */
@@ -77,6 +107,37 @@ export const commandSchema = z.object({
 
 export type CommandDefinition = z.infer<typeof commandSchema>;
 export type CommandVariable = z.infer<typeof commandVariableSchema>;
+
+/**
+ * Per-type validation the Zod schema deliberately leaves out: `template` has a
+ * default so stored workflow records parse, and `steps` defaults to [] for the
+ * existing command types. Returns a user-facing message, or null when valid.
+ *
+ * Pure and library-aware, so the server save handler and `tests/workflows`
+ * share exactly one definition of "a valid workflow".
+ */
+export function validateCommandForSave(
+  command: CommandDefinition,
+  library: CommandDefinition[],
+): string | null {
+  if (command.type === "workflow") {
+    if (command.steps.length === 0) return "A workflow needs at least one step.";
+    const byId = new Map(library.map((entry) => [entry.id, entry]));
+    for (const [index, step] of command.steps.entries()) {
+      if (step.commandId === command.id) {
+        return `Step ${index + 1} points at the workflow itself.`;
+      }
+      const target = byId.get(step.commandId);
+      if (!target) return `Step ${index + 1} references a command that no longer exists.`;
+      if (target.type === "workflow") {
+        return `Step ${index + 1} is a workflow; workflows cannot be nested.`;
+      }
+    }
+    return null;
+  }
+  if (command.template.trim().length === 0) return "Template is required.";
+  return null;
+}
 
 /**
  * Input values a stored command starts from: declared variables first, then
@@ -191,10 +252,25 @@ export const historyEntrySchema = z.object({
   rendered: z.string(),
   targetWorkspaceId: z.string().nullable(),
   targetAgentId: z.string().nullable(),
-  kind: z.enum(["new-agent", "existing-agent", "terminal"]),
+  kind: z.enum(["new-agent", "existing-agent", "terminal", "workflow"]),
   ok: z.boolean(),
   error: z.string().nullable(),
   at: z.string(),
+  /** Workflow runs only: one entry per step, in execution order (0.7.0). */
+  steps: z
+    .array(
+      z.object({
+        commandId: z.string(),
+        commandName: z.string(),
+        condition: workflowStepConditionSchema,
+        kind: z.enum(["new-agent", "existing-agent", "terminal", "workflow"]),
+        ok: z.boolean(),
+        error: z.string().nullable(),
+        /** True when the condition kept the step from running. */
+        skipped: z.boolean(),
+      }),
+    )
+    .optional(),
   /** Full `provider/model` reference the run used; absent on old entries and shell runs. */
   provider: z.string().nullable().optional(),
   /** Input values the run was rendered with (for "Repeat"); absent on old entries. */
@@ -217,7 +293,7 @@ export type ActiveTurnBehavior = z.output<typeof activeTurnBehaviorSchema>;
 
 export const runResultSchema = z.object({
   ok: z.boolean(),
-  kind: z.enum(["new-agent", "existing-agent", "terminal"]),
+  kind: z.enum(["new-agent", "existing-agent", "terminal", "workflow"]),
   workspaceId: z.string().nullable(),
   agentId: z.string().nullable(),
   terminalId: z.string().nullable(),

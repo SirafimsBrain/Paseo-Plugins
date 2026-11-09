@@ -212,8 +212,10 @@ export function looksLikeCron(value: string): boolean {
  * via its shell tool. Shared by the schedule dialog (preview) and the server
  * (creation) so what the user sees is exactly what the daemon stores.
  */
-export function schedulePromptFor(type: "prompt" | "shell", rendered: string): string {
-  if (type === "prompt") return rendered;
+export function schedulePromptFor(type: "prompt" | "shell" | "workflow", rendered: string): string {
+  // Workflows are rejected by `createScheduleFromCommand`; the branch keeps the
+  // signature honest for callers that pass a stored command's type through.
+  if (type === "prompt" || type === "workflow") return rendered;
   return [
     "Run this shell command in the workspace directory, then report its output:",
     "",

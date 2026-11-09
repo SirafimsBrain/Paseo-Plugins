@@ -93,6 +93,14 @@ export async function createScheduleFromCommand(input: {
   if (!command) {
     return { ok: false, id: null, view: null, error: `Unknown command ${input.commandId}.` };
   }
+  if (command.type === "workflow") {
+    return {
+      ok: false,
+      id: null,
+      view: null,
+      error: "Workflows cannot be scheduled — schedule their steps instead.",
+    };
+  }
   const rendered = schedulePromptFor(
     command.type,
     input.render(command.template, input.values, {

@@ -66,8 +66,9 @@ export function createCommandCenterTool(): AgentToolDefinition {
       "Run a saved Command Center command by name or id. Shell commands run in a " +
       "terminal of this agent's workspace; prompt commands create a new agent in " +
       "the same workspace with the command's stored provider and MCP servers (they " +
-      "never prompt this agent itself). Inputs fall back to the command's stored " +
-      "defaults; pass `values` to override them.",
+      "never prompt this agent itself); workflow commands run their saved steps in " +
+      "order on this workspace. Inputs fall back to the command's stored defaults; " +
+      "pass `values` to override them.",
     input: commandCenterToolInput,
     async execute(input, context) {
       const commands = loadCommands();
@@ -99,7 +100,9 @@ export function createCommandCenterTool(): AgentToolDefinition {
           ? `terminal ${result.terminalId ?? "?"}`
           : result.kind === "new-agent"
             ? `new agent ${result.agentId ?? "?"}`
-            : `agent ${result.agentId ?? "?"}`;
+            : result.kind === "workflow"
+              ? `workflow run in workspace ${result.workspaceId ?? "?"}`
+              : `agent ${result.agentId ?? "?"}`;
       return {
         text: `Command "${command.name}" dispatched to ${target}. ` +
           "The outcome is not captured back here — check the workspace (the run is in the Command Center history).",

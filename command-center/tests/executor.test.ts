@@ -64,6 +64,7 @@ function promptCommand(overrides: Partial<CommandDefinition> = {}): CommandDefin
     type: "prompt",
     template: "Hi {{input:who}} in {{workspace.name}} on {{date}}",
     variables: [],
+    steps: [],
     scope: "global",
     provider: "claude/opus-4.6",
     favorite: false,

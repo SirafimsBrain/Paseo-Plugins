@@ -23,8 +23,8 @@ afterAll(() => {
 
 type Handler = (input: never, ctx: { paseo: unknown }) => unknown;
 const handlers = new Map<string, Handler>();
-const beforeHooks = new Map<string, Handler>();
-const eventHooks = new Map<string, Handler>();
+/** `addHook` registrations, keyed by the 0.15.0 hook name. */
+const hooks = new Map<string, Handler>();
 
 function fakeServer(): never {
   return {
@@ -45,11 +45,9 @@ function fakeServer(): never {
         },
       };
     },
-    on(name: string, handler: Handler) {
-      eventHooks.set(name, handler);
-    },
-    before(name: string, handler: Handler) {
-      beforeHooks.set(name, handler);
+    addHook(name: string, handler: Handler) {
+      hooks.set(name, handler);
+      return () => hooks.delete(name);
     },
   } as never;
 }
@@ -67,6 +65,7 @@ function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition 
     type: "prompt",
     template: "Review {{input:pr}}",
     variables: [],
+    steps: [],
     scope: "global",
     provider: "claude/opus-4.6",
     favorite: false,
@@ -80,8 +79,7 @@ function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition 
 describe("command-center RPC handlers", () => {
   beforeEach(() => {
     handlers.clear();
-    beforeHooks.clear();
-    eventHooks.clear();
+    hooks.clear();
     contribute(fakeServer());
   });
 
@@ -320,8 +318,7 @@ describe("command-center RPC handlers", () => {
 describe("0.6.0: session-open hook and the agent-reload RPC", () => {
   beforeEach(() => {
     handlers.clear();
-    beforeHooks.clear();
-    eventHooks.clear();
+    hooks.clear();
     contribute(fakeServer());
   });
 
@@ -354,8 +351,8 @@ describe("0.6.0: session-open hook and the agent-reload RPC", () => {
   }
 
   async function runHook(request: unknown, paseo: unknown) {
-    const hook = beforeHooks.get("agent.session_open");
-    if (!hook) throw new Error("agent.session_open hook not registered");
+    const hook = hooks.get("agent.open.before");
+    if (!hook) throw new Error("agent.open.before hook not registered");
     return (await hook({ request } as never, { paseo } as never)) as {
       tools: { name: string }[];
       mcpServers: Record<string, unknown>;
@@ -371,9 +368,11 @@ describe("0.6.0: session-open hook and the agent-reload RPC", () => {
     );
   }
 
-  it("registers the session_open hook and the archived cleanup", () => {
-    expect(beforeHooks.has("agent.session_open")).toBe(true);
-    expect(eventHooks.has("agent.archived")).toBe(true);
+  it("registers all four lifecycle hooks under their 0.15.0 names", () => {
+    expect(hooks.has("agent.open.before")).toBe(true);
+    expect(hooks.has("agent.archive.after")).toBe(true);
+    expect(hooks.has("agent.turn.after")).toBe(true);
+    expect(hooks.has("workspace.create.after")).toBe(true);
   });
 
   it("attaches the command_center_run tool on interactive opens", async () => {

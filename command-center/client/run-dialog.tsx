@@ -58,6 +58,8 @@ export interface BatchItemResult {
 
 interface Props {
   command: CommandDefinition;
+  /** Saved library, to label a workflow's steps in the preview. */
+  library?: CommandDefinition[];
   workspaces: DialogWorkspaceOption[];
   agents: DialogAgentOption[];
   providers: ProviderWithModels[];
@@ -97,6 +99,7 @@ function isKnownWorkspaceKey(workspaces: DialogWorkspaceOption[], key: string): 
 
 export function RunDialog({
   command,
+  library,
   workspaces,
   agents,
   providers,
@@ -111,8 +114,14 @@ export function RunDialog({
   onSchedule,
   onCancel,
 }: Props) {
-  const declared = command.variables;
-  const discovered = useMemo(() => inputVariablesOf(command.template), [command.template]);
+  const isWorkflow = command.type === "workflow";
+  // A workflow has no template of its own: each step renders its own command
+  // with its stored defaults, so there are no workflow-level inputs to fill.
+  const declared = isWorkflow ? [] : command.variables;
+  const discovered = useMemo(
+    () => (isWorkflow ? [] : inputVariablesOf(command.template)),
+    [isWorkflow, command.template],
+  );
   const merged = useMemo(() => {
     const byName = new Map(declared.map((variable) => [variable.name, variable]));
     for (const variable of discovered) {
@@ -120,6 +129,18 @@ export function RunDialog({
     }
     return [...byName.values()];
   }, [declared, discovered]);
+  const workflowPreview = useMemo(() => {
+    if (!isWorkflow) return "";
+    return command.steps
+      .map((step, index) => {
+        const target = (library ?? []).find((candidate) => candidate.id === step.commandId);
+        const name = target?.name ?? "missing command";
+        const condition =
+          step.condition === "on-success" ? " [on success]" : step.condition === "on-failure" ? " [on failure]" : "";
+        return `${index + 1}. ${name}${condition}`;
+      })
+      .join("\n");
+  }, [command.steps, isWorkflow, library]);
 
   const [values, setValues] = useState<Record<string, string>>(() => ({
     ...Object.fromEntries(merged.map((variable) => [variable.name, variable.defaultValue ?? ""])),
@@ -198,12 +219,14 @@ export function RunDialog({
   }, [openAgents, selectedWorkspaces.length, singleTargetServer]);
 
   const firstWorkspace = selectedWorkspaces[0] ?? null;
-  const preview = renderPreview(
-    command.template,
-    values,
-    firstWorkspace?.id,
-    workspaces.map((option) => ({ id: option.id, name: option.name })),
-  );
+  const preview = isWorkflow
+    ? workflowPreview
+    : renderPreview(
+        command.template,
+        values,
+        firstWorkspace?.id,
+        workspaces.map((option) => ({ id: option.id, name: option.name })),
+      );
 
   const { foreground, foregroundMuted } = theme.colors;
   const typography = useHostTypography();
@@ -219,21 +242,33 @@ export function RunDialog({
   };
 
   const targetCount = Math.max(selectedKeys.length, 1);
-  const providerValid = isShell || isFullModelRef(provider);
+  // A workflow has no provider of its own — each prompt step uses its stored one.
+  const providerValid = isShell || isWorkflow || isFullModelRef(provider);
   const canRun = !busy && providerValid;
-  const runLabel = busy ? "Running…" : isShell ? `Run in terminal on ${targetCount}` : targetCount > 1 ? `Run on ${targetCount} targets` : "Run";
+  const runLabel = busy
+    ? "Running…"
+    : isWorkflow
+      ? targetCount > 1
+        ? `Run workflow on ${targetCount} targets`
+        : "Run workflow"
+      : isShell
+        ? `Run in terminal on ${targetCount}`
+        : targetCount > 1
+          ? `Run on ${targetCount} targets`
+          : "Run";
 
   const handleRun = () => {
     if (!canRun) return;
     const turnBehavior = agentId !== "" ? activeTurn : undefined;
+    const runProvider = isWorkflow ? undefined : provider || undefined;
     const targets: BatchTarget[] =
       selectedKeys.length === 0
-        ? [{ workspaceKey: null, agentId: agentId !== "" ? agentId : undefined, provider: provider || undefined, newWorktree, activeTurnBehavior: turnBehavior }]
+        ? [{ workspaceKey: null, agentId: agentId !== "" ? agentId : undefined, provider: runProvider, newWorktree: isWorkflow ? false : newWorktree, activeTurnBehavior: turnBehavior }]
         : selectedKeys.map((workspaceKey) => ({
             workspaceKey,
             agentId: selectedKeys.length === 1 && agentId !== "" ? agentId : undefined,
-            provider: provider || undefined,
-            newWorktree,
+            provider: runProvider,
+            newWorktree: isWorkflow ? false : newWorktree,
             activeTurnBehavior: turnBehavior,
           }));
     setBusy(true);
@@ -261,7 +296,9 @@ export function RunDialog({
         {command.name}
       </Text>
       <Text style={[styles.subtitle, { color: foregroundMuted, fontSize: font(12) }]}>
-        {isShell
+        {isWorkflow
+          ? `Runs ${command.steps.length} ${command.steps.length === 1 ? "step" : "steps"} in order on each selected workspace (${targetCount}). Steps keep their own providers and defaults.`
+          : isShell
           ? `Runs in a new terminal on each selected workspace (${targetCount}).`
           : targetCount > 1
             ? `Creates a new agent on each of the ${targetCount} selected workspaces.`
@@ -323,6 +360,7 @@ export function RunDialog({
 
       {!isShell ? (
         <>
+          {!isWorkflow ? (
           <View style={styles.field}>
             <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>Provider / model</Text>
             <ProviderModelPicker
@@ -342,12 +380,15 @@ export function RunDialog({
               </Text>
             ) : null}
           </View>
+          ) : null}
+          {!isWorkflow ? (
           <View style={styles.field}>
             <Pressable style={styles.checkRow} onPress={() => setNewWorktree((value) => !value)}>
               <Text style={[styles.check, { color: foreground }]}>{newWorktree ? "☑" : "☐"}</Text>
               <Text style={[styles.checkLabel, { color: foreground }]}>Branch off into a new worktree</Text>
             </Pressable>
           </View>
+          ) : null}
           <View style={styles.field}>
             <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>
               {selectedWorkspaces.length <= 1 ? "Send to an existing agent (optional)" : "Existing agent (single target only)"}
@@ -409,7 +450,7 @@ export function RunDialog({
 
       <View style={styles.previewBox}>
         <Text style={[styles.previewLabel, { color: foregroundMuted }]}>
-          Preview{firstWorkspace ? ` — ${firstWorkspace.name}` : ""}{targetCount > 1 ? ` (+${targetCount - 1} more)` : ""}
+          {isWorkflow ? "Steps" : "Preview"}{firstWorkspace ? ` — ${firstWorkspace.name}` : ""}{targetCount > 1 ? ` (+${targetCount - 1} more)` : ""}
         </Text>
         <Text style={[styles.previewText, { color: foreground, fontSize: font(12) }, monoFont ? { fontFamily: monoFont } : null]}>
           {preview || "—"}

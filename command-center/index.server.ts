@@ -17,7 +17,7 @@ import {
   type CommandDefinition,
   type RunResult,
 } from "./shared/commands";
-import { commandSchema } from "./shared/commands";
+import { commandSchema, validateCommandForSave } from "./shared/commands";
 import {
   createSchedule,
   listScheduleRuns,
@@ -73,7 +73,7 @@ export default function contribute(server: PluginServerContext) {
   // command runs with template defaults in its default workspace — automation
   // has no user to answer input prompts. Errors are swallowed: a failing
   // auto-run must not break the agent that just finished.
-  server.on("agent.turn_ended", async (event, { paseo }) => {
+  server.addHook("agent.turn.after", async (event, { paseo }) => {
     if (event.outcome.kind !== "completed") return;
     const state = await settings.read();
     if (state.status !== "ready") return;
@@ -88,7 +88,7 @@ export default function contribute(server: PluginServerContext) {
 
   // Automation: bootstrap every newly created workspace with a configured
   // command (install deps, lint…). Same defaults-and-swallow-errors policy.
-  server.on("workspace.created", async (event, { paseo }) => {
+  server.addHook("workspace.create.after", async (event, { paseo }) => {
     const state = await settings.read();
     if (state.status !== "ready") return;
     const name = state.values.bootstrapCommand.trim();
@@ -106,7 +106,7 @@ export default function contribute(server: PluginServerContext) {
 
   // The MCP registry tracks live agents only; an archived agent's entry is
   // worthless (a later reopen of the same id would be a different session).
-  server.on("agent.archived", (event) => {
+  server.addHook("agent.archive.after", async (event) => {
     forgetAgentMcp(event.agent.id);
   });
 
@@ -131,7 +131,7 @@ export default function contribute(server: PluginServerContext) {
 
   const commandCenterTool = createCommandCenterTool();
 
-  server.before("agent.session_open", async ({ request }, { paseo }) => {
+  server.addHook("agent.open.before", async ({ request }, { paseo }) => {
     const registry = loadAgentMcpRegistry()[request.agentId] ?? null;
     const decisionInput = {
       reason: request.reason,
@@ -189,6 +189,12 @@ export default function contribute(server: PluginServerContext) {
       return { saved: false, id: null, error: "Command payload failed validation." };
     }
     const commands = loadCommands();
+    // Per-type requirements the schema leaves out (workflow steps, template):
+    // one shared definition with the editor and the tests.
+    const invalid = validateCommandForSave(incoming, commands);
+    if (invalid) {
+      return { saved: false, id: null, error: invalid };
+    }
     const existingIndex = commands.findIndex((command) => command.id === incoming.id);
     if (existingIndex >= 0) {
       // Preserve server-owned counters the client editor does not track.
@@ -401,6 +407,21 @@ export default function contribute(server: PluginServerContext) {
     } catch {
       // Workspace listing failed — fall back to the explicit cwd input.
     }
+    // Workflows execute their steps synchronously against the scheduler's own
+    // context, which the schedule bridge does not model — scheduling the
+    // individual step commands is the supported equivalent.
+    const scheduled = loadCommands().find((command) => command.id === input.commandId);
+    if (!scheduled) {
+      return { ok: false, id: null, view: null, error: `Unknown command ${input.commandId}.` };
+    }
+    if (scheduled.type === "workflow") {
+      return {
+        ok: false,
+        id: null,
+        view: null,
+        error: "Workflows cannot be scheduled — schedule their steps instead.",
+      };
+    }
     return createScheduleFromCommand({
       commandId: input.commandId,
       name: input.name ?? null,
@@ -451,6 +472,9 @@ export default function contribute(server: PluginServerContext) {
       );
     return {
       items: loadCommands()
+        // A workflow has no template of its own, so there is nothing to insert
+        // into a composer message; it stays out of the attachment picker.
+        .filter((command) => command.type !== "workflow")
         .filter(matches)
         .slice(0, 20)
         .map((command) => ({

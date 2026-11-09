@@ -40,6 +40,7 @@ describe("category store", () => {
       type: "prompt",
       template: "t",
       variables: [],
+      steps: [],
       scope: "global",
       favorite: false,
       createdAt: "",
