@@ -1,12 +1,34 @@
 # Compatibility — memory-flash
 
-Current: plugin **0.9.4**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
+Current: plugin **0.10.4**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
 ## Summary (former root README row)
 
 | [memory-flash](./README.md) | **0.14.0 (2026-10-29)** ¹ | `@getpaseo/plugin@0.14.0` (pin `^0.14.0`, `requirements.paseo >=0.14.0`) | **0.14.0: compatible, and its new surface is used — no deprecated API exists in the plugin.** Shipped as **0.9.4**: the compatibility pass (0.8.4) also strengthened the agent recommendation (frontmatter `description` that opens with *mandatory, not optional*, a new `## The non-negotiable baseline` checklist with anti-shortcut rules, and `memory_save`/`memory_search`/`memory_handoff` tool descriptions), and **0.9.4 implements all four recommendations from the pass**: MCP injection in `before("agent.session_open")` (re-derived on every open, so it reaches already created agents and survives eviction — contributing the server only when the agent's saved config does not carry that name, since a collision fails the open; the saved set is read from the daemon's agent record and every unreadable state skips), a read-only `memory_flash_recall` tool attached via `defineAgentTool`, a "repair memory tools" Command Center action on the new `agents.ref(id).reload()`, and MCP `instructions` in `initialize`. Evidence: typecheck + vitest **16 suites, 192 tests**, both entries built by the real 0.14.0 host compiler with zero deprecated calls, `running` on the live 0.14.0 daemon. Earlier: 0.5.0 remote-access HTTP transport with API keys; 0.6.0 outright key deletion and a rewritten agent skill; 0.7.0 Reciprocal Rank Fusion over several FTS5 views plus `memory_diagnose`; 0.7.1 a revision-independent MCP entry path. Details: [Compatibility](./__doc.md#10-compatibility), [§18](./__doc.md#18-paseo-0140--compatibility-pass-2026-10-29). |
+
+## Kimi Code CLI support — 0.10.4
+
+Kimi Code CLI (`@moonshot-ai/kimi-code`, provider id `kimi` in Paseo, launched
+as `kimi acp`) is now a first-class agent target:
+
+- **Direct MCP registration** in `$KIMI_CODE_HOME/mcp.json` (`~/.kimi-code/mcp.json`
+  by default), flat `mcpServers: { memory-flash: { command, args } }` — the same
+  shared JSON writer as Cursor, so foreign servers are preserved, a broken file is
+  never rewritten, and the write stays atomic. `KIMI_CODE_HOME` is honoured, since
+  it moves the CLI's whole data root; the project-local `.kimi-code/mcp.json` is
+  never touched (workspace trust belongs to the repository).
+- **Skill target** `$KIMI_CODE_HOME/skills` (`~/.kimi-code/skills`), the directory
+  Kimi Code CLI scans for user-level Agent Skills, alongside the existing
+  `~/.agents/skills` target it also reads.
+- RPCs `memory-flash.kimi-mcp-status` / `-register` / `-unregister`, a row in the
+  settings screen, and Kimi included in *Register for all local agent configs*.
+
+Evidence: `npm run typecheck` clean, `vitest run` **17 suites / 200 tests** pass
+(the new `tests/kimi-mcp.test.ts` covers the default and moved data root, entry
+shape, foreign-server preservation, corrupted-file refusal and unregistration;
+the skill suite now expects eight targets).
 
 ## Details moved from this plugin's README.md
 

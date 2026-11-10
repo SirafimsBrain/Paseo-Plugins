@@ -38,6 +38,7 @@ export const agentMcpTargetIdSchema = z.enum([
   "cline",
   "cursor",
   "qwen-code",
+  "kimi",
   "codex",
 ]);
 
@@ -318,6 +319,7 @@ export const AGENT_MCP_TARGET_IDS = [
   "cline",
   "cursor",
   "qwen-code",
+  "kimi",
   "codex",
 ] as const;
 export type AgentMcpTargetId = (typeof AGENT_MCP_TARGET_IDS)[number];

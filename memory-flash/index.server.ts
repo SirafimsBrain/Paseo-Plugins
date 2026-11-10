@@ -42,6 +42,9 @@ import {
   registerKiloMcp,
   unregisterKiloMcp,
   kiloMcpStatus,
+  registerKimiMcp,
+  unregisterKimiMcp,
+  kimiMcpStatus,
   registerAllAgentMcp,
 } from "./shared/memories";
 import type { ApiKey } from "./shared/memories";
@@ -65,6 +68,11 @@ import {
   registerCodexMcp as registerCodexMcpOnDisk,
   unregisterCodexMcp as unregisterCodexMcpOnDisk,
 } from "./server/codex-mcp";
+import {
+  kimiMcpStatus as readKimiMcpStatus,
+  registerKimiMcp as registerKimiMcpOnDisk,
+  unregisterKimiMcp as unregisterKimiMcpOnDisk,
+} from "./server/kimi-mcp";
 import {
   opencodeMcpStatus as readOpencodeMcpStatus,
   registerOpencodeMcp as registerOpencodeMcpOnDisk,
@@ -450,11 +458,11 @@ export default function contribute(server: PluginServerContext) {
   });
 
   // --- Direct MCP registration for session-agnostic agents -------------
-  // Cline, Cursor and Codex CLI ignore stdio MCP servers delivered
-  // through the agent session; each reads them from its own config
-  // file, so the plugin registers the server there directly. The
-  // Cline status additionally probes the registered command with a
-  // live MCP initialize handshake.
+  // Cline, Cursor and Codex CLI ignore stdio MCP servers delivered through
+  // the agent session, and Kimi Code CLI keeps its own user-level registry;
+  // each reads MCP servers from its own config file, so the plugin registers
+  // the server there directly. The Cline status additionally probes the
+  // registered command with a live MCP initialize handshake.
 
   server.handle(clineMcpStatus, async () => withLiveSpawn(readClineMcpStatus()));
 
@@ -489,6 +497,15 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(unregisterKiloMcp, () => unregisterKiloMcpOnDisk());
 
+  // Kimi Code CLI keeps its user-level MCP servers in
+  // `$KIMI_CODE_HOME/mcp.json` (`~/.kimi-code/mcp.json` by default), flat
+  // `{command, args}` entries under `mcpServers`.
+  server.handle(kimiMcpStatus, () => readKimiMcpStatus());
+
+  server.handle(registerKimiMcp, () => registerKimiMcpOnDisk());
+
+  server.handle(unregisterKimiMcp, () => unregisterKimiMcpOnDisk());
+
   server.handle(registerAllAgentMcp, () => ({
     results: [
       { agent: "Cline", ...registerClineMcpOnDisk() },
@@ -496,6 +513,7 @@ export default function contribute(server: PluginServerContext) {
       { agent: "Codex CLI", ...registerCodexMcpOnDisk() },
       { agent: "OpenCode", ...registerOpencodeMcpOnDisk() },
       { agent: "Kilo", ...registerKiloMcpOnDisk() },
+      { agent: "Kimi Code CLI", ...registerKimiMcpOnDisk() },
     ],
   }));
 

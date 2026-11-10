@@ -11,15 +11,21 @@ import * as path from "node:path";
 
 let tempHome: string;
 const previousHome = process.env.HOME;
+const previousKimiHome = process.env.KIMI_CODE_HOME;
 
 beforeEach(() => {
   tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "mfc-skill-home-"));
   process.env.HOME = tempHome;
+  // Kimi Code CLI's own skills directory moves with `KIMI_CODE_HOME`; an
+  // inherited value would point the target at a real directory.
+  delete process.env.KIMI_CODE_HOME;
 });
 
 afterEach(() => {
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
+  if (previousKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+  else process.env.KIMI_CODE_HOME = previousKimiHome;
   fs.rmSync(tempHome, { recursive: true, force: true });
 });
 
@@ -109,6 +115,26 @@ describe("remote memory skill", () => {
     expect(uninstallSkill("agents").ok).toBe(true);
     expect(fs.existsSync(result.path!)).toBe(false);
     expect(skillStatuses().find((row) => row.id === "agents")?.installed).toBe(false);
+  });
+
+  it("offers Kimi Code CLI, following KIMI_CODE_HOME", async () => {
+    const { SKILL_NAME, installSkill, skillStatuses, uninstallSkill } = await loadModule();
+
+    const kimi = skillStatuses().find((row) => row.id === "kimi");
+    expect(kimi?.path).toBe(
+      path.join(tempHome, ".kimi-code", "skills", SKILL_NAME, "SKILL.md"),
+    );
+
+    const moved = path.join(tempHome, "kimi-root");
+    process.env.KIMI_CODE_HOME = moved;
+    expect(skillStatuses().find((row) => row.id === "kimi")?.path).toBe(
+      path.join(moved, "skills", SKILL_NAME, "SKILL.md"),
+    );
+
+    expect(installSkill("kimi").ok).toBe(true);
+    expect(fs.existsSync(path.join(moved, "skills", SKILL_NAME, "SKILL.md"))).toBe(true);
+    expect(uninstallSkill("kimi").ok).toBe(true);
+    delete process.env.KIMI_CODE_HOME;
   });
 
   it("rejects an unknown target instead of writing somewhere unexpected", async () => {

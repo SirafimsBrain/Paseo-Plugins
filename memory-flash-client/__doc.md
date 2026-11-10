@@ -92,7 +92,7 @@ The rule for every plugin schema here: **a default must satisfy its own schema, 
 
 ## 5. Agent skill (since 0.2.0)
 
-The plugin ships its own `SKILL.md` — `memory-flash-remote` — installed into the same agent skill directories as the memory-flash skill (`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills`, `~/.kilo/skills`). The settings screen has an **Agent skill** card: *Install into all agents*, one Install/Remove/Update row per target with an `installed · up to date | outdated` state, a message line and a preview of the first lines.
+The plugin ships its own `SKILL.md` — `memory-flash-remote` — installed into the same agent skill directories as the memory-flash skill (`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills`, `~/.kilo/skills`, `$KIMI_CODE_HOME/skills` — `~/.kimi-code/skills` by default). The settings screen has an **Agent skill** card: *Install into all agents*, one Install/Remove/Update row per target with an `installed · up to date | outdated` state, a message line and a preview of the first lines.
 
 **Why the client needs its own skill.** The injected MCP servers make the `memory_*` tools *available* on the client machine, but availability is not usage. Without instruction, an agent treats them as an optional extra on a machine that "does not have the memory plugin", searches once at most, and writes nothing — which is exactly when the shared base is worth the most: before a task, and right after a fix. Because the two plugins are installed independently (a client machine has no memory-flash at all), memory-flash's own `SKILL.md` is not present there.
 

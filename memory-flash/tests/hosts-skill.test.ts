@@ -21,18 +21,25 @@ import {
 let home: string;
 let originalPaseoHome: string | undefined;
 let originalHome: string | undefined;
+let originalKimiHome: string | undefined;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "mf-hosts-"));
   originalPaseoHome = process.env.PASEO_HOME;
   originalHome = process.env.HOME;
+  originalKimiHome = process.env.KIMI_CODE_HOME;
   process.env.PASEO_HOME = home;
   process.env.HOME = home;
+  // Kimi Code CLI's own root moves with `KIMI_CODE_HOME`; an inherited value
+  // would point the skill target (and the MCP config) at a real directory.
+  delete process.env.KIMI_CODE_HOME;
   return () => {
     if (originalPaseoHome === undefined) delete process.env.PASEO_HOME;
     else process.env.PASEO_HOME = originalPaseoHome;
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = originalKimiHome;
     fs.rmSync(home, { recursive: true, force: true });
   };
 });
@@ -84,7 +91,7 @@ describe("remote hosts registry", () => {
 describe("skill installer", () => {
   it("reports targets with install state", () => {
     const statuses = skillStatuses();
-    expect(statuses.length).toBe(7);
+    expect(statuses.length).toBe(8);
     // All targets should have the skill file path containing "memory-flash/SKILL.md"
     for (const status of statuses) {
       expect(status.path).toContain("memory-flash/SKILL.md");
@@ -105,6 +112,7 @@ describe("skill installer", () => {
       "cline",
       "codex",
       "kilo",
+      "kimi",
       "opencode",
       "qwen",
     ]);

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as process from "node:process";
 import { MCP_TOOLS } from "./mcp-tools";
 
 /**
@@ -311,10 +312,22 @@ export interface SkillTarget {
 }
 
 /**
+ * Kimi Code CLI's user-level data root: `$KIMI_CODE_HOME` when set, else
+ * `~/.kimi-code`. Its Kimi-specific skills directory moves with that root,
+ * while the generic `~/.agents/skills` target above stays shared across
+ * tools.
+ */
+function kimiCodeHome(): string {
+  const configured = (process.env.KIMI_CODE_HOME ?? "").trim();
+  return configured.length > 0 ? configured : path.join(os.homedir(), ".kimi-code");
+}
+
+/**
  * Known skill destinations. The four first are the conventions observed on
  * this machine (Paseo itself installs skills into `~/.agents/skills`,
  * `~/.claude/skills` and `~/.codex/skills`; OpenCode and Qwen Code read
- * `~/.config/opencode/skills` and `~/.qwen/skills`).
+ * `~/.config/opencode/skills` and `~/.qwen/skills`). Kimi Code CLI reads
+ * `$KIMI_CODE_HOME/skills`, which is `~/.kimi-code/skills` by default.
  */
 export function skillTargets(): SkillTarget[] {
   const home = os.homedir();
@@ -353,6 +366,13 @@ export function skillTargets(): SkillTarget[] {
       id: "kilo",
       label: "Kilo Code (~/.kilo/skills)",
       dir: () => path.join(home, ".kilo", "skills"),
+    },
+    {
+      id: "kimi",
+      // `KIMI_CODE_HOME` moves the Kimi-specific user directory; the label
+      // shows the default path, the status row shows the resolved one.
+      label: "Kimi Code CLI (~/.kimi-code/skills)",
+      dir: () => path.join(kimiCodeHome(), "skills"),
     },
   ];
 }

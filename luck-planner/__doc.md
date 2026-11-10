@@ -1221,13 +1221,14 @@ gets a real actor, and agents get a written protocol for keeping the tree. Verif
   worth creating, the status table with honest transition criteria, "revision and audit are
   automatic — never manage them by hand", bees/bugs/goals (propose only, human approves),
   growth, and the transport-failure rule ("tools briefly unavailable ≠ data gone"). The
-  installer mirrors memory-flash: seven targets (`~/.agents/skills`, `.claude`, `.codex`,
-  `.config/opencode`, `.qwen`, `.cline`, `.kilo`) with status/install/uninstall functions
-  exposed for the E4 screen. On every plugin load `ensureSkillInstalled()` installs into
+  installer mirrors memory-flash: eight targets (`~/.agents/skills`, `.claude`, `.codex`,
+  `.config/opencode`, `.qwen`, `.cline`, `.kilo`, `$KIMI_CODE_HOME/skills`) with
+  status/install/uninstall functions exposed for the E4 screen. On every plugin load `ensureSkillInstalled()` installs into
   targets whose directory **already exists** (an existing directory means that agent
   convention is active) and rewrites only when the content differs — idempotent, and each
   write is logged so `paseo plugin logs luck-planner` shows the install. Live acceptance:
-  all seven directories on this machine received the skill.
+  all seven directories on this machine received the skill (Kimi Code CLI was added later,
+  in 0.52.2, to the same installer).
 - **Live acceptance (stage D3)** — a real agent created through `paseo run --provider
   kilo/…` called `luck-planner_luck_tree_get_context` (`roots: []`),
   `luck-planner_luck_tree_upsert_leaf` without `parentId` (skeleton + leaf created,
@@ -2010,8 +2011,10 @@ agents' *own* config files:
   is re-read every time a location boots, so the tools come back by
   themselves.
 - **Cline, Cursor, Qwen Code and Codex CLI** are terminal agents that do not connect
-  stdio MCP servers delivered through an orchestrator's session at all — for
-  them a config-file entry is the only way in.
+  stdio MCP servers delivered through an orchestrator's session at all — for them a
+  config-file entry is the only way in. **Kimi Code CLI** keeps its own user-level
+  `mcp.json`, so the same entry also covers Kimi sessions started outside Paseo and is
+  available as soon as the CLI boots.
 
 There is a second, subtler effect, measured on OpenCode (the memory-flash
 lesson): after an eviction the *dead* session entry still owns the server's
@@ -2033,6 +2036,7 @@ behaviour is visible in `paseo plugin logs luck-planner`.
 | Cline | `~/.cline/data/settings/cline_mcp_settings.json` | `mcpServers: { luck-planner: { transport: { type: "stdio", command, args } } }` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers: { luck-planner: { command, args } }` |
 | Qwen Code | `~/.qwen/settings.json` | `mcpServers: { luck-planner: { command, args, timeout: 15000, trust: true } }` |
+| Kimi Code CLI | `$KIMI_CODE_HOME/mcp.json` (`~/.kimi-code/mcp.json` by default) | `mcpServers: { luck-planner: { command, args } }` |
 | Codex CLI | `~/.codex/config.toml` | the `[mcp_servers.luck-planner]` table with `command` and `args` |
 
 **The rules the writers follow**, in every format:

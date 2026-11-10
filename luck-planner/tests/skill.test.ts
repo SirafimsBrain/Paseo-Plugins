@@ -20,22 +20,28 @@ import {
 
 let home: string;
 let originalHome: string | undefined;
+let originalKimiHome: string | undefined;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "luck-skill-"));
   originalHome = process.env.HOME;
+  originalKimiHome = process.env.KIMI_CODE_HOME;
   process.env.HOME = home;
+  // Kimi Code CLI's own skills directory moves with `KIMI_CODE_HOME`.
+  delete process.env.KIMI_CODE_HOME;
   return () => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = originalKimiHome;
     fs.rmSync(home, { recursive: true, force: true });
   };
 });
 
 describe("skill installer", () => {
-  it("reports the seven known targets with install state", () => {
+  it("reports the eight known targets with install state", () => {
     const statuses = skillStatuses();
-    expect(statuses).toHaveLength(7);
+    expect(statuses).toHaveLength(8);
     const ids = statuses.map((status) => status.id).sort();
     expect(ids).toEqual([
       "agents",
@@ -43,6 +49,7 @@ describe("skill installer", () => {
       "cline",
       "codex",
       "kilo",
+      "kimi",
       "opencode",
       "qwen",
     ]);

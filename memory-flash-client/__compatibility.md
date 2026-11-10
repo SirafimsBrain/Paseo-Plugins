@@ -1,12 +1,26 @@
 # Compatibility — memory-flash-client
 
-Current: plugin **0.3.2**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
+Current: plugin **0.4.2**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
 ## Summary (former root README row)
 
 | [memory-flash-client](./README.md) | **0.14.0 (2026-10-29)** ¹ | `@getpaseo/plugin@0.14.0` (pin `^0.14.0`, `requirements.paseo >=0.14.0`) | **0.14.0: compatible, and its new surface is used — no deprecated API exists in the plugin.** Shipped as **0.3.2**: the compatibility pass (0.2.2) strengthened the agent recommendation (frontmatter `description` + a new `## The non-negotiable baseline` checklist), and **0.3.2 implements the pass's recommendations** — the remote HTTP servers are now also contributed in `before("agent.session_open")` (re-derived on every open, skipping any name the agent's saved config already carries, with the saved set read from the daemon's agent record and every unreadable state failing safe to *skip*), plus a "repair remote memory tools" Command Center action on the new `agents.ref(id).reload()`; `defineAgentTool` stays deliberately unused — the tools belong to the remote host. Evidence: typecheck + vitest **6 suites, 61 tests**, both entries built by the real 0.14.0 host compiler with zero deprecated calls, manifest accepted; **limited live evidence** (installed but `disabled` on this machine). Still installs with **no build step**. Requires Memory Flash 0.5.0+ with the HTTP endpoint on the remote host. Still installs with **no build step** — every import is host-supplied, so no npm-registry access is needed. Requires Memory Flash 0.5.0+ with the HTTP endpoint on the remote host. Details: [Compatibility](./__doc.md#12-compatibility), [§17](./__doc.md#17-paseo-0140--compatibility-pass-2026-10-29). |
+
+## Kimi Code CLI skill target — 0.4.2
+
+The `memory-flash-remote` skill can now be installed into Kimi Code CLI's
+user-level skills directory `$KIMI_CODE_HOME/skills` (`~/.kimi-code/skills` by
+default), which the CLI scans for Agent Skills; `KIMI_CODE_HOME` is honoured so a
+moved data root gets its own copy. The remote HTTP MCP servers themselves need no
+Kimi-specific code: they are contributed through the provider-agnostic
+`agent.create` / `agent.session_open` hooks, and Kimi accepts HTTP MCP servers
+over ACP.
+
+Evidence: `npm run typecheck` clean, `vitest run` **6 suites / 62 tests** pass
+(`tests/skill.test.ts` asserts the Kimi target's default path, the
+`KIMI_CODE_HOME` path, and install/uninstall).
 
 ## Details moved from this plugin's README.md
 

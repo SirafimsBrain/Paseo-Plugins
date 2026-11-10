@@ -44,13 +44,18 @@ import {
 let home = "";
 let previousHome: string | undefined;
 let previousXdg: string | undefined;
+let previousKimiHome: string | undefined;
 
 beforeEach(() => {
   home = mkdtempSync(path.join(tmpdir(), "luck-planner-agentcfg-"));
   previousHome = process.env.HOME;
   previousXdg = process.env.XDG_CONFIG_HOME;
+  previousKimiHome = process.env.KIMI_CODE_HOME;
   process.env.HOME = home;
   process.env.XDG_CONFIG_HOME = path.join(home, ".config");
+  // Kimi Code CLI's own root moves with `KIMI_CODE_HOME`; an inherited value
+  // would point the target at a real directory outside the temp home.
+  delete process.env.KIMI_CODE_HOME;
 });
 
 afterEach(() => {
@@ -58,6 +63,8 @@ afterEach(() => {
   else process.env.HOME = previousHome;
   if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = previousXdg;
+  if (previousKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+  else process.env.KIMI_CODE_HOME = previousKimiHome;
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -351,13 +358,14 @@ describe("D4: the writes are atomic", () => {
 });
 
 describe("D4: every target is offered", () => {
-  it("knows the six agents", () => {
+  it("knows the seven agents", () => {
     expect(agentMcpStatuses().map((row) => row.id)).toEqual([
       "opencode",
       "kilo",
       "cline",
       "cursor",
       "qwen-code",
+      "kimi",
       "codex",
     ]);
   });
@@ -376,14 +384,28 @@ describe("D4: the registration is written where the agent reads it", () => {
     expect(existsSync(path.join(home, ".config", "opencode", "opencode.json"))).toBe(true);
   });
 
-  it("uses the home directory for Cline, Cursor, Qwen Code and Codex", () => {
+  it("uses the home directory for Cline, Cursor, Qwen Code, Kimi and Codex", () => {
     registerAgentMcp("cline");
     registerAgentMcp("cursor");
     registerAgentMcp("qwen-code");
+    registerAgentMcp("kimi");
     registerAgentMcp("codex");
     expect(existsSync(path.join(home, ".cline", "data", "settings", "cline_mcp_settings.json"))).toBe(true);
     expect(existsSync(path.join(home, ".cursor", "mcp.json"))).toBe(true);
     expect(existsSync(path.join(home, ".qwen", "settings.json"))).toBe(true);
+    expect(existsSync(path.join(home, ".kimi-code", "mcp.json"))).toBe(true);
     expect(existsSync(path.join(home, ".codex", "config.toml"))).toBe(true);
+  });
+
+  it("follows KIMI_CODE_HOME for Kimi's user-level mcp.json", () => {
+    const moved = path.join(home, "kimi-root");
+    process.env.KIMI_CODE_HOME = moved;
+    expect(registerAgentMcp("kimi").ok).toBe(true);
+    expect(existsSync(path.join(moved, "mcp.json"))).toBe(true);
+    const document = JSON.parse(readFileSync(path.join(moved, "mcp.json"), "utf8")) as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
+    expect(document.mcpServers[AGENT_MCP_SERVER_NAME]?.command).toMatch(/node/);
+    expect(document.mcpServers[AGENT_MCP_SERVER_NAME]?.args[0]).toMatch(/mcp-server\.js$/);
   });
 });

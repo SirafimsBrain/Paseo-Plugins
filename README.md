@@ -70,10 +70,10 @@ MIT. See [LICENSE](./LICENSE).
 | ------ | ---- | -------------- | ----------- | --- | ------ | ------- |
 | [session-manager](./session-manager/README.md) | 0.5.0 | 0.15.0 (2026-11-03) | `>=0.15.0` | `@getpaseo/plugin ^0.15.0` | Compatible after `addHook` migration | [__compatibility.md](./session-manager/__compatibility.md) |
 | [command-center](./command-center/README.md) | 0.7.0 | 0.15.0 (2026-11-09) | `>=0.15.0` | `@getpaseo/plugin ^0.15.3` + `@getpaseo/client ^0.15.3` | Compatible after `addHook` migration | [__compatibility.md](./command-center/__compatibility.md) |
-| [memory-flash](./memory-flash/README.md) | 0.9.4 | 0.14.0 (2026-10-29) | `>=0.14.0` | `@getpaseo/plugin ^0.14.0` | Compatible; 0.14.0 surface in use | [__compatibility.md](./memory-flash/__compatibility.md) |
+| [memory-flash](./memory-flash/README.md) | 0.10.4 | 0.14.0 (2026-10-29) | `>=0.14.0` | `@getpaseo/plugin ^0.14.0` | Compatible; 0.14.0 surface in use | [__compatibility.md](./memory-flash/__compatibility.md) |
 | [bunny-search](./bunny-search/README.md) | 0.5.3 | 0.15.0 (2026-11-03) | `>=0.15.0` | `@getpaseo/plugin ^0.15.0` | Compatible after `addHook` migration | [__compatibility.md](./bunny-search/__compatibility.md) |
-| [memory-flash-client](./memory-flash-client/README.md) | 0.3.2 | 0.14.0 (2026-10-29) | `>=0.14.0` | `@getpaseo/plugin ^0.14.0` | Compatible; 0.14.0 surface in use | [__compatibility.md](./memory-flash-client/__compatibility.md) |
-| [luck-planner](./luck-planner/README.md) | 0.51.2 | 0.15.0 (2026-11-03) | `>=0.15.0` | `@getpaseo/plugin ^0.15.0` | Compatible after `addHook` migration | [__compatibility.md](./luck-planner/__compatibility.md) |
+| [memory-flash-client](./memory-flash-client/README.md) | 0.4.2 | 0.14.0 (2026-10-29) | `>=0.14.0` | `@getpaseo/plugin ^0.14.0` | Compatible; 0.14.0 surface in use | [__compatibility.md](./memory-flash-client/__compatibility.md) |
+| [luck-planner](./luck-planner/README.md) | 0.52.2 | 0.15.0 (2026-11-03) | `>=0.15.0` | `@getpaseo/plugin ^0.15.0` | Compatible after `addHook` migration | [__compatibility.md](./luck-planner/__compatibility.md) |
 | [remote-control](./remote-control/README.md) | 1.0.0 | 0.15.0 (2026-11-03) | `>=0.11.0` | `@getpaseo/plugin 0.13.0` (dev pin) | Compatible as-is; no deprecated API used | [__compatibility.md](./remote-control/__compatibility.md) |
 
 Extended compatibility information — SDK surface diffs, pass evidence and footnotes — lives in each plugin's `__compatibility.md` (linked above) and in its `__doc.md`.

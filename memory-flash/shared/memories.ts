@@ -466,9 +466,31 @@ export const unregisterKiloMcp = defineRpc({
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });
 
+// Kimi Code CLI reads stdio MCP servers from its own user-level `mcp.json`
+// (`$KIMI_CODE_HOME/mcp.json`, `~/.kimi-code/mcp.json` by default), using
+// the flat `{command, args}` shape. See server/kimi-mcp.ts.
+
+export const kimiMcpStatus = defineRpc({
+  name: "memory-flash.kimi-mcp-status",
+  input: z.object({}),
+  output: agentMcpStatusSchema,
+});
+
+export const registerKimiMcp = defineRpc({
+  name: "memory-flash.kimi-mcp-register",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const unregisterKimiMcp = defineRpc({
+  name: "memory-flash.kimi-mcp-unregister",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
 /** Result of registering memory-flash in one agent's MCP config. */
 export const agentMcpRegistrationResultSchema = z.object({
-  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI"). */
+  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI", "Kimi"). */
   agent: z.string(),
   ok: z.boolean(),
   error: z.string().nullable(),

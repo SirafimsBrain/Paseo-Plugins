@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as process from "node:process";
 
 /**
  * Agent skill for the *remote* memory, installed on the client machine.
@@ -262,6 +263,16 @@ export interface SkillTarget {
   dir: () => string;
 }
 
+/**
+ * Kimi Code CLI's user-level data root: `$KIMI_CODE_HOME` when set, else
+ * `~/.kimi-code`. Its Kimi-specific skills directory moves with that root;
+ * the generic `~/.agents/skills` target stays shared across tools.
+ */
+function kimiCodeHome(): string {
+  const configured = (process.env.KIMI_CODE_HOME ?? "").trim();
+  return configured.length > 0 ? configured : path.join(os.homedir(), ".kimi-code");
+}
+
 /** The same destinations memory-flash installs into on this machine. */
 export function skillTargets(): SkillTarget[] {
   const home = os.homedir();
@@ -300,6 +311,13 @@ export function skillTargets(): SkillTarget[] {
       id: "kilo",
       label: "Kilo Code (~/.kilo/skills)",
       dir: () => path.join(home, ".kilo", "skills"),
+    },
+    {
+      id: "kimi",
+      // `KIMI_CODE_HOME` moves the Kimi-specific user directory; the label
+      // shows the default path, the status row shows the resolved one.
+      label: "Kimi Code CLI (~/.kimi-code/skills)",
+      dir: () => path.join(kimiCodeHome(), "skills"),
     },
   ];
 }

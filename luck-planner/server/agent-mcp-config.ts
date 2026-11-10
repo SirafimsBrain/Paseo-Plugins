@@ -14,8 +14,10 @@
  *    file* is not affected: the config is re-read every time a location
  *    boots, so the tools come back by themselves.
  * 2. **Cline, Cursor, Qwen Code and Codex CLI** are terminal agents that do not
- *    connect stdio MCP servers delivered through an orchestrator's session
- *    at all — for them a config-file entry is the only way in.
+ *    connect stdio MCP servers delivered through an orchestrator's session at
+ *    all — for them a config-file entry is the only way in. **Kimi Code CLI**
+ *    keeps its own user-level `mcp.json`, so the same entry also covers Kimi
+ *    sessions started outside Paseo and is available as soon as the CLI boots.
  *
  * A second, subtler reason (measured on OpenCode, the memory-flash lesson):
  * after an eviction the *dead* session entry still owns the server's name in
@@ -64,6 +66,7 @@ export const AGENT_MCP_TARGETS = [
   "cline",
   "cursor",
   "qwen-code",
+  "kimi",
   "codex",
 ] as const;
 export type AgentMcpTargetId = (typeof AGENT_MCP_TARGETS)[number];
@@ -169,6 +172,19 @@ function cursorPath(): string {
  */
 function qwenPath(): string {
   return path.join(os.homedir(), ".qwen", "settings.json");
+}
+
+/**
+ * Kimi Code CLI keeps its user-level MCP servers in
+ * `$KIMI_CODE_HOME/mcp.json`, i.e. `~/.kimi-code/mcp.json` by default. The
+ * file has the same flat `mcpServers: { <name>: { command, args } }` shape as
+ * Cursor. The project-local `.kimi-code/mcp.json` is gated by workspace trust
+ * and belongs to the repository, so the plugin never writes there.
+ */
+function kimiPath(): string {
+  const configured = (process.env.KIMI_CODE_HOME ?? "").trim();
+  const base = configured.length > 0 ? configured : path.join(os.homedir(), ".kimi-code");
+  return path.join(base, "mcp.json");
 }
 
 function codexPath(): string {
@@ -417,6 +433,8 @@ function targetLabel(id: AgentMcpTargetId): string {
       return "Cursor";
     case "qwen-code":
       return "Qwen Code";
+    case "kimi":
+      return "Kimi Code CLI";
     case "codex":
       return "Codex CLI";
   }
@@ -435,6 +453,8 @@ function targetPath(id: AgentMcpTargetId): string {
       return cursorPath();
     case "qwen-code":
       return qwenPath();
+    case "kimi":
+      return kimiPath();
     case "codex":
       return codexPath();
   }
@@ -459,6 +479,8 @@ function targetDetected(id: AgentMcpTargetId): boolean {
       return fs.existsSync(cursorPath()) || fs.existsSync(path.dirname(cursorPath()));
     case "qwen-code":
       return fs.existsSync(qwenPath()) || fs.existsSync(path.dirname(qwenPath()));
+    case "kimi":
+      return fs.existsSync(kimiPath()) || fs.existsSync(path.dirname(kimiPath()));
     case "codex":
       return fs.existsSync(codexPath()) || fs.existsSync(path.dirname(codexPath()));
   }
@@ -492,7 +514,7 @@ function statusOf(id: AgentMcpTargetId): AgentMcpStatus {
     };
   }
 
-  if (id === "cline" || id === "cursor" || id === "qwen-code") {
+  if (id === "cline" || id === "cursor" || id === "qwen-code" || id === "kimi") {
     const loaded = readServersDocument(path);
     if (!loaded.ok) {
       return { id, label: targetLabel(id), path, detected, installed: false, upToDate: null, command: null, args: null };
@@ -545,7 +567,7 @@ function statusOf(id: AgentMcpTargetId): AgentMcpStatus {
   };
 }
 
-/** Reads the launch back from a Cline/Cursor/Qwen entry. */
+/** Reads the launch back from a Cline/Cursor/Qwen/Kimi entry. */
 function serversEntryLaunch(entry: unknown, id: AgentMcpTargetId): AgentMcpLaunch | null {
   const candidate = entry as { command?: unknown; args?: unknown; transport?: unknown } | undefined;
   const command = id === "cline" ? (candidate?.transport as { command?: unknown } | undefined)?.command : candidate?.command;
@@ -554,7 +576,7 @@ function serversEntryLaunch(entry: unknown, id: AgentMcpTargetId): AgentMcpLaunc
   return { command, args: args.map(String) };
 }
 
-/** Writes the entry a Cline/Cursor/Qwen Code expects. */
+/** Writes the entry Cline/Cursor/Qwen Code/Kimi expect. */
 function serversEntryFor(id: AgentMcpTargetId, launch: AgentMcpLaunch): unknown {
   if (id === "cline") {
     return { transport: { type: "stdio", command: launch.command, args: launch.args } };
@@ -600,7 +622,7 @@ export function registerAgentMcp(id: AgentMcpTargetId): { ok: boolean; error: st
       return { ok: true, error: null };
     }
 
-    if (id === "cline" || id === "cursor" || id === "qwen-code") {
+    if (id === "cline" || id === "cursor" || id === "qwen-code" || id === "kimi") {
       const target = targetPath(id);
       const loaded = readServersDocument(target);
       if (!loaded.ok) return { ok: false, error: loaded.error };
@@ -649,7 +671,7 @@ export function unregisterAgentMcp(id: AgentMcpTargetId): { ok: boolean; error: 
       return { ok: true, error: null };
     }
 
-    if (id === "cline" || id === "cursor" || id === "qwen-code") {
+    if (id === "cline" || id === "cursor" || id === "qwen-code" || id === "kimi") {
       const target = targetPath(id);
       const loaded = readServersDocument(target);
       if (!loaded.ok) return { ok: false, error: loaded.error };
