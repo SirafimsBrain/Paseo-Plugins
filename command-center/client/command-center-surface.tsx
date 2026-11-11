@@ -20,8 +20,10 @@ import {
   toggleFavorite,
 } from "../shared/commands";
 import { createSchedule } from "../shared/schedules";
+import { exportCommands, importCommands, importCommandsFromUrl } from "../shared/share";
 import { parseScreenParams, screenParams, type ScreenParams, type ScreenView } from "../shared/screen-params";
 import { CommandForm, type CommandFormResult } from "./command-form";
+import { ShareDialog } from "./share-dialog";
 import { dispatchRemoteTarget } from "./dispatch";
 import { renderPreview } from "./preview";
 import { RunDialog, type BatchItemResult, type BatchTarget } from "./run-dialog";
@@ -78,6 +80,9 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
   const categoriesRpc = useRpc(listCategories);
   const saveCategoriesRpc = useRpc(saveCategories);
   const createScheduleRpc = useRpc(createSchedule);
+  const exportRpc = useRpc(exportCommands);
+  const importRpc = useRpc(importCommands);
+  const importUrlRpc = useRpc(importCommandsFromUrl);
 
   // All configured app hosts (multi-host fan-out). Older hosts may not provide
   // the loader — fall back to single-host mode instead of crashing.
@@ -119,6 +124,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchVisible, setSearchVisible] = useState(false);
+  const [sharing, setSharing] = useState(false);
   /** Deep links (0.6.0): command/schedule the screen params asked to focus. */
   const [focusedCommandId, setFocusedCommandId] = useState<string | null>(null);
   const [highlightScheduleId, setHighlightScheduleId] = useState<string | null>(null);
@@ -529,6 +535,12 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
     }
   };
 
+  /** Stable identity: the share dialog loads the export once on mount. */
+  const handleShareExport = useCallback(
+    (ids: string[] | undefined) => exportRpc(ids ? { ids } : {}),
+    [exportRpc],
+  );
+
   const handleDelete = async (command: CommandDefinition) => {
     try {
       await deleteRpc({ id: command.id });
@@ -832,15 +844,20 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
                 style={[styles.searchInput, { color: foreground, borderColor: theme.colors.border }]}
               />
             ) : null}
-            <Pressable
-              style={[styles.smallButton, searchVisible && { backgroundColor: "rgba(90,140,255,0.25)" }]}
-              onPress={() => {
-                setSearchVisible((visible) => !visible);
-                if (searchVisible) setSearchQuery("");
-              }}
-            >
-              <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Search</Text>
-            </Pressable>
+            <View style={styles.toolbarRow}>
+              <Pressable
+                style={[styles.smallButton, searchVisible && { backgroundColor: "rgba(90,140,255,0.25)" }]}
+                onPress={() => {
+                  setSearchVisible((visible) => !visible);
+                  if (searchVisible) setSearchQuery("");
+                }}
+              >
+                <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Search</Text>
+              </Pressable>
+              <Pressable style={styles.smallButton} onPress={() => setSharing(true)}>
+                <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Share</Text>
+              </Pressable>
+            </View>
           </View>
           {commands === null && commandsError === null ? (
             <Text style={[styles.muted, { color: foregroundMuted, fontSize: font(13) }]}>Loading…</Text>
@@ -1035,6 +1052,32 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
       </Modal>
 
       <Modal
+        open={sharing}
+        onOpenChange={(open) => !open && setSharing(false)}
+        title="Share the library"
+      >
+        <Modal.Content>
+          <ShareDialog
+            theme={theme}
+            commands={commands ?? []}
+            onExport={handleShareExport}
+            onImport={async (json, mode) => {
+              const outcome = await importRpc({ json, mode });
+              if (outcome.ok) refresh();
+              return outcome;
+            }}
+            onImportUrl={async (url, mode) => {
+              const outcome = await importUrlRpc({ url, mode });
+              if (outcome.ok) refresh();
+              return outcome;
+            }}
+            onImported={refresh}
+            onClose={() => setSharing(false)}
+          />
+        </Modal.Content>
+      </Modal>
+
+      <Modal
         open={scheduling !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -1103,6 +1146,7 @@ const styles = StyleSheet.create({
   heading: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
   formContainer: { padding: 4 },
   toolbar: { gap: 8, marginBottom: 2 },
+  toolbarRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   categoryRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: {
     paddingHorizontal: 10,

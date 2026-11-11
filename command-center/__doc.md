@@ -25,6 +25,7 @@ command-center/
 │   ├── schedules.ts           # schedule view models, RPC contracts, cadence helpers (client-safe)
 │   ├── template.ts            # pure template renderer + input discovery (client-safe)
 │   ├── search.ts              # pure command search/filter over name, category, template, variables
+│   ├── share.ts               # portable library bundle: export/import/merge/copy (client-safe)
 │   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
@@ -43,6 +44,7 @@ command-center/
 │   ├── schedules-tab.tsx           # schedule list: status, next/last run, actions, run history
 │   ├── provider-model-picker.tsx   # dropdown for full `provider/model` references with filter
 │   ├── dispatch.ts                 # client-side executor mirror for non-local hosts (multi-host fan-out)
+│   ├── share-dialog.tsx            # export/import modal (clipboard + raw JSON URL)
 │   ├── use-host-typography.ts     # hook: host font settings → scale + families
 │   └── preview.ts                  # preview rendering helper
 └── tests/                     # vitest suites (9 files, 98 tests)
@@ -113,6 +115,9 @@ Each history card shows the used model and agent (resolved live from the agents 
 | `command-center.history-append` | `{ entry }` without `id`/`at` (stamped server-side) | `{ ok, id }` — used by multi-host client dispatch |
 | `command-center.categories` | `{}` | `{ categories: CommandCategory[] }` — stored labels plus implicit ones found on commands |
 | `command-center.categories-save` | `{ category?, renameFrom?, deleteName? }` | `{ ok, error }` — create/rename/delete in one call; deleting unsets the label on referencing commands |
+| `command-center.export` | `{ ids? }` | `{ json, count }` — versioned library bundle; omitted/empty `ids` exports everything |
+| `command-center.import` | `{ json, mode: merge\|copy }` | `{ ok, added, updated, skipped, error }` — accepts a bundle or a bare `commands.json` array |
+| `command-center.import-url` | `{ url, mode }` | same as `import` — fetches a raw http(s) JSON file (10 s timeout) |
 | `command-center.schedules` | `{}` | `{ schedules: ScheduleView[] }` — every daemon schedule plus the plugin link (commandId/commandName); prunes stale links |
 | `command-center.schedule-create` | `{ commandId, values, provider, cron, name?, workspaceId?, cwd?, newWorktree?, archiveOnFinish?, maxRuns?, runOnCreate? }` | `{ ok, id, view, error }` — renders the template once, creates the daemon schedule, stores the link |
 | `command-center.schedule-action` | `{ id, action: pause\|resume\|run-once\|delete }` | `{ ok, error }` |
@@ -367,7 +372,7 @@ Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger a
 
 1. **Workflows — delivered in 0.7.0 (§14.2)** and removed from this list: a `workflow` command type chaining saved commands with `always | on-success | on-failure` conditions, an executor pass, per-step history summaries and a step editor.
 2. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration (not present in 0.10.x), otherwise emulable via Command Center items only.
-3. **Import/export & sharing** — export `commands.json` selections as a shareable JSON or install from a git repo (mirroring how Paseo plugins are distributed).
+3. **Import/export & sharing** — delivered in 0.8.0 (§15): a versioned JSON bundle, merge/copy import semantics, and raw-URL import (a file in a git host, a gist, any static URL).
 4. **Multi-agent fan-out** — done for workspaces/hosts via `run-batch` + client dispatch; per-agent (N existing agents as targets) fan-out is still open.
 5. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is still open and would use `useHosts()` + per-host `getPaseoClient(serverId)` RPCs.
 6. **Command parameters beyond strings** — file pickers, workspace pickers as first-class variable types in the run dialog.
@@ -758,3 +763,84 @@ Client surface:
 | Deprecated-call scan | no `server.on(` / `server.before(` left in the plugin; the fake server in `tests/server-rpc.test.ts` exposes `addHook` only. |
 | Live daemon | **PASS** — installed from the working tree into an isolated **0.15.3** daemon (scratch home under `.tmp/`, `127.0.0.1:16768`, `pluginsEnabled: true`, production `~/.paseo` untouched): status `running`, `[paseo] Plugin ready`, **21 RPC methods** registered, **zero** `Unknown lifecycle hook` errors — the host validates `addHook` names at registration, so the four migrated names are proven accepted. Only the benign `DEP0176 fs.F_OK` warning from the bundled dependency chain appears (§12.1). The scratch home was stopped and removed; the production home was never touched. |
 | Workflow execution | Covered by `tests/workflows.test.ts` against throwaway stores; the workflow path was not exercised through the app UI (the client surface was not rendered). |
+## 15. Version 0.8.0 — library sharing (2026-11-11)
+
+Roadmap §8 item 3 ("import/export & sharing"), delivered. New functionality →
+second-digit bump `0.7.0 → 0.8.0`, annotated tag `command-center@0.8.0`.
+
+### 15.1 Format
+
+`shared/share.ts` owns the format and the merge rules (client-safe, pure):
+
+```json
+{
+  "format": "command-center/commands",
+  "version": 1,
+  "exportedAt": "2026-11-11T00:00:00.000Z",
+  "commands": [ /* CommandDefinition[] */ ]
+}
+```
+
+- The envelope is versioned so a future schema change is rejected instead of
+  silently mis-parsed. Bare `CommandDefinition[]` (what a hand-copied
+  `commands.json` looks like) is also accepted on import.
+- `useCount` is reset to 0 on export and never restored on import: the counter
+  describes *this* library's usage, and importing someone else's history would
+  corrupt the "most used" ordering. `favorite` travels with the command in copy
+  mode and is preserved locally in merge mode.
+- Export takes an optional id selection; the UI lists every command with a
+  toggle, all selected by default.
+
+### 15.2 `merge` vs `copy`
+
+| Mode | Identity | Result |
+| ---- | -------- | ------ |
+| `merge` (default) | Existing id, else case-insensitive name | Matching commands are updated in place (id, `createdAt`, `favorite`, `useCount` stay local); unknown ones are added |
+| `copy` | Always a fresh id | Every imported command is added; a name collision becomes `Name (2)`, `Name (3)`… so importing your own export never overwrites the originals |
+
+Both modes remap workflow step ids through a bundle→final-id map. That is what
+makes a copied workflow chain point at the *copied* step commands instead of at
+dangling ids. Commands are imported before workflows, so a bundle where the
+workflow is listed first still validates. Every candidate passes the same
+`validateCommandForSave` as the save handler; a broken record is skipped and
+reported (`skipped`/`error`), never written.
+
+Import also registers any category labels the bundle brought along (through the
+same categories store the editor uses), so the filter chips stay consistent.
+
+### 15.3 Import from a URL
+
+`command-center.import-url` fetches a raw http(s) JSON file and runs the same
+import path. This is the practical "install from a repository" form: a file
+committed to a git host, a gist, or any static URL works; the plugin does not
+invoke `git` and does not read plugin manifests. The request is user-initiated,
+time-boxed at 10 s, and only `http:`/`https:` URLs are accepted.
+
+### 15.4 UI
+
+The library toolbar gained a `Share` button; the modal has two tabs:
+
+- **Export** — per-command selection chips, the formatted bundle in a read-only
+  text area, `Copy JSON` (`copyText` from `client/ui`).
+- **Import** — mode chips (`Update it (merge)` / `Add a copy`), a paste area,
+  and a raw-URL field with `Fetch`. The result line reports
+  `added / updated / skipped` plus the first error; a successful import
+  refreshes the library immediately.
+
+### 15.5 Deliberately not built
+
+1. **No plugin-manifest install.** The roadmap's "install from a git repo" is
+   satisfied by fetching the JSON file; cloning a repository and running its
+   code is Paseo's own plugin mechanism, not a command-library feature.
+2. **No automatic cross-host push.** Sharing is an explicit bundle operation;
+   see §16 for the SDK limit that keeps automatic store sync open.
+3. **No merge conflict UI.** `merge` is last-write-wins by bundle content; the
+   dialog offers `copy` for users who want to keep both sides.
+
+### 15.6 Verification (2026-11-11)
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | **exit 0** |
+| `npx vitest run` | **15 suites / 170 tests pass** — 159 from 0.7.0 + `tests/share.test.ts` (11: envelope/bare-array parsing, malformed and foreign-format rejection, export selection and counter reset, merge identity/favorite/useCount semantics, invalid-record skipping, copy name de-duplication, workflow step remapping incl. out-of-order bundles, missing-step rejection, unique naming) |
+| UI | The share dialog was not rendered in the app in this pass; its behaviour is covered by the pure module and RPC wiring only |

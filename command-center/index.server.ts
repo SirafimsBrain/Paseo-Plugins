@@ -19,6 +19,15 @@ import {
 } from "./shared/commands";
 import { commandSchema, validateCommandForSave } from "./shared/commands";
 import {
+  buildShareBundle,
+  exportCommands,
+  importCommands,
+  importCommandsFromUrl,
+  parseShareBundle,
+  planImport,
+  type ImportResult,
+} from "./shared/share";
+import {
   createSchedule,
   listScheduleRuns,
   listSchedules,
@@ -58,6 +67,47 @@ function parseCommand(raw: unknown): CommandDefinition | null {
 
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(commandCenterSettings);
+
+  /**
+   * Shared import path (0.8.0): parse a bundle, merge/copy it into the library,
+   * save once, and register any category labels the bundle brought along so
+   * the filter chips stay consistent. Used by both paste-import and URL import.
+   */
+  const applyImport = (json: string, mode: "merge" | "copy"): ImportResult => {
+    const parsed = parseShareBundle(json);
+    if (parsed.error) {
+      return { ok: false, added: 0, updated: 0, skipped: 0, error: parsed.error };
+    }
+    const plan = planImport(loadCommands(), parsed.commands, { mode });
+    if (plan.added + plan.updated > 0) saveCommands(plan.library);
+
+    const categories = loadCategories();
+    const known = new Set(categories.map((category) => category.sortKey));
+    let categoriesChanged = false;
+    for (const command of plan.library) {
+      const name = typeof command.category === "string" ? command.category.trim() : "";
+      const sortKey = name.toLowerCase();
+      if (name.length === 0 || known.has(sortKey)) continue;
+      known.add(sortKey);
+      categories.push({ name, sortKey });
+      categoriesChanged = true;
+    }
+    if (categoriesChanged) {
+      categories.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+      persistCategories(categories);
+    }
+
+    return {
+      ok: plan.added + plan.updated > 0,
+      added: plan.added,
+      updated: plan.updated,
+      skipped: plan.skipped,
+      error:
+        plan.errors.length === 0
+          ? null
+          : `${plan.errors[0]}${plan.errors.length > 1 ? ` (+${plan.errors.length - 1} more)` : ""}`,
+    };
+  };
 
   // History retention: apply the configured limit at startup and on changes.
   void settings.read().then((state) => {
@@ -178,6 +228,62 @@ export default function contribute(server: PluginServerContext) {
   server.handle(listCommands, () => ({
     commands: loadCommands(),
   }));
+
+  // Library sharing (0.8.0): the export is a versioned bundle; the import
+  // accepts that bundle or a bare `commands.json` array.
+  server.handle(exportCommands, (input) => {
+    const bundle = buildShareBundle(loadCommands(), input.ids);
+    return { json: JSON.stringify(bundle, null, 2), count: bundle.commands.length };
+  });
+
+  server.handle(importCommands, (input) => applyImport(input.json, input.mode));
+
+  // "Install from a repository" half of the roadmap item: a raw JSON file
+  // hosted anywhere (including a git host) is a valid source. No git tooling is
+  // invoked; the URL must point at the bundle itself. Time-boxed so a hanging
+  // server cannot wedge the plugin.
+  server.handle(importCommandsFromUrl, async (input) => {
+    let url: URL;
+    try {
+      url = new URL(input.url.trim());
+    } catch {
+      return { ok: false, added: 0, updated: 0, skipped: 0, error: "Invalid URL." };
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return {
+        ok: false,
+        added: 0,
+        updated: 0,
+        skipped: 0,
+        error: "Only http(s) URLs can be imported.",
+      };
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        return {
+          ok: false,
+          added: 0,
+          updated: 0,
+          skipped: 0,
+          error: `The URL returned HTTP ${response.status}.`,
+        };
+      }
+      return applyImport(await response.text(), input.mode);
+    } catch (error) {
+      return {
+        ok: false,
+        added: 0,
+        updated: 0,
+        skipped: 0,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 
   server.handle(saveCommand, (input) => {
     if (input.deleteId) {
