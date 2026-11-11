@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
+import { useRpc } from "@getpaseo/plugin/client";
 import type { ActiveTurnBehavior, CommandDefinition, ProviderWithModels, RunResult } from "../shared/commands";
-import { inputVariablesOf } from "../shared/template";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
+import { browseFiles, resolveCommandInputs, type BrowseResult } from "../shared/variables";
 import { planTargets, type BatchTarget } from "../shared/targets";
 import { renderPreview } from "./preview";
 import { ScheduleDialog } from "./schedule-dialog";
@@ -103,18 +104,9 @@ export function RunDialog({
   const isWorkflow = command.type === "workflow";
   // A workflow has no template of its own: each step renders its own command
   // with its stored defaults, so there are no workflow-level inputs to fill.
-  const declared = isWorkflow ? [] : command.variables;
-  const discovered = useMemo(
-    () => (isWorkflow ? [] : inputVariablesOf(command.template)),
-    [isWorkflow, command.template],
-  );
-  const merged = useMemo(() => {
-    const byName = new Map(declared.map((variable) => [variable.name, variable]));
-    for (const variable of discovered) {
-      if (!byName.has(variable.name)) byName.set(variable.name, { name: variable.name, prompt: variable.name, defaultValue: variable.defaultValue });
-    }
-    return [...byName.values()];
-  }, [declared, discovered]);
+  // `resolveCommandInputs` merges declared variables (which carry the 0.10.0
+  // kind) with `{{input:…}}` names discovered in the template.
+  const merged = useMemo(() => resolveCommandInputs(command), [command]);
   const workflowPreview = useMemo(() => {
     if (!isWorkflow) return "";
     return command.steps
@@ -154,6 +146,8 @@ export function RunDialog({
   const [results, setResults] = useState<BatchItemResult[] | null>(null);
   const [scheduling, setScheduling] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
+  /** `file` input whose directory browser is expanded (0.10.0). */
+  const [browsingInput, setBrowsingInput] = useState<string | null>(null);
 
   // Re-resolve when the model catalog arrives/changes. Safe: a picked value
   // that is still known is returned unchanged, so explicit picks survive.
@@ -350,18 +344,101 @@ export function RunDialog({
       {merged.length > 0 ? (
         <>
           <Text style={[styles.label, { color: foregroundMuted }]}>Inputs</Text>
-          {merged.map((variable) => (
-            <View key={variable.name} style={styles.field}>
-              <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>{variable.prompt || variable.name}</Text>
-              <TextInput
-                style={[styles.input, { color: foreground, borderColor: theme.colors.border }]}
-                value={values[variable.name] ?? ""}
-                onChangeText={(text) => setValues((previous) => ({ ...previous, [variable.name]: text }))}
-                placeholder={variable.defaultValue ?? variable.name}
-                placeholderTextColor={foregroundMuted}
-              />
-            </View>
-          ))}
+          {merged.map((variable) => {
+            const setValue = (text: string) =>
+              setValues((previous) => ({ ...previous, [variable.name]: text }));
+            return (
+              <View key={variable.name} style={styles.field}>
+                <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>
+                  {variable.prompt || variable.name}
+                  {variable.kind === "workspace" ? " · workspace" : variable.kind === "file" ? " · file" : ""}
+                </Text>
+
+                {variable.kind === "workspace" ? (
+                  <>
+                    {workspaces.length === 0 ? (
+                      <Text style={[styles.hint, { color: foregroundMuted }]}>
+                        No workspaces loaded — type the value below.
+                      </Text>
+                    ) : (
+                      <View style={styles.row}>
+                        {workspaces.map((option) => {
+                          const active = (values[variable.name] ?? "") === option.name;
+                          return (
+                            <Pressable
+                              key={`${option.serverId}:${option.id}`}
+                              style={[styles.chip, { borderColor: theme.colors.border }, active && styles.chipActive]}
+                              onPress={() => setValue(option.name)}
+                            >
+                              <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
+                                {active ? "✓ " : ""}{option.name}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    )}
+                    <Text style={[styles.hint, { color: foregroundMuted }]}>
+                      Picks the workspace name; use {"{{"}workspace.path{"}}"} for its directory.
+                    </Text>
+                  </>
+                ) : variable.kind === "file" ? (
+                  <>
+                    <View style={styles.row}>
+                      <TextInput
+                        style={[styles.input, styles.grow, { color: foreground, borderColor: theme.colors.border }]}
+                        value={values[variable.name] ?? ""}
+                        onChangeText={setValue}
+                        placeholder={variable.defaultValue ?? "/absolute/path/to/file"}
+                        placeholderTextColor={foregroundMuted}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <Pressable
+                        style={[styles.chip, { borderColor: theme.colors.border }]}
+                        onPress={() =>
+                          setBrowsingInput((current) => (current === variable.name ? null : variable.name))
+                        }
+                      >
+                        <Text style={[styles.chipText, { color: foreground }]}>
+                          {browsingInput === variable.name ? "Hide" : "Browse…"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {browsingInput === variable.name ? (
+                      firstWorkspace?.directory ? (
+                        <FileBrowser
+                          cwd={firstWorkspace.directory}
+                          startPath={values[variable.name] || firstWorkspace.directory}
+                          theme={theme}
+                          font={font}
+                          monoFont={monoFont}
+                          onPick={(picked) => {
+                            setValue(picked);
+                            setBrowsingInput(null);
+                          }}
+                          onClose={() => setBrowsingInput(null)}
+                        />
+                      ) : (
+                        <Text style={[styles.hint, { color: foregroundMuted }]}>
+                          Browsing needs a workspace directory — select a local workspace or type the
+                          path.
+                        </Text>
+                      )
+                    ) : null}
+                  </>
+                ) : (
+                  <TextInput
+                    style={[styles.input, { color: foreground, borderColor: theme.colors.border }]}
+                    value={values[variable.name] ?? ""}
+                    onChangeText={setValue}
+                    placeholder={variable.defaultValue ?? variable.name}
+                    placeholderTextColor={foregroundMuted}
+                  />
+                )}
+              </View>
+            );
+          })}
         </>
       ) : null}
 
@@ -582,8 +659,113 @@ export function RunDialog({
   );
 }
 
+/**
+ * Directory browser for `file` inputs (0.10.0). Backed by the
+ * `command-center.browse` RPC, which lists directories through the local
+ * daemon's file explorer; picking an entry fills the input with its path.
+ */
+function FileBrowser({
+  cwd,
+  startPath,
+  theme,
+  font,
+  monoFont,
+  onPick,
+  onClose,
+}: {
+  cwd: string;
+  startPath: string;
+  theme: PluginTheme;
+  font: (base: number) => number;
+  monoFont: string | null;
+  onPick: (path: string) => void;
+  onClose: () => void;
+}) {
+  const browseRpc = useRpc(browseFiles);
+  const [dir, setDir] = useState(startPath);
+  const [data, setData] = useState<BrowseResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    browseRpc({ cwd, path: dir })
+      .then((result) => {
+        if (cancelled) return;
+        setData(result);
+        if (result.error) setError(result.error);
+      })
+      .catch((browseError: unknown) => {
+        if (!cancelled) setError(browseError instanceof Error ? browseError.message : String(browseError));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [browseRpc, cwd, dir]);
+
+  const parentOf = (value: string): string => {
+    const clean = value.replace(/[\\/]+$/, "");
+    const cut = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+    return cut > 0 ? clean.slice(0, cut) : clean;
+  };
+
+  const { foreground, foregroundMuted } = theme.colors;
+
+  return (
+    <View style={[styles.browser, { borderColor: theme.colors.border }]}>
+      <View style={styles.row}>
+        <Pressable
+          style={[styles.chip, { borderColor: theme.colors.border }]}
+          onPress={() => setDir(parentOf(data?.path ?? dir))}
+        >
+          <Text style={[styles.chipText, { color: foreground, fontSize: font(11) }]}>↑ Up</Text>
+        </Pressable>
+        <Text
+          style={[
+            styles.browserPath,
+            { color: foregroundMuted, fontSize: font(11) },
+            monoFont ? { fontFamily: monoFont } : null,
+          ]}
+          numberOfLines={1}
+        >
+          {data?.path ?? dir}
+        </Text>
+        <Pressable onPress={onClose}>
+          <Text style={[styles.chipText, { color: foreground, fontSize: font(11) }]}>✕</Text>
+        </Pressable>
+      </View>
+      {loading ? (
+        <Text style={[styles.hint, { color: foregroundMuted }]}>Loading…</Text>
+      ) : null}
+      {error ? (
+        <Text style={[styles.hint, { color: theme.colors.statusDanger }]}>{error}</Text>
+      ) : null}
+      {(data?.entries ?? []).slice(0, 100).map((entry) => (
+        <Pressable
+          key={entry.path}
+          style={styles.browserRow}
+          onPress={() => (entry.kind === "directory" ? setDir(entry.path) : onPick(entry.path))}
+        >
+          <Text style={[styles.chipText, { color: foreground, fontSize: font(11) }]} numberOfLines={1}>
+            {entry.kind === "directory" ? "📁" : "📄"} {entry.name}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { gap: 4 },
+  browser: { borderWidth: 1, borderRadius: 8, padding: 6, marginTop: 6, gap: 2 },
+  browserRow: { paddingVertical: 3, paddingHorizontal: 2 },
+  browserPath: { flex: 1 },
+  grow: { flex: 1, minWidth: 180 },
   title: { fontSize: 16, fontWeight: "700" },
   subtitle: { fontSize: 12, opacity: 0.6, marginBottom: 6 },
   label: { marginTop: 10, fontSize: 12, opacity: 0.7 },

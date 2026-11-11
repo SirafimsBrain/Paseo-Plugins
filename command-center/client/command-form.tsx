@@ -5,12 +5,15 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import type {
   CommandCategory,
   CommandDefinition,
+  CommandVariable,
+  CommandVariableKind,
   ProviderWithModels,
   WorkflowStep,
   WorkflowStepCondition,
 } from "../shared/commands";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
+import { declarationsForTemplate } from "../shared/variables";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 import { commandCenterSettings } from "../shared/settings";
 import { ProviderModelPicker } from "./provider-model-picker";
@@ -27,7 +30,15 @@ export interface CommandFormResult {
   scope: "global" | "workspace";
   /** Chosen from the stored list, or a brand-new label typed in. Empty = none. */
   category: string | null;
+  /** Declared inputs with their kinds (0.10.0); empty for workflows. */
+  variables: CommandVariable[];
 }
+
+const INPUT_KINDS: { label: string; value: CommandVariableKind }[] = [
+  { label: "Text", value: "text" },
+  { label: "File path", value: "file" },
+  { label: "Workspace", value: "workspace" },
+];
 
 const WORKFLOW_CONDITIONS: { label: string; value: WorkflowStepCondition }[] = [
   { label: "Always", value: "always" },
@@ -76,6 +87,10 @@ export function CommandForm({
   const [terminalName, setTerminalName] = useState(initial?.terminalName ?? "");
   const [scope, setScope] = useState<"global" | "workspace">(initial?.scope ?? "global");
   const [category, setCategory] = useState(initial?.category ?? "");
+  /** Input kind per template variable; unknown/template-only names default to text. */
+  const [kinds, setKinds] = useState<Record<string, CommandVariableKind>>(() =>
+    Object.fromEntries((initial?.variables ?? []).map((variable) => [variable.name, variable.kind])),
+  );
 
   // Migrate stale stored values (bare ids, pre-compose refs) against the live
   // catalog. Explicit picks that are still known survive unchanged; the
@@ -369,9 +384,51 @@ export function CommandForm({
         Variables: {"{{input:name|default}}"}, {"{{workspace.name}}"}, {"{{workspace.path}}"}, {"{{date}}"}, {"{{time}}"}
       </Text>
       {variables.length > 0 ? (
-        <Text style={[styles.hint, { color: foregroundMuted }]}>
-          Inputs detected: {variables.map((variable) => variable.name).join(", ")}
-        </Text>
+        <>
+          <Text style={[styles.label, { color: foregroundMuted }]}>Inputs</Text>
+          {variables.map((variable) => {
+            const kind = kinds[variable.name] ?? "text";
+            return (
+              <View key={variable.name} style={[styles.inputRow, { borderColor: theme.colors.border }]}>
+                <Text style={[styles.inputName, { color: foreground }]} numberOfLines={1}>
+                  {variable.name}
+                  {variable.defaultValue ? ` = ${variable.defaultValue}` : ""}
+                </Text>
+                <View style={styles.row}>
+                  {INPUT_KINDS.map((option) => (
+                    <Pressable
+                      key={option.value}
+                      style={[
+                        styles.chip,
+                        styles.smallChip,
+                        { borderColor: theme.colors.border },
+                        kind === option.value && styles.chipActive,
+                      ]}
+                      onPress={() =>
+                        setKinds((previous) => ({ ...previous, [variable.name]: option.value }))
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          styles.smallChipText,
+                          { color: foreground },
+                          kind === option.value && styles.chipTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+          <Text style={[styles.hint, { color: foregroundMuted }]}>
+            File inputs get a Browse button in the run dialog (local workspaces only); workspace
+            inputs pick from the loaded workspaces and insert the name.
+          </Text>
+        </>
       ) : null}
         </>
       )}
@@ -397,6 +454,10 @@ export function CommandForm({
               terminalName: type === "shell" ? terminalName.trim() || null : null,
               scope,
               category: category.trim() || null,
+              variables:
+                type === "workflow"
+                  ? []
+                  : declarationsForTemplate(template, initial?.variables ?? [], kinds),
             })
           }
         >
@@ -410,6 +471,16 @@ export function CommandForm({
 const styles = StyleSheet.create({
   container: { gap: 6 },
   label: { marginTop: 8, marginBottom: 2, fontSize: 12, opacity: 0.7 },
+  inputRow: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 6,
+    gap: 4,
+  },
+  inputName: { fontSize: 12, fontWeight: "600" },
+  smallChip: { paddingHorizontal: 8, paddingVertical: 3 },
+  smallChipText: { fontSize: 11 },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   chip: {
     paddingHorizontal: 12,

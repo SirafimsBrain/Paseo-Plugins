@@ -52,6 +52,8 @@ import { readSavedMcpServers } from "./server/agent-record";
 import { forgetAgentMcp, loadAgentMcpRegistry } from "./server/agent-mcp";
 import { decideSessionOpen, needsCapabilityProbe } from "./server/session-open";
 import { renderTemplate } from "./shared/template";
+import { browseFiles } from "./shared/variables";
+import { getDaemonClient } from "./server/daemon-connection";
 import {
   createScheduleFromCommand,
   fetchScheduleRuns,
@@ -237,6 +239,36 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(importCommands, (input) => applyImport(input.json, input.mode));
+
+  // File-input browser (0.10.0): a read-only listing of one directory through
+  // the daemon's own file explorer. The plugin server has a single daemon
+  // connection, so this answers for the local host; remote targets keep a
+  // typed path.
+  server.handle(browseFiles, async (input) => {
+    try {
+      const client = await getDaemonClient();
+      const result = await client.listDirectory(input.cwd, input.path);
+      const entries = result.entries.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        kind: entry.kind,
+      }));
+      entries.sort((a, b) =>
+        a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1,
+      );
+      return {
+        path: result.path,
+        entries,
+        error: null,
+      };
+    } catch (error) {
+      return {
+        path: input.path,
+        entries: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
 
   // "Install from a repository" half of the roadmap item: a raw JSON file
   // hosted anywhere (including a git host) is a valid source. No git tooling is

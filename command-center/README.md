@@ -11,6 +11,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
   - `prompt` → renders the template and either sends it to an existing agent or creates a new agent (optionally branching off into a fresh git worktree of the target workspace).
   - `shell` → renders the template into a command line and writes it into a new terminal of the selected workspace.
   - `workflow` → runs an ordered chain of saved prompt/shell commands against the same target, each step gated by `always`, `on success` or `on failure` relative to the step before it. Steps keep their own provider, MCP servers and template defaults, and the whole chain records one history entry with a per-step summary.
+- **Typed inputs** — every `{{input:…}}` can be marked `text`, `file` or `workspace` in the editor. A `file` input gets a path field plus a `Browse…` directory picker (local workspaces, read-only, through the daemon's file explorer); a `workspace` input renders the loaded workspaces as chips and inserts the chosen name. Undeclared inputs stay plain text.
 - **Template tokens**
   - `{{input:name}}` / `{{input:name|default}}` — prompted at run time; the run dialog builds a form from them automatically.
   - `{{workspace.name}}`, `{{workspace.path}}` — resolved from the target workspace.

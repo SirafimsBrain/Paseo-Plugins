@@ -465,7 +465,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
           terminalName: form.terminalName ?? undefined,
           scope: form.scope,
           category: form.category ?? undefined,
-          variables: [],
+          variables: form.variables,
           favorite: base?.favorite ?? false,
           createdAt: base?.createdAt ?? now,
           updatedAt: now,

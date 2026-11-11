@@ -33,6 +33,17 @@ export const workflowStepSchema = z.object({
 export type WorkflowStep = z.infer<typeof workflowStepSchema>;
 
 /**
+ * First-class input kinds (0.10.0). `text` is the historical free-form input;
+ * `workspace` renders a picker of the loaded workspaces (the value is the
+ * workspace name); `file` renders a path field with a directory browser backed
+ * by the local daemon's file explorer. Stored commands without `kind` parse as
+ * `text`, so the field is backward compatible.
+ */
+export const commandVariableKindSchema = z.enum(["text", "file", "workspace"]);
+
+export type CommandVariableKind = z.output<typeof commandVariableKindSchema>;
+
+/**
  * `{{input:name}}` / `{{input:name|default}}` — prompted at run time.
  * `{{workspace.name}}`, `{{workspace.path}}` — run-time workspace context.
  * `{{date}}` — current date, `{{time}}` — current time (server clock).
@@ -41,6 +52,8 @@ export const commandVariableSchema = z.object({
   name: z.string().min(1),
   prompt: z.string().min(1),
   defaultValue: z.string().optional(),
+  /** `text` for every pre-0.10.0 record (zod default). */
+  kind: commandVariableKindSchema.default("text"),
 });
 
 export const commandSchema = z.object({

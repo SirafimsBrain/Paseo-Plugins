@@ -27,6 +27,7 @@ command-center/
 │   ├── search.ts              # pure command search/filter over name, category, template, variables
 │   ├── share.ts               # portable library bundle: export/import/merge/copy (client-safe)
 │   ├── targets.ts             # pure per-agent/per-workspace target planner (client-safe)
+│   ├── variables.ts           # typed input resolution + directory-browse RPC (client-safe)
 │   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
@@ -119,6 +120,7 @@ Each history card shows the used model and agent (resolved live from the agents 
 | `command-center.export` | `{ ids? }` | `{ json, count }` — versioned library bundle; omitted/empty `ids` exports everything |
 | `command-center.import` | `{ json, mode: merge\|copy }` | `{ ok, added, updated, skipped, error }` — accepts a bundle or a bare `commands.json` array |
 | `command-center.import-url` | `{ url, mode }` | same as `import` — fetches a raw http(s) JSON file (10 s timeout) |
+| `command-center.browse` | `{ cwd, path }` | `{ path, entries, error }` — read-only directory listing for `file` inputs, via the local daemon's `listDirectory` |
 | `command-center.schedules` | `{}` | `{ schedules: ScheduleView[] }` — every daemon schedule plus the plugin link (commandId/commandName); prunes stale links |
 | `command-center.schedule-create` | `{ commandId, values, provider, cron, name?, workspaceId?, cwd?, newWorktree?, archiveOnFinish?, maxRuns?, runOnCreate? }` | `{ ok, id, view, error }` — renders the template once, creates the daemon schedule, stores the link |
 | `command-center.schedule-action` | `{ id, action: pause\|resume\|run-once\|delete }` | `{ ok, error }` |
@@ -358,6 +360,7 @@ The plugin's manifest range was `>=0.8.0` through 0.5.1, which covered 0.10.x. T
 - **The bridge needs the daemon config.** `daemon-connection.ts` reads `daemon.listen` from `$PASEO_HOME/config.json`; if the daemon listens behind authentication, the bridge would need the password — not required in the default local setup (no password set).
 - **No secrets.** Templates are plain files; do not put tokens into templates.
 - **Worktree runs require a git workspace.** Branch-off mode on a non-git directory will fail with a daemon-side error surfaced in the run dialog.
+- **File browsing is local-only.** `command-center.browse` goes through the plugin's single daemon connection, so the picker lists the local host's filesystem; a remote-host target keeps a typed path.
 - **Agent fan-out is uniform.** Selecting several existing agents sends the same rendered prompt with the same values to each; there are no per-agent value overrides.
 - **History is linear and bounded** (default 50, user-configurable 10–500 via settings, §5d); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
 - **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required. `list`/`history` only open the surface: the slash context has no message channel to print into.
@@ -377,7 +380,7 @@ Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger a
 3. **Import/export & sharing** — delivered in 0.8.0 (§15): a versioned JSON bundle, merge/copy import semantics, and raw-URL import (a file in a git host, a gist, any static URL).
 4. **Multi-agent fan-out** — delivered in 0.9.0 (§16): any number of existing agents can be selected as targets; the pure `planTargets` helper unions them with the selected workspaces, de-duplicates a workspace that already has a selected agent, and carries the owning host so an agent without a loaded workspace still goes to the right daemon.
 5. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is still open and would use `useHosts()` + per-host `getPaseoClient(serverId)` RPCs.
-6. **Command parameters beyond strings** — file pickers, workspace pickers as first-class variable types in the run dialog.
+6. **Command parameters beyond strings** — delivered in 0.10.0 (§17): declared inputs carry a `kind` (`text` / `file` / `workspace`), the editor lets each template input pick one, the run dialog renders a workspace chip picker and a file path field with a directory browser.
 7. **Usage analytics** — aggregate `useCount`/history into a "most used" section; data already exists.
 8. **Composer pills / timeline run cards** — blocked today (§5e); revisit when the SDK gains global pill registration or plugin-attributed timeline items.
 9. **Web dashboard** — deferred (§5e); revisit if the host adds a remote-access surface plugins can attach to.
@@ -900,3 +903,53 @@ Additional rules:
 | `npx tsc --noEmit` | **exit 0** |
 | `npx vitest run` | **16 suites / 176 tests pass** — 170 from 0.8.0 + `tests/targets.test.ts` (6: best-guess fallback, workspace fan-out, agent without a loaded workspace keeps its host, agent replaces its own workspace, mixed workspace/agent planning, busy-turn policy only on agent targets + workflow worktree off) |
 | UI | The multi-select picker was not rendered in the app this pass; the planning logic it calls is unit-tested |
+## 17. Version 0.10.0 — typed command parameters (2026-11-11)
+
+Roadmap §8 item 6 ("command parameters beyond strings"), delivered. New
+functionality → second-digit bump `0.9.0 → 0.10.0`, annotated tag
+`command-center@0.10.0`.
+
+### 17.1 Model
+
+`commandVariableSchema` gained `kind: "text" | "file" | "workspace"` with a zod
+default of `text`, so every pre-0.10.0 command (and every `commands.json`
+written by an older release) parses unchanged. The template token stays
+`{{input:name}}` / `{{input:name|default}}` — the kind controls the widget, not
+the interpolation — so rendering, schedules, the agent tool and the attachment
+source need no changes.
+
+`shared/variables.ts` is the single definition of how inputs are resolved:
+
+- `resolveCommandInputs(command)` — declared variables first (they carry kind,
+  prompt and default), then `{{input:…}}` names discovered in the template as
+  `text`. Workflows return an empty list (no template of their own).
+- `declarationsForTemplate(template, stored, kinds)` — the editor's inverse:
+  emits one declaration per token, keeping the stored prompt, preferring the
+  template's inline default over the stored one, and dropping declarations whose
+  token was removed. This is why saving no longer writes `variables: []`.
+
+### 17.2 Run dialog
+
+| Kind | Control |
+| --- | --- |
+| `text` | The original single-line input |
+| `workspace` | Chip per loaded workspace (grouped by host like the target picker); the value is the workspace **name**. A hint points at `{{workspace.path}}` for the directory |
+| `file` | Path field plus `Browse…`, which expands an inline directory browser |
+
+The browser calls `command-center.browse`, a new RPC backed by
+`DaemonClient.listDirectory(cwd, path)` — the same low-level daemon client the
+schedule bridge already uses, because `PaseoApi` exposes no file listing.
+Entries are sorted directories-first and capped at 100; tapping a directory
+navigates, tapping a file writes its path into the input. The listing is
+read-only and answers for the **local** daemon only (the plugin server holds one
+daemon connection), so a remote-host workspace surfaces the RPC error and the
+user types the path.
+
+### 17.3 Verification (2026-11-11)
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | **exit 0** |
+| `npx vitest run` | **17 suites / 182 tests pass** — 176 from 0.9.0 + `tests/variables.test.ts` (6: declared kind/prompt preservation, discovered-as-text, workflow returns no inputs, editor kind override with template-default precedence, removed-token cleanup, new input defaults to text) |
+| Schema back-compat | `kind` has a zod default, so the existing `tests/store`, `tests/commands`, `tests/executor` and `tests/workflows` fixtures still parse (the only fixture that needed `kind` was the typed search fixture, updated) |
+| UI | The new controls and the directory browser were not rendered in the app this pass; their inputs/outputs are covered by the pure module and the RPC contract |

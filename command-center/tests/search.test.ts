@@ -8,7 +8,7 @@ function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition 
     name: "Review pull request",
     type: "prompt",
     template: "Review {{input:pr}} and summarize {{workspace.name}}",
-    variables: [{ name: "pr", prompt: "Pull request number", defaultValue: "123" }],
+    variables: [{ name: "pr", prompt: "Pull request number", defaultValue: "123", kind: "text" }],
     steps: [],
     scope: "global",
     favorite: false,
