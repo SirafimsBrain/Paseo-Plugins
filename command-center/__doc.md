@@ -29,6 +29,7 @@ command-center/
 │   ├── targets.ts             # pure per-agent/per-workspace target planner (client-safe)
 │   ├── variables.ts           # typed input resolution + directory-browse RPC (client-safe)
 │   ├── analytics.ts           # library ordering + "most used" summary (client-safe)
+│   ├── dashboard.ts           # read-only dashboard HTML + open RPC (client-safe)
 │   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
@@ -37,6 +38,7 @@ command-center/
 │   ├── schedules.ts           # schedule bridge: daemon schedule/* RPCs ↔ plugin contracts
 │   ├── schedules-mapping.ts   # pure daemon→view mapping (unit-tested)
 │   ├── schedule-links.ts      # schedules.json link store (scheduleId ↔ commandId)
+│   ├── dashboard.ts           # loopback HTTP server: token, headers, lifecycle
 │   └── (template.ts removed — shared module is used instead)
 ├── client/
 │   ├── command-center-surface.tsx  # library + history + schedules tabs, editor host, run modal, fan-out
@@ -361,6 +363,7 @@ The plugin's manifest range was `>=0.8.0` through 0.5.1, which covered 0.10.x. T
 - **The bridge needs the daemon config.** `daemon-connection.ts` reads `daemon.listen` from `$PASEO_HOME/config.json`; if the daemon listens behind authentication, the bridge would need the password — not required in the default local setup (no password set).
 - **No secrets.** Templates are plain files; do not put tokens into templates.
 - **Worktree runs require a git workspace.** Branch-off mode on a non-git directory will fail with a daemon-side error surfaced in the run dialog.
+- **The dashboard is loopback-only.** It is a read-only local browser view, not a remote-access feature: binding `127.0.0.1` means a phone on the network cannot open it without a tunnel, which is intentional.
 - **File browsing is local-only.** `command-center.browse` goes through the plugin's single daemon connection, so the picker lists the local host's filesystem; a remote-host target keeps a typed path.
 - **Agent fan-out is uniform.** Selecting several existing agents sends the same rendered prompt with the same values to each; there are no per-agent value overrides.
 - **History is linear and bounded** (default 50, user-configurable 10–500 via settings, §5d); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
@@ -377,14 +380,14 @@ The plugin's manifest range was `>=0.8.0` through 0.5.1, which covered 0.10.x. T
 Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger automation) and 9 (MCP injection) of the previous roadmap were delivered in 0.5.0 (§5d) and removed from this list.
 
 1. **Workflows — delivered in 0.7.0 (§14.2)** and removed from this list: a `workflow` command type chaining saved commands with `always | on-success | on-failure` conditions, an executor pass, per-step history summaries and a step editor.
-2. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration (not present in 0.10.x), otherwise emulable via Command Center items only.
+2. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration. **Still blocked:** a repeated check of `@getpaseo/plugin@0.15.3` finds no keybinding/shortcut/hotkey registration in the client or server contracts. Commands stay reachable through the Command Center items (⌘K), `/cc`, the attachment source and the agent tool.
 3. **Import/export & sharing** — delivered in 0.8.0 (§15): a versioned JSON bundle, merge/copy import semantics, and raw-URL import (a file in a git host, a gist, any static URL).
 4. **Multi-agent fan-out** — delivered in 0.9.0 (§16): any number of existing agents can be selected as targets; the pure `planTargets` helper unions them with the selected workspaces, de-duplicates a workspace that already has a selected agent, and carries the owning host so an agent without a loaded workspace still goes to the right daemon.
-5. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is still open and would use `useHosts()` + per-host `getPaseoClient(serverId)` RPCs.
+5. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is **blocked by the SDK**, not skipped: the client-side `PaseoApi` from `getPaseoClient(serverId)` exposes agents/workspaces/terminals/providers/config/hosts but **no plugin RPC**; `invokePluginRpc` exists only on `DaemonClient` (server-side, one local connection), and the client never receives a `DaemonClient` or a host's connection URL (`HostSummary` carries only ids/labels/metadata). The delivered substitute is the explicit bundle: export on one host, `merge`/`copy` import on another (§15). An automatic push would need the host to expose per-host plugin RPCs.
 6. **Command parameters beyond strings** — delivered in 0.10.0 (§17): declared inputs carry a `kind` (`text` / `file` / `workspace`), the editor lets each template input pick one, the run dialog renders a workspace chip picker and a file path field with a directory browser.
 7. **Usage analytics** — delivered in 0.11.0 (§18): a `Most used` summary (top three by successful runs) and a usage-first library ordering; the data is the existing `useCount`.
 8. **Composer pills / timeline run cards** — blocked today (§5e); revisit when the SDK gains global pill registration or plugin-attributed timeline items.
-9. **Web dashboard** — deferred (§5e); revisit if the host adds a remote-access surface plugins can attach to.
+9. **Web dashboard** — delivered in 0.12.0 (§19) in the safe form: a loopback-only, token-protected, read-only page. Network/remote exposure is still deliberately absent; a phone view would need Paseo's own remote access, because exposing this port on the LAN would publish prompt text and run arguments.
 
 ## 9. Planned improvements with Paseo 0.11.0
 
@@ -996,3 +999,50 @@ not dialog opens.
 | `npx tsc --noEmit` | **exit 0** |
 | `npx vitest run` | **18 suites / 188 tests pass** — 182 from 0.10.0 + `tests/analytics.test.ts` (6: default ordering, usage ordering with default tie-break, input immutability, zero-run exclusion and cap, all-zero case, zero limit) |
 | UI | The summary block and ordering chips were not rendered in the app this pass; their data comes from the unit-tested helpers |
+## 19. Version 0.12.0 — loopback read-only dashboard (2026-11-11)
+
+Roadmap §8 item 9 ("web dashboard"), delivered in the only form that does not
+add an attack surface the plugin cannot defend. New functionality →
+second-digit bump `0.11.0 → 0.12.0`, annotated tag `command-center@0.12.0`.
+
+### 19.1 What it is
+
+`server/dashboard.ts` starts (lazily, on the first `command-center.dashboard`
+call) a Node `http` server that renders `shared/dashboard.ts` — the library
+table (name, type/provider, category, run count) and the last 50 runs (time,
+command, result, rendered text or error). The library toolbar's `Dashboard`
+button fetches the URL and opens it with the host's `openExternalUrl`.
+
+### 19.2 Security model
+
+| Decision | Reason |
+| --- | --- |
+| Binds `127.0.0.1` on port 0 (ephemeral) | Nothing is reachable from the network; there is no "expose to LAN" setting to misconfigure. A phone view would require a tunnel and is explicitly out of scope |
+| Fresh 24-byte token per process, embedded in the URL, required on every request | The store contains prompt text and history contains run arguments; a bare local port would leak them to any local process |
+| Constant-time token comparison (`sha256` digests + `timingSafeEqual`) | Avoids a length-dependent early exit |
+| GET/HEAD only, a single `/` route, no forms or actions | The page has no write path at all, even with a valid token |
+| `cache-control: no-store`, `content-security-policy: default-src 'none'; style-src 'unsafe-inline'`, `nosniff`, `no-referrer`, `noindex` | No caching of prompt text, no external loads, no referrer leak of the token |
+| The plugin disposer calls `stopDashboard()` | The socket does not outlive the plugin instance |
+| `<meta http-equiv="refresh" content="10">` | The page stays current without any JavaScript (CSP forbids it) |
+
+All user-controlled text is HTML-escaped through one `escapeHtml` helper; the
+tests assert that `<script>` and `<img onerror=…>` cannot appear verbatim.
+
+### 19.3 Deliberately not built
+
+1. **No LAN/remote binding.** The roadmap's "read-only view on a phone" would
+   mean publishing prompt text and run arguments on the network; the host's own
+   remote access is the right layer for that.
+2. **No filters, search or links.** A static page keeps the CSP and the code
+   small; the filter story belongs to the in-app library.
+3. **No write endpoints.** Scheduling, running and editing stay in the app,
+   where permission and confirmation UI exist.
+
+### 19.4 Verification (2026-11-11)
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | **exit 0** |
+| `npx vitest run` | **19 suites / 193 tests pass** — 188 from 0.11.0 + `tests/dashboard.test.ts` (5: escaped markup in commands and runs, empty states, metacharacter escaping, a real server requiring the token with 401/404/405 checks and the security headers, stable URL on reuse) |
+| Server lifecycle | Started and stopped by the test through the real `ensureDashboard()`/`stopDashboard()`; it binds an ephemeral loopback port, so the test is independent of any running daemon |
+| UI | The `Dashboard` button was not exercised in the app this pass (it is a thin `openExternalUrl` call around the tested RPC) |

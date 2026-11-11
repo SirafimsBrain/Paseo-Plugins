@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
+import { getPaseoClient, openExternalUrl, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderWithModels } from "../shared/commands";
@@ -22,6 +22,7 @@ import {
 } from "../shared/commands";
 import { createSchedule } from "../shared/schedules";
 import { exportCommands, importCommands, importCommandsFromUrl } from "../shared/share";
+import { openDashboard } from "../shared/dashboard";
 import { parseScreenParams, screenParams, type ScreenParams, type ScreenView } from "../shared/screen-params";
 import { CommandForm, type CommandFormResult } from "./command-form";
 import { ShareDialog } from "./share-dialog";
@@ -85,6 +86,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
   const exportRpc = useRpc(exportCommands);
   const importRpc = useRpc(importCommands);
   const importUrlRpc = useRpc(importCommandsFromUrl);
+  const dashboardRpc = useRpc(openDashboard);
 
   // All configured app hosts (multi-host fan-out). Older hosts may not provide
   // the loader — fall back to single-host mode instead of crashing.
@@ -555,6 +557,20 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
     [exportRpc],
   );
 
+  /** Opens the read-only, loopback-only dashboard in the system browser. */
+  const handleOpenDashboard = async () => {
+    try {
+      const result = await dashboardRpc({});
+      if (!result.url) {
+        toast.error(result.error ?? "The dashboard could not start.");
+        return;
+      }
+      await openExternalUrl(result.url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const handleDelete = async (command: CommandDefinition) => {
     try {
       await deleteRpc({ id: command.id });
@@ -889,6 +905,9 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
               </Pressable>
               <Pressable style={styles.smallButton} onPress={() => setSharing(true)}>
                 <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Share</Text>
+              </Pressable>
+              <Pressable style={styles.smallButton} onPress={() => void handleOpenDashboard()}>
+                <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Dashboard</Text>
               </Pressable>
             </View>
           </View>
