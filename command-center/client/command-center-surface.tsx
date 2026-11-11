@@ -6,6 +6,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderWithModels } from "../shared/commands";
 import { defaultValuesForCommand, isFullModelRef, normalizeProviderModels, resolveModelRef } from "../shared/commands";
 import { commandMatchesCategory, commandMatchesQuery } from "../shared/search";
+import { mostUsedCommands, sortCommands, type CommandSort } from "../shared/analytics";
 import {
   appendHistory,
   clearHistory,
@@ -126,6 +127,8 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
   const [searchQuery, setSearchQuery] = useState("");
   const [searchVisible, setSearchVisible] = useState(false);
   const [sharing, setSharing] = useState(false);
+  /** Library ordering (0.11.0): favorites-first or most-runs-first. */
+  const [sortMode, setSortMode] = useState<CommandSort>("default");
   /** Deep links (0.6.0): command/schedule the screen params asked to focus. */
   const [focusedCommandId, setFocusedCommandId] = useState<string | null>(null);
   const [highlightScheduleId, setHighlightScheduleId] = useState<string | null>(null);
@@ -432,14 +435,24 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
     };
   }, [paseo, hostsKey, localServerId, reloadKey]);
 
-  const sorted = useMemo(() => {
-    const favoriteFirst = (a: CommandDefinition, b: CommandDefinition) =>
-      Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name);
-    return [...(commands ?? [])]
-      .filter((command) => commandMatchesCategory(command, categoryFilter))
-      .filter((command) => commandMatchesQuery(command, searchQuery))
-      .sort(favoriteFirst);
-  }, [commands, categoryFilter, searchQuery]);
+  const sorted = useMemo(
+    () =>
+      sortCommands(
+        (commands ?? [])
+          .filter((command) => commandMatchesCategory(command, categoryFilter))
+          .filter((command) => commandMatchesQuery(command, searchQuery)),
+        sortMode,
+      ),
+    [commands, categoryFilter, searchQuery, sortMode],
+  );
+  /** "Most used" summary (0.11.0): hidden while a filter would make it lie. */
+  const mostUsed = useMemo(
+    () =>
+      searchQuery.trim().length > 0 || categoryFilter !== null
+        ? []
+        : mostUsedCommands(commands ?? [], 3),
+    [commands, searchQuery, categoryFilter],
+  );
 
   const { foreground, foregroundMuted } = theme.colors;
   const typography = useHostTypography();
@@ -854,6 +867,18 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
             ) : null}
             <View style={styles.toolbarRow}>
               <Pressable
+                style={[styles.smallButton, sortMode === "default" && styles.smallButtonActive]}
+                onPress={() => setSortMode("default")}
+              >
+                <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>A–Z</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.smallButton, sortMode === "used" && styles.smallButtonActive]}
+                onPress={() => setSortMode("used")}
+              >
+                <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Most used</Text>
+              </Pressable>
+              <Pressable
                 style={[styles.smallButton, searchVisible && { backgroundColor: "rgba(90,140,255,0.25)" }]}
                 onPress={() => {
                   setSearchVisible((visible) => !visible);
@@ -867,6 +892,16 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
               </Pressable>
             </View>
           </View>
+          {mostUsed.length > 0 ? (
+            <View style={[styles.mostUsed, { borderColor: theme.colors.border }]}>
+              <Text style={[styles.mostUsedTitle, { color: foregroundMuted, fontSize: font(11) }]}>
+                Most used
+              </Text>
+              <Text style={[styles.mostUsedBody, { color: foreground, fontSize: font(12) }]}>
+                {mostUsed.map((command) => `${command.name} (${command.useCount})`).join(" · ")}
+              </Text>
+            </View>
+          ) : null}
           {commands === null && commandsError === null ? (
             <Text style={[styles.muted, { color: foregroundMuted, fontSize: font(13) }]}>Loading…</Text>
           ) : null}
@@ -1196,6 +1231,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(128,128,128,0.2)",
   },
   primarySmallButton: { backgroundColor: "rgba(90,140,255,0.9)" },
+  smallButtonActive: { backgroundColor: "rgba(90,140,255,0.25)" },
+  mostUsed: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+    backgroundColor: "rgba(128,128,128,0.08)",
+  },
+  mostUsedTitle: { fontSize: 11, opacity: 0.7, textTransform: "uppercase", letterSpacing: 0.4 },
+  mostUsedBody: { fontSize: 12 },
   primarySmallButtonText: { color: "white", fontWeight: "600" },
   smallButtonText: { fontSize: 12 },
   list: { gap: 10, paddingBottom: 24 },

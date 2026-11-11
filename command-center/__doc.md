@@ -28,6 +28,7 @@ command-center/
 │   ├── share.ts               # portable library bundle: export/import/merge/copy (client-safe)
 │   ├── targets.ts             # pure per-agent/per-workspace target planner (client-safe)
 │   ├── variables.ts           # typed input resolution + directory-browse RPC (client-safe)
+│   ├── analytics.ts           # library ordering + "most used" summary (client-safe)
 │   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
@@ -381,7 +382,7 @@ Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger a
 4. **Multi-agent fan-out** — delivered in 0.9.0 (§16): any number of existing agents can be selected as targets; the pure `planTargets` helper unions them with the selected workspaces, de-duplicates a workspace that already has a selected agent, and carries the owning host so an agent without a loaded workspace still goes to the right daemon.
 5. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is still open and would use `useHosts()` + per-host `getPaseoClient(serverId)` RPCs.
 6. **Command parameters beyond strings** — delivered in 0.10.0 (§17): declared inputs carry a `kind` (`text` / `file` / `workspace`), the editor lets each template input pick one, the run dialog renders a workspace chip picker and a file path field with a directory browser.
-7. **Usage analytics** — aggregate `useCount`/history into a "most used" section; data already exists.
+7. **Usage analytics** — delivered in 0.11.0 (§18): a `Most used` summary (top three by successful runs) and a usage-first library ordering; the data is the existing `useCount`.
 8. **Composer pills / timeline run cards** — blocked today (§5e); revisit when the SDK gains global pill registration or plugin-attributed timeline items.
 9. **Web dashboard** — deferred (§5e); revisit if the host adds a remote-access surface plugins can attach to.
 
@@ -953,3 +954,45 @@ user types the path.
 | `npx vitest run` | **17 suites / 182 tests pass** — 176 from 0.9.0 + `tests/variables.test.ts` (6: declared kind/prompt preservation, discovered-as-text, workflow returns no inputs, editor kind override with template-default precedence, removed-token cleanup, new input defaults to text) |
 | Schema back-compat | `kind` has a zod default, so the existing `tests/store`, `tests/commands`, `tests/executor` and `tests/workflows` fixtures still parse (the only fixture that needed `kind` was the typed search fixture, updated) |
 | UI | The new controls and the directory browser were not rendered in the app this pass; their inputs/outputs are covered by the pure module and the RPC contract |
+## 18. Version 0.11.0 — usage analytics (2026-11-11)
+
+Roadmap §8 item 7 ("usage analytics"), delivered. New functionality →
+second-digit bump `0.10.0 → 0.11.0`, annotated tag `command-center@0.11.0`.
+
+### 18.1 What changed
+
+`shared/analytics.ts` holds both pure helpers:
+
+- `sortCommands(commands, "default" | "used")` — the library ordering. `default`
+  keeps the historical favorites-first alphabetical order; `used` sorts by
+  `useCount` descending and falls back to the default ordering for ties, so the
+  list is deterministic.
+- `mostUsedCommands(commands, limit = 3)` — the summary: only commands with
+  `useCount > 0`, highest first, favorite/name as tie-breakers, capped.
+
+The library tab gained two ordering chips (`A–Z`, `Most used`) in the toolbar
+and a bordered `Most used` block above the list (`Name (runs) · …`). The block
+is hidden while a search query or category filter is active, because it would
+otherwise describe a different set than the list below it.
+
+`useCount` is still server-owned: `command-center.save` preserves the stored
+counter and `run`/`run-batch` increment it by the number of successful targets
+(workflows count once, per §14). The summary therefore reflects real dispatches,
+not dialog opens.
+
+### 18.2 Deliberately not built
+
+1. **No separate analytics tab.** The roadmap asked for a "most used" section;
+   a tab would duplicate the library for three numbers.
+2. **No time-windowed stats.** `useCount` is a monotonic counter; "runs this
+   week" would need history queries with retention-dependent results (history is
+   bounded at 10–500 entries).
+3. **No cross-command charts.** Out of scope for a personal command library.
+
+### 18.3 Verification (2026-11-11)
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | **exit 0** |
+| `npx vitest run` | **18 suites / 188 tests pass** — 182 from 0.10.0 + `tests/analytics.test.ts` (6: default ordering, usage ordering with default tie-break, input immutability, zero-run exclusion and cap, all-zero case, zero limit) |
+| UI | The summary block and ordering chips were not rendered in the app this pass; their data comes from the unit-tested helpers |
