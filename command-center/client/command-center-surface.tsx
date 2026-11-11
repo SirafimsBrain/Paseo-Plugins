@@ -26,7 +26,8 @@ import { CommandForm, type CommandFormResult } from "./command-form";
 import { ShareDialog } from "./share-dialog";
 import { dispatchRemoteTarget } from "./dispatch";
 import { renderPreview } from "./preview";
-import { RunDialog, type BatchItemResult, type BatchTarget } from "./run-dialog";
+import { RunDialog, type BatchItemResult } from "./run-dialog";
+import type { BatchTarget } from "../shared/targets";
 import { ScheduleDialog } from "./schedule-dialog";
 import { SchedulesTab } from "./schedules-tab";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
@@ -575,15 +576,22 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
         target.workspaceKey !== null
           ? (workspaces.find((candidate) => workspaceKey(candidate) === target.workspaceKey) ?? null)
           : null;
-      const parsed = target.workspaceKey
-        ? splitWorkspaceKey(target.workspaceKey)
-        : { serverId: localServerId, workspaceId: undefined as string | undefined };
+      const parsed = target.serverId
+        ? { serverId: target.serverId, workspaceId: workspace?.id }
+        : target.workspaceKey
+          ? splitWorkspaceKey(target.workspaceKey)
+          : { serverId: localServerId, workspaceId: undefined as string | undefined };
       return { target, workspace, serverId: parsed.serverId, workspaceId: parsed.workspaceId };
     });
 
-    const outcomes: BatchItemResult[] = resolved.map(({ workspace }) => ({
+    const outcomes: BatchItemResult[] = resolved.map(({ workspace, target }) => ({
       key: "",
-      workspaceName: workspace?.name ?? "Best-guess workspace",
+      workspaceName:
+        workspace?.name ??
+        (target.agentId
+          ? (agents.find((agent) => agent.id === target.agentId)?.title ??
+            `agent ${target.agentId.slice(0, 10)}`)
+          : "Best-guess workspace"),
       hostLabel: workspace?.hostLabel ?? "",
       ok: false,
       kind:

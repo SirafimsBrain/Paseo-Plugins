@@ -26,6 +26,7 @@ command-center/
 │   ├── template.ts            # pure template renderer + input discovery (client-safe)
 │   ├── search.ts              # pure command search/filter over name, category, template, variables
 │   ├── share.ts               # portable library bundle: export/import/merge/copy (client-safe)
+│   ├── targets.ts             # pure per-agent/per-workspace target planner (client-safe)
 │   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
@@ -52,7 +53,7 @@ command-center/
 
 Data flow for a run:
 
-1. The run dialog resolves N targets (workspace multi-select grouped by host, optional provider override, optional existing agent for a single target) and fills variable values, previewing the rendered result locally with the same renderer the server uses.
+1. The run dialog resolves N targets (workspace multi-select grouped by host, optional provider override, and any number of existing agents — `shared/targets.ts` plans the union, with a selected agent replacing the new-agent run for its own workspace) and fills variable values, previewing the rendered result locally with the same renderer the server uses.
 2. Local targets (this daemon) go through `command-center.run-batch` in one call; the executor runs them sequentially and records one history entry per target. A failure on one target does not stop the rest.
 3. Targets on other hosts are dispatched from the client via `getPaseoClient(serverId)` using `client/dispatch.ts` — a mirror of the daemon executor, sharing `renderTemplate` and `worktreeBranchFor` from `shared/template.ts` so naming and rendering cannot drift. Results are reported back through `command-center.history-append`.
 4. `command-center.run` (single target) is kept unchanged for the `/cc` slash command. Per-target dispatch rules (both executors):
@@ -357,6 +358,7 @@ The plugin's manifest range was `>=0.8.0` through 0.5.1, which covered 0.10.x. T
 - **The bridge needs the daemon config.** `daemon-connection.ts` reads `daemon.listen` from `$PASEO_HOME/config.json`; if the daemon listens behind authentication, the bridge would need the password — not required in the default local setup (no password set).
 - **No secrets.** Templates are plain files; do not put tokens into templates.
 - **Worktree runs require a git workspace.** Branch-off mode on a non-git directory will fail with a daemon-side error surfaced in the run dialog.
+- **Agent fan-out is uniform.** Selecting several existing agents sends the same rendered prompt with the same values to each; there are no per-agent value overrides.
 - **History is linear and bounded** (default 50, user-configurable 10–500 via settings, §5d); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
 - **`/cc` runs with defaults** — empty inputs fall back to template defaults and the workspace is picked server-side; a matching command name is required. `list`/`history` only open the surface: the slash context has no message channel to print into.
 - **Automation is best-effort.** Auto-run/bootstrap commands execute with template defaults and swallow errors (§5d); a failing automation never blocks the triggering event, and failures are only visible via the run history.
@@ -373,7 +375,7 @@ Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger a
 1. **Workflows — delivered in 0.7.0 (§14.2)** and removed from this list: a `workflow` command type chaining saved commands with `always | on-success | on-failure` conditions, an executor pass, per-step history summaries and a step editor.
 2. **Keyboard shortcuts** — global hotkeys per command; requires host support for keybinding registration (not present in 0.10.x), otherwise emulable via Command Center items only.
 3. **Import/export & sharing** — delivered in 0.8.0 (§15): a versioned JSON bundle, merge/copy import semantics, and raw-URL import (a file in a git host, a gist, any static URL).
-4. **Multi-agent fan-out** — done for workspaces/hosts via `run-batch` + client dispatch; per-agent (N existing agents as targets) fan-out is still open.
+4. **Multi-agent fan-out** — delivered in 0.9.0 (§16): any number of existing agents can be selected as targets; the pure `planTargets` helper unions them with the selected workspaces, de-duplicates a workspace that already has a selected agent, and carries the owning host so an agent without a loaded workspace still goes to the right daemon.
 5. **Cross-host sync** — runs across hosts are done (client dispatch); *store* sync (shared `commands.json` across daemons) is still open and would use `useHosts()` + per-host `getPaseoClient(serverId)` RPCs.
 6. **Command parameters beyond strings** — file pickers, workspace pickers as first-class variable types in the run dialog.
 7. **Usage analytics** — aggregate `useCount`/history into a "most used" section; data already exists.
@@ -844,3 +846,57 @@ The library toolbar gained a `Share` button; the modal has two tabs:
 | `npx tsc --noEmit` | **exit 0** |
 | `npx vitest run` | **15 suites / 170 tests pass** — 159 from 0.7.0 + `tests/share.test.ts` (11: envelope/bare-array parsing, malformed and foreign-format rejection, export selection and counter reset, merge identity/favorite/useCount semantics, invalid-record skipping, copy name de-duplication, workflow step remapping incl. out-of-order bundles, missing-step rejection, unique naming) |
 | UI | The share dialog was not rendered in the app in this pass; its behaviour is covered by the pure module and RPC wiring only |
+## 16. Version 0.9.0 — per-agent fan-out (2026-11-11)
+
+Roadmap §8 item 4, the remaining half: multi-agent fan-out. New functionality →
+second-digit bump `0.8.0 → 0.9.0`, annotated tag `command-center@0.9.0`.
+
+### 16.1 What changed
+
+The run dialog's single "Send to an existing agent" picker became a multi-select
+list. The target planner moved into `shared/targets.ts` (`planTargets`), a pure
+module the dialog and `tests/targets.test.ts` share:
+
+| Selection | Targets |
+| --- | --- |
+| Nothing | One legacy best-guess target (server picks the workspace) |
+| Workspaces only | One new-agent target per workspace (unchanged) |
+| Agents only | One existing-agent target per agent |
+| Workspace + an agent of that workspace | The agent target only — the workspace is not started again with a new agent |
+| Workspace A + agent of workspace B | A new-agent target for A and an existing-agent target for B |
+
+Additional rules:
+
+- **Host routing.** A target now carries `serverId`. The workspace key used to
+  be the only host carrier, but an agent can be selected without its workspace
+  being in the loaded list; without `serverId` that target would be dispatched
+  to the local daemon with a foreign agent id. `client/dispatch.ts` and the
+  local `run-batch` split in the surface use it, so remote agents always reach
+  their own host.
+- **Offer set.** With workspaces selected, the agent list shows only agents
+  living in them (across hosts); with nothing selected it shows every open
+  agent. Closed/archived agents are never offered.
+- **Turn-aware dispatch** (`activeTurnBehavior`) is applied to every selected
+  agent target; new-agent targets never carry it. The busy-turn chips appear
+  as soon as at least one agent is selected.
+- **Worktrees** stay a new-agent concept: agent targets always use
+  `newWorktree: false`, and workflows keep forcing it off for the remaining
+  new-agent targets.
+- The per-target result list labels an agent target by the agent's title when no
+  workspace name is available.
+
+### 16.2 Deliberately not built
+
+1. **No per-agent values.** One rendered prompt goes to every selected agent;
+   per-agent variable overrides would need a different dialog model.
+2. **No "send to every agent of a workspace".** Agents are picked explicitly;
+   a select-all shortcut for the filtered list is a future UI nicety.
+3. **Schedules are unchanged** — a scheduled run still creates its own agent.
+
+### 16.3 Verification (2026-11-11)
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | **exit 0** |
+| `npx vitest run` | **16 suites / 176 tests pass** — 170 from 0.8.0 + `tests/targets.test.ts` (6: best-guess fallback, workspace fan-out, agent without a loaded workspace keeps its host, agent replaces its own workspace, mixed workspace/agent planning, busy-turn policy only on agent targets + workflow worktree off) |
+| UI | The multi-select picker was not rendered in the app this pass; the planning logic it calls is unit-tested |

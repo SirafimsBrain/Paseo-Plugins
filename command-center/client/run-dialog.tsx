@@ -4,6 +4,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import type { ActiveTurnBehavior, CommandDefinition, ProviderWithModels, RunResult } from "../shared/commands";
 import { inputVariablesOf } from "../shared/template";
 import { isFullModelRef, resolveModelRef } from "../shared/commands";
+import { planTargets, type BatchTarget } from "../shared/targets";
 import { renderPreview } from "./preview";
 import { ScheduleDialog } from "./schedule-dialog";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
@@ -32,21 +33,6 @@ export interface DialogProviderOption {
   serverId: string;
   hostLabel: string;
 }
-/** One fan-out target: a workspace on a host, plus per-run overrides. */
-export interface BatchTarget {
-  /** JSON key from `workspaceKey()`; null means "let the server pick". */
-  workspaceKey: string | null;
-  agentId?: string;
-  provider?: string;
-  newWorktree: boolean;
-  /**
-   * Turn-aware dispatch (0.6.0), only for targets with an existing `agentId`:
-   * `interrupt` stops the running turn (the daemon default when omitted),
-   * `steer` delivers the prompt into the running turn.
-   */
-  activeTurnBehavior?: ActiveTurnBehavior;
-}
-
 export interface BatchItemResult {
   key: string;
   workspaceName: string;
@@ -155,11 +141,12 @@ export function RunDialog({
   const [provider, setProvider] = useState<string>(() =>
     resolveModelRef(providers, initialProvider ?? command.provider),
   );
-  const [agentId, setAgentId] = useState<string>(() =>
-    initialAgentId && agents.some((agent) => agent.id === initialAgentId && agent.status !== "closed")
-      ? initialAgentId
-      : "",
-  );
+  /** Existing agents picked as run targets (0.9.0 — multi-select fan-out). */
+  const [selectedAgentKeys, setSelectedAgentKeys] = useState<string[]>(() => {
+    if (!initialAgentId) return [];
+    const match = agents.find((agent) => agent.id === initialAgentId && agent.status !== "closed");
+    return match ? [`${match.serverId}:${match.id}`] : [];
+  });
   const [newWorktree, setNewWorktree] = useState(false);
   /** What happens when the existing-agent target is mid-turn (0.6.0). */
   const [activeTurn, setActiveTurn] = useState<ActiveTurnBehavior>("interrupt");
@@ -210,13 +197,44 @@ export function RunDialog({
     return [...groups.values()];
   }, [workspaces]);
 
-  // Existing-agent picker is only meaningful for a single target.
-  const singleTargetServer = selectedWorkspaces.length === 1 ? (selectedWorkspaces[0]?.serverId ?? null) : null;
+  const agentKey = (agent: DialogAgentOption) => `${agent.serverId}:${agent.id}`;
+  const selectedAgents = useMemo(
+    () => openAgents.filter((agent) => selectedAgentKeys.includes(agentKey(agent))),
+    [openAgents, selectedAgentKeys],
+  );
+  /**
+   * Agents offered as targets: when workspaces are selected, only the agents
+   * living in them (across hosts); with no workspace selected, every open agent.
+   * Selecting an agent implies its workspace, so the same workspace is not run
+   * twice (no new agent is created next to the one that was picked).
+   */
   const agentsForTarget = useMemo(() => {
-    if (selectedWorkspaces.length !== 1) return [];
-    if (singleTargetServer === null) return openAgents;
-    return openAgents.filter((agent) => agent.serverId === singleTargetServer);
-  }, [openAgents, selectedWorkspaces.length, singleTargetServer]);
+    if (selectedWorkspaces.length === 0) return openAgents;
+    return openAgents.filter((agent) =>
+      selectedWorkspaces.some(
+        (workspace) => workspace.id === agent.workspaceId && workspace.serverId === agent.serverId,
+      ),
+    );
+  }, [openAgents, selectedWorkspaces]);
+  const groupedAgents = useMemo(() => {
+    const groups = new Map<string, { label: string; options: DialogAgentOption[] }>();
+    for (const agent of agentsForTarget) {
+      let group = groups.get(agent.serverId);
+      if (!group) {
+        group = { label: agent.hostLabel.length > 0 ? agent.hostLabel : "This host", options: [] };
+        groups.set(agent.serverId, group);
+      }
+      group.options.push(agent);
+    }
+    return [...groups.values()];
+  }, [agentsForTarget]);
+  /** Workspace key of an agent's own workspace, when it is loaded. */
+  const workspaceKeyForAgent = (agent: DialogAgentOption): string | null => {
+    const workspace = workspaces.find(
+      (option) => option.id === agent.workspaceId && option.serverId === agent.serverId,
+    );
+    return workspace ? JSON.stringify([workspace.serverId, workspace.id]) : null;
+  };
 
   const firstWorkspace = selectedWorkspaces[0] ?? null;
   const preview = isWorkflow
@@ -241,7 +259,25 @@ export function RunDialog({
     );
   };
 
-  const targetCount = Math.max(selectedKeys.length, 1);
+  const toggleAgent = (agent: DialogAgentOption) => {
+    setResults(null);
+    const key = agentKey(agent);
+    setSelectedAgentKeys((previous) =>
+      previous.includes(key) ? previous.filter((candidate) => candidate !== key) : [...previous, key],
+    );
+  };
+
+  /**
+   * Workspaces that still need a *new* agent: the selected ones minus those
+   * already covered by a selected existing agent. Selecting an agent therefore
+   * replaces the new-agent run for its workspace instead of duplicating it.
+   */
+  const newAgentWorkspaceKeys = selectedKeys.filter((key) => {
+    const covered = selectedAgents.some((agent) => workspaceKeyForAgent(agent) === key);
+    return !covered;
+  });
+  const targetCount = Math.max(newAgentWorkspaceKeys.length + selectedAgents.length, 1);
+  const agentTargetCount = selectedAgents.length;
   // A workflow has no provider of its own — each prompt step uses its stored one.
   const providerValid = isShell || isWorkflow || isFullModelRef(provider);
   const canRun = !busy && providerValid;
@@ -255,22 +291,24 @@ export function RunDialog({
         ? `Run in terminal on ${targetCount}`
         : targetCount > 1
           ? `Run on ${targetCount} targets`
-          : "Run";
+          : agentTargetCount > 0
+            ? "Send to agent"
+            : "Run";
 
   const handleRun = () => {
     if (!canRun) return;
-    const turnBehavior = agentId !== "" ? activeTurn : undefined;
-    const runProvider = isWorkflow ? undefined : provider || undefined;
-    const targets: BatchTarget[] =
-      selectedKeys.length === 0
-        ? [{ workspaceKey: null, agentId: agentId !== "" ? agentId : undefined, provider: runProvider, newWorktree: isWorkflow ? false : newWorktree, activeTurnBehavior: turnBehavior }]
-        : selectedKeys.map((workspaceKey) => ({
-            workspaceKey,
-            agentId: selectedKeys.length === 1 && agentId !== "" ? agentId : undefined,
-            provider: runProvider,
-            newWorktree: isWorkflow ? false : newWorktree,
-            activeTurnBehavior: turnBehavior,
-          }));
+    const targets: BatchTarget[] = planTargets({
+      selectedWorkspaceKeys: selectedKeys,
+      selectedAgents: selectedAgents.map((agent) => ({
+        id: agent.id,
+        serverId: agent.serverId,
+        workspaceKey: workspaceKeyForAgent(agent),
+      })),
+      provider: isWorkflow ? undefined : provider || undefined,
+      newWorktree,
+      workflow: isWorkflow,
+      activeTurnBehavior: selectedAgents.length > 0 ? activeTurn : undefined,
+    });
     setBusy(true);
     setResults(null);
     void onRun({ values, targets })
@@ -300,11 +338,13 @@ export function RunDialog({
           ? `Runs ${command.steps.length} ${command.steps.length === 1 ? "step" : "steps"} in order on each selected workspace (${targetCount}). Steps keep their own providers and defaults.`
           : isShell
           ? `Runs in a new terminal on each selected workspace (${targetCount}).`
-          : targetCount > 1
-            ? `Creates a new agent on each of the ${targetCount} selected workspaces.`
-            : command.scope === "workspace"
-              ? "Runs in the selected workspace."
-              : "Creates a new agent in the selected workspace."}
+          : agentTargetCount > 0
+            ? `Sends the prompt to ${agentTargetCount} ${agentTargetCount === 1 ? "existing agent" : "existing agents"}${newAgentWorkspaceKeys.length > 0 ? ` and creates ${newAgentWorkspaceKeys.length} new ${newAgentWorkspaceKeys.length === 1 ? "agent" : "agents"}` : ""}.`
+            : targetCount > 1
+              ? `Creates a new agent on each of the ${targetCount} selected workspaces.`
+              : command.scope === "workspace"
+                ? "Runs in the selected workspace."
+                : "Creates a new agent in the selected workspace."}
       </Text>
 
       {merged.length > 0 ? (
@@ -391,39 +431,46 @@ export function RunDialog({
           ) : null}
           <View style={styles.field}>
             <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>
-              {selectedWorkspaces.length <= 1 ? "Send to an existing agent (optional)" : "Existing agent (single target only)"}
+              Existing agents (optional) — pick one or more instead of creating new ones
             </Text>
-            {selectedWorkspaces.length <= 1 ? (
-              <View style={styles.row}>
-                <Pressable
-                  style={[styles.chip, { borderColor: theme.colors.border }, agentId === "" && styles.chipActive]}
-                  onPress={() => setAgentId("")}
-                >
-                  <Text style={[styles.chipText, { color: foreground }]}>New agent</Text>
-                </Pressable>
-                {agentsForTarget.map((agent) => (
-                  <Pressable
-                    key={`${agent.serverId}:${agent.id}`}
-                    style={[
-                      styles.chip,
-                      { borderColor: theme.colors.border },
-                      agentId === agent.id && styles.chipActive,
-                    ]}
-                    onPress={() => setAgentId(agent.id)}
-                  >
-                    <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
-                      {agent.title ?? agent.id.slice(0, 10)}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : (
+            {agentsForTarget.length === 0 ? (
               <Text style={[styles.hint, { color: foregroundMuted }]}>
-                Each target gets a new agent — pick a single workspace to reuse an existing one.
+                {openAgents.length === 0
+                  ? "No open agents on the selected hosts."
+                  : "No open agents in the selected workspaces."}
               </Text>
+            ) : (
+              groupedAgents.map((group) => (
+                <View key={group.label} style={styles.group}>
+                  {multiHost ? (
+                    <Text style={[styles.groupLabel, { color: foregroundMuted }]}>{group.label}</Text>
+                  ) : null}
+                  <View style={styles.row}>
+                    {group.options.map((agent) => {
+                      const active = selectedAgentKeys.includes(agentKey(agent));
+                      return (
+                        <Pressable
+                          key={agentKey(agent)}
+                          style={[styles.chip, { borderColor: theme.colors.border }, active && styles.chipActive]}
+                          onPress={() => toggleAgent(agent)}
+                        >
+                          <Text style={[styles.chipText, { color: foreground }]} numberOfLines={1}>
+                            {active ? "✓ " : ""}{agent.title ?? agent.id.slice(0, 10)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))
             )}
+            {selectedAgents.length > 0 ? (
+              <Text style={[styles.hint, { color: foregroundMuted }]}>
+                Each selected agent receives the rendered prompt; its workspace is not started again.
+              </Text>
+            ) : null}
           </View>
-          {agentId !== "" ? (
+          {selectedAgents.length > 0 ? (
             <View style={styles.field}>
               <Text style={[styles.fieldLabel, { color: foregroundMuted }]}>If the agent is busy</Text>
               <View style={styles.row}>
