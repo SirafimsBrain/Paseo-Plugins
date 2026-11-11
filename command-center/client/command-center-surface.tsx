@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { getPaseoClient, openExternalUrl, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
+import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderWithModels } from "../shared/commands";
@@ -22,9 +22,9 @@ import {
 } from "../shared/commands";
 import { createSchedule } from "../shared/schedules";
 import { exportCommands, importCommands, importCommandsFromUrl } from "../shared/share";
-import { openDashboard } from "../shared/dashboard";
 import { parseScreenParams, screenParams, type ScreenParams, type ScreenView } from "../shared/screen-params";
 import { CommandForm, type CommandFormResult } from "./command-form";
+import { DashboardTab } from "./dashboard-tab";
 import { ShareDialog } from "./share-dialog";
 import { dispatchRemoteTarget } from "./dispatch";
 import { renderPreview } from "./preview";
@@ -34,7 +34,7 @@ import { ScheduleDialog } from "./schedule-dialog";
 import { SchedulesTab } from "./schedules-tab";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 
-type Tab = "library" | "history" | "schedules";
+type Tab = "library" | "history" | "schedules" | "dashboard";
 
 interface WorkspaceOption {
   id: string;
@@ -86,7 +86,6 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
   const exportRpc = useRpc(exportCommands);
   const importRpc = useRpc(importCommands);
   const importUrlRpc = useRpc(importCommandsFromUrl);
-  const dashboardRpc = useRpc(openDashboard);
 
   // All configured app hosts (multi-host fan-out). Older hosts may not provide
   // the loader — fall back to single-host mode instead of crashing.
@@ -557,20 +556,6 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
     [exportRpc],
   );
 
-  /** Opens the read-only, loopback-only dashboard in the system browser. */
-  const handleOpenDashboard = async () => {
-    try {
-      const result = await dashboardRpc({});
-      if (!result.url) {
-        toast.error(result.error ?? "The dashboard could not start.");
-        return;
-      }
-      await openExternalUrl(result.url);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const handleDelete = async (command: CommandDefinition) => {
     try {
       await deleteRpc({ id: command.id });
@@ -793,7 +778,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
   return (
     <View style={styles.container}>
       <View style={styles.tabRow}>
-        {(["library", "history", "schedules"] as Tab[]).map((option) => (
+        {(["library", "history", "schedules", "dashboard"] as Tab[]).map((option) => (
           <Pressable
             key={option}
             style={[styles.tab, tab === option && styles.tabActive]}
@@ -806,7 +791,13 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
                 tab === option && styles.tabTextActive,
               ]}
             >
-              {option === "library" ? "Commands" : option === "history" ? "History" : "Schedules"}
+              {option === "library"
+                ? "Commands"
+                : option === "history"
+                  ? "History"
+                  : option === "schedules"
+                    ? "Schedules"
+                    : "Dashboard"}
             </Text>
           </Pressable>
         ))}
@@ -843,6 +834,8 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
           focusScheduleId={highlightScheduleId}
           onShowCommand={(commandId) => applyParams(screenParams("library", { commandId }))}
         />
+      ) : tab === "dashboard" ? (
+        <DashboardTab theme={theme} reloadKey={reloadKey} />
       ) : tab === "library" ? (
         <ScrollView contentContainerStyle={styles.list}>
           <View style={styles.toolbar}>
@@ -905,9 +898,6 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
               </Pressable>
               <Pressable style={styles.smallButton} onPress={() => setSharing(true)}>
                 <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Share</Text>
-              </Pressable>
-              <Pressable style={styles.smallButton} onPress={() => void handleOpenDashboard()}>
-                <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Dashboard</Text>
               </Pressable>
             </View>
           </View>

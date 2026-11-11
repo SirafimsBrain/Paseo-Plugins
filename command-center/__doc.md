@@ -29,7 +29,7 @@ command-center/
 │   ├── targets.ts             # pure per-agent/per-workspace target planner (client-safe)
 │   ├── variables.ts           # typed input resolution + directory-browse RPC (client-safe)
 │   ├── analytics.ts           # library ordering + "most used" summary (client-safe)
-│   ├── dashboard.ts           # read-only dashboard HTML + open RPC (client-safe)
+│   ├── dashboard.ts           # read-only dashboard summary (client-safe)
 │   └── host-fonts.ts          # host Appearance settings parsing + font scale math (client-safe)
 ├── server/
 │   ├── store.ts               # atomic JSON storage in $PASEO_HOME/plugins/command-center
@@ -38,7 +38,6 @@ command-center/
 │   ├── schedules.ts           # schedule bridge: daemon schedule/* RPCs ↔ plugin contracts
 │   ├── schedules-mapping.ts   # pure daemon→view mapping (unit-tested)
 │   ├── schedule-links.ts      # schedules.json link store (scheduleId ↔ commandId)
-│   ├── dashboard.ts           # loopback HTTP server: token, headers, lifecycle
 │   └── (template.ts removed — shared module is used instead)
 ├── client/
 │   ├── command-center-surface.tsx  # library + history + schedules tabs, editor host, run modal, fan-out
@@ -49,6 +48,7 @@ command-center/
 │   ├── schedules-tab.tsx           # schedule list: status, next/last run, actions, run history
 │   ├── provider-model-picker.tsx   # dropdown for full `provider/model` references with filter
 │   ├── dispatch.ts                 # client-side executor mirror for non-local hosts (multi-host fan-out)
+│   ├── dashboard-tab.tsx           # read-only dashboard tab (summary, commands, recent runs)
 │   ├── share-dialog.tsx            # export/import modal (clipboard + raw JSON URL)
 │   ├── use-host-typography.ts     # hook: host font settings → scale + families
 │   └── preview.ts                  # preview rendering helper
@@ -363,7 +363,7 @@ The plugin's manifest range was `>=0.8.0` through 0.5.1, which covered 0.10.x. T
 - **The bridge needs the daemon config.** `daemon-connection.ts` reads `daemon.listen` from `$PASEO_HOME/config.json`; if the daemon listens behind authentication, the bridge would need the password — not required in the default local setup (no password set).
 - **No secrets.** Templates are plain files; do not put tokens into templates.
 - **Worktree runs require a git workspace.** Branch-off mode on a non-git directory will fail with a daemon-side error surfaced in the run dialog.
-- **The dashboard is loopback-only.** It is a read-only local browser view, not a remote-access feature: binding `127.0.0.1` means a phone on the network cannot open it without a tunnel, which is intentional.
+- **The dashboard is read-only and in-app.** It lives in a tab of the Command Center screen and exposes no HTTP endpoint, so there is no phone/remote view; counts are the monotonic run counters and failures cover the stored history window only.
 - **File browsing is local-only.** `command-center.browse` goes through the plugin's single daemon connection, so the picker lists the local host's filesystem; a remote-host target keeps a typed path.
 - **Agent fan-out is uniform.** Selecting several existing agents sends the same rendered prompt with the same values to each; there are no per-agent value overrides.
 - **History is linear and bounded** (default 50, user-configurable 10–500 via settings, §5d); repeat works per entry (batch re-runs are repeated one target at a time); there is no per-command filtering yet.
@@ -387,7 +387,7 @@ Ordered by value/effort, all verified to exist in SDK 0.10.1. Items 1 (trigger a
 6. **Command parameters beyond strings** — delivered in 0.10.0 (§17): declared inputs carry a `kind` (`text` / `file` / `workspace`), the editor lets each template input pick one, the run dialog renders a workspace chip picker and a file path field with a directory browser.
 7. **Usage analytics** — delivered in 0.11.0 (§18): a `Most used` summary (top three by successful runs) and a usage-first library ordering; the data is the existing `useCount`.
 8. **Composer pills / timeline run cards** — blocked today (§5e); revisit when the SDK gains global pill registration or plugin-attributed timeline items.
-9. **Web dashboard** — delivered in 0.12.0 (§19) in the safe form: a loopback-only, token-protected, read-only page. Network/remote exposure is still deliberately absent; a phone view would need Paseo's own remote access, because exposing this port on the LAN would publish prompt text and run arguments.
+9. **Web dashboard** — delivered in 0.12.x as an in-app tab (§19): a read-only summary, library table and recent runs inside the Command Center screen, deep-linkable via `view=dashboard` and `/cc dashboard`. A browser page was shipped in 0.12.0 and replaced in 0.12.1 because the dashboard must open in a Paseo tab; no network surface remains, and a phone view would still need Paseo's own remote access.
 
 ## 9. Planned improvements with Paseo 0.11.0
 
@@ -999,50 +999,65 @@ not dialog opens.
 | `npx tsc --noEmit` | **exit 0** |
 | `npx vitest run` | **18 suites / 188 tests pass** — 182 from 0.10.0 + `tests/analytics.test.ts` (6: default ordering, usage ordering with default tie-break, input immutability, zero-run exclusion and cap, all-zero case, zero limit) |
 | UI | The summary block and ordering chips were not rendered in the app this pass; their data comes from the unit-tested helpers |
-## 19. Version 0.12.0 — loopback read-only dashboard (2026-11-11)
+## 19. Versions 0.12.0–0.12.1 — read-only dashboard
 
-Roadmap §8 item 9 ("web dashboard"), delivered in the only form that does not
-add an attack surface the plugin cannot defend. New functionality →
-second-digit bump `0.11.0 → 0.12.0`, annotated tag `command-center@0.12.0`.
+Roadmap §8 item 9 ("web dashboard"). 0.12.0 shipped it as a loopback web page;
+0.12.1 moved it into a Paseo tab, because the dashboard must open inside the
+app rather than in the external browser. The move is a change to existing
+functionality → patch bump `0.12.0 → 0.12.1`; both releases carry annotated
+tags (`command-center@0.12.0`, `command-center@0.12.1`).
 
-### 19.1 What it is
+### 19.1 What the dashboard is now (0.12.1)
 
-`server/dashboard.ts` starts (lazily, on the first `command-center.dashboard`
-call) a Node `http` server that renders `shared/dashboard.ts` — the library
-table (name, type/provider, category, run count) and the last 50 runs (time,
-command, result, rendered text or error). The library toolbar's `Dashboard`
-button fetches the URL and opens it with the host's `openExternalUrl`.
+A fourth tab in the Command Center screen — next to Commands, History and
+Schedules — rendered natively with the host theme and typography:
 
-### 19.2 Security model
+- a summary card: command count, total runs (sum of the server-owned
+  `useCount` counters), failures in the stored history window, and whether the
+  numbers are read-only;
+- **Most used** (top three, from `mostUsedCommands`);
+- the whole **library** with name, favorite star, type/provider, category and
+  run count;
+- **Recent runs** with result, rendered text or error, timestamp and provider;
+- a `Refresh` button; the tab reloads whenever the surface's reload key changes
+  (after a run, save, import or schedule action).
 
-| Decision | Reason |
+`shared/dashboard.ts` owns `dashboardSummary(commands, history, options)` — the
+one definition of those numbers, with independent caps for the recent and
+most-used lists and negative limits clamped to zero. Pure and client-safe, so
+the tab and `tests/dashboard.test.ts` share it.
+
+### 19.2 Reachability
+
+| Entry point | Params |
 | --- | --- |
-| Binds `127.0.0.1` on port 0 (ephemeral) | Nothing is reachable from the network; there is no "expose to LAN" setting to misconfigure. A phone view would require a tunnel and is explicitly out of scope |
-| Fresh 24-byte token per process, embedded in the URL, required on every request | The store contains prompt text and history contains run arguments; a bare local port would leak them to any local process |
-| Constant-time token comparison (`sha256` digests + `timingSafeEqual`) | Avoids a length-dependent early exit |
-| GET/HEAD only, a single `/` route, no forms or actions | The page has no write path at all, even with a valid token |
-| `cache-control: no-store`, `content-security-policy: default-src 'none'; style-src 'unsafe-inline'`, `nosniff`, `no-referrer`, `noindex` | No caching of prompt text, no external loads, no referrer leak of the token |
-| The plugin disposer calls `stopDashboard()` | The socket does not outlive the plugin instance |
-| `<meta http-equiv="refresh" content="10">` | The page stays current without any JavaScript (CSP forbids it) |
+| Tab row in the Command Center screen | — |
+| `/cc dashboard` | `view=dashboard` |
+| Command Center item "Open Command Center dashboard" (⌘K) | `view=dashboard` |
+| Any host deep link | `?view=dashboard` (unknown views still degrade to the library) |
 
-All user-controlled text is HTML-escaped through one `escapeHtml` helper; the
-tests assert that `<script>` and `<img onerror=…>` cannot appear verbatim.
+`ScreenView` gained `dashboard`, so `parseScreenParams` / `toOpenScreenParams`
+round-trip the new tab through the same validated path the other deep links use.
 
-### 19.3 Deliberately not built
+### 19.3 What was removed in 0.12.1
 
-1. **No LAN/remote binding.** The roadmap's "read-only view on a phone" would
-   mean publishing prompt text and run arguments on the network; the host's own
-   remote access is the right layer for that.
-2. **No filters, search or links.** A static page keeps the CSP and the code
-   small; the filter story belongs to the in-app library.
-3. **No write endpoints.** Scheduling, running and editing stay in the app,
-   where permission and confirmation UI exist.
+The 0.12.0 implementation started a Node `http` server on `127.0.0.1`, required
+a per-process token in the URL, and opened the page with `openExternalUrl`. All
+of that is gone:
+
+- no socket, no port, no token, no HTML renderer, no CSP/header maintenance;
+- nothing to expose accidentally, and no second rendering path that could drift
+  from the app's own data presentation;
+- the dashboard cannot mutate anything because it renders no actions at all.
+
+If a remote/phone view is ever wanted, it belongs to Paseo's own remote access
+rather than a plugin-published port: the store contains prompt text and run
+arguments.
 
 ### 19.4 Verification (2026-11-11)
 
 | Check | Result |
 | --- | --- |
 | `npx tsc --noEmit` | **exit 0** |
-| `npx vitest run` | **19 suites / 193 tests pass** — 188 from 0.11.0 + `tests/dashboard.test.ts` (5: escaped markup in commands and runs, empty states, metacharacter escaping, a real server requiring the token with 401/404/405 checks and the security headers, stable URL on reuse) |
-| Server lifecycle | Started and stopped by the test through the real `ensureDashboard()`/`stopDashboard()`; it binds an ephemeral loopback port, so the test is independent of any running daemon |
-| UI | The `Dashboard` button was not exercised in the app this pass (it is a thin `openExternalUrl` call around the tested RPC) |
+| `npx vitest run` | **19 suites / 194 tests pass** — `tests/dashboard.test.ts` now covers `dashboardSummary` (counts, summed runs, recent failures, independent caps, empty store, negative limits) and the `view=dashboard` deep link, instead of the removed HTTP server |
+| UI | The new tab was not rendered in the app in this pass; it is a read-only consumer of the tested summary helper and the existing `list`/`history` RPCs |

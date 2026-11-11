@@ -20,7 +20,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 - **Live preview** — the run dialog shows the fully rendered prompt/line before it is dispatched.
 - **Categories** — every command can carry a free-form category label. The library shows a category chip row; picking a chip filters the list, and a new label typed in the editor is registered automatically on save.
 - **Search** — a toggleable search field filters commands by name, category, template body, and variable prompts. Matching is case-insensitive and multi-term (AND).
-- **Local read-only dashboard** — the `Dashboard` button opens a small web page in the system browser with the command library (type, category, run count) and the last 50 runs. It is served from `127.0.0.1` on an ephemeral port with a per-process token in the URL, is GET-only, and cannot change anything; there is no LAN/remote exposure.
+- **Dashboard tab** — a fourth tab inside the Command Center screen (next to Commands, History and Schedules) with a read-only summary: command/run/failure counts, the most-used commands, the whole library with type/category/run counts, and recent runs. Reachable directly via `/cc dashboard`, the ⌘K item, or the `view=dashboard` screen params; it never leaves Paseo.
 - **Usage analytics** — a `Most used` summary above the library (top three commands by successful runs) and a `Most used` ordering next to `A–Z`; every successful run increments the per-command counter.
 - **Sharing** — the `Share` button exports the library as a versioned JSON bundle (copy it to the clipboard) and imports one by pasting it or fetching a raw JSON URL (a file in a git repository, a gist, any static host). `Merge` updates commands that already exist (matched by id, then by name) and adds the rest while keeping local favorites and run counters; `Add a copy` imports everything under fresh ids and names without touching the originals.
 - **Targeting** — multi-select workspaces grouped by host (prompt and shell), run-time provider/model picker with live model lists (disabled providers hidden), optional existing agents — one or many, each receives the prompt and its workspace is not started again — and an optional branch-off worktree. One click fans out to many workspaces, agents and hosts with per-target results.
@@ -67,7 +67,7 @@ $PASEO_HOME/plugins/command-center/
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
 
-## Version 0.12.0 — roadmap §8 features (2026-11-11)
+## Versions 0.8.0–0.12.1 — roadmap §8 features (2026-11-11)
 
 Five roadmap items landed in sequence, each its own release and annotated tag:
 
@@ -88,13 +88,15 @@ Five roadmap items landed in sequence, each its own release and annotated tag:
 - **0.11.0 — usage analytics.** A `Most used` summary (top three by successful
   runs) and a usage-first library ordering over the existing server-owned
   `useCount`. §18.
-- **0.12.0 — loopback read-only dashboard.** A `Dashboard` button opens a
-  server-rendered page with the library and the last 50 runs: `127.0.0.1` only,
-  ephemeral port, per-process token, GET-only, `no-store` + `default-src 'none'`
-  CSP, no LAN/remote exposure. §19.
+- **0.12.0 — read-only dashboard.** A read-only view of the library and recent
+  runs, first shipped as a loopback web page. §19.
+- **0.12.1 — dashboard moved into Paseo.** The external-browser page was
+  replaced by a native `Dashboard` tab inside the Command Center screen, plus a
+  `view=dashboard` deep link and a `/cc dashboard` subcommand; the loopback HTTP
+  server and its token were removed. §19.
 
-**Verification:** `tsc --noEmit` clean and vitest **19 suites / 193 tests** green
-(34 new tests across `share`, `targets`, `variables`, `analytics` and
+**Verification:** `tsc --noEmit` clean and vitest **19 suites / 194 tests** green
+(35 new tests across `share`, `targets`, `variables`, `analytics` and
 `dashboard`). The new UI surfaces were not rendered in the app during this
 pass; the pure modules and RPC contracts they call are unit-tested.
 
@@ -165,6 +167,6 @@ methods** in an isolated 0.14.0 daemon.
 
 ## Compatibility
 
-Paseo **0.15.0 (2026-11-09)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.3` + `@getpaseo/client ^0.15.3` — compatible after the `addHook` migration; 0.14.0 surface stays in use. Current plugin version: **0.12.0**.
+Paseo **0.15.0 (2026-11-09)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.3` + `@getpaseo/client ^0.15.3` — compatible after the `addHook` migration; 0.14.0 surface stays in use. Current plugin version: **0.12.1**.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

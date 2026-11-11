@@ -1,13 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import * as path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { CommandDefinition, HistoryEntry } from "../shared/commands";
-import { escapeHtml, renderDashboardHtml } from "../shared/dashboard";
-import { appendHistory, saveCommands } from "../server/store";
-import { ensureDashboard, stopDashboard } from "../server/dashboard";
-
-const home = mkdtempSync(path.join(tmpdir(), "cc-dashboard-"));
+import { dashboardSummary } from "../shared/dashboard";
+import { parseScreenParams, screenParams, toOpenScreenParams } from "../shared/screen-params";
 
 function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition {
   return {
@@ -28,92 +22,69 @@ function command(overrides: Partial<CommandDefinition> = {}): CommandDefinition 
   };
 }
 
-const entry: HistoryEntry = {
-  id: "h_1",
-  commandId: "cmd_1",
-  commandName: "Deploy staging",
-  rendered: "Deploy api",
-  targetWorkspaceId: "w1",
-  targetAgentId: null,
-  kind: "new-agent",
-  ok: false,
-  error: "daemon refused",
-  at: "2026-11-11T10:00:00.000Z",
-};
+function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
+  return {
+    id: "h_1",
+    commandId: "cmd_1",
+    commandName: "Deploy staging",
+    rendered: "Deploy api",
+    targetWorkspaceId: "w1",
+    targetAgentId: null,
+    kind: "new-agent",
+    ok: true,
+    error: null,
+    at: "2026-11-11T10:00:00.000Z",
+    ...overrides,
+  };
+}
 
-beforeAll(() => {
-  process.env.PASEO_HOME = home;
-  saveCommands([command()]);
-  appendHistory([], entry);
+describe("dashboardSummary", () => {
+  it("counts commands, sums the run counters and reports recent failures", () => {
+    const summary = dashboardSummary(
+      [command({ useCount: 4 }), command({ id: "cmd_2", name: "Lint", useCount: 2 })],
+      [entry(), entry({ id: "h_2", ok: false, error: "daemon refused" })],
+    );
+    expect(summary.commandCount).toBe(2);
+    expect(summary.totalRuns).toBe(6);
+    expect(summary.failedRuns).toBe(1);
+    expect(summary.recent).toHaveLength(2);
+    expect(summary.mostUsed.map((entryCommand) => entryCommand.name)).toEqual([
+      "Deploy staging",
+      "Lint",
+    ]);
+  });
+
+  it("caps the recent list and the most-used list independently", () => {
+    const summary = dashboardSummary(
+      [command({ useCount: 3 }), command({ id: "cmd_2", name: "Lint", useCount: 1 })],
+      [entry({ id: "a" }), entry({ id: "b" }), entry({ id: "c" })],
+      { recentLimit: 2, mostUsedLimit: 1 },
+    );
+    expect(summary.recent.map((item) => item.id)).toEqual(["a", "b"]);
+    expect(summary.mostUsed.map((item) => item.name)).toEqual(["Deploy staging"]);
+  });
+
+  it("handles an empty store", () => {
+    const summary = dashboardSummary([], []);
+    expect(summary).toMatchObject({ commandCount: 0, totalRuns: 0, failedRuns: 0 });
+    expect(summary.recent).toEqual([]);
+    expect(summary.mostUsed).toEqual([]);
+  });
+
+  it("treats a negative limit as zero instead of slicing from the end", () => {
+    const summary = dashboardSummary([command()], [entry()], { recentLimit: -5, mostUsedLimit: -1 });
+    expect(summary.recent).toEqual([]);
+    expect(summary.mostUsed).toEqual([]);
+  });
 });
 
-afterAll(() => {
-  stopDashboard();
-  delete process.env.PASEO_HOME;
-  rmSync(home, { recursive: true, force: true });
-});
-
-describe("renderDashboardHtml", () => {
-  it("lists commands and runs and escapes markup", () => {
-    const html = renderDashboardHtml({
-      commands: [command({ name: '<script>alert("x")</script>' })],
-      history: [
-        { ...entry, error: null, rendered: "<img src=x onerror=alert(1)>" },
-        entry,
-      ],
-      now: new Date("2026-11-11T12:00:00.000Z"),
-    });
-    expect(html).toContain("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
-    expect(html).not.toContain("<script>alert");
-    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
-    expect(html).toContain("Deploy staging");
-    expect(html).toContain("daemon refused");
-    expect(html).toContain("Read-only");
+describe("dashboard deep link", () => {
+  it("parses view=dashboard and round-trips it", () => {
+    expect(parseScreenParams({ view: "dashboard" }).view).toBe("dashboard");
+    expect(toOpenScreenParams(screenParams("dashboard"))).toEqual({ view: "dashboard" });
   });
 
-  it("renders empty states", () => {
-    const html = renderDashboardHtml({ commands: [], history: [], now: new Date() });
-    expect(html).toContain("No commands saved yet.");
-    expect(html).toContain("Nothing has run yet.");
-  });
-
-  it("escapes the five HTML metacharacters", () => {
-    expect(escapeHtml(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&#39;");
-  });
-});
-
-describe("loopback dashboard server", () => {
-  it("starts on 127.0.0.1 and serves the page only with the token", async () => {
-    const started = await ensureDashboard();
-    expect(started.error).toBeNull();
-    expect(started.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?token=[0-9a-f]+$/);
-
-    const url = new URL(started.url!);
-    const authorized = await fetch(url);
-    expect(authorized.status).toBe(200);
-    expect(authorized.headers.get("content-type")).toContain("text/html");
-    expect(authorized.headers.get("cache-control")).toContain("no-store");
-    expect(authorized.headers.get("content-security-policy")).toContain("default-src 'none'");
-    const html = await authorized.text();
-    expect(html).toContain("Deploy staging");
-    expect(html).toContain("daemon refused");
-
-    const unauthorized = await fetch(`${url.origin}/`);
-    expect(unauthorized.status).toBe(401);
-
-    const wrongToken = await fetch(`${url.origin}/?token=deadbeef`);
-    expect(wrongToken.status).toBe(401);
-
-    const notFound = await fetch(`${url.origin}/other?token=${url.searchParams.get("token")}`);
-    expect(notFound.status).toBe(404);
-
-    const mutation = await fetch(url, { method: "POST" });
-    expect(mutation.status).toBe(405);
-  });
-
-  it("reuses the same URL on later calls", async () => {
-    const first = await ensureDashboard();
-    const second = await ensureDashboard();
-    expect(second.url).toBe(first.url);
+  it("still degrades an unknown view to the library", () => {
+    expect(parseScreenParams({ view: "nope" }).view).toBe("library");
   });
 });

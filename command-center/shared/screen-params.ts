@@ -4,7 +4,7 @@
  * `openScreen({ screenId, params })` carries a `Record<string, string>` into
  * `PluginScreenProps.params` (SDK 0.13+). The Command Center screen accepts:
  *
- * - `view=library|history|schedules` — the tab to open;
+ * - `view=library|history|schedules|dashboard` — the tab to open;
  * - `command=<command id>` — focus that command in the library;
  * - `schedule=<schedule id>` — focus that schedule in the schedules tab.
  *
@@ -13,7 +13,7 @@
  * share one definition of a valid link.
  */
 
-export type ScreenView = "library" | "history" | "schedules";
+export type ScreenView = "library" | "history" | "schedules" | "dashboard";
 
 export interface ScreenParams {
   view: ScreenView;
@@ -43,7 +43,9 @@ export function parseScreenParams(params: Record<string, string> | undefined): S
   const raw = params ?? {};
   const view = raw["view"];
   const parsedView: ScreenView =
-    view === "history" || view === "schedules" || view === "library" ? view : "library";
+    view === "history" || view === "schedules" || view === "dashboard" || view === "library"
+      ? view
+      : "library";
   const commandId = nonEmpty(raw["command"]);
   const scheduleId = nonEmpty(raw["schedule"]);
   return {

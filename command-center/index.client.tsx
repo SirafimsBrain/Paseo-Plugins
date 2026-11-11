@@ -60,6 +60,20 @@ export default function contribute(client: PluginClientContext) {
   });
 
   client.addCommandCenterItem({
+    id: "open-command-center-dashboard",
+    title: "Open Command Center dashboard",
+    icon: "TerminalSquare",
+    keywords: ["command", "center", "dashboard", "stats", "runs", "history"],
+    context: "global",
+    onSelect({ openScreen }) {
+      openScreen({
+        screenId: SCREEN_ID,
+        params: toOpenScreenParams(screenParams("dashboard")),
+      });
+    },
+  });
+
+  client.addCommandCenterItem({
     id: "open-command-center-workspace",
     title: "Open Command Center (this workspace)",
     icon: "TerminalSquare",
@@ -118,7 +132,7 @@ export default function contribute(client: PluginClientContext) {
   client.addSlashCommand({
     name: "cc",
     description: "Run a Command Center command by name",
-    argumentHint: "list | history | schedule <name> <cron> | <command name>",
+    argumentHint: "list | history | dashboard | schedule <name> <cron> | <command name>",
     context: "agent",
     async onSubmit({ args, rpc, openScreen }) {
       const trimmed = args.trim();
@@ -134,6 +148,11 @@ export default function contribute(client: PluginClientContext) {
 
       if (sub === "history") {
         openScreen({ screenId: SCREEN_ID, params: toOpenScreenParams(screenParams("history")) });
+        return;
+      }
+
+      if (sub === "dashboard") {
+        openScreen({ screenId: SCREEN_ID, params: toOpenScreenParams(screenParams("dashboard")) });
         return;
       }
 

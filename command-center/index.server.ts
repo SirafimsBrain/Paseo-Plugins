@@ -53,9 +53,7 @@ import { forgetAgentMcp, loadAgentMcpRegistry } from "./server/agent-mcp";
 import { decideSessionOpen, needsCapabilityProbe } from "./server/session-open";
 import { renderTemplate } from "./shared/template";
 import { browseFiles } from "./shared/variables";
-import { openDashboard } from "./shared/dashboard";
 import { getDaemonClient } from "./server/daemon-connection";
-import { ensureDashboard, stopDashboard } from "./server/dashboard";
 import {
   createScheduleFromCommand,
   fetchScheduleRuns,
@@ -241,9 +239,6 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(importCommands, (input) => applyImport(input.json, input.mode));
-
-  // Read-only dashboard (0.12.0): loopback-only, token in the URL, no writes.
-  server.handle(openDashboard, () => ensureDashboard());
 
   // File-input browser (0.10.0): a read-only listing of one directory through
   // the daemon's own file explorer. The plugin server has a single daemon
@@ -644,7 +639,5 @@ export default function contribute(server: PluginServerContext) {
     }),
   );
 
-  return () => {
-    stopDashboard();
-  };
+  return () => {};
 }
