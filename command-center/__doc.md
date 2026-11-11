@@ -314,11 +314,11 @@ The same defect existed in three sibling plugins and was fixed the same way — 
 
 ## 6. Compatibility
 
-Current: **verified on 2026-11-09 against Paseo `0.15.0`**, shipped as
-`0.7.0` with `@getpaseo/plugin@^0.15.3` + `@getpaseo/client@^0.15.3` — the
-four lifecycle hooks moved from the deprecated `server.on` / `server.before`
-to `server.addHook` (§14.1), which makes `requirements.paseo >=0.15.0` a hard
-requirement (`addHook` does not exist on a 0.14.0 host). The 0.14.0 surface
+Current: **0.12.0, verified on 2026-11-09 against Paseo `0.15.0`** (the SDK
+pins and the floor are unchanged since 0.7.0): `@getpaseo/plugin@^0.15.3` +
+`@getpaseo/client@^0.15.3` — the four lifecycle hooks moved from the deprecated
+`server.on` / `server.before` to `server.addHook` (§14.1), which makes
+`requirements.paseo >=0.15.0` a hard requirement (`addHook` does not exist on a 0.14.0 host). The 0.14.0 surface
 adopted in 0.6.0 (`defineAgentTool` delivery via `request.tools`, the
 `agent.open.before` request maps, `agents.ref(id).reload()`) is unchanged, and
 the deprecated `client/react-native` UI entry stays migrated from 0.5.3 (§12).

@@ -43,7 +43,7 @@ The idea is inspired by [stablyai/orca](https://github.com/stablyai/orca), but i
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:command-center
 ```
 
-Requires Paseo ≥ 0.15.0 (verified against the stable 0.15.0 release, 2026-11-09). Version 0.7.0 registers all four lifecycle hooks through `server.addHook`, which does not exist on 0.14.0, so the real host gate rejects older daemons; the 0.14.0-only surface adopted in 0.6.0 (the `agent.open.before` tool/MCP maps and `agents.ref(id).reload()`) is in use as well, and earlier versions raised the floor to the first release whose `client/ui` exported `Modal` / `useToast`.
+Requires Paseo ≥ 0.15.0 (verified against the stable 0.15.0 release, 2026-11-09). Versions from 0.7.0 on register all four lifecycle hooks through `server.addHook`, which does not exist on 0.14.0, so the real host gate rejects older daemons; the 0.14.0-only surface adopted in 0.6.0 (the `agent.open.before` tool/MCP maps and `agents.ref(id).reload()`) is in use as well, and earlier versions raised the floor to the first release whose `client/ui` exported `Modal` / `useToast`. 0.12.0 adds sharing, per-agent fan-out, typed inputs, usage analytics and the loopback dashboard on the same surface.
 
 The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugins/command-center/<revision>/checkout/command-center`, together with its dependencies. It talks to the standard Paseo scheduler through the low-level `@getpaseo/client` daemon client, which Paseo does **not** supply to plugins — so the manifest runs `npm ci` as its install-time build step, and the daemon installs the dependencies before bundling. That means the host needs npm-registry access at install and update time. Updates: `paseo plugin update command-center`.
 
@@ -66,6 +66,41 @@ $PASEO_HOME/plugins/command-center/
 ├── history.json     # the last N runs (settings.historyLimit)
 └── schedules.json   # scheduleId ↔ command links for the scheduler bridge
 ```
+
+## Version 0.12.0 — roadmap §8 features (2026-11-11)
+
+Five roadmap items landed in sequence, each its own release and annotated tag:
+
+- **0.8.0 — sharing.** A versioned JSON bundle (`command-center/commands`, v1)
+  exports the whole library or a selection; imports accept the bundle or a bare
+  `commands.json` array, by paste or by fetching a raw http(s) JSON URL.
+  `merge` updates matching commands by id/name and keeps local favorites and run
+  counters; `copy` adds fresh ids and de-duplicated names and remaps workflow
+  step references. See [__doc.md](./__doc.md) §15.
+- **0.9.0 — per-agent fan-out.** The run dialog targets any number of existing
+  agents alongside the selected workspaces; a selected agent replaces the
+  new-agent run for its own workspace, and each target carries its host so a
+  remote agent without a loaded workspace still reaches its daemon. §16.
+- **0.10.0 — typed parameters.** Inputs carry `kind` (`text` / `file` /
+  `workspace`), picked per `{{input:…}}` token in the editor. Workspace inputs
+  render a picker; file inputs add `Browse…`, a read-only directory browser
+  backed by the local daemon's file explorer. §17.
+- **0.11.0 — usage analytics.** A `Most used` summary (top three by successful
+  runs) and a usage-first library ordering over the existing server-owned
+  `useCount`. §18.
+- **0.12.0 — loopback read-only dashboard.** A `Dashboard` button opens a
+  server-rendered page with the library and the last 50 runs: `127.0.0.1` only,
+  ephemeral port, per-process token, GET-only, `no-store` + `default-src 'none'`
+  CSP, no LAN/remote exposure. §19.
+
+**Verification:** `tsc --noEmit` clean and vitest **19 suites / 193 tests** green
+(34 new tests across `share`, `targets`, `variables`, `analytics` and
+`dashboard`). The new UI surfaces were not rendered in the app during this
+pass; the pure modules and RPC contracts they call are unit-tested.
+
+Still open in §8: keyboard shortcuts (no keybinding API in the 0.15.3 SDK),
+automatic cross-host store sync (the client-side `PaseoApi` has no plugin RPC),
+and composer pills / timeline run cards (host constraints, §5e).
 
 ## Version 0.7.0 — Paseo 0.15.0 and workflows (2026-11-09)
 
@@ -130,6 +165,6 @@ methods** in an isolated 0.14.0 daemon.
 
 ## Compatibility
 
-Paseo **0.15.0 (2026-11-09)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.3` + `@getpaseo/client ^0.15.3` — compatible after the `addHook` migration; 0.14.0 surface stays in use (0.7.0).
+Paseo **0.15.0 (2026-11-09)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.3` + `@getpaseo/client ^0.15.3` — compatible after the `addHook` migration; 0.14.0 surface stays in use. Current plugin version: **0.12.0**.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
