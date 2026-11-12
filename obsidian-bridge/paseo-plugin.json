@@ -1,0 +1,20 @@
+{
+  "id": "obsidian-bridge",
+  "requirements": {
+    "paseo": ">=0.15.0"
+  },
+  "build": [
+    [
+      "npm",
+      "ci"
+    ],
+    [
+      "npm",
+      "run",
+      "bundle"
+    ]
+  ],
+  "mcp": {
+    "entry": "dist/mcp-server.js"
+  }
+}

@@ -381,7 +381,8 @@ Vault path in settings with include/exclude; full scan; parsing (frontmatter, he
 inline fields); chunking by headings; SQLite + FTS5 + tags + links; `fs.watch` + reconcile; tools `obsidian_search`
 (lexical + graph + recency, RRF), `obsidian_read`, `obsidian_outline`, `obsidian_list`, `obsidian_links`, `obsidian_index`,
 `obsidian_status`; **inert** MCP injection via `agent.open.before` (no probing, no scan, no env); native tools for non-MCP
-providers; tool descriptions carrying the §2 contract.
+providers; tool descriptions carrying the §2 contract. **Status: shipped in 0.1.0** (see [README.md](./README.md),
+[__doc.md](./__doc.md)).
 *Acceptance:* on this machine's real vault, 20 hand-picked control queries return the right note in the top 3; a full index
 completes in seconds and stays current after an external edit; opening an agent adds no measurable latency and starts no
 vault I/O; an agent in a new workspace can answer "what does my note X say" when asked.
