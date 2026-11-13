@@ -3,17 +3,18 @@ import type { RuntimeSettings } from "../shared/settings";
 import {
   appendToNote,
   describeRoleDirs,
-  isWritableRole,
+  normalizeRoleDir,
   resolveRoleDirs,
   roleOfPath,
   type Role,
   type RoleDirs,
+  type WritableRole,
 } from "./dirs";
-import { indexPathFor } from "./paths";
+import { indexPathFor, resolveVaultRoot } from "./paths";
 import { scanVault } from "./scan";
 import { searchIndex } from "./search";
 import { BridgeStore } from "./store";
-import { checkVault, readVaultNote, splitList } from "./vault";
+import { looksLikeVault, readVaultNote, splitList } from "./vault";
 
 /**
  * Tool definitions and dispatch for the obsidian-bridge MCP server.
@@ -222,18 +223,18 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "obsidian_append_inbox",
     title: "Append to the inbox",
     description:
-      `${CONTRACT_SENTENCE} Appends to a note in the configured \`inbox\` directory (incoming ` +
-      "sources, references). Only when the user asked to add material there — the inbox is the " +
-      "user's, not a place to file your own notes.",
+      `${CONTRACT_SENTENCE} Appends to an explicitly named note in the configured \`inbox\` ` +
+      "directory (incoming sources, references). Only when the user asked to add material there — " +
+      "the inbox is the user's, not a place to file your own notes.",
     inputSchema: {
       type: "object",
       properties: {
-        name: { type: "string", description: "File name inside the inbox directory; default Inbox.md." },
+        name: { type: "string", description: "Note to append to, inside the inbox directory, with or without .md." },
         title: { type: "string", description: "Section title; defaults to the file name." },
         body: { type: "string", description: "Markdown to append." },
         create: { type: "boolean", description: "Create the note when missing (default true)." },
       },
-      required: ["body"],
+      required: ["name", "body"],
     },
   },
   {
@@ -269,9 +270,8 @@ export interface ToolRuntime {
 /** Opens the vault and its index, or explains why it cannot. */
 export function openRuntime(
   settings: RuntimeSettings,
-  options: { readOnly?: boolean } = {},
 ): { runtime: ToolRuntime } | { error: string } {
-  const root = settings.vaultPath.trim();
+  const root = resolveVaultRoot(settings.vaultPath);
   if (root.length === 0) {
     return {
       error:
@@ -290,7 +290,6 @@ export function openRuntime(
   }
   try {
     const store = new BridgeStore(indexPathFor(root), { stemming: settings.ftsStemming });
-    void options;
     return { runtime: { root, store, dirs: resolveRoleDirs(settings) } };
   } catch (cause) {
     return {
@@ -307,6 +306,15 @@ function fail(message: string): ToolOutcome {
   return { text: message, isError: true };
 }
 
+/**
+ * Folder argument of a read tool, normalized so it cannot address anything
+ * above the configured root. `null` = refused, `""` = the whole root.
+ */
+function normalizeFolder(value: unknown): string | null {
+  const folder = typeof value === "string" ? value.trim() : "";
+  return folder.length === 0 ? "" : normalizeRoleDir(folder);
+}
+
 function parseScope(value: unknown): Role | "all" {
   return value === "workspace" || value === "inbox" || value === "out" || value === "raw"
     ? value
@@ -316,7 +324,7 @@ function parseScope(value: unknown): Role | "all" {
 function write(
   settings: RuntimeSettings,
   runtime: ToolRuntime,
-  role: Exclude<Role, "workspace">,
+  role: WritableRole,
   input: Record<string, unknown>,
 ): ToolOutcome {
   if (settings.readOnly) {
@@ -326,15 +334,19 @@ function write(
     );
   }
   const body = typeof input.body === "string" ? input.body : "";
+  if (body.trim().length === 0) return fail("body is required.");
   if (body.length > settings.maxWriteChars) {
     return fail(
       `The document body is ${body.length} characters; the configured limit is ` +
         `${settings.maxWriteChars}. Split it into sections.`,
     );
   }
-  const defaultName = role === "inbox" ? "Inbox" : "";
-  const name = typeof input.name === "string" && input.name.trim().length > 0 ? input.name : defaultName;
-  if (name.length === 0) return fail("name is required.");
+  // A write always names its note: the inbox is the user's, so it is never a
+  // default dumping ground.
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (name.length === 0) {
+    return fail(`name is required: pass the note to append to inside the ${role} directory.`);
+  }
   const create = input.create === undefined ? true : input.create === true;
 
   const outcome = appendToNote({
@@ -371,27 +383,31 @@ export function dispatchTool(
   settings: RuntimeSettings,
 ): ToolOutcome {
   const input = (args ?? {}) as Record<string, unknown>;
+
+  // Pure configuration query: answered without opening (and creating) an index.
+  if (name === "obsidian_directories") {
+    const dirs = resolveRoleDirs(settings);
+    return json({
+      root: resolveVaultRoot(settings.vaultPath),
+      directories: dirs,
+      roles: describeRoleDirs(dirs),
+      writesEnabled: !settings.readOnly,
+    });
+  }
+
   const opened = openRuntime(settings);
   if ("error" in opened) return fail(opened.error);
   const { runtime } = opened;
   try {
     switch (name) {
-      case "obsidian_directories": {
-        return json({
-          root: runtime.root,
-          directories: runtime.dirs,
-          roles: describeRoleDirs(runtime.dirs),
-          writesEnabled: !settings.readOnly,
-        });
-      }
-
       case "obsidian_search": {
         const query = typeof input.query === "string" ? input.query.trim() : "";
         const limit =
           typeof input.limit === "number" && Number.isFinite(input.limit)
             ? Math.max(1, Math.min(50, Math.trunc(input.limit)))
             : settings.maxResults;
-        const folder = typeof input.folder === "string" ? input.folder.trim() : "";
+        const folder = normalizeFolder(input.folder);
+        if (folder === null) return fail(`'${String(input.folder)}' is not a folder inside the configured directory.`);
         const tags =
           typeof input.tags === "string" && input.tags.trim().length > 0
             ? splitList(input.tags)
@@ -466,7 +482,8 @@ export function dispatchTool(
       }
 
       case "obsidian_list": {
-        const folder = typeof input.folder === "string" ? input.folder.trim() : "";
+        const folder = normalizeFolder(input.folder);
+        if (folder === null) return fail(`'${String(input.folder)}' is not a folder inside the configured directory.`);
         const scope = parseScope(input.scope);
         const limit =
           typeof input.limit === "number" && Number.isFinite(input.limit)
@@ -528,7 +545,6 @@ export function dispatchTool(
 
       case "obsidian_status": {
         const counts = runtime.store.counts();
-        const check = checkVault(runtime.root, 0);
         const lastScan = runtime.store.getMeta("last_scan_ms");
         const byRole = runtime.store.listNoteFiles().reduce<Record<string, number>>((acc, row) => {
           const role = roleOfPath(row.path, runtime.dirs);
@@ -539,7 +555,7 @@ export function dispatchTool(
           vaultPath: runtime.root,
           directories: runtime.dirs,
           notesByRole: byRole,
-          isObsidianVault: check.isObsidianVault,
+          isObsidianVault: looksLikeVault(runtime.root),
           notes: counts.notes,
           chunks: counts.chunks,
           links: counts.links,
@@ -547,7 +563,7 @@ export function dispatchTool(
           indexBytes: runtime.store.sizeBytes(),
           lastScanAt: lastScan ? new Date(Number(lastScan)).toISOString() : null,
           readOnly: settings.readOnly,
-          writeRoles: (["inbox", "out", "raw"] as const).filter((role) => isWritableRole(role)),
+          writesEnabled: !settings.readOnly,
         });
       }
 

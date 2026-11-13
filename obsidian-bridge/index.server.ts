@@ -11,6 +11,7 @@ import {
 import { obsidianBridgeSettings, runtimeSettingsOf, type RuntimeSettings } from "./shared/settings";
 import { readSavedMcpServers } from "./server/agent-record";
 import { createObsidianTools } from "./server/agent-tools";
+import { normalizeRoleDir } from "./server/dirs";
 import { VaultIndexer } from "./server/indexer";
 import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
 import { dispatchTool, openRuntime } from "./server/mcp-tools";
@@ -155,6 +156,12 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(searchVaultRpc, async ({ query, limit, folder }) => {
     const runtimeSettings = await readRuntimeSettings();
+    const requestedFolder = (folder ?? "").trim();
+    const normalizedFolder = requestedFolder.length === 0 ? "" : normalizeRoleDir(requestedFolder);
+    if (normalizedFolder === null) {
+      const note = `'${requestedFolder}' is not a folder inside the configured directory.`;
+      return { query, hits: [], text: note, tookMs: 0, signals: [], note };
+    }
     const opened = openRuntime(runtimeSettings);
     if ("error" in opened) {
       return {
@@ -170,7 +177,7 @@ export default function contribute(server: PluginServerContext) {
       return searchIndex(opened.runtime.store, {
         query,
         limit,
-        folder,
+        folder: normalizedFolder,
         budgetChars: runtimeSettings.searchBudgetChars,
         snippetChars: runtimeSettings.snippetChars,
         dirs: opened.runtime.dirs,

@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.2.0**.
+Version covered: **0.2.1**.
 
 ## 1. Purpose and scope
 
@@ -148,21 +148,26 @@ the configured directory. `roleOfPath` matches the most specific role (raw → o
 listing entry and status snapshot carries its role.
 
 Read tool safety: every path goes through `resolveInsideVault`, which resolves paths lexically, refuses anything outside
-the vault root, and refuses `.obsidian/` (plugin code and settings are not the agents' business). A path like
-`../../etc/passwd` returns an explicit error, covered by tests.
+the vault root, and refuses `.obsidian/` (plugin code and settings are not the agents' business). The `folder` argument of
+`obsidian_list` and `obsidian_search` goes through the same `normalizeRoleDir` used for the role directories, so `..`, an
+absolute path or `.obsidian` is refused instead of being used as a `LIKE` prefix. A path like `../../etc/passwd` returns an
+explicit error, covered by tests.
 
 ### Write tools
 
 `obsidian_write_document` (out), `obsidian_write_scratch` (raw) and `obsidian_append_inbox` (inbox) share one
 implementation, `appendToNote`:
 
-- an absolute name, a `..` segment or a name that resolves outside the role is refused **before** normalization;
+- `normalizeDocumentName` accepts a nested name (`guides/queues`), adds `.md`, and refuses absolute names, `..`
+  segments, control characters, names over 200 characters and empty names **before** any path is built;
 - an existing note is appended to (`## <date> — <title>` section); nothing is rewritten, moved or deleted;
-- a missing note is created only with `create: true`, with `title`/`kind`/`created`/`source` frontmatter;
+- a missing note is created only with `create: true`, with `title`/`kind`/`created`/`source` frontmatter, using
+  `flag: "wx"` (`O_EXCL`) so a note created concurrently by the user is appended to instead of overwritten;
 - an identical body already present is reported as a duplicate and skipped;
 - `readOnly` and `maxWriteChars` are enforced in the dispatcher, before any filesystem work;
-- after an append the file size is verified; the one realistic race (Obsidian saving a stale buffer over the append) is
-  retried once and then reported instead of silently losing text.
+- the append itself is one `O_APPEND` write, so concurrent appends cannot clobber each other's offset; the section is
+  then read back from the file's tail, and if Obsidian replaced the file with a stale buffer in between, the append is
+  repeated once. When it still cannot be confirmed, the tool returns an error instead of claiming success.
 
 `obsidian_index` runs the same `scanVault` the indexer runs, so tool and background indexes cannot diverge.
 
@@ -203,7 +208,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `vaultPath` | `""` | The one directory available to Paseo (a vault root or a project directory inside one). Empty = not configured: no scan, tools explain how to configure. |
+| `vaultPath` | `""` | The one directory available to Paseo (a vault root or a project directory inside one). Absolute paths, `~` and paths relative to the home directory are accepted; `resolveVaultRoot` turns them into one absolute path for the plugin host and for the MCP server, whose working directories differ. Empty = not configured: no scan, tools explain how to configure. |
 | `inboxDir` | `Inbox` | Vault-relative incoming-material role. Empty = role disabled. |
 | `outDir` | `Documentation` | Vault-relative authored-documents role. |
 | `rawDir` | `raw` | Vault-relative scratch role. |
@@ -245,7 +250,7 @@ Embeddings and vectors were deliberately left out: the 230 MB / brute-force cosi
 
 ## 9. Verification
 
-`npm test` (52 tests, 7 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (55 tests, 7 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
@@ -255,8 +260,9 @@ Embeddings and vectors were deliberately left out: the 230 MB / brute-force cosi
 - `tests/indexer.test.ts` — idle without a path, scan, changed/added/removed notes, bad path error, include folders.
 - `tests/session-open.test.ts` — the injection decision matrix and probe conditions.
 - `tests/directories.test.ts` — role normalization (absolute paths, `..`, `.obsidian`), most-specific role matching,
-  append-only creation/appending, duplicate detection, `readOnly`/`maxWriteChars` refusal, role tags and `scope` filters,
-  and refused writes above the root.
+  document-name validation, append-only creation/appending, duplicate detection, `readOnly`/`maxWriteChars` refusal, role
+  tags and `scope` filters, refused writes above the root, refused `folder` arguments that would leave the root, whole-
+  segment folder matching, a required inbox `name`, and `resolveVaultRoot` for `~`/home-relative paths.
 - `tests/mcp-server-e2e.test.ts` — spawns the built `dist/mcp-server.js`, speaks JSON-RPC over stdio, indexes, searches,
   reads a heading, writes a document into `out`, and checks a path escape is refused.
 
@@ -271,3 +277,24 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - `index.db` is disposable: delete it and run `obsidian_index` (or restart the plugin) to rebuild.
 - Writes are append-only and confined to the `inbox`/`out`/`raw` roles. There is no tool that edits, moves, renames or
 deletes a note, and `readOnly` switches every write off.
+
+## 11. Review pass (0.2.1)
+
+A fresh read of the 0.2.0 code found one setup bug and one boundary gap, both fixed here; no new functionality, so the
+patch version moved 0.2.0 → 0.2.1.
+
+- **A relative `vaultPath` silently disabled indexing.** `path.resolve(".obsidian/Main/Paseo")` depended on the working
+  directory of whichever process read it (plugin host or agent-spawned MCP server), so a perfectly reasonable value never
+  reached the scan. All reads of the path now go through `resolveVaultRoot` (absolute, `~`, home-relative).
+- **`folder` was not validated.** `obsidian_list` passed it straight into a `LIKE` prefix and `obsidian_search` even did a
+  bare `startsWith(folder)`, so `Inbox` matched `Inbox-old/…` and `..` was accepted as a folder. Both now use
+  `normalizeRoleDir` and whole-segment matching; escaping values are refused with an error.
+- **Write path simplification.** Removed the duplicated size cap in `appendToNote` (one owner: the dispatcher), the
+  `isWritableRole` helper that was always true, the unused `options` parameter of `openRuntime`, the dead `writeRoles`
+  status field and the dead `directoryGuide` call in the status agent tool. `obsidian_directories` no longer opens (and
+  therefore creates) the index database just to report configuration.
+- **Race hardening.** Creation uses `O_EXCL` and falls back to appending when the note appeared concurrently; the append
+  is one `O_APPEND` write followed by a read-back of the file tail, retried once and then reported instead of the previous
+  size comparison that could not distinguish a stale-buffer overwrite.
+- **`obsidian_append_inbox` requires `name`.** The inbox is the user's; there is no default `Inbox.md` to silently collect
+  agent text.

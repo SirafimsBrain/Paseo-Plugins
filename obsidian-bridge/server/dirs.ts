@@ -23,6 +23,9 @@ import { resolveInsideVault } from "./vault";
 
 export type Role = "workspace" | "inbox" | "out" | "raw";
 
+/** The roles a write may target. */
+export type WritableRole = Exclude<Role, "workspace">;
+
 export interface RoleDirs {
   /** Vault-relative directory the plugin may access; `""` = the root itself. */
   workspace: string;
@@ -31,13 +34,24 @@ export interface RoleDirs {
   raw: string | null;
 }
 
-/** Normalizes a configured sub-directory; `null` when it is unusable. */
+/** Upper bound for a configured sub-directory and for one document name. */
+const MAX_PATH_CHARS = 200;
+
+/** Control characters have no business in a note or folder name. */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Normalizes a vault-relative folder; `null` when it is unusable. Refuses
+ * absolute paths, parent traversal and the vault's own configuration directory,
+ * so a folder argument can never point above the configured root.
+ */
 export function normalizeRoleDir(value: string): string | null {
-  const trimmed = value.trim().replace(/\\/g, "/");
-  if (trimmed.length === 0) return null;
-  if (path.posix.isAbsolute(trimmed)) return null;
-  const segments = trimmed.split("/").filter((segment) => segment.length > 0 && segment !== ".");
-  if (segments.some((segment) => segment === "..")) return null;
+  const raw = value.trim().replace(/\\/g, "/");
+  if (raw.length === 0 || raw.length > MAX_PATH_CHARS) return null;
+  if (path.posix.isAbsolute(raw)) return null;
+  const segments = raw.split("/").filter((segment) => segment.length > 0 && segment !== ".");
+  if (segments.length === 0) return null;
+  if (segments.some((segment) => segment === ".." || CONTROL_CHARS.test(segment))) return null;
   if (segments[0] === ".obsidian") return null;
   return segments.join("/");
 }
@@ -52,28 +66,40 @@ export function resolveRoleDirs(settings: RuntimeSettings): RoleDirs {
 }
 
 /**
- * Role of a vault-relative path. `other` means "inside the workspace directory
- * but outside every named role" — readable, never writable.
+ * Role of a vault-relative path. `workspace` means "inside the configured
+ * directory but outside every named role" — readable, never writable.
  */
 export function roleOfPath(relPath: string, dirs: RoleDirs): Role {
   const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
-  const matches = (dir: string | null): boolean =>
-    dir !== null && (normalized === dir || normalized.startsWith(`${dir}/`));
-  if (matches(dirs.raw)) return "raw";
-  if (matches(dirs.out)) return "out";
-  if (matches(dirs.inbox)) return "inbox";
+  for (const role of ["raw", "out", "inbox"] as const) {
+    const dir = dirs[role];
+    if (dir !== null && (normalized === dir || normalized.startsWith(`${dir}/`))) return role;
+  }
   return "workspace";
 }
 
-/** True when the path is inside a directory agents may write to. */
-export function isWritableRole(role: Role): boolean {
-  return role === "inbox" || role === "out" || role === "raw";
+/**
+ * Turns a document name into a path relative to its role, or `null` when the
+ * name could address something outside it. Nested names (`guides/queues`) are
+ * allowed; absolute names, `..`, control characters and empty names are not.
+ */
+export function normalizeDocumentName(value: string): string | null {
+  const raw = value.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  if (raw.length === 0 || raw.length > MAX_PATH_CHARS) return null;
+  if (path.posix.isAbsolute(raw)) return null;
+  const segments = raw
+    .replace(/\.md$/i, "")
+    .split("/")
+    .filter((segment) => segment.length > 0 && segment !== ".");
+  if (segments.length === 0) return null;
+  if (segments.some((segment) => segment === ".." || CONTROL_CHARS.test(segment))) return null;
+  return `${segments.join("/")}.md`;
 }
 
 /** Resolves `dir/name` into a vault-relative path, or explains why not. */
 export function resolveRolePath(
   dirs: RoleDirs,
-  role: Exclude<Role, "workspace">,
+  role: WritableRole,
   name: string,
 ): { path: string } | { error: string } {
   const dir = dirs[role];
@@ -84,21 +110,11 @@ export function resolveRolePath(
         "Settings → Plugins → Obsidian Bridge.",
     };
   }
-  const rawName = name.trim().replace(/\\/g, "/");
-  // Absolute names are refused before any normalization: stripping the leading
-  // slash would silently turn `/etc/passwd` into a relative name.
-  if (rawName.length === 0) return { error: "A document name is required." };
-  if (path.posix.isAbsolute(rawName)) {
-    return { error: `'${name}' is not a file name inside the ${role} directory.` };
+  const fileName = normalizeDocumentName(name);
+  if (fileName === null) {
+    return { error: `'${name}' is not a valid document name inside the ${role} directory.` };
   }
-  const cleaned = rawName.replace(/^\.\//, "").replace(/\.md$/i, "");
-  const segments = cleaned.split("/").filter((segment) => segment.length > 0 && segment !== ".");
-  if (segments.length === 0) return { error: "A document name is required." };
-  if (segments.some((segment) => segment === "..")) {
-    return { error: `'${name}' is not a file name inside the ${role} directory.` };
-  }
-  const relPath = `${dir}/${segments.join("/")}.md`;
-  return { path: relPath };
+  return { path: `${dir}/${fileName}` };
 }
 
 export interface AppendOutcome {
@@ -113,14 +129,21 @@ export interface AppendOutcome {
  *
  * Append-only by construction: the existing content is never rewritten. A
  * created note gets a small frontmatter block and one heading; later calls add
- * `## <date> — <title>` sections. The size check after the write catches the one
- * realistic conflict — Obsidian saving a stale buffer over the append — and the
- * caller retries once before reporting it.
+ * `## <date> — <title>` sections.
+ *
+ * The two writer races are handled explicitly:
+ * - creation uses `O_EXCL` (`flag: "wx"`), so a note created concurrently by the
+ *   user or Obsidian is appended to instead of being overwritten;
+ * - `appendFileSync` opens with `O_APPEND`, so a concurrent append cannot lose
+ *   our offset, and the section is then read back from the file's tail. If the
+ *   file was replaced in between (Obsidian saving a stale buffer), the append is
+ *   repeated; when it still cannot be seen, the tool reports it instead of
+ *   claiming success.
  */
 export function appendToNote(input: {
   root: string;
   dirs: RoleDirs;
-  role: Exclude<Role, "workspace">;
+  role: WritableRole;
   name: string;
   title?: string;
   body: string;
@@ -129,21 +152,10 @@ export function appendToNote(input: {
   const resolved = resolveRolePath(input.dirs, input.role, input.name);
   if ("error" in resolved) return resolved;
   const absolute = resolveInsideVault(input.root, resolved.path);
-  if (!absolute) return { error: `'${input.name}' resolves outside the configured directory.` };
+  if (!absolute) return { error: `'${resolved.path}' resolves outside the configured directory.` };
 
-  const body = input.body.replace(/\r\n/g, "\n").trimEnd();
-  if (body.trim().length === 0) return { error: "Refusing to write an empty document." };
-  if (body.length > 200_000) return { error: "Document body is too large (200 000 characters)." };
-
-  const exists = fs.existsSync(absolute);
-  if (!exists && !input.create) {
-    return { error: `'${resolved.path}' does not exist and create was not requested.` };
-  }
-
-  const existing = exists ? fs.readFileSync(absolute, "utf-8") : "";
-  if (existing.includes(body.trim())) {
-    return { path: resolved.path, created: false, duplicate: true, bytes: 0 };
-  }
+  const body = input.body.replace(/\r\n/g, "\n").trim();
+  if (body.length === 0) return { error: "Refusing to write an empty document." };
 
   const title = (input.title?.trim() || path.posix.basename(resolved.path, ".md")).slice(0, 200);
   const date = new Date().toISOString().slice(0, 10);
@@ -151,46 +163,103 @@ export function appendToNote(input: {
 
   try {
     fs.mkdirSync(path.dirname(absolute), { recursive: true });
-    if (!exists) {
-      const frontmatter = [
-        "---",
-        `title: ${title}`,
-        `kind: ${input.role}`,
-        `created: ${date}`,
-        "source: obsidian-bridge",
-        "---",
-        "",
-        `# ${title}`,
-        "",
-      ].join("\n");
-      fs.writeFileSync(absolute, `${frontmatter}${section}`, "utf-8");
+
+    const existing = readIfExists(absolute);
+    if (existing !== null) {
+      if (existing.includes(body)) {
+        return { path: resolved.path, created: false, duplicate: true, bytes: 0 };
+      }
+      appendSection(absolute, section);
       return {
         path: resolved.path,
-        created: true,
+        created: false,
         duplicate: false,
         bytes: Buffer.byteLength(section),
       };
     }
 
-    const before = fs.statSync(absolute).size;
-    // O_APPEND: a concurrent append cannot interleave with ours.
-    fs.appendFileSync(absolute, `\n${section}`, "utf-8");
-    const after = fs.statSync(absolute).size;
-    if (after < before + Buffer.byteLength(section)) {
-      // Obsidian (or another writer) replaced the file between our read and our
-      // write. One retry is enough for the realistic race; then report it.
-      const retry = fs.readFileSync(absolute, "utf-8");
-      fs.writeFileSync(absolute, `${retry.trimEnd()}\n\n${section}`, "utf-8");
+    if (!input.create) {
+      return { error: `'${resolved.path}' does not exist and create was not requested.` };
     }
-    return {
-      path: resolved.path,
-      created: false,
-      duplicate: false,
-      bytes: Buffer.byteLength(section),
-    };
+
+    const header = [
+      "---",
+      `title: ${title}`,
+      `kind: ${input.role}`,
+      `created: ${date}`,
+      "source: obsidian-bridge",
+      "---",
+      "",
+      `# ${title}`,
+      "",
+      "",
+    ].join("\n");
+    const document = `${header}${section}`;
+    try {
+      fs.writeFileSync(absolute, document, { encoding: "utf-8", flag: "wx" });
+      return {
+        path: resolved.path,
+        created: true,
+        duplicate: false,
+        bytes: Buffer.byteLength(document),
+      };
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+      // Someone created the note between our read and our create: append to it.
+      appendSection(absolute, section, body);
+      return {
+        path: resolved.path,
+        created: false,
+        duplicate: false,
+        bytes: Buffer.byteLength(section),
+      };
+    }
   } catch (cause) {
     return { error: cause instanceof Error ? cause.message : String(cause) };
   }
+}
+
+function readIfExists(absolute: string): string | null {
+  try {
+    return fs.readFileSync(absolute, "utf-8");
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw cause;
+  }
+}
+
+/**
+ * Appends `section` and confirms it landed. Repeats the append once when the
+ * file was replaced while writing; throws rather than lying about the outcome.
+ */
+function appendSection(absolute: string, section: string, body = section): void {
+  const chunk = `\n${section}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    // O_APPEND: the kernel picks the offset, so concurrent appends cannot
+    // overwrite each other.
+    fs.appendFileSync(absolute, chunk, "utf-8");
+    if (tailContains(absolute, body)) return;
+  }
+  throw new Error(
+    `Could not confirm the append to '${path.basename(absolute)}': the file was replaced while ` +
+      "writing, which is what Obsidian does when it saves a stale buffer. Wait for Obsidian to " +
+      "finish saving and retry the call.",
+  );
+}
+
+/** True when `needle` appears in the last few kilobytes of the file. */
+function tailContains(absolute: string, needle: string): boolean {
+  const stat = fs.statSync(absolute);
+  const size = Math.min(stat.size, Buffer.byteLength(needle) + 512);
+  if (size === 0) return false;
+  const buffer = Buffer.alloc(size);
+  const fd = fs.openSync(absolute, "r");
+  try {
+    fs.readSync(fd, buffer, 0, size, stat.size - size);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return buffer.toString("utf-8").includes(needle);
 }
 
 /** Human- and agent-readable directory map, used by instructions and tools. */

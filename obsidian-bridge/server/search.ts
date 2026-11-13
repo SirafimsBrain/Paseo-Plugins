@@ -50,7 +50,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
   const limit = options.limit ?? 10;
   const snippetChars = options.snippetChars ?? 600;
   const budgetChars = options.budgetChars ?? 8000;
-  const folder = options.folder?.trim().replace(/^\/+|\/+$/g, "") ?? "";
+  const folder = options.folder?.trim() ?? "";
   const wantedTags = (options.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean);
   const scope = options.scope ?? "all";
   const dirs: RoleDirs = options.dirs ?? { workspace: "", inbox: null, out: null, raw: null };
@@ -120,10 +120,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
   let candidates = [...scores.values()];
   if (folder.length > 0) {
     candidates = candidates.filter(
-      (candidate) =>
-        candidate.path === folder ||
-        candidate.path.startsWith(`${folder}/`) ||
-        candidate.path.startsWith(folder),
+      (candidate) => candidate.path === folder || candidate.path.startsWith(`${folder}/`),
     );
   }
   if (wantedTags.length > 0) {

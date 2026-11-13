@@ -1,8 +1,7 @@
 import { defineAgentTool, type AgentToolDefinition } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import type { RuntimeSettings } from "../shared/settings";
-import { resolveRoleDirs } from "./dirs";
-import { CONTRACT_SENTENCE, directoryGuide, dispatchTool, type ToolOutcome } from "./mcp-tools";
+import { CONTRACT_SENTENCE, dispatchTool, type ToolOutcome } from "./mcp-tools";
 
 /**
  * Attached agent tools (Paseo `defineAgentTool`).
@@ -112,9 +111,9 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
   const appendInbox = defineAgentTool({
     name: "obsidian_bridge_append_inbox",
     title: "Append to the Obsidian inbox",
-    description: `${CONTRACT_SENTENCE} Appends to a note in the inbox directory — only when the user asked to add material there.`,
+    description: `${CONTRACT_SENTENCE} Appends to an explicitly named note in the inbox directory — only when the user asked to add material there.`,
     input: z.object({
-      name: z.string().max(200).optional().describe("File name inside the inbox directory; default Inbox.md."),
+      name: z.string().min(1).max(200).describe("Note to append to, inside the inbox directory."),
       title: z.string().max(200).optional().describe("Section title."),
       body: z.string().min(1).describe("Markdown to append."),
       create: z.boolean().optional().describe("Create the note when missing (default true)."),
@@ -135,7 +134,6 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(_input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      void directoryGuide(resolveRoleDirs(settings));
       return toResult(dispatchTool("obsidian_status", {}, settings));
     },
   });

@@ -28,6 +28,23 @@ export function settingsMirrorPath(): string {
   return path.join(pluginDataDir(), "settings.json");
 }
 
+/**
+ * Normalizes the configured directory into an absolute path.
+ *
+ * `~`, `~/…` and relative paths are resolved against the home directory, so a
+ * value typed as `.obsidian/Main/Paseo` works the same for the plugin process
+ * and for the MCP server spawned by an agent (which have different working
+ * directories). Returns `""` when nothing is configured.
+ */
+export function resolveVaultRoot(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+  if (trimmed === "~") return path.resolve(os.homedir());
+  if (trimmed.startsWith("~/")) return path.resolve(os.homedir(), trimmed.slice(2));
+  if (path.isAbsolute(trimmed)) return path.resolve(trimmed);
+  return path.resolve(os.homedir(), trimmed);
+}
+
 /** Stable per-vault identifier (12 hex chars of the absolute path's SHA-1). */
 export function vaultId(vaultPath: string): string {
   return crypto.createHash("sha1").update(path.resolve(vaultPath)).digest("hex").slice(0, 12);

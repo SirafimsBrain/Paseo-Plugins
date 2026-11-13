@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseNote, type ParsedNote } from "./parse";
+import { resolveVaultRoot } from "./paths";
 
 /**
  * Vault filesystem helpers: path validation, bounded walking with the
@@ -129,10 +130,29 @@ export function walkMarkdown(
   return { files, capped };
 }
 
+/**
+ * True when the directory looks like an Obsidian vault: it has its own
+ * `.obsidian` folder, or it lives directly inside one (the plugin may be
+ * pointed at a project directory rather than at the vault root).
+ */
+export function looksLikeVault(root: string): boolean {
+  const resolved = resolveVaultRoot(root);
+  if (resolved.length === 0) return false;
+  for (const candidate of [resolved, path.dirname(resolved)]) {
+    try {
+      if (fs.statSync(path.join(candidate, ".obsidian")).isDirectory()) return true;
+    } catch {
+      // keep looking
+    }
+  }
+  return false;
+}
+
 /** Validates a candidate vault path and reports what was found. */
 export function checkVault(candidate: string, sampleLimit = 8): VaultCheck {
+  const resolved = resolveVaultRoot(candidate);
   const result: VaultCheck = {
-    path: candidate,
+    path: resolved.length > 0 ? resolved : candidate,
     exists: false,
     isDirectory: false,
     isObsidianVault: false,
@@ -141,7 +161,10 @@ export function checkVault(candidate: string, sampleLimit = 8): VaultCheck {
     sample: [],
     error: null,
   };
-  const resolved = path.resolve(candidate);
+  if (resolved.length === 0) {
+    result.error = "Set the directory available to Paseo first.";
+    return result;
+  }
   try {
     const stat = fs.statSync(resolved);
     result.exists = true;
@@ -155,13 +178,7 @@ export function checkVault(candidate: string, sampleLimit = 8): VaultCheck {
     return result;
   }
 
-  try {
-    result.isObsidianVault = fs
-      .statSync(path.join(resolved, ".obsidian"))
-      .isDirectory();
-  } catch {
-    result.isObsidianVault = false;
-  }
+  result.isObsidianVault = looksLikeVault(resolved);
 
   const walk = walkMarkdown(resolved, {
     includeFolders: "",

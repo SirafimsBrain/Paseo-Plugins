@@ -5,10 +5,10 @@ import type { VaultStatus } from "../shared/contracts";
 import type { RuntimeSettings } from "../shared/settings";
 import { resolveRoleDirs } from "./dirs";
 import { parseNote } from "./parse";
-import { indexPathFor } from "./paths";
+import { indexPathFor, resolveVaultRoot } from "./paths";
 import { scanVault, type ScanOutcome } from "./scan";
 import { BridgeStore } from "./store";
-import { isExcluded, isIncluded, isMarkdownPath } from "./vault";
+import { isExcluded, isIncluded, isMarkdownPath, looksLikeVault } from "./vault";
 
 /**
  * Owns the vault index for the plugin process.
@@ -72,7 +72,9 @@ export class VaultIndexer {
       return;
     }
 
-    const resolvedRoot = path.resolve(wantedRoot);
+    // `~` and home-relative values are accepted; `path.resolve` alone would
+    // depend on the daemon's working directory.
+    const resolvedRoot = resolveVaultRoot(wantedRoot);
     let isDirectory = false;
     try {
       isDirectory = fs.statSync(resolvedRoot).isDirectory();
@@ -143,41 +145,25 @@ export class VaultIndexer {
   /** Snapshot for the `obsidian-bridge.status` RPC. */
   status(): VaultStatus {
     const settings = this.settings;
-    const vaultPath = settings?.vaultPath ?? "";
-    const configured = vaultPath.trim().length > 0;
-    const exists = this.root !== null;
-    const counts = this.store
-      ? (() => {
-          try {
-            return this.store.counts();
-          } catch {
-            return { notes: 0, chunks: 0, links: 0, unresolvedLinks: 0 };
-          }
-        })()
-      : { notes: 0, chunks: 0, links: 0, unresolvedLinks: 0 };
-    const size = this.store
-      ? (() => {
-          try {
-            return this.store.sizeBytes();
-          } catch {
-            return 0;
-          }
-        })()
-      : 0;
+    const emptyCounts = { notes: 0, chunks: 0, links: 0, unresolvedLinks: 0 };
+    const attempt = <T,>(read: () => T, fallback: T): T => {
+      try {
+        return read();
+      } catch {
+        return fallback;
+      }
+    };
+    const counts = this.store ? attempt(() => this.store!.counts(), emptyCounts) : emptyCounts;
+    const size = this.store ? attempt(() => this.store!.sizeBytes(), 0) : 0;
     const lastScanMs = this.store
-      ? (() => {
-          try {
-            return this.store.getMeta("last_scan_ms");
-          } catch {
-            return null;
-          }
-        })()
+      ? attempt(() => this.store!.getMeta("last_scan_ms"), null)
       : null;
+    const exists = this.root !== null;
     return {
-      vaultPath,
-      configured,
+      vaultPath: settings?.vaultPath ?? "",
+      configured: settings !== null && settings.vaultPath.trim().length > 0,
       vaultExists: exists,
-      isObsidianVault: exists,
+      isObsidianVault: this.root !== null && looksLikeVault(this.root),
       indexingEnabled: settings?.indexingEnabled ?? false,
       indexedNotes: counts.notes,
       indexedChunks: counts.chunks,

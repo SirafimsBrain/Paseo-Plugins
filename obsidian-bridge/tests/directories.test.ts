@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -10,7 +11,7 @@ import {
   roleOfPath,
 } from "../server/dirs";
 import { dispatchTool } from "../server/mcp-tools";
-import { indexPathFor } from "../server/paths";
+import { indexPathFor, resolveVaultRoot } from "../server/paths";
 import { scanVault } from "../server/scan";
 import { BridgeStore } from "../server/store";
 import { makeWorkspace, runtimeSettings, type TestWorkspace } from "./fixtures";
@@ -60,15 +61,33 @@ describe("role paths", () => {
 
   it("refuses a document name that escapes its directory", () => {
     const dirs = resolveRoleDirs(runtimeSettings("/tmp/vault"));
-    expect(resolveRolePath(dirs, "out", "../../etc/passwd")).toEqual({
-      error: expect.stringContaining("not a file name"),
-    });
-    expect(resolveRolePath(dirs, "out", "/abs.md")).toEqual({
-      error: expect.stringContaining("not a file name"),
-    });
+    for (const name of ["../../etc/passwd", "/abs.md", "a/../../b", "..", "  ", "bad\u0000name"]) {
+      expect(resolveRolePath(dirs, "out", name)).toEqual({
+        error: expect.stringContaining("not a valid document name"),
+      });
+    }
     expect(resolveRolePath(dirs, "out", "Guides/queue")).toEqual({
       path: "Documentation/Guides/queue.md",
     });
+    expect(resolveRolePath(dirs, "out", "./Guides/queue.md")).toEqual({
+      path: "Documentation/Guides/queue.md",
+    });
+  });
+
+  it("resolves the configured directory independently of the working directory", () => {
+    const home = os.homedir();
+    expect(resolveVaultRoot(" ~ ")).toBe(path.resolve(home));
+    expect(resolveVaultRoot("~/.obsidian/Main/Paseo/")).toBe(
+      path.join(home, ".obsidian/Main/Paseo"),
+    );
+    // A plain relative path is read against the home directory, never against
+    // the daemon's working directory (which differs between the plugin host and
+    // the MCP server spawned by an agent).
+    expect(resolveVaultRoot(".obsidian/Main/Paseo/")).toBe(
+      path.join(home, ".obsidian/Main/Paseo"),
+    );
+    expect(resolveVaultRoot("/tmp/vault")).toBe("/tmp/vault");
+    expect(resolveVaultRoot("")).toBe("");
   });
 
   it("describes every role for agents", () => {
@@ -172,8 +191,18 @@ describe("write tools", () => {
     );
     expect(scratch.structuredContent).toMatchObject({ path: "raw/bugfix-alt.md" });
 
-    const inbox = dispatchTool("obsidian_append_inbox", { body: "New source arrived." }, settings);
-    expect(inbox.structuredContent).toMatchObject({ path: "Inbox/Inbox.md", created: true });
+    const inbox = dispatchTool(
+      "obsidian_append_inbox",
+      { name: "Sources", body: "New source arrived." },
+      settings,
+    );
+    expect(inbox.structuredContent).toMatchObject({ path: "Inbox/Sources.md", created: true });
+
+    // The inbox is the user's: there is no default note to fall back to.
+    const unnamed = dispatchTool("obsidian_append_inbox", { body: "No name." }, settings);
+    expect(unnamed.isError).toBe(true);
+    expect(unnamed.text).toContain("name is required");
+    expect(fs.existsSync(path.join(created.vault, "Inbox/Inbox.md"))).toBe(false);
   });
 
   it("refuses every write when readOnly is on", () => {
@@ -216,6 +245,34 @@ describe("write tools", () => {
     const read = dispatchTool("obsidian_read", { path: "../outside.md" }, settings);
     expect(read.isError).toBe(true);
     expect(read.text).toContain("outside the vault");
+  });
+
+  it("refuses a folder that would leave the configured directory", () => {
+    const created = workspace();
+    const settings = index(created);
+    for (const folder of ["../", "..", "/etc", "Inbox/../../.."]) {
+      const listed = dispatchTool("obsidian_list", { folder }, settings);
+      expect(listed.isError).toBe(true);
+      expect(listed.text).toContain("is not a folder inside the configured directory");
+    }
+    const searched = dispatchTool("obsidian_search", { query: "queues", folder: "../.." }, settings);
+    expect(searched.isError).toBe(true);
+
+    const inside = dispatchTool("obsidian_list", { folder: "Inbox" }, settings);
+    const notes = (inside.structuredContent as { notes: Array<{ path: string }> }).notes;
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes.every((note) => note.path.startsWith("Inbox/"))).toBe(true);
+  });
+
+  it("matches a folder prefix only on whole segments", () => {
+    const created = workspace({ "Inbox-old/legacy.md": "# Legacy\n\nOld material.\n" });
+    const settings = index(created);
+    const listed = dispatchTool("obsidian_list", { folder: "Inbox" }, settings);
+    const paths = (listed.structuredContent as { notes: Array<{ path: string }> }).notes.map(
+      (note) => note.path,
+    );
+    expect(paths).toContain("Inbox/source.md");
+    expect(paths).not.toContain("Inbox-old/legacy.md");
   });
 
   it("tells the agent which directory is for what", () => {

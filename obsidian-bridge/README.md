@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.2.0)
+## What it does (0.2.1)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -21,7 +21,7 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Read tools.** `obsidian_search`, `obsidian_read` (whole note or one heading subtree), `obsidian_outline`,
   `obsidian_list`, `obsidian_links`, `obsidian_directories`, plus `obsidian_index` and `obsidian_status`.
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
-  notes) and `obsidian_append_inbox` (add material to incoming sources). A write names its document, appends a dated
+  notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
 - **Directory roles.** One directory is available to Paseo; inside it four roles tell an agent where to work. Nothing above
   the configured directory can be addressed at all.
@@ -70,8 +70,9 @@ The install runs `npm ci` and `npm run bundle`, which builds the standalone stdi
 ## First run
 
 1. Open **Settings → Plugins → Obsidian Bridge**.
-2. Enter the absolute path of the directory available to Paseo (a vault root, or a project directory inside one) and press
-   **Check path**. The check reports how many Markdown files it found.
+2. Enter the path of the directory available to Paseo (a vault root, or a project directory inside one) and press
+   **Check path**. Absolute paths, `~` and paths relative to your home directory all work (`~/.obsidian/Main/Paseo`,
+   `.obsidian/Main/Paseo`). The check reports how many Markdown files it found.
 3. Set the `Inbox`, `Documentation` and `raw` directories. Defaults match the layout above; clear one to disable that role.
 4. Save. Saving a valid path starts the first scan — that is the only point at which the plugin touches the disk, and it is
    triggered by you, not by an agent.
@@ -81,7 +82,7 @@ If the path is not configured, nothing is indexed and every tool answers with an
 
 ## Write semantics
 
-- A write always names its document (`name`), or defaults to `Inbox.md` for the inbox.
+- A write always names its note: there is no default document, and the inbox is never used as a fallback.
 - Existing notes are **appended**: a `## <date> — <title>` section is added, the rest of the file is untouched.
 - A missing note is created only when `create` is requested, with `title`, `kind` (role) and `created` frontmatter.
 - An identical body already present in the document is reported as a duplicate and skipped.
