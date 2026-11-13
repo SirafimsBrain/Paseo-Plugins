@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { VaultStatus } from "../shared/contracts";
 import type { RuntimeSettings } from "../shared/settings";
+import { resolveRoleDirs } from "./dirs";
 import { parseNote } from "./parse";
 import { indexPathFor } from "./paths";
 import { scanVault, type ScanOutcome } from "./scan";
@@ -190,6 +191,9 @@ export class VaultIndexer {
       watching: this.state.watching,
       indexRunning: this.state.indexRunning,
       readOnly: settings?.readOnly ?? true,
+      directories: settings
+        ? resolveRoleDirs(settings)
+        : { workspace: "", inbox: null, out: null, raw: null },
       dbPath: this.root ? indexPathFor(this.root) : null,
       error: this.state.error,
     };

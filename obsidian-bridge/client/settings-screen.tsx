@@ -130,14 +130,14 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
 
       <SettingsCard>
         <SettingsSection
-          title="Vault"
-          info="The local Obsidian vault this plugin indexes. It is read from disk, so Obsidian does not need to be running."
+          title="Directory available to Paseo"
+          info="The one directory this plugin may touch. Agents cannot reach anything above it, and writes are confined to the roles below. Read from disk, so Obsidian does not need to be running."
         >
           <SettingsInput
-            label="Vault path"
-            hint="Absolute path of the vault folder (the directory that contains your notes and the .obsidian folder). Saving a valid path starts the first scan — no project files are ever written."
+            label="Directory path"
+            hint="Absolute path — either a whole vault or a project directory inside one, e.g. /home/you/.obsidian/Main/Paseo. Saving a valid path starts the first scan."
             initialValue={values.vaultPath}
-            placeholder="/home/you/Obsidian/MyVault"
+            placeholder="/home/you/.obsidian/Main/Paseo"
             onChangeText={(text: string) => patch({ vaultPath: text })}
           />
           <SettingsAction
@@ -187,6 +187,35 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
               {indexMessage}
             </Text>
           ) : null}
+        </SettingsSection>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingsSection
+          title="Directories"
+          info="Paths relative to the directory above. Agents are told which directory is for what, and write only inside these roles."
+        >
+          <SettingsInput
+            label="Inbox (incoming documents)"
+            hint="Converted documents, reference books, primary sources. Read; append only when the user asks. Empty = no inbox role."
+            initialValue={values.inboxDir}
+            placeholder="Inbox"
+            onChangeText={(text: string) => patch({ inboxDir: text })}
+          />
+          <SettingsInput
+            label="Documentation (authored documents)"
+            hint="Where an agent writes the extended document it was asked for. Created on demand; appends only."
+            initialValue={values.outDir}
+            placeholder="Documentation"
+            onChangeText={(text: string) => patch({ outDir: text })}
+          />
+          <SettingsInput
+            label="Raw (intermediate documents)"
+            hint="Scratch material the agent may compose freely: clarifications, bugfix alternatives, temporary notes that lose value after the work."
+            initialValue={values.rawDir}
+            placeholder="raw"
+            onChangeText={(text: string) => patch({ rawDir: text })}
+          />
         </SettingsSection>
       </SettingsCard>
 
@@ -282,10 +311,21 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             onValueChange={(enabled: boolean) => patch({ injectIntoAgents: enabled })}
           />
           <SettingsSwitch
-            label="Read-only"
-            hint="Reserved for the write tools planned in 0.2.0. 0.1.0 ships read-only tools, so this switch has no effect yet."
+            label="Refuse writes"
+            hint="Turns every write tool off. Writes are already append-only and confined to the inbox/out/raw directories, so this is an extra brake."
             value={values.readOnly}
             onValueChange={(enabled: boolean) => patch({ readOnly: enabled })}
+          />
+          <SettingsInput
+            label="Max document size (characters)"
+            hint="Upper bound for one written body; larger documents are rejected with a request to split them."
+            initialValue={String(values.maxWriteChars)}
+            onChangeText={(text: string) => {
+              const parsed = Number.parseInt(text, 10);
+              if (Number.isFinite(parsed) && String(parsed) === text.trim()) {
+                patch({ maxWriteChars: parsed });
+              }
+            }}
           />
           <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}>
             The vault is read from disk; the Obsidian application does not have to be running.

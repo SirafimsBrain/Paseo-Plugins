@@ -1,4 +1,5 @@
-import { MCP_INSTRUCTIONS, MCP_TOOLS, dispatchTool } from "./mcp-tools";
+import { MCP_TOOLS, dispatchTool, mcpInstructions } from "./mcp-tools";
+import { resolveRoleDirs } from "./dirs";
 import { parseSettingsFile } from "./settings-file";
 
 /**
@@ -87,7 +88,7 @@ function handleRequest(
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
         serverInfo,
-        instructions: MCP_INSTRUCTIONS,
+        instructions: mcpInstructions(resolveRoleDirs(settings)),
       });
       return;
     case "notifications/initialized":

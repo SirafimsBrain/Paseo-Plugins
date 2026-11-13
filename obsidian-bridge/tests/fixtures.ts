@@ -49,6 +49,9 @@ export function makeWorkspace(notes: Record<string, string> = {}): TestWorkspace
 export function runtimeSettings(vault: string, overrides: Partial<Record<string, unknown>> = {}) {
   return {
     vaultPath: vault,
+    inboxDir: "Inbox",
+    outDir: "Documentation",
+    rawDir: "raw",
     indexingEnabled: true,
     includeFolders: "",
     excludeGlobs: ".obsidian/**, .trash/**, .git/**, .smart-env/**",
@@ -57,10 +60,14 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     maxResults: 10,
     searchBudgetChars: 8000,
     snippetChars: 600,
-    readOnly: true,
+    readOnly: false,
+    maxWriteChars: 200_000,
     ...overrides,
   } as {
     vaultPath: string;
+    inboxDir: string;
+    outDir: string;
+    rawDir: string;
     indexingEnabled: boolean;
     includeFolders: string;
     excludeGlobs: string;
@@ -70,5 +77,6 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     searchBudgetChars: number;
     snippetChars: number;
     readOnly: boolean;
+    maxWriteChars: number;
   };
 }

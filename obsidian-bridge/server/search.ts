@@ -1,4 +1,5 @@
 import type { SearchHit, SearchResult } from "../shared/contracts";
+import { roleOfPath, type Role, type RoleDirs } from "./dirs";
 import type { BridgeStore } from "./store";
 
 /**
@@ -28,8 +29,12 @@ export interface SearchOptions {
   limit?: number;
   folder?: string;
   tags?: string[];
+  /** Restrict to one directory role (`workspace` = everything else). */
+  scope?: Role | "all";
   budgetChars?: number;
   snippetChars?: number;
+  /** Directory roles, so every hit can name the folder it came from. */
+  dirs?: RoleDirs;
 }
 
 interface Candidate {
@@ -47,6 +52,8 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
   const budgetChars = options.budgetChars ?? 8000;
   const folder = options.folder?.trim().replace(/^\/+|\/+$/g, "") ?? "";
   const wantedTags = (options.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean);
+  const scope = options.scope ?? "all";
+  const dirs: RoleDirs = options.dirs ?? { workspace: "", inbox: null, out: null, raw: null };
   const signals: string[] = [];
   const scores = new Map<string, Candidate>();
 
@@ -125,6 +132,9 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
       return wantedTags.every((tag) => tags.includes(tag));
     });
   }
+  if (scope !== "all") {
+    candidates = candidates.filter((candidate) => roleOfPath(candidate.path, dirs) === scope);
+  }
 
   candidates.sort((a, b) => b.score - a.score);
   const top = candidates.slice(0, limit);
@@ -139,6 +149,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
       snippet: candidate.snippet.replace(/\s+/g, " ").trim().slice(0, snippetChars),
       score: Number(candidate.score.toFixed(6)),
       backlinks: backlinks.get(candidate.path) ?? 0,
+      role: roleOfPath(candidate.path, dirs),
     };
   });
 

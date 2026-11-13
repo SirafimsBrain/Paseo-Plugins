@@ -19,6 +19,8 @@ export const searchHitSchema = z.object({
   score: z.number(),
   /** Number of notes linking to this one. */
   backlinks: z.number().int(),
+  /** Directory role the note lives in (`workspace` when outside every role). */
+  role: z.enum(["workspace", "inbox", "out", "raw"]),
 });
 
 export type SearchHit = z.infer<typeof searchHitSchema>;
@@ -57,6 +59,13 @@ export const vaultStatusSchema = z.object({
   readOnly: z.boolean(),
   dbPath: z.string().nullable(),
   error: z.string().nullable(),
+  /** Vault-relative directory map the agents are told about. */
+  directories: z.object({
+    workspace: z.string(),
+    inbox: z.string().nullable(),
+    out: z.string().nullable(),
+    raw: z.string().nullable(),
+  }),
 });
 
 export type VaultStatus = z.infer<typeof vaultStatusSchema>;

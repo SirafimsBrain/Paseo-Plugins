@@ -139,6 +139,27 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
           </Text>
         ) : null}
 
+        {status?.configured ? (
+          <View style={{ gap: 2 }}>
+            {(
+              [
+                ["workspace", status.directories.workspace, "."],
+                ["inbox", status.directories.inbox, "(not configured)"],
+                ["out", status.directories.out, "(not configured)"],
+                ["raw", status.directories.raw, "(not configured)"],
+              ] as Array<[string, string | null, string]>
+            ).map(([role, value, fallback]) => (
+              <Text
+                key={role}
+                style={{ color: fgMuted, fontSize: font(10), ...monoFontStyle }}
+                numberOfLines={1}
+              >
+                {role}: {value === null || value.length === 0 ? fallback : value}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+
         {!configured ? (
           <View style={styles.emptyBox}>
             <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }}>
@@ -214,7 +235,7 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
                 {hit.title}
               </Text>
               <Text style={{ color: fgMuted, fontSize: font(10), ...monoFontStyle }} numberOfLines={1}>
-                {hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path}
+                {hit.role} · {hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path}
               </Text>
               <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }} numberOfLines={3}>
                 {hit.snippet}

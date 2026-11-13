@@ -173,6 +173,7 @@ export default function contribute(server: PluginServerContext) {
         folder,
         budgetChars: runtimeSettings.searchBudgetChars,
         snippetChars: runtimeSettings.snippetChars,
+        dirs: opened.runtime.dirs,
       });
     } finally {
       opened.runtime.store.close();

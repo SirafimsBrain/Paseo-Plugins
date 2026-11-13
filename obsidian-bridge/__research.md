@@ -387,11 +387,15 @@ providers; tool descriptions carrying the §2 contract. **Status: shipped in 0.1
 completes in seconds and stays current after an external edit; opening an agent adds no measurable latency and starts no
 vault I/O; an agent in a new workspace can answer "what does my note X say" when asked.
 
-**0.2.0 — explicit-target append.**
-`obsidian_append_note` with a required target (path or project alias), `create: true` requirement, write allowlist,
-`readOnly`, atomic append with marker verification, dedup, caps. *Acceptance:* the tool refuses a missing target and any
-path outside the allowlist; two concurrent appends do not interleave; an append survives Obsidian having the note open;
-no other write tool exists in `tools/list`.
+**0.2.0 — directory roles and append-only writes.** *Shipped, revised from the original plan at the owner's request.*
+Instead of a single `obsidian_append_note` with a project alias, the plugin gained an explicit role map — the configured
+directory is the hard boundary, and `inbox` (incoming sources), `out` (authored documents) and `raw` (scratch) are
+paths relative to it. Three write tools append into those roles (`obsidian_write_document`, `obsidian_write_scratch`,
+`obsidian_append_inbox`); a name that is absolute, contains `..` or resolves outside its role is refused, existing notes
+are only appended to, `readOnly` and `maxWriteChars` are enforced before any filesystem work, and the resolved role map
+is part of the MCP instructions and of `obsidian_directories` so an agent knows where a requested document belongs.
+*Acceptance:* the tools refuse writes above the root and outside a role; identical bodies are reported as duplicates;
+the size check survives a concurrent Obsidian save; no edit/move/delete tool exists in `tools/list`.
 
 **0.3.0 — semantic layer.**
 Optional local model, worker-thread embedding, incremental embedding of changed chunks, vector signal in fusion,

@@ -21,11 +21,15 @@ describe("tool catalogue", () => {
   it("exposes read-only tools only", () => {
     const names = MCP_TOOLS.map((tool) => tool.name);
     expect(names).toEqual([
+      "obsidian_directories",
       "obsidian_search",
       "obsidian_read",
       "obsidian_outline",
       "obsidian_list",
       "obsidian_links",
+      "obsidian_write_document",
+      "obsidian_write_scratch",
+      "obsidian_append_inbox",
       "obsidian_index",
       "obsidian_status",
     ]);
@@ -36,9 +40,17 @@ describe("tool catalogue", () => {
 
   it("states the explicit-use contract in every content tool", () => {
     const content = MCP_TOOLS.filter((tool) =>
-      ["obsidian_search", "obsidian_read", "obsidian_outline", "obsidian_list", "obsidian_links"].includes(
-        tool.name,
-      ),
+      [
+        "obsidian_directories",
+        "obsidian_search",
+        "obsidian_read",
+        "obsidian_outline",
+        "obsidian_list",
+        "obsidian_links",
+        "obsidian_write_document",
+        "obsidian_write_scratch",
+        "obsidian_append_inbox",
+      ].includes(tool.name),
     );
     for (const tool of content) {
       expect(tool.description).toContain("only when the user explicitly asks");
@@ -150,7 +162,7 @@ describe("dispatchTool", () => {
     const status = dispatchTool("obsidian_status", {}, settings);
     const snapshot = status.structuredContent as { notes: number; readOnly: boolean; isObsidianVault: boolean };
     expect(snapshot.notes).toBe(3);
-    expect(snapshot.readOnly).toBe(true);
+    expect(snapshot.readOnly).toBe(false);
     expect(snapshot.isObsidianVault).toBe(true);
   });
 

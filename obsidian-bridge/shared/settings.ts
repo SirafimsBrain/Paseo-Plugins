@@ -20,7 +20,9 @@ export const DEFAULT_EXCLUDES = ".obsidian/**, .trash/**, .git/**, .smart-env/**
 export const obsidianBridgeSettings = defineSettings({
   id: "obsidian-bridge",
   scope: "host",
-  version: 1,
+  // 2: directory roles (inbox/out/raw) and maxWriteChars; readOnly now defaults
+  // to false because the write tools exist.
+  version: 2,
   schema: z.object({
     /**
      * Absolute path of the local Obsidian vault. Empty means "not
@@ -29,6 +31,22 @@ export const obsidianBridgeSettings = defineSettings({
      * plugin cannot guess.
      */
     vaultPath: z.string().trim().max(1024).default(""),
+    /**
+     * Vault-relative directory for incoming material: converted documents,
+     * reference books and other primary sources the agents read ("Inbox").
+     * Empty = not configured; the role then does not exist for the tools.
+     */
+    inboxDir: z.string().trim().max(512).default("Inbox"),
+    /**
+     * Vault-relative directory for authored documents produced on request
+     * ("Documentation"). Agents may append and create notes here.
+     */
+    outDir: z.string().trim().max(512).default("Documentation"),
+    /**
+     * Vault-relative directory for scratch work: clarifications, bugfix
+     * alternatives, temporary notes ("raw"). Agents may write here freely.
+     */
+    rawDir: z.string().trim().max(512).default("raw"),
     /**
      * Indexing starts automatically once `vaultPath` resolves to a real
      * directory — the user typing the path in the settings screen is the
@@ -58,10 +76,13 @@ export const obsidianBridgeSettings = defineSettings({
     /** Snippet length per hit. */
     snippetChars: z.number().int().min(120).max(4000).default(600),
     /**
-     * Reserved for the write tools introduced in 0.2.0. 0.1.0 ships read-only
-     * tools, so this switch is documented but inert.
+     * Refuse every write tool. Writes are append-only and confined to the
+     * configured inbox/out/raw directories, so this is an extra brake rather
+     * than the primary boundary.
      */
-    readOnly: z.boolean().default(true),
+    readOnly: z.boolean().default(false),
+    /** Hard cap for one written document body, in characters. */
+    maxWriteChars: z.number().int().min(1000).max(400_000).default(200_000),
     /** Inject the MCP server (or the fallback agent tools) into agents. */
     injectIntoAgents: z.boolean().default(true),
   }),
@@ -72,6 +93,9 @@ export type ObsidianBridgeSettings = z.infer<(typeof obsidianBridgeSettings)["sc
 /** Settings subset the MCP server process needs (no UI-only values). */
 export interface RuntimeSettings {
   vaultPath: string;
+  inboxDir: string;
+  outDir: string;
+  rawDir: string;
   indexingEnabled: boolean;
   includeFolders: string;
   excludeGlobs: string;
@@ -81,11 +105,15 @@ export interface RuntimeSettings {
   searchBudgetChars: number;
   snippetChars: number;
   readOnly: boolean;
+  maxWriteChars: number;
 }
 
 export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettings {
   return {
     vaultPath: values.vaultPath,
+    inboxDir: values.inboxDir,
+    outDir: values.outDir,
+    rawDir: values.rawDir,
     indexingEnabled: values.indexingEnabled,
     includeFolders: values.includeFolders,
     excludeGlobs: values.excludeGlobs,
@@ -95,5 +123,6 @@ export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettin
     searchBudgetChars: values.searchBudgetChars,
     snippetChars: values.snippetChars,
     readOnly: values.readOnly,
+    maxWriteChars: values.maxWriteChars,
   };
 }

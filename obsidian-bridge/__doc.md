@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.1.0**.
+Version covered: **0.2.0**.
 
 ## 1. Purpose and scope
 
@@ -16,7 +16,7 @@ The operating contract (`__research.md` §2) is the specification this implement
 1. availability is not initiative — the tools are injected so an agent *can* answer a request;
 2. every vault access is request-scoped — a turn that does not ask touches nothing;
 3. the bridge is a reference for every agent and every workspace, with no per-agent identity or state;
-4. writes need an explicitly named target (no write tools exist in 0.1.0 at all);
+4. writes need an explicitly named target and stay inside one of the configured roles;
 5. `memory-flash` and `luck-planner` keep their current behaviour and data;
 6. no skill is installed automatically; the contract lives in tool descriptions;
 7. injection is cheap and inert — no probe, no scan, no env, no cwd change in the open path;
@@ -34,13 +34,14 @@ obsidian-bridge/
 │   └── host-fonts.ts        # host Appearance settings parsing (client-safe, copied from memory-flash)
 ├── server/
 │   ├── paths.ts             # $PASEO_HOME, plugin data dir, per-vault index path
+│   ├── dirs.ts              # role map (workspace/inbox/out/raw), append-only writer
 │   ├── parse.ts             # frontmatter, headings, chunking, tags, wikilinks, aliases
 │   ├── vault.ts             # path safety, walking, include/exclude globs, note reading
 │   ├── store.ts             # SQLite schema, FTS5, tags/links/aliases, link resolution, search SQL
 │   ├── scan.ts              # one reconciliation pass (shared by indexer and the obsidian_index tool)
 │   ├── search.ts            # RRF fusion and token-budgeted packing
 │   ├── indexer.ts           # watch + reconcile timer + status (plugin process only)
-│   ├── mcp-tools.ts         # tool definitions + transport-independent dispatch
+│   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
 │   ├── settings-file.ts     # settings reader for the spawned server (file + env, no zod)
@@ -132,20 +133,45 @@ BM25 afterwards. An empty query lists recent notes — the "show me what I was w
 
 Definitions in `server/mcp-tools.ts`, shared by the stdio server, the attached agent tools and the tests:
 
-`obsidian_search`, `obsidian_read`, `obsidian_outline`, `obsidian_list`, `obsidian_links`, `obsidian_index`,
-`obsidian_status`.
+`obsidian_directories`, `obsidian_search`, `obsidian_read`, `obsidian_outline`, `obsidian_list`, `obsidian_links`,
+`obsidian_write_document`, `obsidian_write_scratch`, `obsidian_append_inbox`, `obsidian_index`, `obsidian_status`.
 
-Read tool safety: every path goes through `resolveInsideVault`, which resolves symlinks lexically, refuses anything outside
+The MCP `initialize` instructions embed the resolved role map (`mcpInstructions(dirs)`), so an agent asked to write a
+document is told which directory that document belongs to before it calls anything.
+
+### Directory roles (`server/dirs.ts`)
+
+`vaultPath` is the single directory the plugin may touch; it is either a vault root or a project directory inside one.
+Three roles are vault-relative paths under it: `inboxDir` (incoming material), `outDir` (authored documents) and
+`rawDir` (scratch). Normalization rejects absolute paths, `..` segments and `.obsidian`, so a role can never point above
+the configured directory. `roleOfPath` matches the most specific role (raw → out → inbox → workspace), and every hit,
+listing entry and status snapshot carries its role.
+
+Read tool safety: every path goes through `resolveInsideVault`, which resolves paths lexically, refuses anything outside
 the vault root, and refuses `.obsidian/` (plugin code and settings are not the agents' business). A path like
 `../../etc/passwd` returns an explicit error, covered by tests.
+
+### Write tools
+
+`obsidian_write_document` (out), `obsidian_write_scratch` (raw) and `obsidian_append_inbox` (inbox) share one
+implementation, `appendToNote`:
+
+- an absolute name, a `..` segment or a name that resolves outside the role is refused **before** normalization;
+- an existing note is appended to (`## <date> — <title>` section); nothing is rewritten, moved or deleted;
+- a missing note is created only with `create: true`, with `title`/`kind`/`created`/`source` frontmatter;
+- an identical body already present is reported as a duplicate and skipped;
+- `readOnly` and `maxWriteChars` are enforced in the dispatcher, before any filesystem work;
+- after an append the file size is verified; the one realistic race (Obsidian saving a stale buffer over the append) is
+  retried once and then reported instead of silently losing text.
 
 `obsidian_index` runs the same `scanVault` the indexer runs, so tool and background indexes cannot diverge.
 
 ### Attached agent tools
 
-`obsidian_bridge_search`, `obsidian_bridge_read`, `obsidian_bridge_status` — `defineAgentTool` definitions attached through
-`request.tools` when the MCP server cannot be contributed. The prefix cannot collide with Paseo built-ins, another plugin,
-or this server's own MCP tool names.
+`obsidian_bridge_directories`, `obsidian_bridge_search`, `obsidian_bridge_read`,
+`obsidian_bridge_write_document`, `obsidian_bridge_write_scratch`, `obsidian_bridge_append_inbox`,
+`obsidian_bridge_status` — `defineAgentTool` definitions attached through `request.tools` when the MCP server cannot be
+contributed. The prefix cannot collide with Paseo built-ins, another plugin, or this server's own MCP tool names.
 
 ## 6. Injection (the only hook)
 
@@ -177,7 +203,10 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `vaultPath` | `""` | Absolute vault path. Empty = not configured: no scan, tools explain how to configure. |
+| `vaultPath` | `""` | The one directory available to Paseo (a vault root or a project directory inside one). Empty = not configured: no scan, tools explain how to configure. |
+| `inboxDir` | `Inbox` | Vault-relative incoming-material role. Empty = role disabled. |
+| `outDir` | `Documentation` | Vault-relative authored-documents role. |
+| `rawDir` | `raw` | Vault-relative scratch role. |
 | `indexingEnabled` | `true` | Pause indexing without clearing the path. |
 | `includeFolders` | `""` | Comma-separated vault-relative folders. |
 | `excludeGlobs` | `.obsidian/**, .trash/**, .git/**, .smart-env/**` | Comma-separated globs, `*`/`**` supported. |
@@ -186,11 +215,14 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `maxResults` | `10` | Default hit limit. |
 | `searchBudgetChars` | `8000` | Packed answer budget. |
 | `snippetChars` | `600` | Snippet length per hit. |
-| `readOnly` | `true` | Reserved for 0.2.0 writes; inert in 0.1.0. |
+| `readOnly` | `false` | Refuse every write tool; reads unaffected. |
+| `maxWriteChars` | `200000` | Cap for one written body. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
-That choice is deliberate for 0.1.0 (11 keys, all simple), and it matches `bunny-search`/`memory-flash`. If the setting
+That choice is deliberate (15 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
+version is 2: role directories and `maxWriteChars` were added, and `readOnly` now defaults to `false` because the write
+tools exist. If the setting
 count grows past what a form can hold (per-vault registries, credentials, index diagnostics), a loopback panel like
 `remote-control`'s console becomes the better home — the RPC layer already isolates that decision.
 
@@ -199,11 +231,11 @@ The vault path is validated by the `obsidian-bridge.verify-vault` RPC before it 
 notes is reported as an error in the UI; the plugin still saves what the user typed, but indexing produces an empty index
 and the panel says so.
 
-## 8. Not shipped in 0.1.0 (roadmap)
+## 8. Not shipped yet (roadmap)
 
 | Version | Work |
 | --- | --- |
-| 0.2.0 | Append-only write path to an **explicitly named** target (project inbox or note path), atomic append with marker verification, dedup, `readOnly` enforced. |
+| 0.2.0 (shipped) | Directory roles (workspace/inbox/out/raw) with the root as a hard boundary, append-only write tools to `out`/`raw`/`inbox`, role tags on hits and listings, `maxWriteChars`, `readOnly`. |
 | 0.3.0 | Optional local embeddings (`@huggingface/transformers`, multilingual MiniLM/e5 small, worker thread), vector signal in fusion, `obsidian_diagnose` recall@k. |
 | 0.4.0 | Obsidian-side enrichment via the Local REST API plugin (authoritative backlinks, fuzzy-search signal, SSE-driven reindex, "open in Obsidian"), composer attachment source, workspace panel. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
@@ -213,7 +245,7 @@ Embeddings and vectors were deliberately left out: the 230 MB / brute-force cosi
 
 ## 9. Verification
 
-`npm test` (39 tests, 6 suites, ~0.3 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (52 tests, 7 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
@@ -222,8 +254,11 @@ Embeddings and vectors were deliberately left out: the 230 MB / brute-force cosi
   outline/list/status/index against a temporary vault; path escape refused; missing-vault message.
 - `tests/indexer.test.ts` — idle without a path, scan, changed/added/removed notes, bad path error, include folders.
 - `tests/session-open.test.ts` — the injection decision matrix and probe conditions.
+- `tests/directories.test.ts` — role normalization (absolute paths, `..`, `.obsidian`), most-specific role matching,
+  append-only creation/appending, duplicate detection, `readOnly`/`maxWriteChars` refusal, role tags and `scope` filters,
+  and refused writes above the root.
 - `tests/mcp-server-e2e.test.ts` — spawns the built `dist/mcp-server.js`, speaks JSON-RPC over stdio, indexes, searches,
-  reads a heading, and checks a path escape is refused.
+  reads a heading, writes a document into `out`, and checks a path escape is refused.
 
 Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real vault, index or daemon home.
 
@@ -234,4 +269,5 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - A slow first scan is expected on a large vault (one read + parse per note, ~5 000 notes/second on a warm cache in local
   tests). Reindexing is safe at any time.
 - `index.db` is disposable: delete it and run `obsidian_index` (or restart the plugin) to rebuild.
-- The plugin never writes to the vault in 0.1.0. `readOnly` exists so the default is recorded before the write path lands.
+- Writes are append-only and confined to the `inbox`/`out`/`raw` roles. There is no tool that edits, moves, renames or
+deletes a note, and `readOnly` switches every write off.

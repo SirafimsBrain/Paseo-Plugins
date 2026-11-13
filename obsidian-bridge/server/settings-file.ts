@@ -14,6 +14,9 @@ import { settingsMirrorPath } from "./paths";
 
 const DEFAULTS: RuntimeSettings = {
   vaultPath: "",
+  inboxDir: "Inbox",
+  outDir: "Documentation",
+  rawDir: "raw",
   indexingEnabled: true,
   includeFolders: "",
   excludeGlobs: ".obsidian/**, .trash/**, .git/**, .smart-env/**",
@@ -22,7 +25,8 @@ const DEFAULTS: RuntimeSettings = {
   maxResults: 10,
   searchBudgetChars: 8000,
   snippetChars: 600,
-  readOnly: true,
+  readOnly: false,
+  maxWriteChars: 200_000,
 };
 
 function optionalString(value: unknown): string | undefined {
@@ -53,6 +57,9 @@ function parseFile(filePath: string): Partial<RuntimeSettings> {
     if (typeof values.vaultPath === "string") {
       parsed.vaultPath = values.vaultPath.trim().slice(0, 1024);
     }
+    for (const key of ["inboxDir", "outDir", "rawDir"] as const) {
+      if (typeof values[key] === "string") parsed[key] = values[key].trim().slice(0, 512);
+    }
     if (typeof values.indexingEnabled === "boolean") parsed.indexingEnabled = values.indexingEnabled;
     if (typeof values.includeFolders === "string") {
       parsed.includeFolders = values.includeFolders.trim().slice(0, 2000);
@@ -71,6 +78,8 @@ function parseFile(filePath: string): Partial<RuntimeSettings> {
     if (snippet !== undefined) parsed.snippetChars = snippet;
     const readOnly = optionalBool(values.readOnly);
     if (readOnly !== undefined) parsed.readOnly = readOnly;
+    const maxWrite = optionalInt(values.maxWriteChars, 1000, 400_000);
+    if (maxWrite !== undefined) parsed.maxWriteChars = maxWrite;
     return parsed;
   } catch {
     return {};
@@ -81,6 +90,12 @@ function parseEnv(): Partial<RuntimeSettings> {
   const parsed: Partial<RuntimeSettings> = {};
   const vaultPath = optionalString(process.env.OBSIDIAN_VAULT_PATH);
   if (vaultPath) parsed.vaultPath = vaultPath.slice(0, 1024);
+  const inboxDir = optionalString(process.env.OBSIDIAN_INBOX_DIR);
+  if (inboxDir) parsed.inboxDir = inboxDir.slice(0, 512);
+  const outDir = optionalString(process.env.OBSIDIAN_OUT_DIR);
+  if (outDir) parsed.outDir = outDir.slice(0, 512);
+  const rawDir = optionalString(process.env.OBSIDIAN_RAW_DIR);
+  if (rawDir) parsed.rawDir = rawDir.slice(0, 512);
   const includeFolders = optionalString(process.env.OBSIDIAN_INCLUDE_FOLDERS);
   if (includeFolders) parsed.includeFolders = includeFolders;
   const excludeGlobs = optionalString(process.env.OBSIDIAN_EXCLUDE_GLOBS);

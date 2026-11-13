@@ -117,6 +117,26 @@ describe("bundled MCP server", () => {
     });
     expect(read.result.content[0].text).toContain("Ship the bounded queue");
 
+    const directories = await server.request("tools/call", {
+      name: "obsidian_directories",
+      arguments: {},
+    });
+    expect(directories.result.structuredContent.directories).toMatchObject({
+      inbox: "Inbox",
+      out: "Documentation",
+      raw: "raw",
+    });
+
+    const written = await server.request("tools/call", {
+      name: "obsidian_write_document",
+      arguments: { name: "Queue guide", title: "Queue guide", body: "Bounded queue, step by step." },
+    });
+    expect(written.result.isError).toBeUndefined();
+    expect(written.result.structuredContent.path).toBe("Documentation/Queue guide.md");
+    expect(
+      fs.readFileSync(path.join(workspace.vault, "Documentation/Queue guide.md"), "utf-8"),
+    ).toContain("Bounded queue, step by step.");
+
     const crossed = await server.request("tools/call", {
       name: "obsidian_read",
       arguments: { path: "../../etc/passwd" },
