@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.3.1)
+## What it does (0.3.2)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -21,7 +21,8 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   directory role.
 - **Semantic search, in-process.** `@huggingface/transformers` runs a multilingual e5-small ONNX model inside Node — no
   Ollama, no Python, no Docker, no vector database. Vectors live in the same SQLite index and are built by a short-lived
-  child process, so a full re-embedding does not pin gigabytes inside the daemon.
+  child process, so a full re-embedding does not pin gigabytes inside the daemon. Unchanged notes are never re-read
+  into vectors, and an edited note only re-embeds the sections whose text changed.
 - **Read tools.** `obsidian_search`, `obsidian_read` (whole note or one heading subtree), `obsidian_outline`,
   `obsidian_list`, `obsidian_links`, `obsidian_directories`, plus `obsidian_index`, `obsidian_diagnose` and
   `obsidian_status`.
@@ -52,6 +53,17 @@ paths relative to that directory:
 `obsidian_directories` returns this map (with the resolved absolute root, roles and whether writes are enabled), and the
 same map is part of the MCP `initialize` instructions, so an agent asked to "write this into Obsidian" knows where the
 document belongs. Every search hit and listing carries its role.
+
+## Secrets
+
+The bridge indexes the vault **as it is on disk** and never decrypts anything: parsing, search and the embedding model
+are local, and no note text leaves the machine. Hiding secrets is the vault owner's responsibility. With an in-place
+encryption plugin such as [Inline Secret Block](https://github.com/vnrtmnv/obsidian-inline-secret-block), a `secret`
+fence is stored as `secret-lock` plus AES-256-GCM ciphertext, so the bridge chunks, indexes and embeds only ciphertext —
+the plaintext never reaches the index, a snippet, an agent or a vector. There is deliberately no secret detection and no
+frontmatter redaction: a heuristic that misses one note would be worse than a clear rule. Notes that must not be indexed
+at all belong outside `vaultPath`/`includeFolders`, or under an `excludeGlobs` pattern; the next scan drops them from the
+index together with their chunks and vectors. Details: [__doc.md](./__doc.md) §12.
 
 ## Requirements
 
@@ -130,4 +142,5 @@ Obsidian notes, never as a place to record agent memory.
 - Obsidian-side enrichment (the Local REST API plugin) is planned, not shipped. See [__doc.md](./__doc.md) §8.
 - Larger local models and external RAG providers are deliberate post-1.0 work: the project stays on the Paseo/Node base
   unless a requirement genuinely cannot be met there.
-- Excluded from indexing: `.obsidian/`, `.trash/`, `.git/`, `.smart-env/` and anything matching your exclude globs.
+- Excluded from indexing: `.obsidian/`, `.trash/`, `.git/`, `.smart-env/` and anything matching your exclude globs. A
+  note that stops matching is removed from the index together with its chunks and vectors.

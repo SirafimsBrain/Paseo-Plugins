@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.3.0**.
+Version covered: **0.3.2**.
 
 ## 1. Purpose and scope
 
@@ -92,6 +92,7 @@ Schema (SQLite, WAL, `busy_timeout = 5000` so the plugin and agent processes can
 | `tags` | (path, tag, source) |
 | `aliases` | (path, alias) from `aliases:`/`alias:` |
 | `links` | source, raw target, resolved target, alias, anchor, kind (`link`/`embed`) |
+| `embeddings` | chunk id, note path, model id, dimension, text hash, vector BLOB (0.3.0) |
 | `meta` | schema version, tokenizer, last scan timestamp |
 
 Deliberately no triggers: `upsertNote`/`deleteNote` maintain the FTS rows explicitly, which keeps the "delete everything for
@@ -100,6 +101,15 @@ this path, then reinsert" step atomic inside one transaction and avoids stale FT
 Tokenizer: `unicode61 remove_diacritics 2`, or `porter unicode61 remove_diacritics 2` when `ftsStemming` is on. The choice
 is recorded in `meta`; a change wipes the derived tables so the next scan rebuilds them (the tokenizer is baked into the
 FTS schema).
+
+### Incremental indexing and vectors
+
+`notes.hash` is a SHA-1 of the whole file; `scanVault` re-parses only notes whose hash differs, even when `force` is set
+(`force` only skips the mtime/size shortcut). Vectors are keyed by chunk id and every note write recreates its chunks, so
+`upsertNote` snapshots the note's vectors by `text_hash` before deleting them and re-attaches each one to a new chunk with
+byte-identical text. Editing one section therefore re-embeds only that section, plus anything the edit split or merged;
+`chunksToEmbed` is exactly the set of chunks with no vector for the active model. A model change deletes the other
+model's vectors in the worker before it embeds, and a note removed from the walk loses its chunks and vectors.
 
 ### Parsing (`server/parse.ts`)
 
@@ -128,6 +138,10 @@ guessing, and `obsidian_links` reports them; a deleted note nulls the links that
 | Wikilink proximity | 0.45 | one-hop neighbours of the top 5 lexical hits |
 | Recency | 0.25 | `notes` by mtime (empty-query browse path) |
 | Semantic | 0.9 | cosine over the stored chunk vectors (0.3.0, optional) |
+
+Each signal contributes `weight / (k + rank)`: ranks only, never raw BM25 or cosine values, so BM25's unbounded scale and
+cosine's [-1, 1] are never calibrated against each other. A note can accumulate rank contributions from several of its
+chunks. This is the same fusion `memory-flash` uses.
 
 The semantic signal embeds the query in the same process that serves the tool (lazy, ~10 ms once the model is warm),
 ranks every stored chunk of the active model by cosine similarity and contributes the top 40 to the same RRF map. It is
@@ -263,6 +277,7 @@ and the panel says so.
 | --- | --- |
 | 0.2.0 (shipped) | Directory roles (workspace/inbox/out/raw) with the root as a hard boundary, append-only write tools to `out`/`raw`/`inbox`, role tags on hits and listings, `maxWriteChars`, `readOnly`. |
 | 0.3.0 (shipped) | Optional local embeddings (`@huggingface/transformers`, multilingual e5-small q8), vectors in SQLite, semantic signal in fusion, `obsidian_diagnose` recall@k, memory policy in status. |
+| 0.3.1, 0.3.2 (shipped) | Forced-scan fix and per-chunk vector reuse (an edit re-embeds only changed sections); secrets and encryption-at-rest documented in §12. |
 | 0.4.0 | Obsidian-side enrichment via the Local REST API plugin (authoritative backlinks, fuzzy-search signal, SSE-driven reindex, "open in Obsidian"), composer attachment source, workspace panel. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
@@ -277,7 +292,7 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
 
 ## 9. Verification
 
-`npm test` (64 tests, 8 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (65 tests, 8 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
@@ -290,8 +305,8 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
   document-name validation, append-only creation/appending, duplicate detection, `readOnly`/`maxWriteChars` refusal, role
   tags and `scope` filters, refused writes above the root, refused `folder` arguments that would leave the root, whole-
   segment folder matching, a required inbox `name`, and `resolveVaultRoot` for `~`/home-relative paths.
-- `tests/semantic.test.ts` — vector storage round-trip and invalidation, semantic fusion finding a note with no lexical
-  overlap, the injected provider path through `obsidian_search`/`obsidian_status`, graceful fallback when the model cannot
+- `tests/semantic.test.ts` — vector storage round-trip and invalidation, reuse of unchanged chunks' vectors when a note
+  is edited, semantic fusion finding a note with no lexical overlap, the injected provider path through `obsidian_search`/`obsidian_status`, graceful fallback when the model cannot
   load, per-call opt-out, `obsidian_diagnose` recall, and the 2 GB / 4 GB memory levels.
 - `tests/mcp-server-e2e.test.ts` — spawns the built `dist/mcp-server.js`, speaks JSON-RPC over stdio, indexes, searches,
   reads a heading, writes a document into `out`, and checks a path escape is refused.
@@ -315,7 +330,18 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2)
+
+### 0.3.2
+
+- **A one-line edit re-embedded the whole note.** Vectors were keyed by chunk id and every note write recreates its chunks,
+  so all vectors of the edited note were dropped. `upsertNote` now snapshots them by `text_hash` and re-attaches the ones
+  whose text is byte-identical; only the changed section (and any re-split neighbour) goes back into the queue. Test:
+  editing one of two sections leaves one pending chunk and keeps the other's vector.
+- **Fusion audited against the linear-mixing failure.** `search.ts` already fuses ranks with RRF (`k = 60`) and never adds
+  BM25 to cosine; the documentation now states that explicitly, together with why the weights exist.
+- **Secrets are documented, not heuristically detected.** The indexer works on bytes on disk, so vault-side encryption
+  (Inline Secret Block) already keeps plaintext out of the index; §12 records that contract and the owner's boundaries.
 
 ### 0.3.1
 
@@ -346,3 +372,32 @@ patch version moved 0.2.0 → 0.2.1.
   size comparison that could not distinguish a stale-buffer overwrite.
 - **`obsidian_append_inbox` requires `name`.** The inbox is the user's; there is no default `Inbox.md` to silently collect
   agent text.
+
+## 12. Secrets and privacy
+
+The bridge indexes the vault **as it is on disk**. It has no key material, decrypts nothing, and sends no note text
+anywhere: parsing, BM25, the ONNX model and the vectors are local, and `index.db` is a local file.
+
+Hiding secrets is the vault owner's job. The recommended pattern is encryption in place, for example
+[Inline Secret Block](https://github.com/vnrtmnv/obsidian-inline-secret-block): a ```` ```secret ```` fence is rewritten
+on disk as ```` ```secret-lock ```` with an AES-256-GCM ciphertext body, and an inline `` `secret …` `` span becomes
+`` `secret-lock <base64>` ``. Obsidian writes only the ciphertext into the `.md` file, so the bridge chunks, FTS-indexes
+and embeds the ciphertext. The plaintext never enters the index, a snippet, an agent's context or a vector. To the parser
+a `secret-lock` block is an ordinary fenced code block (fences are stripped only for tag/link extraction; chunk text keeps
+them), which is why its base64 body appears as opaque text in a snippet.
+
+Deliberately **not** implemented: secret detection, `private:`/`secret:` frontmatter redaction, and snippet masking. A
+heuristic that misses one note is worse than a clear rule, and the owner already controls what is written to disk. A note
+containing plaintext secrets is indexed like any other note.
+
+Boundaries for notes that must not be indexed at all:
+
+- keep them outside the directory available to Paseo (`vaultPath`),
+- or outside `includeFolders`,
+- or behind an `excludeGlobs` pattern (`Private/**, **/*.secret.md`).
+
+The next scan deletes the rows of notes that no longer match, including their chunks and vectors.
+
+Residual exposure belongs to the encryption plugin's threat model, not to the bridge: undo history, Obsidian File
+Recovery, sync version history and filesystem backups can retain plaintext written before it was encrypted. A credential
+that was ever synced in plaintext should be rotated.

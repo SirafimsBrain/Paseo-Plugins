@@ -5,7 +5,7 @@ import { MEMORY_NORMAL_BYTES, MEMORY_WARN_BYTES, memoryReport } from "../server/
 import { indexPathFor } from "../server/paths";
 import { scanVault } from "../server/scan";
 import { searchIndex } from "../server/search";
-import { BridgeStore } from "../server/store";
+import { BridgeStore, chunkTextHash } from "../server/store";
 import { makeWorkspace, runtimeSettings, type TestWorkspace } from "./fixtures";
 
 const MODEL = "fake:test-model";
@@ -31,7 +31,8 @@ const QUERY_VECTOR = vectorFor("очередь");
 
 function workspace(): TestWorkspace {
   const created = makeWorkspace({
-    "Queue.md": "# Queue\n\nA bounded queue with retries and metrics.\n",
+    "Queue.md":
+      "# Queue\n\nA bounded queue with retries and metrics.\n\n## Retry policy\n\nExponential backoff, three attempts.\n",
     "Garden.md": "# Garden\n\nTomatoes and basil on the balcony.\n",
   });
   workspaces.push(created);
@@ -51,7 +52,7 @@ function seedVectors(created: TestWorkspace): number {
       path: chunk.path,
       modelId: MODEL,
       dim: DIM,
-      textHash: "test",
+      textHash: chunkTextHash(chunk.text),
       vec: vectorFor(chunk.text),
     });
   }
@@ -109,16 +110,23 @@ describe("vector storage", () => {
     store.close();
   });
 
-  it("drops vectors when the note changes", () => {
+  it("re-embeds only the chunks whose text changed", () => {
     const created = workspace();
     seedVectors(created);
-    created.write("Queue.md", "# Queue\n\nRewritten: a bounded queue with metrics.\n");
+    // One section changes, the other stays byte-identical: its vector must be
+    // carried over to the recreated chunk instead of being thrown away.
+    created.write(
+      "Queue.md",
+      "# Queue\n\nA bounded queue with retries and metrics.\n\n## Retry policy\n\nExponential backoff with jitter, five attempts.\n",
+    );
     const settings = runtimeSettings(created.vault);
     const store = new BridgeStore(indexPathFor(created.vault), { stemming: false });
+    const before = store.embeddingStats(MODEL).embedded;
     scanVault({ root: created.vault, store, settings, force: true });
-    const stats = store.embeddingStats(MODEL);
-    expect(stats.embedded).toBeLessThan(stats.chunks);
-    expect(store.chunksToEmbed(MODEL).length).toBeGreaterThan(0);
+    const pending = store.chunksToEmbed(MODEL);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].text).toContain("five attempts");
+    expect(store.embeddingStats(MODEL).embedded).toBe(before - 1);
     store.close();
   });
 });

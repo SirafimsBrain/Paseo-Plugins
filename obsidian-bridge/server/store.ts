@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -85,6 +86,11 @@ export function toFtsQuery(raw: string): string {
   const unique = [...new Set(tokens)];
   if (unique.length === 0) return "";
   return unique.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
+}
+
+/** SHA-1 of a chunk's text: the identity a stored vector is reused by. */
+export function chunkTextHash(text: string): string {
+  return crypto.createHash("sha1").update(text).digest("hex");
 }
 
 export class BridgeStore {
@@ -238,6 +244,10 @@ export class BridgeStore {
     const folder = path.posix.dirname(relPath) === "." ? "" : path.posix.dirname(relPath);
     this.db.exec("BEGIN");
     try {
+      // Vectors are keyed by chunk id, and every note write recreates its
+      // chunks. Snapshot them by text hash first so a one-line edit only costs
+      // a vector for the chunk that actually changed, not the whole note.
+      const carried = this.vectorsByTextHash(relPath);
       this.deleteDerivedRows(relPath);
 
       this.db
@@ -278,7 +288,19 @@ export class BridgeStore {
       );
       parsed.chunks.forEach((chunk, ordinal) => {
         const result = insertChunk.run(relPath, ordinal, chunk.heading, chunk.text);
-        insertChunkFts.run(Number(result.lastInsertRowid), chunk.text, chunk.heading, relPath);
+        const id = Number(result.lastInsertRowid);
+        insertChunkFts.run(id, chunk.text, chunk.heading, relPath);
+        const vectors = carried.get(chunkTextHash(chunk.text));
+        if (vectors) {
+          for (const vector of vectors) {
+            this.db
+              .prepare(
+                `INSERT INTO embeddings (chunk_id, path, model_id, dim, text_hash, vec)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+              )
+              .run(id, relPath, vector.modelId, vector.dim, chunkTextHash(chunk.text), vector.vec);
+          }
+        }
       });
 
       const insertTag = this.db.prepare(
@@ -303,6 +325,30 @@ export class BridgeStore {
       this.db.exec("ROLLBACK");
       throw cause;
     }
+  }
+
+  /**
+   * Vectors of one note grouped by chunk text hash. Callers reuse them when a
+   * rewritten note still contains a byte-identical chunk.
+   */
+  private vectorsByTextHash(
+    relPath: string,
+  ): Map<string, Array<{ modelId: string; dim: number; vec: Uint8Array }>> {
+    const rows = this.db
+      .prepare("SELECT text_hash, model_id, dim, vec FROM embeddings WHERE path = ?")
+      .all(relPath) as unknown as Array<{
+      text_hash: string;
+      model_id: string;
+      dim: number;
+      vec: Uint8Array;
+    }>;
+    const grouped = new Map<string, Array<{ modelId: string; dim: number; vec: Uint8Array }>>();
+    for (const row of rows) {
+      const list = grouped.get(row.text_hash) ?? [];
+      list.push({ modelId: row.model_id, dim: row.dim, vec: row.vec });
+      grouped.set(row.text_hash, list);
+    }
+    return grouped;
   }
 
   private deleteDerivedRows(relPath: string): void {

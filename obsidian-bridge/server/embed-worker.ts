@@ -1,6 +1,5 @@
-import * as crypto from "node:crypto";
 import { createLocalProvider } from "./embed/local";
-import { BridgeStore } from "./store";
+import { BridgeStore, chunkTextHash } from "./store";
 
 /**
  * Short-lived embedding job, spawned by the plugin host and run as its own
@@ -63,7 +62,7 @@ async function main(): Promise<void> {
         path: chunk.path,
         modelId: model,
         dim: vec.length,
-        textHash: crypto.createHash("sha1").update(chunk.text).digest("hex"),
+        textHash: chunkTextHash(chunk.text),
         vec,
       });
       done += 1;
