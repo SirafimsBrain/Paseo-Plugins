@@ -5,6 +5,8 @@ import type { VaultStatus } from "../shared/contracts";
 import type { RuntimeSettings } from "../shared/settings";
 import { resolveRoleDirs } from "./dirs";
 import { EmbedJob } from "./embed/job";
+import { EnrichmentService } from "./enrichment";
+import type { VaultEvent } from "./obsidian-api";
 import { queryProviderStatus } from "./embed/query";
 import { memoryReport } from "./memory";
 import { parseNote } from "./parse";
@@ -41,6 +43,7 @@ export class VaultIndexer {
   private disposed = false;
   private settings: RuntimeSettings | null = null;
   private readonly embedJob = new EmbedJob();
+  private readonly enrichment = new EnrichmentService((event) => this.handleVaultEvent(event));
   private state: IndexerState = {
     lastScanAt: null,
     lastChangeAt: null,
@@ -111,12 +114,24 @@ export class VaultIndexer {
     this.state.error = null;
     if (!settings.indexingEnabled) {
       this.stopWatching();
+      // No index to refresh, so live vault events have nothing to update.
+      this.enrichment.stop();
       return;
     }
 
     await this.scanNow();
     this.startWatching();
     this.scheduleReconcile(settings.reconcileMinutes);
+    // Optional and never blocking: a closed app must not delay indexing.
+    void this.enrichment
+      .configure(settings)
+      .catch((cause) =>
+        console.warn(
+          `[obsidian-bridge] enrichment unavailable: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        ),
+      );
   }
 
   /** Runs one scan on the plugin queue (also used by the reindex RPC). */
@@ -201,6 +216,7 @@ export class VaultIndexer {
       watching: this.state.watching,
       indexRunning: this.state.indexRunning,
       readOnly: settings?.readOnly ?? true,
+      enrichment: this.enrichment.status(),
       directories: settings
         ? resolveRoleDirs(settings)
         : { workspace: "", inbox: null, out: null, raw: null },
@@ -405,8 +421,31 @@ export class VaultIndexer {
     });
   }
 
+  /**
+   * Obsidian vault events supplement the filesystem watcher: a rename or a
+   * metadata change that `fs.watch` reports late still lands in the pending
+   * queue, and the normal flush turns it into an index update.
+   */
+  private handleVaultEvent(event: VaultEvent): void {
+    const settings = this.settings;
+    if (!settings) return;
+    const paths = [event.path, event.type === "rename" ? event.oldPath : null];
+    let queued = false;
+    for (const candidate of paths) {
+      if (!candidate) continue;
+      const rel = candidate.replace(/\\/g, "/").replace(/^\/+/, "");
+      if (!isMarkdownPath(rel)) continue;
+      if (!isIncluded(rel, settings.includeFolders)) continue;
+      if (isExcluded(rel, settings.excludeGlobs)) continue;
+      this.pending.add(rel);
+      queued = true;
+    }
+    if (queued) this.schedulePendingFlush();
+  }
+
   private closeResources(): void {
     this.embedJob.stop();
+    this.enrichment.stop();
     this.stopWatching();
     if (this.reconcileTimer) {
       clearInterval(this.reconcileTimer);

@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.3.2**.
+Version covered: **0.4.0**.
 
 ## 1. Purpose and scope
 
@@ -31,6 +31,7 @@ obsidian-bridge/
 ├── shared/
 │   ├── settings.ts          # defineSettings schema + runtime subset
 │   ├── contracts.ts         # zod value types + plugin RPC contracts (defineRpc)
+│   ├── attachments.ts       # composer attachment source + search RPC (0.4.0)
 │   └── host-fonts.ts        # host Appearance settings parsing (client-safe, copied from memory-flash)
 ├── server/
 │   ├── paths.ts             # $PASEO_HOME, plugin data dir, per-vault index path
@@ -46,7 +47,9 @@ obsidian-bridge/
 │   ├── store.ts             # SQLite schema, FTS5, tags/links/aliases, link resolution, search SQL
 │   ├── scan.ts              # one reconciliation pass (shared by indexer and the obsidian_index tool)
 │   ├── search.ts            # RRF fusion and token-budgeted packing
-│   ├── indexer.ts           # watch + reconcile timer + status (plugin process only)
+│   ├── indexer.ts           # watch + reconcile timer + enrichment lifecycle + status
+│   ├── obsidian-api.ts      # optional Local REST API client: probe, fuzzy search, note JSON, open, SSE
+│   ├── enrichment.ts        # enrichment lifecycle + fuzzy signal with failure cache
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
@@ -57,6 +60,7 @@ obsidian-bridge/
 │   └── agent-tools.ts       # attached fallback tools (defineAgentTool)
 ├── client/
 │   ├── surface.tsx          # knowledge-base screen
+│   ├── workspace-panel.tsx  # compact tab: status, search, preview, open in Obsidian
 │   ├── settings-screen.tsx  # every setting, validated in place
 │   ├── use-host-typography.ts, web.ts
 └── scripts/bundle-mcp-server.mjs
@@ -68,9 +72,12 @@ obsidian-bridge/
    with a debounced `fs.watch`, and reconciles every `reconcileMinutes` for events a watcher can miss.
 2. **Index → agent (agent process).** An agent spawns `dist/mcp-server.js`; each tool call opens the vault's SQLite file,
    answers, and closes it. Note bodies are re-read from disk, so a note is never quoted from a stale index.
-3. **Index → UI (plugin process).** The panel and the settings screen call plugin RPCs; only the plugin process touches the
-   indexer.
-4. **Settings → MCP bundle.** The host owns the settings store; the plugin mirrors it to
+3. **Index → UI (plugin process).** The screen, workspace tab, attachment picker and settings screen call plugin RPCs;
+   only the plugin process touches the indexer.
+4. **Optional Obsidian enrichment.** The plugin process probes the Local REST API once per configuration, follows vault
+   events when it answers, and the MCP process adds Obsidian's fuzzy search to retrieval when it is reachable. No note text
+   leaves the machine: the API is a loopback service in the same vault.
+5. **Settings → MCP bundle.** The host owns the settings store; the plugin mirrors it to
    `$PASEO_HOME/plugins/obsidian-bridge/settings.json` on startup and on every change (atomic temp file + rename), because
    the spawned server cannot use the plugin API.
 
@@ -235,7 +242,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 
 ## 7. Settings
 
-`shared/settings.ts` (`defineSettings`, host scope, version 3):
+`shared/settings.ts` (`defineSettings`, host scope, version 4):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -257,12 +264,15 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `embeddingModel` | `Xenova/multilingual-e5-small` | Hugging Face repo with ONNX weights. |
 | `embeddingDtype` | `q8` | ONNX dtype: `q8` ≈ 118 MB, `fp32` ≈ 470 MB. |
 | `embeddingIdleMinutes` | `10` | Unload the query model after this idle time; `0` keeps it. |
+| `obsidianApiEnabled` | `false` | Optional Local REST API enrichment (fuzzy signal, authoritative backlinks, live events, open in app). |
+| `obsidianApiUrl` | `https://127.0.0.1:27124` | Local REST API base URL. Self-signed TLS is accepted for loopback hosts only. |
+| `obsidianApiKey` | `""` | Bearer token for that API. Mirrored in a `0600` settings file; never logged. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
 That choice is deliberate (19 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
-version is 3: role directories and `maxWriteChars` came in 0.2.0 (`readOnly` defaults to `false` since the write tools
-exist), and 0.3.0 added the four semantic keys. If the setting
+version is 4: role directories and `maxWriteChars` came in 0.2.0 (`readOnly` defaults to `false` since the write tools
+exist), 0.3.0 added the four semantic keys, and 0.4.0 added the three enrichment keys. If the setting
 count grows past what a form can hold (per-vault registries, credentials, index diagnostics), a loopback panel like
 `remote-control`'s console becomes the better home — the RPC layer already isolates that decision.
 
@@ -278,7 +288,7 @@ and the panel says so.
 | 0.2.0 (shipped) | Directory roles (workspace/inbox/out/raw) with the root as a hard boundary, append-only write tools to `out`/`raw`/`inbox`, role tags on hits and listings, `maxWriteChars`, `readOnly`. |
 | 0.3.0 (shipped) | Optional local embeddings (`@huggingface/transformers`, multilingual e5-small q8), vectors in SQLite, semantic signal in fusion, `obsidian_diagnose` recall@k, memory policy in status. |
 | 0.3.1, 0.3.2 (shipped) | Forced-scan fix and per-chunk vector reuse (an edit re-embeds only changed sections); secrets and encryption-at-rest documented in §12. |
-| 0.4.0 | Obsidian-side enrichment via the Local REST API plugin (authoritative backlinks, fuzzy-search signal, SSE-driven reindex, "open in Obsidian"), composer attachment source, workspace panel. |
+| 0.4.0 (shipped) | Optional Local REST API enrichment (fuzzy signal, authoritative link metadata, SSE vault events, "Open in Obsidian"), composer attachment source, workspace panel. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -292,7 +302,7 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
 
 ## 9. Verification
 
-`npm test` (65 tests, 8 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (75 tests, 9 suites, ~0.8 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
@@ -308,6 +318,9 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
 - `tests/semantic.test.ts` — vector storage round-trip and invalidation, reuse of unchanged chunks' vectors when a note
   is edited, semantic fusion finding a note with no lexical overlap, the injected provider path through `obsidian_search`/`obsidian_status`, graceful fallback when the model cannot
   load, per-call opt-out, `obsidian_diagnose` recall, and the 2 GB / 4 GB memory levels.
+- `tests/enrichment.test.ts` — the Local REST API client against a fake loopback server: probe and version, rejected key,
+  fuzzy search ranking, note JSON links/backlinks, open, SSE events, unreachable host; fuzzy fusion that surfaces a note
+  with no lexical overlap, ignores paths outside the index, and degrades to lexical search when Obsidian is down.
 - `tests/mcp-server-e2e.test.ts` — spawns the built `dist/mcp-server.js`, speaks JSON-RPC over stdio, indexes, searches,
   reads a heading, writes a document into `out`, and checks a path escape is refused.
 
@@ -401,3 +414,40 @@ The next scan deletes the rows of notes that no longer match, including their ch
 Residual exposure belongs to the encryption plugin's threat model, not to the bridge: undo history, Obsidian File
 Recovery, sync version history and filesystem backups can retain plaintext written before it was encrypted. A credential
 that was ever synced in plaintext should be rotated.
+
+## 13. Obsidian enrichment (0.4.0)
+
+Optional, off by default, and never required for correctness. It uses the
+[Local REST API with MCP](https://github.com/coddingtonbear/obsidian-local-rest-api) community plugin in a running
+Obsidian. When the app is closed or the key is wrong, every path falls back to the filesystem index and the status says
+why.
+
+| Feature | Endpoint | Used by |
+| --- | --- | --- |
+| Probe + version | `GET /` | indexer status, `obsidian_status`, settings "Test" |
+| Fuzzy search signal | `POST /search/simple/?query=…&maxResults=…` | `obsidian_search`, panel search |
+| Authoritative links | `GET /vault/{path}` with `Accept: application/vnd.olrapi.note+json` | `obsidian_outline`, panel preview |
+| Open in app | `POST /open/{path}` | panel button (RPC) |
+| Live vault events | `POST /events/vault/{create,modify,delete,rename}/` + SSE | indexer pending queue |
+
+**Retrieval.** Obsidian returns note paths in its own ranking order. Each path that exists in the index contributes
+`0.6 / (60 + rank)` to the same RRF map, i.e. a note-level signal below chunk BM25 (1.0) and semantic (0.9). Paths missing
+from the index are dropped, so an excluded folder cannot leak back in. When the API fails, the fusion is exactly the
+lexical + graph + semantic result and `structuredContent.enrichment` carries the reason.
+
+**Failure policy.** Every call has a 1.5 s timeout. A search failure is cached per endpoint for 30 s, so a closed Obsidian
+costs one timeout rather than one per agent query. The probe and event subscription run once per settings change, never in
+`agent.open.before`.
+
+**Events.** Each vault event is treated exactly like an `fs.watch` notification: the path (and `oldPath` on a rename) goes
+into the same debounced pending queue, so targeted reindexing and vector reuse are unchanged. Streams reconnect with a 5 s
+backoff; the filesystem watcher stays the primary mechanism.
+
+**Credentials.** The URL and bearer token are host settings. The token is mirrored to the MCP settings file (mode `0600`),
+never logged, and sent only to the configured URL. TLS verification is relaxed only for loopback hosts, because the plugin
+generates its own CA; a non-loopback URL is validated normally.
+
+**Paseo surface.** A workspace panel (`addWorkspacePanel`) offers status, search, preview and "Open in Obsidian"; an
+attachment source (`defineAttachmentSource`) attaches one note to a prompt as a text snapshot (capped at 40 000 characters,
+with an explicit truncation marker). Writes still go through the append-only filesystem tools; the REST API is never used
+to modify notes.

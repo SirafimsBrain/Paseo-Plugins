@@ -35,9 +35,30 @@ export const searchResultSchema = z.object({
   signals: z.array(z.string()),
   /** Set when the vault is not configured or the index is empty. */
   note: z.string().nullable(),
+  /** Whether Obsidian's own fuzzy search joined the fusion, and why not. */
+  enrichment: z.object({
+    enabled: z.boolean(),
+    used: z.boolean(),
+    error: z.string().nullable(),
+  }),
 });
 
 export type SearchResult = z.infer<typeof searchResultSchema>;
+
+/** Optional Obsidian enrichment (Local REST API plugin). */
+export const enrichmentStatusSchema = z.object({
+  enabled: z.boolean(),
+  url: z.string(),
+  reachable: z.boolean(),
+  authenticated: z.boolean(),
+  version: z.string().nullable(),
+  /** True while vault event streams are connected (plugin process only). */
+  events: z.boolean(),
+  lastEventAt: z.string().nullable(),
+  error: z.string().nullable(),
+});
+
+export type EnrichmentStatus = z.infer<typeof enrichmentStatusSchema>;
 
 /** Live status of the vault and its index. */
 export const vaultStatusSchema = z.object({
@@ -66,6 +87,8 @@ export const vaultStatusSchema = z.object({
     out: z.string().nullable(),
     raw: z.string().nullable(),
   }),
+  /** Optional Obsidian-side enrichment; `enabled: false` is a normal state. */
+  enrichment: enrichmentStatusSchema,
   /** Semantic layer: model, vector coverage and background job. */
   embedding: z.object({
     enabled: z.boolean(),
@@ -172,6 +195,25 @@ export const reindexVault = defineRpc({
     notes: z.number().int(),
     chunks: z.number().int(),
     tookMs: z.number().int(),
+    error: z.string().nullable(),
+  }),
+});
+
+/** Opens a note in the Obsidian application (Local REST API, optional). */
+export const openInObsidian = defineRpc({
+  name: "obsidian-bridge.open-in-obsidian",
+  input: z.object({ path: z.string().trim().min(1).max(1024) }),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+/** Fresh probe of the Local REST API, used by the settings screen. */
+export const testEnrichment = defineRpc({
+  name: "obsidian-bridge.test-enrichment",
+  input: z.object({}),
+  output: z.object({
+    ok: z.boolean(),
+    authenticated: z.boolean(),
+    version: z.string().nullable(),
     error: z.string().nullable(),
   }),
 });

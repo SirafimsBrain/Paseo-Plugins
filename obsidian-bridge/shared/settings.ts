@@ -20,9 +20,9 @@ export const DEFAULT_EXCLUDES = ".obsidian/**, .trash/**, .git/**, .smart-env/**
 export const obsidianBridgeSettings = defineSettings({
   id: "obsidian-bridge",
   scope: "host",
-  // 3: semantic search settings (0.3.0). 2 added directory roles and
-  // maxWriteChars; readOnly defaults to false since the write tools exist.
-  version: 3,
+  // 4: optional Obsidian Local REST API enrichment (0.4.0). 3 added the
+  // semantic settings; 2 added directory roles and maxWriteChars.
+  version: 4,
   schema: z.object({
     /**
      * Absolute path of the local Obsidian vault. Empty means "not
@@ -99,6 +99,21 @@ export const obsidianBridgeSettings = defineSettings({
      * to 2 GB is normal, 2-4 GB is reported in the panel, never blocked.
      */
     embeddingIdleMinutes: z.number().int().min(0).max(240).default(10),
+    /**
+     * Optional enrichment through the Local REST API plugin: Obsidian's own
+     * fuzzy search joins retrieval, its metadata cache provides authoritative
+     * links/backlinks, vault events supplement the filesystem watcher, and the
+     * panel can open a note in the app. Never required; off by default.
+     */
+    obsidianApiEnabled: z.boolean().default(false),
+    /** Base URL of the Local REST API plugin. Loopback HTTPS with its generated CA. */
+    obsidianApiUrl: z.string().trim().max(512).default("https://127.0.0.1:27124"),
+    /**
+     * Bearer token from Obsidian → Settings → Local REST API. Local credential:
+     * it is mirrored to the plugin's settings file so agent-side MCP processes
+     * can use enrichment, and it is never logged or sent with note text.
+     */
+    obsidianApiKey: z.string().trim().max(512).default(""),
     /** Inject the MCP server (or the fallback agent tools) into agents. */
     injectIntoAgents: z.boolean().default(true),
   }),
@@ -126,6 +141,9 @@ export interface RuntimeSettings {
   embeddingModel: string;
   embeddingDtype: string;
   embeddingIdleMinutes: number;
+  obsidianApiEnabled: boolean;
+  obsidianApiUrl: string;
+  obsidianApiKey: string;
 }
 
 export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettings {
@@ -148,5 +166,8 @@ export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettin
     embeddingModel: values.embeddingModel,
     embeddingDtype: values.embeddingDtype,
     embeddingIdleMinutes: values.embeddingIdleMinutes,
+    obsidianApiEnabled: values.obsidianApiEnabled,
+    obsidianApiUrl: values.obsidianApiUrl,
+    obsidianApiKey: values.obsidianApiKey,
   };
 }

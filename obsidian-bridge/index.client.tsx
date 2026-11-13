@@ -4,7 +4,9 @@ import type {
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { KnowledgeSurface } from "./client/surface";
+import { KnowledgeWorkspacePanel } from "./client/workspace-panel";
 import { ObsidianBridgeSettingsScreen } from "./client/settings-screen";
+import { notesAttachmentSource } from "./shared/attachments";
 
 const SCREEN_ID = "obsidian-bridge";
 
@@ -36,6 +38,16 @@ export default function contribute(client: PluginClientContext) {
     title: "Obsidian Bridge",
     Component: ObsidianBridgeSidebarItem,
   });
+
+  client.addWorkspacePanel({
+    id: "knowledge-base",
+    title: "Obsidian",
+    icon: "BookOpen",
+    Component: KnowledgeWorkspacePanel,
+  });
+
+  // Attach one note to a prompt as an explicit text snapshot.
+  client.addAttachmentSource(notesAttachmentSource);
 
   client.addSettingsScreen({
     id: "obsidian-bridge-settings",

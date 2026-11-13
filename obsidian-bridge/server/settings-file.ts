@@ -31,6 +31,9 @@ const DEFAULTS: RuntimeSettings = {
   embeddingModel: "Xenova/multilingual-e5-small",
   embeddingDtype: "q8",
   embeddingIdleMinutes: 10,
+  obsidianApiEnabled: false,
+  obsidianApiUrl: "https://127.0.0.1:27124",
+  obsidianApiKey: "",
 };
 
 function optionalString(value: unknown): string | undefined {
@@ -95,6 +98,15 @@ function parseFile(filePath: string): Partial<RuntimeSettings> {
     }
     const idle = optionalInt(values.embeddingIdleMinutes, 0, 240);
     if (idle !== undefined) parsed.embeddingIdleMinutes = idle;
+    if (typeof values.obsidianApiEnabled === "boolean") {
+      parsed.obsidianApiEnabled = values.obsidianApiEnabled;
+    }
+    if (typeof values.obsidianApiUrl === "string") {
+      parsed.obsidianApiUrl = values.obsidianApiUrl.trim().slice(0, 512);
+    }
+    if (typeof values.obsidianApiKey === "string") {
+      parsed.obsidianApiKey = values.obsidianApiKey.trim().slice(0, 512);
+    }
     return parsed;
   } catch {
     return {};
@@ -133,6 +145,15 @@ function parseEnv(): Partial<RuntimeSettings> {
     ? optionalInt(Number(process.env.OBSIDIAN_EMBEDDING_IDLE_MINUTES), 0, 240)
     : undefined;
   if (idle !== undefined) parsed.embeddingIdleMinutes = idle;
+  const apiUrl = optionalString(process.env.OBSIDIAN_API_URL);
+  if (apiUrl) parsed.obsidianApiUrl = apiUrl.slice(0, 512);
+  const apiKey = optionalString(process.env.OBSIDIAN_API_KEY);
+  if (apiKey) {
+    parsed.obsidianApiKey = apiKey.slice(0, 512);
+    parsed.obsidianApiEnabled = true;
+  }
+  if (process.env.OBSIDIAN_API_ENABLED === "0") parsed.obsidianApiEnabled = false;
+  if (process.env.OBSIDIAN_API_ENABLED === "1") parsed.obsidianApiEnabled = true;
   return parsed;
 }
 

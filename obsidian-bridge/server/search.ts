@@ -1,5 +1,6 @@
 import type { SearchHit, SearchResult } from "../shared/contracts";
 import { roleOfPath, type Role, type RoleDirs } from "./dirs";
+import type { FuzzyHit } from "./obsidian-api";
 import type { BridgeStore } from "./store";
 
 /**
@@ -24,6 +25,8 @@ const WEIGHT_TITLES = 0.7;
 const WEIGHT_GRAPH = 0.45;
 const WEIGHT_RECENT = 0.25;
 const WEIGHT_SEMANTIC = 0.9;
+/** Obsidian's own fuzzy search: a note-level signal below chunk BM25. */
+const WEIGHT_OBSIDIAN = 0.6;
 
 /** Semantic candidates considered before fusing; the tail rarely changes the top. */
 const SEMANTIC_CANDIDATES = 40;
@@ -41,6 +44,10 @@ export interface SearchOptions {
   dirs?: RoleDirs;
   /** Query vector + model whose vectors should join the fusion (0.3.0). */
   semantic?: { vector: Float32Array; modelId: string } | null;
+  /** Ranked note paths from Obsidian's fuzzy search (0.4.0, optional). */
+  fuzzy?: FuzzyHit[];
+  /** Whether enrichment was requested, and why it produced nothing. */
+  enrichment?: { enabled: boolean; error: string | null };
 }
 
 interface Candidate {
@@ -143,6 +150,24 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     }
   }
 
+  if (options.fuzzy && options.fuzzy.length > 0) {
+    let added = false;
+    options.fuzzy.forEach((hit, index) => {
+      // Only indexed notes can be cited; an excluded path from Obsidian's
+      // index must not leak into results.
+      if (store.noteMeta(hit.path) === null) return;
+      const chunk = store.firstChunk(hit.path);
+      add({
+        path: hit.path,
+        heading: chunk?.heading ?? "",
+        snippet: hit.snippet.length > 0 ? hit.snippet : (chunk?.text ?? ""),
+        score: WEIGHT_OBSIDIAN / (RRF_K + index + 1),
+      });
+      added = true;
+    });
+    if (added) signals.push("obsidian");
+  }
+
   let candidates = [...scores.values()];
   if (folder.length > 0) {
     candidates = candidates.filter(
@@ -190,6 +215,11 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     tookMs: Date.now() - startedAt,
     signals,
     note,
+    enrichment: {
+      enabled: options.enrichment?.enabled ?? false,
+      used: signals.includes("obsidian"),
+      error: options.enrichment?.error ?? null,
+    },
   };
 }
 

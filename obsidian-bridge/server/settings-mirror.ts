@@ -14,8 +14,10 @@ export function writeSettingsMirror(values: RuntimeSettings, filePath?: string):
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const body = JSON.stringify({ values, writtenAt: new Date().toISOString() }, null, 2);
   const temp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, body, "utf-8");
+  // 0600: the document carries the Local REST API key when enrichment is on.
+  fs.writeFileSync(temp, body, { encoding: "utf-8", mode: 0o600 });
   fs.renameSync(temp, target);
+  fs.chmodSync(target, 0o600);
   return target;
 }
 

@@ -67,6 +67,9 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     embeddingModel: "Xenova/multilingual-e5-small",
     embeddingDtype: "q8",
     embeddingIdleMinutes: 10,
+    obsidianApiEnabled: false,
+    obsidianApiUrl: "https://127.0.0.1:27124",
+    obsidianApiKey: "",
     ...overrides,
   } as {
     vaultPath: string;
@@ -87,5 +90,8 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     embeddingModel: string;
     embeddingDtype: string;
     embeddingIdleMinutes: number;
+    obsidianApiEnabled: boolean;
+    obsidianApiUrl: string;
+    obsidianApiKey: string;
   };
 }

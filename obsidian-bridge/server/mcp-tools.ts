@@ -11,6 +11,8 @@ import {
   type WritableRole,
 } from "./dirs";
 import { embedQuery, queryProviderStatus } from "./embed/query";
+import { fuzzySearch } from "./enrichment";
+import { createObsidianApi } from "./obsidian-api";
 import { memoryReport } from "./memory";
 import { indexPathFor, resolveVaultRoot } from "./paths";
 import { scanVault } from "./scan";
@@ -102,8 +104,9 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     title: "Search the Obsidian vault",
     description:
       `${CONTRACT_SENTENCE} Hybrid search: full-text over heading chunks fused with title/alias ` +
-      "matches and wikilink proximity. Returns ranked snippets with the note path, heading and " +
-      "directory role, so the answer can be cited.",
+      "matches, wikilink proximity, local semantics and (when Obsidian is running with its Local " +
+      "REST API) Obsidian's own fuzzy search. Returns ranked snippets with the note path, " +
+      "heading and directory role, so the answer can be cited.",
     inputSchema: {
       type: "object",
       properties: {
@@ -279,8 +282,9 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "obsidian_status",
     title: "Vault index status",
     description:
-      "Reports the configured directory, the role map, index counts, freshness and whether " +
-      "writes are enabled. Use it to check that the bridge is connected before relying on it.",
+      "Reports the configured directory, the role map, index counts, freshness, whether " +
+      "writes are enabled and whether optional Obsidian enrichment is reachable. Use it to " +
+      "check that the bridge is connected before relying on it.",
     inputSchema: { type: "object", properties: {} },
   },
 ];
@@ -555,6 +559,7 @@ export async function dispatchTool(
           input.semantic === undefined ? settings.semanticSearch : input.semantic === true;
         const queryEmbedding =
           semanticWanted && query.length > 0 ? await embedQuery(settings, query) : null;
+        const fuzzy = await fuzzySearch(settings, query, 20);
         const result = searchIndex(runtime.store, {
           query,
           limit,
@@ -567,6 +572,8 @@ export async function dispatchTool(
           semantic: queryEmbedding?.vector
             ? { vector: queryEmbedding.vector, modelId: queryEmbedding.modelId }
             : null,
+          fuzzy: fuzzy.hits,
+          enrichment: { enabled: fuzzy.enabled, error: fuzzy.error },
         });
         const text = result.text.length > 0 ? result.text : (result.note ?? "No results.");
         return {
@@ -578,6 +585,7 @@ export async function dispatchTool(
             tookMs: result.tookMs,
             note: result.note,
             directories: runtime.dirs,
+            enrichment: result.enrichment,
             semantic: {
               requested: semanticWanted,
               used: result.signals.includes("semantic"),
@@ -617,6 +625,10 @@ export async function dispatchTool(
         if (relPath.length === 0) return fail("path is required.");
         const note = readVaultNote(runtime.root, relPath, { maxBytes: 4 * 1024 * 1024 });
         if ("error" in note) return fail(note.error);
+        // Obsidian's metadata cache is authoritative when the app answers;
+        // the parsed index remains the fallback.
+        const obsidianApi = createObsidianApi(settings);
+        const authority = obsidianApi ? await obsidianApi.noteLinks(relPath) : null;
         return json({
           path: relPath,
           role: roleOfPath(relPath, runtime.dirs),
@@ -625,7 +637,10 @@ export async function dispatchTool(
           frontmatterKeys: Object.keys(note.parsed.frontmatter),
           tags: note.parsed.tags,
           links: runtime.store.outgoingLinks(relPath),
-          backlinks: runtime.store.backlinksOf(relPath),
+          backlinks: authority?.links?.backlinks ?? runtime.store.backlinksOf(relPath),
+          unresolvedLinks: authority?.links?.unresolvedLinks ?? null,
+          linkSource: authority?.links ? "obsidian" : "index",
+          enrichmentError: authority?.error ?? null,
         });
       }
 
@@ -706,6 +721,8 @@ export async function dispatchTool(
         const vectors = runtime.store.embeddingStats(settings.embeddingModel);
         const provider = queryProviderStatus();
         const memory = memoryReport(process.memoryUsage().rss);
+        const obsidianApi = createObsidianApi(settings);
+        const probe = obsidianApi ? await obsidianApi.probe() : null;
         const semanticState = !settings.semanticSearch
           ? "idle"
           : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
@@ -726,6 +743,16 @@ export async function dispatchTool(
           lastScanAt: lastScan ? new Date(Number(lastScan)).toISOString() : null,
           readOnly: settings.readOnly,
           writesEnabled: !settings.readOnly,
+          enrichment: {
+            enabled: obsidianApi !== null,
+            url: settings.obsidianApiUrl,
+            reachable: probe?.ok ?? false,
+            authenticated: probe?.authenticated ?? false,
+            version: probe?.version ?? null,
+            events: false,
+            lastEventAt: null,
+            error: probe?.error ?? null,
+          },
           embedding: {
             enabled: settings.semanticSearch,
             model: settings.embeddingModel,

@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.3.2)
+## What it does (0.4.0)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -25,7 +25,7 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   into vectors, and an edited note only re-embeds the sections whose text changed.
 - **Read tools.** `obsidian_search`, `obsidian_read` (whole note or one heading subtree), `obsidian_outline`,
   `obsidian_list`, `obsidian_links`, `obsidian_directories`, plus `obsidian_index`, `obsidian_diagnose` and
-  `obsidian_status`.
+  `obsidian_status`. The workspace tab and the composer attachment picker use the same index.
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
   notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
@@ -33,6 +33,11 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   the configured directory can be addressed at all.
 - **Inert injection.** The MCP server is contributed on `agent.open.before` — no probing, no scanning, no latency in the
   path that opens an agent. Providers without MCP support get the same operations as native agent tools.
+- **Optional Obsidian enrichment.** With the Local REST API plugin, Obsidian's own fuzzy search joins retrieval, its
+  metadata cache becomes the authoritative link source, vault events supplement the file watcher, and the panel can open
+  a note in the app. Off or unavailable leaves everything else unchanged.
+- **Composer attachment and workspace tab.** Attach a note to a prompt as a text snapshot from the composer's attachment
+  picker, and search/preview the vault in a workspace tab beside agents and terminals.
 - **Everything configured in Paseo.** Settings → Plugins → Obsidian Bridge. There is no separate HTTP configuration server.
 - **Knowledge-base screen.** Status and index freshness, the role map, the same search engine the agents use, note preview
   with backlinks, and a reindex button.
@@ -65,6 +70,17 @@ frontmatter redaction: a heuristic that misses one note would be worse than a cl
 at all belong outside `vaultPath`/`includeFolders`, or under an `excludeGlobs` pattern; the next scan drops them from the
 index together with their chunks and vectors. Details: [__doc.md](./__doc.md) §12.
 
+## Obsidian enrichment (optional)
+
+Everything works with Obsidian closed. If you want the extra signals, install the
+[Local REST API with MCP](https://github.com/coddingtonbear/obsidian-local-rest-api) community plugin, copy its API key
+from **Settings → Local REST API with MCP**, and enable enrichment in the Paseo settings screen. It adds Obsidian's fuzzy
+search as a lower-weighted retrieval signal, authoritative `links`/`backlinks` from Obsidian's metadata cache, live vault
+events on top of the filesystem watcher, and **Open in Obsidian**. The default URL is `https://127.0.0.1:27124`; its
+self-signed certificate is accepted only for loopback hosts. The key is stored locally (the mirrored settings file is
+`0600`), never logged, and never sent anywhere except the configured URL. A closed app or a wrong key degrades search to
+the normal lexical + graph + semantic path and is reported in the panel and `obsidian_status`.
+
 ## Requirements
 
 - Paseo `>= 0.15.0`.
@@ -72,6 +88,8 @@ index together with their chunks and vectors. Details: [__doc.md](./__doc.md) §
 - Semantic search downloads a model once (~118 MB for the default q8 e5-small) into
   `$PASEO_HOME/plugins/obsidian-bridge/models`, then runs offline. ~0.5 GB RAM while the model is loaded; up to 2 GB is
   treated as normal, 2–4 GB shows a warning in the panel (never a hard limit).
+- Optional: Obsidian running with the Local REST API with MCP plugin, for the fuzzy signal, authoritative backlinks,
+  live events and "Open in Obsidian".
 - A local directory of Markdown files. The Obsidian application itself is **not** required, and nothing needs to be
   installed into Obsidian.
 - Linux is the primary target; macOS and Windows are future work ([__compatibility.md](./__compatibility.md)).
@@ -139,7 +157,8 @@ Obsidian notes, never as a place to record agent memory.
   synced and can be deleted at any time (a scan rebuilds it).
 - Semantic search needs the model download on its first run and keeps ~0.5 GB resident while loaded. Memory is a
   warning, not a limit: the plugin reports 2–4 GB in the panel and never refuses work because of it.
-- Obsidian-side enrichment (the Local REST API plugin) is planned, not shipped. See [__doc.md](./__doc.md) §8.
+- Obsidian-side enrichment needs the app and its Local REST API plugin; without them the index, search, reads and writes
+  behave exactly as before. See [__doc.md](./__doc.md) §13.
 - Larger local models and external RAG providers are deliberate post-1.0 work: the project stays on the Paseo/Node base
   unless a requirement genuinely cannot be met there.
 - Excluded from indexing: `.obsidian/`, `.trash/`, `.git/`, `.smart-env/` and anything matching your exclude globs. A

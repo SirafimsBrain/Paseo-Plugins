@@ -3,6 +3,7 @@ import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
+  openInObsidian,
   readNote,
   reindexVault,
   searchVaultRpc,
@@ -38,14 +39,17 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
   const searchRpc = useRpc(searchVaultRpc);
   const noteRpc = useRpc(readNote);
   const reindexRpc = useRpc(reindexVault);
+  const openRpc = useRpc(openInObsidian);
 
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [noteText, setNoteText] = useState<string | null>(null);
+  const [notePath, setNotePath] = useState<string | null>(null);
   const [noteTitle, setNoteTitle] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openPath, setOpenPath] = useState<string | null>(null);
 
   const refreshStatus = useCallback(() => {
     void statusRpc({})
@@ -77,6 +81,7 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
       setBusy(true);
       try {
         const note: NotePreview = await noteRpc({ path });
+        setNotePath(note.path);
         setNoteTitle(`${note.path}${note.truncated ? " (truncated)" : ""}`);
         setNoteText(note.content);
       } catch (cause) {
@@ -86,6 +91,21 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
       }
     },
     [noteRpc],
+  );
+
+  const openInApp = useCallback(
+    async (path: string) => {
+      setOpenPath(path);
+      try {
+        const result = await openRpc({ path });
+        if (!result.ok) setMessage(result.error ?? "Obsidian did not open the note.");
+      } catch (cause) {
+        setMessage(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setOpenPath(null);
+      }
+    },
+    [openRpc],
   );
 
   const reindex = useCallback(async () => {
@@ -174,6 +194,14 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
                 numberOfLines={2}
               >
                 {status.embedding.note}
+              </Text>
+            ) : null}
+            {status.enrichment.enabled ? (
+              <Text style={{ color: fgMuted, fontSize: font(10), ...monoFontStyle }} numberOfLines={2}>
+                obsidian: {status.enrichment.reachable ? "connected" : "unreachable"}
+                {status.enrichment.version ? ` · ${status.enrichment.version}` : ""}
+                {status.enrichment.events ? " · live events" : ""}
+                {status.enrichment.error ? ` · ${status.enrichment.error}` : ""}
               </Text>
             ) : null}
             {status.memory.level !== "ok" && status.memory.note ? (
@@ -280,16 +308,39 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
           >
             {noteText}
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              setNoteText(null);
-              setNoteTitle(null);
-            }}
-            style={[styles.button, { backgroundColor: surface, borderColor: border, borderWidth: 1 }]}
-          >
-            <Text style={{ color: fg, fontSize: font(11), ...uiFontStyle }}>Close note</Text>
-          </Pressable>
+          <View style={styles.row}>
+            {notePath ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void openInApp(notePath)}
+                disabled={openPath !== null || !status?.enrichment.enabled}
+                style={[
+                  styles.button,
+                  {
+                    backgroundColor: accent,
+                    opacity: openPath !== null || !status?.enrichment.enabled ? 0.5 : 1,
+                  },
+                ]}
+              >
+                <Text
+                  style={{ color: theme.colors.accentForeground, fontSize: font(11), ...uiFontStyle }}
+                >
+                  {openPath !== null ? "Opening…" : "Open in Obsidian"}
+                </Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setNoteText(null);
+                setNotePath(null);
+                setNoteTitle(null);
+              }}
+              style={[styles.button, { backgroundColor: surface, borderColor: border, borderWidth: 1 }]}
+            >
+              <Text style={{ color: fg, fontSize: font(11), ...uiFontStyle }}>Close note</Text>
+            </Pressable>
+          </View>
         </View>
       ) : null}
     </ScrollView>

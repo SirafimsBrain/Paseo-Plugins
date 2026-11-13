@@ -2,18 +2,23 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { VerifyVaultResult } from "./shared/contracts";
 import {
   notePreviewSchema,
+  openInObsidian,
   readNote,
   reindexVault,
   searchVaultRpc,
+  testEnrichment,
   vaultStatus,
   verifyVault,
 } from "./shared/contracts";
+import { searchNotesForAttachment } from "./shared/attachments";
 import { obsidianBridgeSettings, runtimeSettingsOf, type RuntimeSettings } from "./shared/settings";
 import { readSavedMcpServers } from "./server/agent-record";
 import { createObsidianTools } from "./server/agent-tools";
 import { normalizeRoleDir } from "./server/dirs";
 import { embedQuery } from "./server/embed/query";
+import { fuzzySearch } from "./server/enrichment";
 import { VaultIndexer } from "./server/indexer";
+import { createObsidianApi, ObsidianApi } from "./server/obsidian-api";
 import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
 import { openRuntime } from "./server/mcp-tools";
 import { searchIndex } from "./server/search";
@@ -21,6 +26,7 @@ import { parseSettingsFile } from "./server/settings-file";
 import { writeSettingsMirror } from "./server/settings-mirror";
 import { decideSessionOpen, needsCapabilityProbe } from "./server/session-open";
 import { checkVault, readVaultNote } from "./server/vault";
+import * as path from "node:path";
 
 /**
  * Plugin server for Obsidian Bridge.
@@ -161,7 +167,15 @@ export default function contribute(server: PluginServerContext) {
     const normalizedFolder = requestedFolder.length === 0 ? "" : normalizeRoleDir(requestedFolder);
     if (normalizedFolder === null) {
       const note = `'${requestedFolder}' is not a folder inside the configured directory.`;
-      return { query, hits: [], text: note, tookMs: 0, signals: [], note };
+      return {
+        query,
+        hits: [],
+        text: note,
+        tookMs: 0,
+        signals: [],
+        note,
+        enrichment: { enabled: runtimeSettings.obsidianApiEnabled, used: false, error: null },
+      };
     }
     const opened = openRuntime(runtimeSettings);
     if ("error" in opened) {
@@ -172,12 +186,14 @@ export default function contribute(server: PluginServerContext) {
         tookMs: 0,
         signals: [],
         note: opened.error,
+        enrichment: { enabled: runtimeSettings.obsidianApiEnabled, used: false, error: null },
       };
     }
     try {
       const semanticWanted = semantic === undefined ? runtimeSettings.semanticSearch : semantic;
       const embedding =
         semanticWanted && query.length > 0 ? await embedQuery(runtimeSettings, query) : null;
+      const fuzzy = await fuzzySearch(runtimeSettings, query, 20);
       return searchIndex(opened.runtime.store, {
         query,
         limit,
@@ -188,6 +204,8 @@ export default function contribute(server: PluginServerContext) {
         semantic: embedding?.vector
           ? { vector: embedding.vector, modelId: embedding.modelId }
           : null,
+        fuzzy: fuzzy.hits,
+        enrichment: { enabled: fuzzy.enabled, error: fuzzy.error },
       });
     } finally {
       opened.runtime.store.close();
@@ -239,6 +257,8 @@ export default function contribute(server: PluginServerContext) {
       if ("error" in note) {
         return notePreviewSchema.parse({ ...empty, content: note.error });
       }
+      const api = createObsidianApi(runtimeSettings);
+      const authority = api ? await api.noteLinks(path) : null;
       return notePreviewSchema.parse({
         path: note.path,
         title: note.parsed.title,
@@ -251,10 +271,87 @@ export default function contribute(server: PluginServerContext) {
         links: opened.runtime.store
           .outgoingLinks(path)
           .map((link) => ({ target: link.raw_target, resolved: link.target_path })),
-        backlinks: opened.runtime.store.backlinksOf(path),
+        backlinks: authority?.links?.backlinks ?? opened.runtime.store.backlinksOf(path),
         content: note.text,
         truncated: note.truncated,
       });
+    } finally {
+      opened.runtime.store.close();
+    }
+  });
+
+  server.handle(openInObsidian, async ({ path: notePath }) => {
+    const runtimeSettings = await readRuntimeSettings();
+    const api = createObsidianApi(runtimeSettings);
+    if (!api) {
+      return {
+        ok: false,
+        error:
+          "Obsidian enrichment is off. Enable it in Settings → Plugins → Obsidian Bridge and start Obsidian with the Local REST API plugin.",
+      };
+    }
+    const opened = openRuntime(runtimeSettings);
+    if ("error" in opened) return { ok: false, error: opened.error };
+    try {
+      // Refuse paths outside the configured directory (and `.obsidian/`)
+      // before handing anything to the API.
+      const note = readVaultNote(opened.runtime.root, notePath, { maxBytes: 1024 });
+      if ("error" in note) return { ok: false, error: note.error };
+    } finally {
+      opened.runtime.store.close();
+    }
+    return api.openNote(notePath);
+  });
+
+  server.handle(testEnrichment, async () => {
+    const runtimeSettings = await readRuntimeSettings();
+    const api = new ObsidianApi({
+      url: runtimeSettings.obsidianApiUrl,
+      apiKey: runtimeSettings.obsidianApiKey,
+    });
+    return api.probe();
+  });
+
+  server.handle(searchNotesForAttachment, async ({ query }) => {
+    const runtimeSettings = await readRuntimeSettings();
+    const opened = openRuntime(runtimeSettings);
+    if ("error" in opened) return { items: [] };
+    try {
+      const result = searchIndex(opened.runtime.store, {
+        query,
+        limit: 8,
+        budgetChars: 4000,
+        snippetChars: 300,
+        dirs: opened.runtime.dirs,
+      });
+      const items: Array<{
+        id: string;
+        identifier: string;
+        title: string;
+        subtitle: string;
+        url: string;
+        text: string;
+        resourceType: string;
+      }> = [];
+      for (const hit of result.hits) {
+        const note = readVaultNote(opened.runtime.root, hit.path, { maxBytes: 4 * 1024 * 1024 });
+        if ("error" in note) continue;
+        const absolute = path.join(opened.runtime.root, hit.path);
+        const text =
+          note.text.length > 40_000
+            ? `${note.text.slice(0, 40_000)}\n\n[truncated by Obsidian Bridge]`
+            : note.text;
+        items.push({
+          id: hit.path,
+          identifier: hit.path,
+          title: hit.title,
+          subtitle: `${hit.role}${hit.heading.length > 0 ? ` · ${hit.heading}` : ""}`,
+          url: `obsidian://open?path=${encodeURIComponent(absolute)}`,
+          text,
+          resourceType: "obsidian-note",
+        });
+      }
+      return { items };
     } finally {
       opened.runtime.store.close();
     }

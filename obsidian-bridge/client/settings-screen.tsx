@@ -11,6 +11,7 @@ import {
 } from "@getpaseo/plugin/client/ui";
 import {
   reindexVault,
+  testEnrichment,
   vaultStatus,
   verifyVault,
   type VerifyVaultResult,
@@ -40,8 +41,11 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
   const verifyRpc = useRpc(verifyVault);
   const statusRpc = useRpc(vaultStatus);
   const reindexRpc = useRpc(reindexVault);
+  const testRpc = useRpc(testEnrichment);
 
   const [check, setCheck] = useState<VerifyVaultResult | null>(null);
+  const [enrichmentCheck, setEnrichmentCheck] = useState<string | null>(null);
+  const [testingEnrichment, setTestingEnrichment] = useState(false);
   const [checking, setChecking] = useState(false);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
   const [indexing, setIndexing] = useState(false);
@@ -79,6 +83,23 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
   useEffect(() => {
     if (currentPath.trim().length > 0) void runCheck(currentPath);
   }, [currentPath, runCheck]);
+
+  const testObsidianApi = useCallback(async () => {
+    setTestingEnrichment(true);
+    setEnrichmentCheck(null);
+    try {
+      const probe = await testRpc({});
+      setEnrichmentCheck(
+        probe.ok
+          ? `Connected${probe.version ? ` — Obsidian ${probe.version}` : ""}.`
+          : (probe.error ?? "Obsidian did not answer."),
+      );
+    } catch (cause) {
+      setEnrichmentCheck(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setTestingEnrichment(false);
+    }
+  }, [testRpc]);
 
   const rebuild = useCallback(async () => {
     setIndexing(true);
@@ -333,6 +354,50 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
               }
             }}
           />
+        </SettingsSection>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingsSection
+          title="Obsidian enrichment (optional)"
+          info="Uses the Local REST API plugin in a running Obsidian: its fuzzy search joins retrieval, its metadata cache supplies authoritative links and backlinks, and vault events supplement the file watcher. Off or unavailable leaves search exactly as before."
+        >
+          <SettingsSwitch
+            label="Use the Local REST API"
+            hint="Requires Obsidian to be running with the Local REST API with MCP plugin enabled. Nothing here is used while the switch is off."
+            value={values.obsidianApiEnabled}
+            onValueChange={(enabled: boolean) => patch({ obsidianApiEnabled: enabled })}
+          />
+          <SettingsInput
+            label="API URL"
+            hint="Default is the plugin's loopback HTTPS endpoint. Use http://127.0.0.1:27123 if its insecure HTTP server is enabled."
+            initialValue={values.obsidianApiUrl}
+            placeholder="https://127.0.0.1:27124"
+            onChangeText={(text: string) => patch({ obsidianApiUrl: text })}
+          />
+          <SettingsInput
+            label="API key"
+            hint="Copy it from Obsidian → Settings → Local REST API with MCP. Stored locally; never logged and never sent with note text."
+            initialValue={values.obsidianApiKey}
+            secureTextEntry
+            onChangeText={(text: string) => patch({ obsidianApiKey: text })}
+          />
+          <SettingsAction
+            label="Test connection"
+            hint="Probes GET / on the configured URL with the saved key."
+            actionLabel={testingEnrichment ? "Testing…" : "Test"}
+            onPress={() => void testObsidianApi()}
+            disabled={testingEnrichment || values.obsidianApiUrl.trim().length === 0}
+          />
+          {enrichmentCheck ? (
+            <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }} numberOfLines={4}>
+              {enrichmentCheck}
+            </Text>
+          ) : null}
+          <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}>
+            Optional: everything except "Open in Obsidian", live vault events and the extra fuzzy
+            signal works with Obsidian closed.
+          </Text>
         </SettingsSection>
       </SettingsCard>
 
