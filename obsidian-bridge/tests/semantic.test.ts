@@ -97,6 +97,18 @@ describe("vector storage", () => {
     store.close();
   });
 
+  it("keeps vectors when a forced scan finds nothing changed", () => {
+    const created = workspace();
+    seedVectors(created);
+    const settings = runtimeSettings(created.vault);
+    const store = new BridgeStore(indexPathFor(created.vault), { stemming: false });
+    const before = store.embeddingStats(MODEL).embedded;
+    scanVault({ root: created.vault, store, settings, force: true });
+    expect(store.embeddingStats(MODEL).embedded).toBe(before);
+    expect(store.chunksToEmbed(MODEL)).toHaveLength(0);
+    store.close();
+  });
+
   it("drops vectors when the note changes", () => {
     const created = workspace();
     seedVectors(created);

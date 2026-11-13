@@ -11,7 +11,7 @@
  * still runs on Node built-ins alone, so an agent's runtime needs nothing more.
  */
 import { build } from "esbuild";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,5 +55,9 @@ await build({
   entryPoints: [join(root, "server", "embed-worker.ts")],
   outfile: join(root, "dist", "embed-worker.js"),
 });
+
+// Mark the output directory as ESM so Node stops auto-detecting the module
+// type (and warning about it) for both entry points.
+writeFileSync(join(root, "dist", "package.json"), '{"type":"module"}\n');
 
 console.log("dist/mcp-server.js and dist/embed-worker.js written");

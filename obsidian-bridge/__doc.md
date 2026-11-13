@@ -315,7 +315,18 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review pass (0.2.1)
+## 11. Review passes (0.2.1, 0.3.1)
+
+### 0.3.1
+
+- **A forced scan wiped every vector.** `scanVault({force:true})` re-upserted every note, and `upsertNote` recreates the
+  chunks, so the embeddings of unchanged notes were deleted — every plugin restart would re-embed the whole vault. The
+  scan now compares the content hash and skips unchanged notes even when forced; `force` only bypasses the mtime/size
+  shortcut. Regression test: a forced scan leaves the vector count and the embedding queue untouched.
+- **`dist/` now carries `{"type":"module"}`.** Both bundles are ESM; without it Node auto-detected the module type and
+  printed a warning into the plugin log on every embedding run.
+
+### 0.2.1
 
 A fresh read of the 0.2.0 code found one setup bug and one boundary gap, both fixed here; no new functionality, so the
 patch version moved 0.2.0 → 0.2.1.

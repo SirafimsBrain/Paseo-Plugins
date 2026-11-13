@@ -68,14 +68,15 @@ export function scanVault(input: {
       continue;
     }
 
+    const hash = crypto.createHash("sha1").update(text).digest("hex");
+    // A forced scan re-reads every file but must not rewrite unchanged notes:
+    // rewriting recreates their chunks and (0.3.0) throws away their vectors, so
+    // every restart would re-embed the whole vault. Content hash is the
+    // authority, `force` only skips the mtime/size shortcut.
+    if (store.noteFile(relPath)?.hash === hash) continue;
+
     const parsed = parseNote(text, relPath);
-    store.upsertNote({
-      relPath,
-      parsed,
-      mtimeMs: stat.mtimeMs,
-      size: stat.size,
-      hash: crypto.createHash("sha1").update(text).digest("hex"),
-    });
+    store.upsertNote({ relPath, parsed, mtimeMs: stat.mtimeMs, size: stat.size, hash });
     scanned += 1;
   }
 
