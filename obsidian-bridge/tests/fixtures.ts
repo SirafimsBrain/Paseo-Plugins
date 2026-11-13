@@ -62,6 +62,11 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     snippetChars: 600,
     readOnly: false,
     maxWriteChars: 200_000,
+    // Off by default: unit tests must never download or load a real model.
+    semanticSearch: false,
+    embeddingModel: "Xenova/multilingual-e5-small",
+    embeddingDtype: "q8",
+    embeddingIdleMinutes: 10,
     ...overrides,
   } as {
     vaultPath: string;
@@ -78,5 +83,9 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     snippetChars: number;
     readOnly: boolean;
     maxWriteChars: number;
+    semanticSearch: boolean;
+    embeddingModel: string;
+    embeddingDtype: string;
+    embeddingIdleMinutes: number;
   };
 }

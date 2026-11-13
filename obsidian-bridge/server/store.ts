@@ -16,7 +16,7 @@ import { parseYamlSubset, type ParsedNote } from "./parse";
  * change wipes the derived tables so the next scan rebuilds them.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const TOKENIZE_PLAIN = "unicode61 remove_diacritics 2";
 export const TOKENIZE_STEMMED = "porter unicode61 remove_diacritics 2";
@@ -56,6 +56,23 @@ export interface IndexCounts {
   chunks: number;
   links: number;
   unresolvedLinks: number;
+}
+
+export interface ChunkToEmbed {
+  id: number;
+  path: string;
+  heading: string;
+  text: string;
+}
+
+export interface EmbeddedChunk extends ChunkToEmbed {
+  vec: Float32Array;
+}
+
+export interface EmbeddingStats {
+  chunks: number;
+  embedded: number;
+  stale: number;
 }
 
 /**
@@ -137,6 +154,16 @@ export class BridgeStore {
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
         title, aliases, path UNINDEXED, tokenize='${tokenize}'
       );
+      CREATE TABLE IF NOT EXISTS embeddings (
+        chunk_id INTEGER PRIMARY KEY,
+        path TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        dim INTEGER NOT NULL,
+        text_hash TEXT NOT NULL,
+        vec BLOB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS embeddings_model ON embeddings(model_id);
+      CREATE INDEX IF NOT EXISTS embeddings_path ON embeddings(path);
     `);
 
     const recorded = this.getMeta("tokenize");
@@ -282,6 +309,8 @@ export class BridgeStore {
     this.db
       .prepare("DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE path = ?)")
       .run(relPath);
+    // Chunk ids are recreated on every note write, so vectors go with them.
+    this.db.prepare("DELETE FROM embeddings WHERE path = ?").run(relPath);
     this.db.prepare("DELETE FROM chunks WHERE path = ?").run(relPath);
     this.db
       .prepare("DELETE FROM notes_fts WHERE rowid IN (SELECT rowid FROM notes WHERE path = ?)")
@@ -531,6 +560,88 @@ export class BridgeStore {
     return counts;
   }
 
+  // -------------------------------------------------------------------------
+  // embeddings
+  // -------------------------------------------------------------------------
+
+  /** Chunks that have no vector for `modelId` yet (missing or another model). */
+  chunksToEmbed(modelId: string, limit = 200_000): ChunkToEmbed[] {
+    return this.db
+      .prepare(
+        `SELECT c.id AS id, c.path AS path, c.heading AS heading, c.text AS text
+         FROM chunks c
+         LEFT JOIN embeddings e ON e.chunk_id = c.id AND e.model_id = ?
+         WHERE e.chunk_id IS NULL
+         ORDER BY c.path, c.ordinal LIMIT ?`,
+      )
+      .all(modelId, limit) as unknown as ChunkToEmbed[];
+  }
+
+  putEmbedding(input: {
+    chunkId: number;
+    path: string;
+    modelId: string;
+    dim: number;
+    textHash: string;
+    vec: Float32Array;
+  }): void {
+    const bytes = new Uint8Array(input.vec.buffer, input.vec.byteOffset, input.vec.byteLength);
+    this.db
+      .prepare(
+        `INSERT INTO embeddings (chunk_id, path, model_id, dim, text_hash, vec)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(chunk_id) DO UPDATE SET
+           path = excluded.path, model_id = excluded.model_id, dim = excluded.dim,
+           text_hash = excluded.text_hash, vec = excluded.vec`,
+      )
+      .run(input.chunkId, input.path, input.modelId, input.dim, input.textHash, bytes);
+  }
+
+  embeddingStats(modelId: string): EmbeddingStats {
+    const one = (sql: string, ...params: Array<string | number>): number => {
+      const row = this.db.prepare(sql).get(...params) as { c: number } | undefined;
+      return row?.c ?? 0;
+    };
+    return {
+      chunks: one("SELECT COUNT(*) AS c FROM chunks"),
+      embedded: one("SELECT COUNT(*) AS c FROM embeddings WHERE model_id = ?", modelId),
+      stale: one("SELECT COUNT(*) AS c FROM embeddings WHERE model_id <> ?", modelId),
+    };
+  }
+
+  /** Vectors of one model, joined with the chunk text for snippets. */
+  embeddingsFor(modelId: string): EmbeddedChunk[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.chunk_id AS id, e.path AS path, c.heading AS heading, c.text AS text, e.vec AS vec
+         FROM embeddings e JOIN chunks c ON c.id = e.chunk_id
+         WHERE e.model_id = ?`,
+      )
+      .all(modelId) as unknown as Array<{
+      id: number;
+      path: string;
+      heading: string;
+      text: string;
+      vec: Uint8Array;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      path: row.path,
+      heading: row.heading,
+      text: row.text,
+      vec: toFloat32(row.vec),
+    }));
+  }
+
+  /** Drops vectors produced by a different model (a model change invalidates them). */
+  clearEmbeddingsExcept(modelId: string): void {
+    this.db.prepare("DELETE FROM embeddings WHERE model_id <> ?").run(modelId);
+  }
+
+  clearEmbeddings(): void {
+    this.db.prepare("DELETE FROM embeddings").run();
+  }
+
   counts(): IndexCounts {
     const one = (sql: string): number => {
       const row = this.db.prepare(sql).get() as { c: number } | undefined;
@@ -551,6 +662,13 @@ export class BridgeStore {
     const pageSize = this.db.prepare("PRAGMA page_size").get() as { page_size: number } | undefined;
     return Number(pageCount?.page_count ?? 0) * Number(pageSize?.page_size ?? 0);
   }
+}
+
+/** Decodes a BLOB column into a Float32Array copy (never aliases SQLite memory). */
+function toFloat32(blob: Uint8Array): Float32Array {
+  const copy = new Uint8Array(blob.byteLength);
+  copy.set(blob);
+  return new Float32Array(copy.buffer);
 }
 
 /** Resolves one wikilink target against the vault's note/alias maps. */

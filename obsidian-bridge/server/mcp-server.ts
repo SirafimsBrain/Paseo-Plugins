@@ -66,7 +66,7 @@ function main(): void {
         respondError(null, -32700, "Parse error");
         continue;
       }
-      handleRequest(request, settings, serverInfo);
+      void handleRequest(request, settings, serverInfo);
     }
   });
 
@@ -76,11 +76,11 @@ function main(): void {
   process.on("SIGTERM", shutdown);
 }
 
-function handleRequest(
+async function handleRequest(
   request: JsonRpcRequest,
   settings: ReturnType<typeof parseSettingsFile>,
   serverInfo: { name: string; version: string },
-): void {
+): Promise<void> {
   const id = request.id ?? null;
   switch (request.method) {
     case "initialize":
@@ -103,7 +103,7 @@ function handleRequest(
     case "tools/call": {
       const params = request.params ?? {};
       const name = String(params.name ?? "");
-      const outcome = dispatchTool(name, params.arguments ?? {}, settings);
+      const outcome = await dispatchTool(name, params.arguments ?? {}, settings);
       if (outcome.isError) {
         process.stderr.write(`[obsidian-bridge] tool ${name} failed: ${outcome.text}\n`);
       }

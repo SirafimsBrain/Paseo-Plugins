@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("tool catalogue", () => {
-  it("exposes read-only tools only", () => {
+  it("exposes read-only tools only", async () => {
     const names = MCP_TOOLS.map((tool) => tool.name);
     expect(names).toEqual([
       "obsidian_directories",
@@ -31,6 +31,7 @@ describe("tool catalogue", () => {
       "obsidian_write_scratch",
       "obsidian_append_inbox",
       "obsidian_index",
+      "obsidian_diagnose",
       "obsidian_status",
     ]);
     for (const tool of MCP_TOOLS) {
@@ -38,7 +39,7 @@ describe("tool catalogue", () => {
     }
   });
 
-  it("states the explicit-use contract in every content tool", () => {
+  it("states the explicit-use contract in every content tool", async () => {
     const content = MCP_TOOLS.filter((tool) =>
       [
         "obsidian_directories",
@@ -88,9 +89,9 @@ describe("dispatchTool", () => {
     return { workspace: created, settings };
   }
 
-  it("searches, cites the heading and reports backlinks", () => {
+  it("searches, cites the heading and reports backlinks", async () => {
     const { settings } = indexed();
-    const outcome = dispatchTool("obsidian_search", { query: "bounded retries" }, settings);
+    const outcome = await dispatchTool("obsidian_search", { query: "bounded retries" }, settings);
     expect(outcome.isError).toBeUndefined();
     expect(outcome.text).toContain("Projects/orion/Research/queue.md");
     const structured = outcome.structuredContent as {
@@ -101,9 +102,9 @@ describe("dispatchTool", () => {
     expect(structured.hits[0].heading).toBe("Queue");
   });
 
-  it("filters by folder and tags", () => {
+  it("filters by folder and tags", async () => {
     const { settings } = indexed();
-    const byFolder = dispatchTool(
+    const byFolder = await dispatchTool(
       "obsidian_search",
       { query: "queue", folder: "Projects/orion/Research" },
       settings,
@@ -111,17 +112,17 @@ describe("dispatchTool", () => {
     const folderHits = (byFolder.structuredContent as { hits: Array<{ path: string }> }).hits;
     expect(folderHits.every((hit) => hit.path.startsWith("Projects/orion/Research"))).toBe(true);
 
-    const byTags = dispatchTool("obsidian_search", { query: "queue", tags: "plan" }, settings);
+    const byTags = await dispatchTool("obsidian_search", { query: "queue", tags: "plan" }, settings);
     const tagHits = (byTags.structuredContent as { hits: Array<{ path: string }> }).hits;
     expect(tagHits.every((hit) => hit.path === "Projects/orion/Plan.md")).toBe(true);
   });
 
-  it("reads a whole note and a single heading subtree", () => {
+  it("reads a whole note and a single heading subtree", async () => {
     const { settings } = indexed();
-    const whole = dispatchTool("obsidian_read", { path: "Projects/orion/Plan.md" }, settings);
+    const whole = await dispatchTool("obsidian_read", { path: "Projects/orion/Plan.md" }, settings);
     expect(whole.text).toContain("bounded retries");
 
-    const section = dispatchTool(
+    const section = await dispatchTool(
       "obsidian_read",
       { path: "Projects/orion/Plan.md", heading: "Milestones" },
       settings,
@@ -129,20 +130,20 @@ describe("dispatchTool", () => {
     expect(section.text).toContain("Ship the queue in Q3");
     expect(section.text).not.toContain("Loose thoughts");
 
-    const missing = dispatchTool("obsidian_read", { path: "Nope.md" }, settings);
+    const missing = await dispatchTool("obsidian_read", { path: "Nope.md" }, settings);
     expect(missing.isError).toBe(true);
   });
 
-  it("refuses a path outside the vault", () => {
+  it("refuses a path outside the vault", async () => {
     const { settings } = indexed();
-    const escape = dispatchTool("obsidian_read", { path: "../../etc/passwd" }, settings);
+    const escape = await dispatchTool("obsidian_read", { path: "../../etc/passwd" }, settings);
     expect(escape.isError).toBe(true);
     expect(escape.text).toContain("outside the vault");
   });
 
-  it("outlines a note with links and backlinks", () => {
+  it("outlines a note with links and backlinks", async () => {
     const { settings } = indexed();
-    const outcome = dispatchTool("obsidian_outline", { path: "Projects/orion/Plan.md" }, settings);
+    const outcome = await dispatchTool("obsidian_outline", { path: "Projects/orion/Plan.md" }, settings);
     const outline = outcome.structuredContent as {
       headings: Array<{ text: string }>;
       tags: string[];
@@ -154,28 +155,28 @@ describe("dispatchTool", () => {
     expect(outline.links[0].target_path).toBe("Projects/orion/Research/queue.md");
   });
 
-  it("lists notes and reports status", () => {
+  it("lists notes and reports status", async () => {
     const { settings } = indexed();
-    const listed = dispatchTool("obsidian_list", { folder: "Projects" }, settings);
+    const listed = await dispatchTool("obsidian_list", { folder: "Projects" }, settings);
     expect((listed.structuredContent as { count: number }).count).toBe(2);
 
-    const status = dispatchTool("obsidian_status", {}, settings);
+    const status = await dispatchTool("obsidian_status", {}, settings);
     const snapshot = status.structuredContent as { notes: number; readOnly: boolean; isObsidianVault: boolean };
     expect(snapshot.notes).toBe(3);
     expect(snapshot.readOnly).toBe(false);
     expect(snapshot.isObsidianVault).toBe(true);
   });
 
-  it("reindexes through the tool", () => {
+  it("reindexes through the tool", async () => {
     const { workspace: created, settings } = indexed();
     created.write("Later.md", "# Later\n\nAdded after the first scan.\n");
-    const outcome = dispatchTool("obsidian_index", {}, settings);
+    const outcome = await dispatchTool("obsidian_index", {}, settings);
     expect(outcome.isError).toBeUndefined();
     expect((outcome.structuredContent as { notes: number }).notes).toBe(4);
   });
 
-  it("explains how to configure a missing vault instead of failing obscurely", () => {
-    const outcome = dispatchTool("obsidian_search", { query: "x" }, runtimeSettings(""));
+  it("explains how to configure a missing vault instead of failing obscurely", async () => {
+    const outcome = await dispatchTool("obsidian_search", { query: "x" }, runtimeSettings(""));
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toContain("Settings → Plugins → Obsidian Bridge");
   });

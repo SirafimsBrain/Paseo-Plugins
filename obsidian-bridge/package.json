@@ -1,13 +1,16 @@
 {
   "name": "obsidian-bridge",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "scripts": {
     "bundle": "node scripts/bundle-mcp-server.mjs",
     "pretest": "node scripts/bundle-mcp-server.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b tsconfig.json"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1"
   },
   "devDependencies": {
     "@getpaseo/plugin": "^0.15.0",

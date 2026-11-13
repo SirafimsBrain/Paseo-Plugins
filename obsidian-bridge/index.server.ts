@@ -12,9 +12,10 @@ import { obsidianBridgeSettings, runtimeSettingsOf, type RuntimeSettings } from 
 import { readSavedMcpServers } from "./server/agent-record";
 import { createObsidianTools } from "./server/agent-tools";
 import { normalizeRoleDir } from "./server/dirs";
+import { embedQuery } from "./server/embed/query";
 import { VaultIndexer } from "./server/indexer";
 import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
-import { dispatchTool, openRuntime } from "./server/mcp-tools";
+import { openRuntime } from "./server/mcp-tools";
 import { searchIndex } from "./server/search";
 import { parseSettingsFile } from "./server/settings-file";
 import { writeSettingsMirror } from "./server/settings-mirror";
@@ -154,7 +155,7 @@ export default function contribute(server: PluginServerContext) {
     return result;
   });
 
-  server.handle(searchVaultRpc, async ({ query, limit, folder }) => {
+  server.handle(searchVaultRpc, async ({ query, limit, folder, semantic }) => {
     const runtimeSettings = await readRuntimeSettings();
     const requestedFolder = (folder ?? "").trim();
     const normalizedFolder = requestedFolder.length === 0 ? "" : normalizeRoleDir(requestedFolder);
@@ -174,6 +175,9 @@ export default function contribute(server: PluginServerContext) {
       };
     }
     try {
+      const semanticWanted = semantic === undefined ? runtimeSettings.semanticSearch : semantic;
+      const embedding =
+        semanticWanted && query.length > 0 ? await embedQuery(runtimeSettings, query) : null;
       return searchIndex(opened.runtime.store, {
         query,
         limit,
@@ -181,6 +185,9 @@ export default function contribute(server: PluginServerContext) {
         budgetChars: runtimeSettings.searchBudgetChars,
         snippetChars: runtimeSettings.snippetChars,
         dirs: opened.runtime.dirs,
+        semantic: embedding?.vector
+          ? { vector: embedding.vector, modelId: embedding.modelId }
+          : null,
       });
     } finally {
       opened.runtime.store.close();
@@ -259,6 +266,5 @@ export default function contribute(server: PluginServerContext) {
     removeSettingsListener();
     removeOpenHook();
     void indexer.stop();
-    void dispatchTool; // kept for the bundle's shared tool layer
   };
 }

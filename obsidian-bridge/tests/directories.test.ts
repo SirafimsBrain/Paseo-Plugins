@@ -42,7 +42,7 @@ function index(created: TestWorkspace) {
 }
 
 describe("role paths", () => {
-  it("rejects absolute paths, parent traversal and the config directory", () => {
+  it("rejects absolute paths, parent traversal and the config directory", async () => {
     expect(normalizeRoleDir("/abs")).toBeNull();
     expect(normalizeRoleDir("../up")).toBeNull();
     expect(normalizeRoleDir(".obsidian/plugins")).toBeNull();
@@ -50,7 +50,7 @@ describe("role paths", () => {
     expect(normalizeRoleDir("")).toBeNull();
   });
 
-  it("resolves the most specific role and falls back to the workspace", () => {
+  it("resolves the most specific role and falls back to the workspace", async () => {
     const dirs = resolveRoleDirs(runtimeSettings("/tmp/vault"));
     expect(dirs).toEqual({ workspace: "", inbox: "Inbox", out: "Documentation", raw: "raw" });
     expect(roleOfPath("Inbox/a.md", dirs)).toBe("inbox");
@@ -59,7 +59,7 @@ describe("role paths", () => {
     expect(roleOfPath("Projects/a.md", dirs)).toBe("workspace");
   });
 
-  it("refuses a document name that escapes its directory", () => {
+  it("refuses a document name that escapes its directory", async () => {
     const dirs = resolveRoleDirs(runtimeSettings("/tmp/vault"));
     for (const name of ["../../etc/passwd", "/abs.md", "a/../../b", "..", "  ", "bad\u0000name"]) {
       expect(resolveRolePath(dirs, "out", name)).toEqual({
@@ -74,7 +74,7 @@ describe("role paths", () => {
     });
   });
 
-  it("resolves the configured directory independently of the working directory", () => {
+  it("resolves the configured directory independently of the working directory", async () => {
     const home = os.homedir();
     expect(resolveVaultRoot(" ~ ")).toBe(path.resolve(home));
     expect(resolveVaultRoot("~/.obsidian/Main/Paseo/")).toBe(
@@ -90,7 +90,7 @@ describe("role paths", () => {
     expect(resolveVaultRoot("")).toBe("");
   });
 
-  it("describes every role for agents", () => {
+  it("describes every role for agents", async () => {
     const dirs = resolveRoleDirs(runtimeSettings("/tmp/vault"));
     expect(describeRoleDirs(dirs).map((entry) => entry.role)).toEqual([
       "workspace",
@@ -102,7 +102,7 @@ describe("role paths", () => {
 });
 
 describe("appendToNote", () => {
-  it("creates a document with frontmatter and appends sections afterwards", () => {
+  it("creates a document with frontmatter and appends sections afterwards", async () => {
     const created = workspace();
     const dirs = resolveRoleDirs(runtimeSettings(created.vault));
 
@@ -139,7 +139,7 @@ describe("appendToNote", () => {
     );
   });
 
-  it("reports an identical body as a duplicate instead of writing twice", () => {
+  it("reports an identical body as a duplicate instead of writing twice", async () => {
     const created = workspace();
     const dirs = resolveRoleDirs(runtimeSettings(created.vault));
     appendToNote({ root: created.vault, dirs, role: "raw", name: "notes", body: "same", create: false });
@@ -154,7 +154,7 @@ describe("appendToNote", () => {
     expect(repeat).toMatchObject({ duplicate: true });
   });
 
-  it("refuses a missing document when create is not requested", () => {
+  it("refuses a missing document when create is not requested", async () => {
     const created = workspace();
     const dirs = resolveRoleDirs(runtimeSettings(created.vault));
     expect(
@@ -171,11 +171,11 @@ describe("appendToNote", () => {
 });
 
 describe("write tools", () => {
-  it("writes into the configured out, raw and inbox directories", () => {
+  it("writes into the configured out, raw and inbox directories", async () => {
     const created = workspace();
     const settings = index(created);
 
-    const document = dispatchTool(
+    const document = await dispatchTool(
       "obsidian_write_document",
       { name: "Queue guide", title: "Queue guide", body: "Authored content." },
       settings,
@@ -184,14 +184,14 @@ describe("write tools", () => {
     expect(document.structuredContent).toMatchObject({ path: "Documentation/Queue guide.md", created: true });
     expect(fs.existsSync(path.join(created.vault, "Documentation/Queue guide.md"))).toBe(true);
 
-    const scratch = dispatchTool(
+    const scratch = await dispatchTool(
       "obsidian_write_scratch",
       { name: "bugfix-alt", body: "Option A: retry." },
       settings,
     );
     expect(scratch.structuredContent).toMatchObject({ path: "raw/bugfix-alt.md" });
 
-    const inbox = dispatchTool(
+    const inbox = await dispatchTool(
       "obsidian_append_inbox",
       { name: "Sources", body: "New source arrived." },
       settings,
@@ -199,13 +199,13 @@ describe("write tools", () => {
     expect(inbox.structuredContent).toMatchObject({ path: "Inbox/Sources.md", created: true });
 
     // The inbox is the user's: there is no default note to fall back to.
-    const unnamed = dispatchTool("obsidian_append_inbox", { body: "No name." }, settings);
+    const unnamed = await dispatchTool("obsidian_append_inbox", { body: "No name." }, settings);
     expect(unnamed.isError).toBe(true);
     expect(unnamed.text).toContain("name is required");
     expect(fs.existsSync(path.join(created.vault, "Inbox/Inbox.md"))).toBe(false);
   });
 
-  it("refuses every write when readOnly is on", () => {
+  it("refuses every write when readOnly is on", async () => {
     const created = workspace();
     const settings = index(created);
     const readOnly = { ...settings, readOnly: true };
@@ -214,16 +214,16 @@ describe("write tools", () => {
       ["obsidian_write_scratch", { name: "x", body: "y" }],
       ["obsidian_append_inbox", { body: "y" }],
     ] as const) {
-      const outcome = dispatchTool(tool, args, readOnly);
+      const outcome = await dispatchTool(tool, args, readOnly);
       expect(outcome.isError).toBe(true);
       expect(outcome.text).toContain("Writes are disabled");
     }
   });
 
-  it("refuses a body over the configured limit", () => {
+  it("refuses a body over the configured limit", async () => {
     const created = workspace();
     const settings = { ...index(created), maxWriteChars: 1000 };
-    const outcome = dispatchTool(
+    const outcome = await dispatchTool(
       "obsidian_write_scratch",
       { name: "big", body: "x".repeat(1200) },
       settings,
@@ -232,42 +232,42 @@ describe("write tools", () => {
     expect(outcome.text).toContain("limit is 1000");
   });
 
-  it("cannot write outside the configured roles or above the root", () => {
+  it("cannot write outside the configured roles or above the root", async () => {
     const created = workspace();
     const settings = index(created);
-    const escaped = dispatchTool(
+    const escaped = await dispatchTool(
       "obsidian_write_document",
       { name: "../../outside", body: "x" },
       settings,
     );
     expect(escaped.isError).toBe(true);
 
-    const read = dispatchTool("obsidian_read", { path: "../outside.md" }, settings);
+    const read = await dispatchTool("obsidian_read", { path: "../outside.md" }, settings);
     expect(read.isError).toBe(true);
     expect(read.text).toContain("outside the vault");
   });
 
-  it("refuses a folder that would leave the configured directory", () => {
+  it("refuses a folder that would leave the configured directory", async () => {
     const created = workspace();
     const settings = index(created);
     for (const folder of ["../", "..", "/etc", "Inbox/../../.."]) {
-      const listed = dispatchTool("obsidian_list", { folder }, settings);
+      const listed = await dispatchTool("obsidian_list", { folder }, settings);
       expect(listed.isError).toBe(true);
       expect(listed.text).toContain("is not a folder inside the configured directory");
     }
-    const searched = dispatchTool("obsidian_search", { query: "queues", folder: "../.." }, settings);
+    const searched = await dispatchTool("obsidian_search", { query: "queues", folder: "../.." }, settings);
     expect(searched.isError).toBe(true);
 
-    const inside = dispatchTool("obsidian_list", { folder: "Inbox" }, settings);
+    const inside = await dispatchTool("obsidian_list", { folder: "Inbox" }, settings);
     const notes = (inside.structuredContent as { notes: Array<{ path: string }> }).notes;
     expect(notes.length).toBeGreaterThan(0);
     expect(notes.every((note) => note.path.startsWith("Inbox/"))).toBe(true);
   });
 
-  it("matches a folder prefix only on whole segments", () => {
+  it("matches a folder prefix only on whole segments", async () => {
     const created = workspace({ "Inbox-old/legacy.md": "# Legacy\n\nOld material.\n" });
     const settings = index(created);
-    const listed = dispatchTool("obsidian_list", { folder: "Inbox" }, settings);
+    const listed = await dispatchTool("obsidian_list", { folder: "Inbox" }, settings);
     const paths = (listed.structuredContent as { notes: Array<{ path: string }> }).notes.map(
       (note) => note.path,
     );
@@ -275,10 +275,10 @@ describe("write tools", () => {
     expect(paths).not.toContain("Inbox-old/legacy.md");
   });
 
-  it("tells the agent which directory is for what", () => {
+  it("tells the agent which directory is for what", async () => {
     const created = workspace();
     const settings = index(created);
-    const outcome = dispatchTool("obsidian_directories", {}, settings);
+    const outcome = await dispatchTool("obsidian_directories", {}, settings);
     expect(outcome.structuredContent).toMatchObject({
       directories: {
         workspace: "",
@@ -293,16 +293,16 @@ describe("write tools", () => {
     expect(roles.find((role) => role.role === "raw")?.use).toContain("Scratch");
   });
 
-  it("tags search hits and listings with their role and filters by scope", () => {
+  it("tags search hits and listings with their role and filters by scope", async () => {
     const created = workspace();
     const settings = index(created);
 
-    const all = dispatchTool("obsidian_search", { query: "material" }, settings);
+    const all = await dispatchTool("obsidian_search", { query: "material" }, settings);
     const hits = (all.structuredContent as { hits: Array<{ path: string; role: string }> }).hits;
     const inboxHit = hits.find((hit) => hit.path.startsWith("Inbox/"));
     expect(inboxHit?.role).toBe("inbox");
 
-    const outOnly = dispatchTool(
+    const outOnly = await dispatchTool(
       "obsidian_search",
       { query: "queues", scope: "out" },
       settings,
@@ -310,7 +310,7 @@ describe("write tools", () => {
     const outHits = (outOnly.structuredContent as { hits: Array<{ role: string }> }).hits;
     expect(outHits.every((hit) => hit.role === "out")).toBe(true);
 
-    const listed = dispatchTool("obsidian_list", { scope: "raw" }, settings);
+    const listed = await dispatchTool("obsidian_list", { scope: "raw" }, settings);
     const notes = (listed.structuredContent as { notes: Array<{ role: string }> }).notes;
     expect(notes.length).toBeGreaterThan(0);
     expect(notes.every((note) => note.role === "raw")).toBe(true);

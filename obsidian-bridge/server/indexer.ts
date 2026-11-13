@@ -4,8 +4,11 @@ import * as path from "node:path";
 import type { VaultStatus } from "../shared/contracts";
 import type { RuntimeSettings } from "../shared/settings";
 import { resolveRoleDirs } from "./dirs";
+import { EmbedJob } from "./embed/job";
+import { queryProviderStatus } from "./embed/query";
+import { memoryReport } from "./memory";
 import { parseNote } from "./parse";
-import { indexPathFor, resolveVaultRoot } from "./paths";
+import { indexPathFor, modelsDir, resolveVaultRoot } from "./paths";
 import { scanVault, type ScanOutcome } from "./scan";
 import { BridgeStore } from "./store";
 import { isExcluded, isIncluded, isMarkdownPath, looksLikeVault } from "./vault";
@@ -37,6 +40,7 @@ export class VaultIndexer {
   private scanning = false;
   private disposed = false;
   private settings: RuntimeSettings | null = null;
+  private readonly embedJob = new EmbedJob();
   private state: IndexerState = {
     lastScanAt: null,
     lastChangeAt: null,
@@ -131,6 +135,7 @@ export class VaultIndexer {
       });
       this.state.lastScanAt = new Date().toISOString();
       this.state.error = null;
+      this.ensureEmbeddings();
       return outcome;
     } catch (cause) {
       this.state.error = `Indexing failed: ${cause instanceof Error ? cause.message : String(cause)}`;
@@ -144,8 +149,6 @@ export class VaultIndexer {
 
   /** Snapshot for the `obsidian-bridge.status` RPC. */
   status(): VaultStatus {
-    const settings = this.settings;
-    const emptyCounts = { notes: 0, chunks: 0, links: 0, unresolvedLinks: 0 };
     const attempt = <T,>(read: () => T, fallback: T): T => {
       try {
         return read();
@@ -153,6 +156,27 @@ export class VaultIndexer {
         return fallback;
       }
     };
+    const settings = this.settings;
+    const model = settings?.embeddingModel ?? "";
+    const vectors =
+      this.store && model
+        ? attempt(() => this.store!.embeddingStats(model), { chunks: 0, embedded: 0, stale: 0 })
+        : { chunks: 0, embedded: 0, stale: 0 };
+    const job = this.embedJob.snapshot();
+    const provider = queryProviderStatus();
+    const semanticEnabled = this.settings?.semanticSearch ?? false;
+    const semanticState = !semanticEnabled
+      ? "idle"
+      : job.state === "running"
+        ? "running"
+        : job.state === "error"
+          ? "error"
+          : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
+            ? "done"
+            : vectors.embedded > 0
+              ? "running"
+              : "idle";
+    const emptyCounts = { notes: 0, chunks: 0, links: 0, unresolvedLinks: 0 };
     const counts = this.store ? attempt(() => this.store!.counts(), emptyCounts) : emptyCounts;
     const size = this.store ? attempt(() => this.store!.sizeBytes(), 0) : 0;
     const lastScanMs = this.store
@@ -182,6 +206,25 @@ export class VaultIndexer {
         : { workspace: "", inbox: null, out: null, raw: null },
       dbPath: this.root ? indexPathFor(this.root) : null,
       error: this.state.error,
+      embedding: {
+        enabled: semanticEnabled,
+        model,
+        dtype: this.settings?.embeddingDtype ?? "",
+        state: semanticState,
+        chunks: vectors.chunks,
+        embedded: vectors.embedded,
+        stale: vectors.stale,
+        done: job.done,
+        total: job.total > 0 ? job.total : vectors.chunks,
+        modelLoaded: provider.loaded,
+        rssMb: job.rssMb ?? provider.rssMb,
+        error: job.error ?? provider.error,
+        note:
+          semanticEnabled && vectors.chunks > 0 && vectors.embedded < vectors.chunks
+            ? "Embedding the vault in the background; lexical search works meanwhile."
+            : null,
+      },
+      memory: memoryReport(process.memoryUsage().rss),
     };
   }
 
@@ -256,6 +299,7 @@ export class VaultIndexer {
       });
       this.state.lastScanAt = new Date().toISOString();
       this.state.error = null;
+      this.ensureEmbeddings();
     } catch (cause) {
       this.state.error = `Reconcile failed: ${cause instanceof Error ? cause.message : String(cause)}`;
     } finally {
@@ -316,6 +360,7 @@ export class VaultIndexer {
         this.store.resolveLinks();
         this.state.lastChangeAt = new Date().toISOString();
         this.store.setMeta("last_scan_ms", String(Date.now()));
+        this.ensureEmbeddings();
       } catch (cause) {
         this.state.error = `Link resolution failed: ${
           cause instanceof Error ? cause.message : String(cause)
@@ -324,7 +369,44 @@ export class VaultIndexer {
     }
   }
 
+  /**
+   * Starts the short-lived embedding process when vectors are missing.
+   *
+   * Runs in the background: the lexical index is usable immediately, and the
+   * child process exits with the ~1 GB peak it needed, instead of keeping it in
+   * the daemon.
+   */
+  private ensureEmbeddings(): void {
+    const settings = this.settings;
+    const store = this.store;
+    const root = this.root;
+    if (!settings || !store || !root) return;
+    if (!settings.semanticSearch) {
+      this.embedJob.stop();
+      return;
+    }
+    if (this.embedJob.running) return;
+    let pending = 0;
+    try {
+      pending = store.chunksToEmbed(settings.embeddingModel, 1).length;
+    } catch (cause) {
+      this.state.error = `Could not read the embedding queue: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`;
+      return;
+    }
+    if (pending === 0) return;
+    this.embedJob.start({
+      dbPath: indexPathFor(root),
+      model: settings.embeddingModel,
+      dtype: settings.embeddingDtype,
+      cacheDir: modelsDir(),
+      stemming: settings.ftsStemming,
+    });
+  }
+
   private closeResources(): void {
+    this.embedJob.stop();
     this.stopWatching();
     if (this.reconcileTimer) {
       clearInterval(this.reconcileTimer);

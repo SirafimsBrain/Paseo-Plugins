@@ -37,7 +37,7 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(_input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      return toResult(dispatchTool("obsidian_directories", {}, settings));
+      return toResult(await dispatchTool("obsidian_directories", {}, settings));
     },
   });
 
@@ -55,7 +55,7 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      return toResult(dispatchTool("obsidian_search", input, settings));
+      return toResult(await dispatchTool("obsidian_search", input, settings));
     },
   });
 
@@ -70,7 +70,7 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      return toResult(dispatchTool("obsidian_read", input, settings));
+      return toResult(await dispatchTool("obsidian_read", input, settings));
     },
   });
 
@@ -87,7 +87,7 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      return toResult(dispatchTool("obsidian_write_document", input, settings));
+      return toResult(await dispatchTool("obsidian_write_document", input, settings));
     },
   });
 
@@ -104,7 +104,7 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      return toResult(dispatchTool("obsidian_write_scratch", input, settings));
+      return toResult(await dispatchTool("obsidian_write_scratch", input, settings));
     },
   });
 
@@ -121,7 +121,32 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      return toResult(dispatchTool("obsidian_append_inbox", input, settings));
+      return toResult(await dispatchTool("obsidian_append_inbox", input, settings));
+    },
+  });
+
+  const diagnose = defineAgentTool({
+    name: "obsidian_bridge_diagnose",
+    title: "Measure Obsidian retrieval quality",
+    description: `${CONTRACT_SENTENCE} Measures recall@k of lexical versus hybrid retrieval over cases you supply.`,
+    input: z.object({
+      cases: z
+        .array(
+          z.object({
+            query: z.string().min(1).max(1000),
+            expected_paths: z.array(z.string()).default([]),
+          }),
+        )
+        .max(50)
+        .optional()
+        .describe("Cases: a query and the note paths that must appear in the top k."),
+      k: z.number().int().min(1).max(20).optional().describe("Recall cut-off."),
+      semantic: z.boolean().optional().describe("Force the semantic signal on/off."),
+    }),
+    async execute(input, { signal }) {
+      if (signal.aborted) return { text: "Cancelled.", isError: true };
+      const settings = await readSettings();
+      return toResult(await dispatchTool("obsidian_diagnose", input, settings));
     },
   });
 
@@ -134,9 +159,9 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     async execute(_input, { signal }) {
       if (signal.aborted) return { text: "Cancelled.", isError: true };
       const settings = await readSettings();
-      return toResult(dispatchTool("obsidian_status", {}, settings));
+      return toResult(await dispatchTool("obsidian_status", {}, settings));
     },
   });
 
-  return [directories, search, read, writeDocument, writeScratch, appendInbox, status];
+  return [directories, search, read, writeDocument, writeScratch, appendInbox, diagnose, status];
 }

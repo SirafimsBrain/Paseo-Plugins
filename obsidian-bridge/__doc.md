@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.2.1**.
+Version covered: **0.3.0**.
 
 ## 1. Purpose and scope
 
@@ -35,6 +35,12 @@ obsidian-bridge/
 ├── server/
 │   ├── paths.ts             # $PASEO_HOME, plugin data dir, per-vault index path
 │   ├── dirs.ts              # role map (workspace/inbox/out/raw), append-only writer
+│   ├── memory.ts            # RSS policy: silent < 2 GB, warning 2–4 GB, never a limit
+│   ├── embed/
+│   │   ├── local.ts         # @huggingface/transformers provider (e5-small, q8, batch 1)
+│   │   ├── query.ts         # lazy query model + idle unload, injectable for tests
+│   │   └── job.ts           # spawns/tracks the short-lived embedding process
+│   ├── embed-worker.ts      # child entry: writes vectors, exits, returns its memory
 │   ├── parse.ts             # frontmatter, headings, chunking, tags, wikilinks, aliases
 │   ├── vault.ts             # path safety, walking, include/exclude globs, note reading
 │   ├── store.ts             # SQLite schema, FTS5, tags/links/aliases, link resolution, search SQL
@@ -121,6 +127,12 @@ guessing, and `obsidian_links` reports them; a deleted note nulls the links that
 | Titles / aliases | 0.7 | `notes_fts` BM25 |
 | Wikilink proximity | 0.45 | one-hop neighbours of the top 5 lexical hits |
 | Recency | 0.25 | `notes` by mtime (empty-query browse path) |
+| Semantic | 0.9 | cosine over the stored chunk vectors (0.3.0, optional) |
+
+The semantic signal embeds the query in the same process that serves the tool (lazy, ~10 ms once the model is warm),
+ranks every stored chunk of the active model by cosine similarity and contributes the top 40 to the same RRF map. It is
+additive: with no vectors, semantic search off, or a model that fails to load, the list is exactly the lexical + graph
+result and `structuredContent.semantic.error` says why.
 
 Filters (`folder`, `tags`) are applied to the candidate set before truncation. The final list is packed into
 `searchBudgetChars` (default 8000), each hit rendered as `[n] path § Heading (backlinks: k)` plus a snippet trimmed to
@@ -134,7 +146,12 @@ BM25 afterwards. An empty query lists recent notes — the "show me what I was w
 Definitions in `server/mcp-tools.ts`, shared by the stdio server, the attached agent tools and the tests:
 
 `obsidian_directories`, `obsidian_search`, `obsidian_read`, `obsidian_outline`, `obsidian_list`, `obsidian_links`,
-`obsidian_write_document`, `obsidian_write_scratch`, `obsidian_append_inbox`, `obsidian_index`, `obsidian_status`.
+`obsidian_write_document`, `obsidian_write_scratch`, `obsidian_append_inbox`, `obsidian_index`, `obsidian_diagnose`,
+`obsidian_status`.
+
+`obsidian_diagnose` measures recall@k over cases the caller supplies (`{query, expected_paths}`), for lexical and for
+hybrid retrieval, so "semantic helps here" is a measurement rather than a claim. Without cases it reports vector
+coverage and how to measure.
 
 The MCP `initialize` instructions embed the resolved role map (`mcpInstructions(dirs)`), so an agent asked to write a
 document is told which directory that document belongs to before it calls anything.
@@ -175,8 +192,8 @@ implementation, `appendToNote`:
 
 `obsidian_bridge_directories`, `obsidian_bridge_search`, `obsidian_bridge_read`,
 `obsidian_bridge_write_document`, `obsidian_bridge_write_scratch`, `obsidian_bridge_append_inbox`,
-`obsidian_bridge_status` — `defineAgentTool` definitions attached through `request.tools` when the MCP server cannot be
-contributed. The prefix cannot collide with Paseo built-ins, another plugin, or this server's own MCP tool names.
+`obsidian_bridge_diagnose`, `obsidian_bridge_status` — `defineAgentTool` definitions attached through `request.tools`
+when the MCP server cannot be contributed. The prefix cannot collide with Paseo built-ins, another plugin, or this server's own MCP tool names.
 
 ## 6. Injection (the only hook)
 
@@ -204,7 +221,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 
 ## 7. Settings
 
-`shared/settings.ts` (`defineSettings`, host scope, version 1):
+`shared/settings.ts` (`defineSettings`, host scope, version 3):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -222,12 +239,16 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `snippetChars` | `600` | Snippet length per hit. |
 | `readOnly` | `false` | Refuse every write tool; reads unaffected. |
 | `maxWriteChars` | `200000` | Cap for one written body. |
+| `semanticSearch` | `true` | Local embedding signal in search. |
+| `embeddingModel` | `Xenova/multilingual-e5-small` | Hugging Face repo with ONNX weights. |
+| `embeddingDtype` | `q8` | ONNX dtype: `q8` ≈ 118 MB, `fp32` ≈ 470 MB. |
+| `embeddingIdleMinutes` | `10` | Unload the query model after this idle time; `0` keeps it. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
-That choice is deliberate (15 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
-version is 2: role directories and `maxWriteChars` were added, and `readOnly` now defaults to `false` because the write
-tools exist. If the setting
+That choice is deliberate (19 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
+version is 3: role directories and `maxWriteChars` came in 0.2.0 (`readOnly` defaults to `false` since the write tools
+exist), and 0.3.0 added the four semantic keys. If the setting
 count grows past what a form can hold (per-vault registries, credentials, index diagnostics), a loopback panel like
 `remote-control`'s console becomes the better home — the RPC layer already isolates that decision.
 
@@ -241,12 +262,13 @@ and the panel says so.
 | Version | Work |
 | --- | --- |
 | 0.2.0 (shipped) | Directory roles (workspace/inbox/out/raw) with the root as a hard boundary, append-only write tools to `out`/`raw`/`inbox`, role tags on hits and listings, `maxWriteChars`, `readOnly`. |
-| 0.3.0 | Optional local embeddings (`@huggingface/transformers`, multilingual e5-small q8), vector signal in fusion, `obsidian_diagnose` recall@k. |
+| 0.3.0 (shipped) | Optional local embeddings (`@huggingface/transformers`, multilingual e5-small q8), vectors in SQLite, semantic signal in fusion, `obsidian_diagnose` recall@k, memory policy in status. |
 | 0.4.0 | Obsidian-side enrichment via the Local REST API plugin (authoritative backlinks, fuzzy-search signal, SSE-driven reindex, "open in Obsidian"), composer attachment source, workspace panel. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
+| after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
-Embeddings and vectors were deliberately left out of 0.2.x: the 230 MB / brute-force cosine design is documented in
-`__research.md` §4.3, and the lexical + graph path has to prove its recall first (`obsidian_diagnose`).
+Embeddings and vectors were deliberately left out of 0.2.x: the design is documented in `__research.md` §4.3 and §12, and
+the lexical + graph path proves its recall with `obsidian_diagnose`.
 
 The 0.3.0 spike is done (`__research.md` §12). Measured on this vault (1 684 chunks): q8 e5-small loads in ~1.4 s,
 embeds the whole vault in ~151 s (batch 1 is 3–4× faster than batching), query embedding is ~10 ms, a full cosine scan
@@ -255,7 +277,7 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
 
 ## 9. Verification
 
-`npm test` (55 tests, 7 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (64 tests, 8 suites, ~0.7 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
@@ -268,6 +290,9 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
   document-name validation, append-only creation/appending, duplicate detection, `readOnly`/`maxWriteChars` refusal, role
   tags and `scope` filters, refused writes above the root, refused `folder` arguments that would leave the root, whole-
   segment folder matching, a required inbox `name`, and `resolveVaultRoot` for `~`/home-relative paths.
+- `tests/semantic.test.ts` — vector storage round-trip and invalidation, semantic fusion finding a note with no lexical
+  overlap, the injected provider path through `obsidian_search`/`obsidian_status`, graceful fallback when the model cannot
+  load, per-call opt-out, `obsidian_diagnose` recall, and the 2 GB / 4 GB memory levels.
 - `tests/mcp-server-e2e.test.ts` — spawns the built `dist/mcp-server.js`, speaks JSON-RPC over stdio, indexes, searches,
   reads a heading, writes a document into `out`, and checks a path escape is refused.
 
@@ -282,6 +307,13 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - `index.db` is disposable: delete it and run `obsidian_index` (or restart the plugin) to rebuild.
 - Writes are append-only and confined to the `inbox`/`out`/`raw` roles. There is no tool that edits, moves, renames or
 deletes a note, and `readOnly` switches every write off.
+- Embedding model cache: `$PASEO_HOME/plugins/obsidian-bridge/models` (not inside the checkout, which `paseo plugin update`
+  replaces). First semantic run needs network; afterwards it is offline.
+- A full re-embedding runs in its own process (`dist/embed-worker.js`) and peaks around 1.1 GB for 1 684 chunks, which
+  leaves with the process. The query model stays in the MCP process only while used and unloads after
+  `embeddingIdleMinutes`.
+- Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
+  limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
 ## 11. Review pass (0.2.1)
 

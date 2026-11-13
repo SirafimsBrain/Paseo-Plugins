@@ -12,14 +12,19 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.2.1)
+## What it does (0.3.0)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
-- **Hybrid search.** Full-text over heading chunks, fused (Reciprocal Rank Fusion) with title/alias matches and one-hop
-  wikilink proximity, packed into a bounded answer with note paths, headings and the directory role.
+- **Hybrid search.** Full-text over heading chunks, fused (Reciprocal Rank Fusion) with title/alias matches, one-hop
+  wikilink proximity and a local semantic signal, packed into a bounded answer with note paths, headings and the
+  directory role.
+- **Semantic search, in-process.** `@huggingface/transformers` runs a multilingual e5-small ONNX model inside Node — no
+  Ollama, no Python, no Docker, no vector database. Vectors live in the same SQLite index and are built by a short-lived
+  child process, so a full re-embedding does not pin gigabytes inside the daemon.
 - **Read tools.** `obsidian_search`, `obsidian_read` (whole note or one heading subtree), `obsidian_outline`,
-  `obsidian_list`, `obsidian_links`, `obsidian_directories`, plus `obsidian_index` and `obsidian_status`.
+  `obsidian_list`, `obsidian_links`, `obsidian_directories`, plus `obsidian_index`, `obsidian_diagnose` and
+  `obsidian_status`.
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
   notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
@@ -52,6 +57,9 @@ document belongs. Every search hit and listing carries its role.
 
 - Paseo `>= 0.15.0`.
 - Node.js `>= 22.5` on the daemon host (the index uses the built-in `node:sqlite` with FTS5; verified on Node 24).
+- Semantic search downloads a model once (~118 MB for the default q8 e5-small) into
+  `$PASEO_HOME/plugins/obsidian-bridge/models`, then runs offline. ~0.5 GB RAM while the model is loaded; up to 2 GB is
+  treated as normal, 2–4 GB shows a warning in the panel (never a hard limit).
 - A local directory of Markdown files. The Obsidian application itself is **not** required, and nothing needs to be
   installed into Obsidian.
 - Linux is the primary target; macOS and Windows are future work ([__compatibility.md](./__compatibility.md)).
@@ -103,7 +111,8 @@ If the path is not configured, nothing is indexed and every tool answers with an
 | `obsidian_write_scratch` | Append a scratch note in `raw`. |
 | `obsidian_append_inbox` | Append to a note in `inbox`. |
 | `obsidian_index` | Rebuilds the index from disk. |
-| `obsidian_status` | Directory, role map, counts, freshness, write state. |
+| `obsidian_diagnose` | recall@k of lexical vs hybrid retrieval over cases you supply. |
+| `obsidian_status` | Directory, role map, counts, freshness, write state, vector coverage, memory. |
 
 The MCP server is registered under the name `obsidian-bridge`. When a provider cannot take an MCP server, the plugin
 attaches the equivalent `obsidian_bridge_*` tools instead.
@@ -116,6 +125,9 @@ Obsidian notes, never as a place to record agent memory.
 - Notes are read from disk, so the index is authoritative for search but a note's content is always re-read when opened.
 - The index lives outside the directory, in `$PASEO_HOME/plugins/obsidian-bridge/vaults/<vault-id>/index.db`; it is never
   synced and can be deleted at any time (a scan rebuilds it).
-- Semantic (embedding) search and Obsidian-side enrichment (the Local REST API plugin) are planned, not shipped. See
-  [__doc.md](./__doc.md) §8.
+- Semantic search needs the model download on its first run and keeps ~0.5 GB resident while loaded. Memory is a
+  warning, not a limit: the plugin reports 2–4 GB in the panel and never refuses work because of it.
+- Obsidian-side enrichment (the Local REST API plugin) is planned, not shipped. See [__doc.md](./__doc.md) §8.
+- Larger local models and external RAG providers are deliberate post-1.0 work: the project stays on the Paseo/Node base
+  unless a requirement genuinely cannot be met there.
 - Excluded from indexing: `.obsidian/`, `.trash/`, `.git/`, `.smart-env/` and anything matching your exclude globs.

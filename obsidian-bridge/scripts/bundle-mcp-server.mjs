@@ -1,11 +1,14 @@
 /**
- * Bundles `server/mcp-server.ts` into a standalone `dist/mcp-server.js`.
+ * Bundles the two entry points agents and the plugin spawn:
  *
- * Agents spawn the MCP server with their own Node runtime, so a single-file
- * bundle avoids shipping `node_modules` and resolves extensionless ESM
- * imports. The bundle depends only on Node built-ins (`node:sqlite`,
- * `node:fs`, …), so agents' Node runtimes (>= 22.5 for `node:sqlite`) can
- * spawn it without `npm install`.
+ * - `dist/mcp-server.js` — the stdio MCP server;
+ * - `dist/embed-worker.js` — the short-lived embedding process (0.3.0).
+ *
+ * Everything except the embedding stack is inlined (`node:*` and the
+ * `@huggingface/transformers` / `onnxruntime-node` pair stay external: their
+ * native `.node` binaries cannot be bundled, and they are ordinary runtime
+ * dependencies of the plugin checkout). Without semantic search the MCP server
+ * still runs on Node built-ins alone, so an agent's runtime needs nothing more.
  */
 import { build } from "esbuild";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -20,13 +23,11 @@ mkdirSync(join(root, "dist"), { recursive: true });
 // inject it from package.json so the two never drift.
 const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
 
-await build({
-  entryPoints: [join(root, "server", "mcp-server.ts")],
+const shared = {
   bundle: true,
   platform: "node",
   target: "node22",
   format: "esm",
-  outfile: join(root, "dist", "mcp-server.js"),
   define: { __OBSIDIAN_BRIDGE_VERSION__: JSON.stringify(version) },
   banner: {
     js: [
@@ -38,9 +39,21 @@ await build({
       "const __dirname = __dp(__filename);",
     ].join("\n"),
   },
-  external: ["node:*"],
+  external: ["node:*", "@huggingface/transformers", "onnxruntime-node", "sharp"],
   sourcemap: false,
   logLevel: "warning",
+};
+
+await build({
+  ...shared,
+  entryPoints: [join(root, "server", "mcp-server.ts")],
+  outfile: join(root, "dist", "mcp-server.js"),
 });
 
-console.log("dist/mcp-server.js written");
+await build({
+  ...shared,
+  entryPoints: [join(root, "server", "embed-worker.ts")],
+  outfile: join(root, "dist", "embed-worker.js"),
+});
+
+console.log("dist/mcp-server.js and dist/embed-worker.js written");

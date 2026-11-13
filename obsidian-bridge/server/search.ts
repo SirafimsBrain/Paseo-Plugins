@@ -23,6 +23,10 @@ const WEIGHT_CHUNKS = 1.0;
 const WEIGHT_TITLES = 0.7;
 const WEIGHT_GRAPH = 0.45;
 const WEIGHT_RECENT = 0.25;
+const WEIGHT_SEMANTIC = 0.9;
+
+/** Semantic candidates considered before fusing; the tail rarely changes the top. */
+const SEMANTIC_CANDIDATES = 40;
 
 export interface SearchOptions {
   query: string;
@@ -35,6 +39,8 @@ export interface SearchOptions {
   snippetChars?: number;
   /** Directory roles, so every hit can name the folder it came from. */
   dirs?: RoleDirs;
+  /** Query vector + model whose vectors should join the fusion (0.3.0). */
+  semantic?: { vector: Float32Array; modelId: string } | null;
 }
 
 interface Candidate {
@@ -117,6 +123,26 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     });
   }
 
+  if (options.semantic && options.semantic.vector.length > 0) {
+    const embedded = store.embeddingsFor(options.semantic.modelId);
+    if (embedded.length > 0) {
+      signals.push("semantic");
+      const vector = options.semantic.vector;
+      embedded
+        .map((row) => ({ row, similarity: dotProduct(vector, row.vec) }))
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, SEMANTIC_CANDIDATES)
+        .forEach((entry, index) => {
+          add({
+            path: entry.row.path,
+            heading: entry.row.heading,
+            snippet: entry.row.text,
+            score: WEIGHT_SEMANTIC / (RRF_K + index + 1),
+          });
+        });
+    }
+  }
+
   let candidates = [...scores.values()];
   if (folder.length > 0) {
     candidates = candidates.filter(
@@ -165,6 +191,14 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     signals,
     note,
   };
+}
+
+/** Dot product of two L2-normalised vectors, i.e. their cosine similarity. */
+function dotProduct(a: Float32Array, b: Float32Array): number {
+  const length = Math.min(a.length, b.length);
+  let sum = 0;
+  for (let index = 0; index < length; index += 1) sum += a[index] * b[index];
+  return sum;
 }
 
 /** Packs hits into a bounded text block an agent can quote from. */

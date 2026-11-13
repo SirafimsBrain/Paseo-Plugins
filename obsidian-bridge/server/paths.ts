@@ -23,6 +23,18 @@ export function pluginDataDir(): string {
   return path.join(paseoHome(), "plugins", "obsidian-bridge");
 }
 
+/**
+ * Where embedding models are cached.
+ *
+ * Deliberately under plugin data, never inside the checkout:
+ * `transformers.js` defaults to `node_modules/@huggingface/transformers/.cache`,
+ * which `paseo plugin update` replaces, so every update would re-download the
+ * model (118 MB for e5-small q8).
+ */
+export function modelsDir(): string {
+  return path.join(pluginDataDir(), "models");
+}
+
 /** Settings mirror the MCP bundle and the plugin both read. */
 export function settingsMirrorPath(): string {
   return path.join(pluginDataDir(), "settings.json");

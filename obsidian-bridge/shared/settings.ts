@@ -20,9 +20,9 @@ export const DEFAULT_EXCLUDES = ".obsidian/**, .trash/**, .git/**, .smart-env/**
 export const obsidianBridgeSettings = defineSettings({
   id: "obsidian-bridge",
   scope: "host",
-  // 2: directory roles (inbox/out/raw) and maxWriteChars; readOnly now defaults
-  // to false because the write tools exist.
-  version: 2,
+  // 3: semantic search settings (0.3.0). 2 added directory roles and
+  // maxWriteChars; readOnly defaults to false since the write tools exist.
+  version: 3,
   schema: z.object({
     /**
      * Absolute path of the local Obsidian vault. Empty means "not
@@ -83,6 +83,22 @@ export const obsidianBridgeSettings = defineSettings({
     readOnly: z.boolean().default(false),
     /** Hard cap for one written document body, in characters. */
     maxWriteChars: z.number().int().min(1000).max(400_000).default(200_000),
+    /**
+     * Add a semantic signal to search: local embeddings from
+     * `@huggingface/transformers`, fused with full text and the link graph.
+     * Off leaves retrieval lexical + graph only.
+     */
+    semanticSearch: z.boolean().default(true),
+    /** Embedding model id (Hugging Face repo, ONNX weights). */
+    embeddingModel: z.string().trim().max(200).default("Xenova/multilingual-e5-small"),
+    /** ONNX dtype: `q8` (~118 MB), `fp32` (~470 MB), `q4`, `int8`. */
+    embeddingDtype: z.string().trim().max(16).default("q8"),
+    /**
+     * Unload the query model after this many idle minutes. `0` keeps it loaded
+     * for the whole MCP process lifetime. Memory is a warning, not a limit: up
+     * to 2 GB is normal, 2-4 GB is reported in the panel, never blocked.
+     */
+    embeddingIdleMinutes: z.number().int().min(0).max(240).default(10),
     /** Inject the MCP server (or the fallback agent tools) into agents. */
     injectIntoAgents: z.boolean().default(true),
   }),
@@ -106,6 +122,10 @@ export interface RuntimeSettings {
   snippetChars: number;
   readOnly: boolean;
   maxWriteChars: number;
+  semanticSearch: boolean;
+  embeddingModel: string;
+  embeddingDtype: string;
+  embeddingIdleMinutes: number;
 }
 
 export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettings {
@@ -124,5 +144,9 @@ export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettin
     snippetChars: values.snippetChars,
     readOnly: values.readOnly,
     maxWriteChars: values.maxWriteChars,
+    semanticSearch: values.semanticSearch,
+    embeddingModel: values.embeddingModel,
+    embeddingDtype: values.embeddingDtype,
+    embeddingIdleMinutes: values.embeddingIdleMinutes,
   };
 }

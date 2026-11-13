@@ -515,8 +515,14 @@ Other figures, all on the real index: embedding dim 384; query embedding latency
 - **Indexing UX:** first run ≈ 2–5 minutes for this vault (download + 151 s embedding), incremental runs are seconds.
   The lexical index must be usable immediately, before vectors finish.
 - **Diagnostics:** `obsidian_diagnose` still has to prove recall; the spike says nothing about quality.
+- **Memory policy (owner decision, 0.3.0):** consumption up to 2 GB is unremarkable and silent; 2–4 GB must show a
+  warning in the panel and in `obsidian_status`; the project imposes **no** hard memory limit, so even the >4 GB band is a
+  stronger warning, not a refusal. The 0.3.0 implementation encodes exactly that in `server/memory.ts`.
 - **Docs:** `__compatibility.md` gains the native-binary, cache-size and memory notes; the README says what the first
   semantic run downloads.
+- **Post-1.0 goal:** stronger local models (fp32 / larger multilingual encoders rather than the q8 small default) and
+  external RAG providers. Both stay behind explicit settings and remain the last resort, per §12.4; they are not part of
+  any base stage.
 
 ### 12.4 Principle: stay on the Paseo/Node base
 

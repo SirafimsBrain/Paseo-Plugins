@@ -10,6 +10,8 @@ import {
   type RoleDirs,
   type WritableRole,
 } from "./dirs";
+import { embedQuery, queryProviderStatus } from "./embed/query";
+import { memoryReport } from "./memory";
 import { indexPathFor, resolveVaultRoot } from "./paths";
 import { scanVault } from "./scan";
 import { searchIndex } from "./search";
@@ -117,6 +119,11 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         budget_chars: {
           type: "number",
           description: "Character budget for the packed answer text (default from settings).",
+        },
+        semantic: {
+          type: "boolean",
+          description:
+            "Force the local semantic signal on/off for this query (default from plugin settings).",
         },
       },
       required: ["query"],
@@ -246,6 +253,29 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "obsidian_diagnose",
+    title: "Measure retrieval quality",
+    description:
+      "Measures recall@k of lexical versus hybrid retrieval over cases you supply " +
+      "(`{query, expected_paths}`), and reports vector coverage and the signals in use. Use it " +
+      "to check whether semantic search actually helps on this vault.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cases: {
+          type: "array",
+          description: "Cases: [{query, expected_paths: [note paths that must be in the top k]}].",
+          items: { type: "object", description: "{query, expected_paths}" },
+        },
+        k: { type: "number", description: "Cut-off for recall, 1–20 (default 5)." },
+        semantic: {
+          type: "boolean",
+          description: "Force the semantic signal on/off; default from settings.",
+        },
+      },
+    },
+  },
+  {
     name: "obsidian_status",
     title: "Vault index status",
     description:
@@ -304,6 +334,111 @@ function json(value: unknown): ToolOutcome {
 
 function fail(message: string): ToolOutcome {
   return { text: message, isError: true };
+}
+
+/**
+ * `obsidian_diagnose`: recall@k for lexical versus hybrid retrieval.
+ *
+ * There is no universal ground truth for a personal vault, so the caller
+ * supplies cases. Without cases the tool reports coverage and how to measure,
+ * instead of inventing a number.
+ */
+async function diagnose(
+  store: BridgeStore,
+  dirs: RoleDirs,
+  settings: RuntimeSettings,
+  input: Record<string, unknown>,
+): Promise<ToolOutcome> {
+  const k =
+    typeof input.k === "number" && Number.isFinite(input.k)
+      ? Math.max(1, Math.min(20, Math.trunc(input.k)))
+      : 5;
+  const semanticWanted =
+    input.semantic === undefined ? settings.semanticSearch : input.semantic === true;
+  const vectors = store.embeddingStats(settings.embeddingModel);
+  const semanticUsable = semanticWanted && vectors.embedded > 0;
+
+  const cases = (Array.isArray(input.cases) ? input.cases : [])
+    .map((entry) => {
+      const record = (entry ?? {}) as Record<string, unknown>;
+      const query = typeof record.query === "string" ? record.query.trim() : "";
+      const expected = Array.isArray(record.expected_paths)
+        ? record.expected_paths.filter((path): path is string => typeof path === "string")
+        : [];
+      return { query, expected };
+    })
+    .filter((item) => item.query.length > 0);
+
+  if (cases.length === 0) {
+    return json({
+      k,
+      cases: 0,
+      chunks: vectors.chunks,
+      embedded: vectors.embedded,
+      model: settings.embeddingModel,
+      semantic: semanticUsable,
+      note: "Pass cases: [{query, expected_paths}] to measure recall@k on this vault.",
+    });
+  }
+
+  const results: Array<{
+    query: string;
+    lexical: string[];
+    hybrid: string[];
+    lexicalRecall: number | null;
+    hybridRecall: number | null;
+  }> = [];
+  let semanticError: string | null = null;
+
+  for (const item of cases) {
+    const lexical = searchIndex(store, { query: item.query, limit: k, dirs });
+    let hybrid = lexical;
+    if (semanticUsable) {
+      const embedding = await embedQuery(settings, item.query);
+      if (embedding.error) semanticError = embedding.error;
+      if (embedding.vector) {
+        hybrid = searchIndex(store, {
+          query: item.query,
+          limit: k,
+          dirs,
+          semantic: { vector: embedding.vector, modelId: embedding.modelId },
+        });
+      }
+    }
+    const recallOf = (paths: string[]): number | null =>
+      item.expected.length === 0
+        ? null
+        : item.expected.filter((path) => paths.includes(path)).length / item.expected.length;
+    const lexicalPaths = lexical.hits.map((hit) => hit.path);
+    const hybridPaths = hybrid.hits.map((hit) => hit.path);
+    results.push({
+      query: item.query,
+      lexical: lexicalPaths,
+      hybrid: hybridPaths,
+      lexicalRecall: recallOf(lexicalPaths),
+      hybridRecall: recallOf(hybridPaths),
+    });
+  }
+
+  const mean = (key: "lexicalRecall" | "hybridRecall"): number | null => {
+    const values = results.map((row) => row[key]).filter((value): value is number => value !== null);
+    return values.length === 0
+      ? null
+      : Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 1000) / 1000;
+  };
+
+  return json({
+    k,
+    cases: results.length,
+    model: settings.embeddingModel,
+    semantic: semanticUsable,
+    semanticError,
+    chunks: vectors.chunks,
+    embedded: vectors.embedded,
+    meanLexicalRecall: mean("lexicalRecall"),
+    meanHybridRecall: mean("hybridRecall"),
+    results,
+  });
 }
 
 /**
@@ -377,11 +512,11 @@ function write(
   });
 }
 
-export function dispatchTool(
+export async function dispatchTool(
   name: string,
   args: unknown,
   settings: RuntimeSettings,
-): ToolOutcome {
+): Promise<ToolOutcome> {
   const input = (args ?? {}) as Record<string, unknown>;
 
   // Pure configuration query: answered without opening (and creating) an index.
@@ -416,6 +551,10 @@ export function dispatchTool(
           typeof input.budget_chars === "number" && Number.isFinite(input.budget_chars)
             ? Math.max(500, Math.min(60000, Math.trunc(input.budget_chars)))
             : settings.searchBudgetChars;
+        const semanticWanted =
+          input.semantic === undefined ? settings.semanticSearch : input.semantic === true;
+        const queryEmbedding =
+          semanticWanted && query.length > 0 ? await embedQuery(settings, query) : null;
         const result = searchIndex(runtime.store, {
           query,
           limit,
@@ -425,6 +564,9 @@ export function dispatchTool(
           budgetChars: budget,
           snippetChars: settings.snippetChars,
           dirs: runtime.dirs,
+          semantic: queryEmbedding?.vector
+            ? { vector: queryEmbedding.vector, modelId: queryEmbedding.modelId }
+            : null,
         });
         const text = result.text.length > 0 ? result.text : (result.note ?? "No results.");
         return {
@@ -436,6 +578,12 @@ export function dispatchTool(
             tookMs: result.tookMs,
             note: result.note,
             directories: runtime.dirs,
+            semantic: {
+              requested: semanticWanted,
+              used: result.signals.includes("semantic"),
+              model: settings.embeddingModel,
+              error: queryEmbedding?.error ?? null,
+            },
           },
         };
       }
@@ -543,6 +691,10 @@ export function dispatchTool(
         return json({ ok: true, ...outcome });
       }
 
+      case "obsidian_diagnose": {
+        return await diagnose(runtime.store, runtime.dirs, settings, input);
+      }
+
       case "obsidian_status": {
         const counts = runtime.store.counts();
         const lastScan = runtime.store.getMeta("last_scan_ms");
@@ -551,6 +703,16 @@ export function dispatchTool(
           acc[role] = (acc[role] ?? 0) + 1;
           return acc;
         }, {});
+        const vectors = runtime.store.embeddingStats(settings.embeddingModel);
+        const provider = queryProviderStatus();
+        const memory = memoryReport(process.memoryUsage().rss);
+        const semanticState = !settings.semanticSearch
+          ? "idle"
+          : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
+            ? "done"
+            : vectors.embedded > 0
+              ? "running"
+              : "idle";
         return json({
           vaultPath: runtime.root,
           directories: runtime.dirs,
@@ -564,6 +726,25 @@ export function dispatchTool(
           lastScanAt: lastScan ? new Date(Number(lastScan)).toISOString() : null,
           readOnly: settings.readOnly,
           writesEnabled: !settings.readOnly,
+          embedding: {
+            enabled: settings.semanticSearch,
+            model: settings.embeddingModel,
+            dtype: settings.embeddingDtype,
+            state: provider.error !== null && settings.semanticSearch ? "error" : semanticState,
+            chunks: vectors.chunks,
+            embedded: vectors.embedded,
+            stale: vectors.stale,
+            done: vectors.embedded,
+            total: vectors.chunks,
+            modelLoaded: provider.loaded,
+            rssMb: provider.rssMb,
+            error: provider.error,
+            note:
+              vectors.chunks > 0 && vectors.embedded < vectors.chunks
+                ? "The plugin host is still embedding the vault; lexical search works meanwhile."
+                : null,
+          },
+          memory,
         });
       }
 

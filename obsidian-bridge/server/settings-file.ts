@@ -27,6 +27,10 @@ const DEFAULTS: RuntimeSettings = {
   snippetChars: 600,
   readOnly: false,
   maxWriteChars: 200_000,
+  semanticSearch: true,
+  embeddingModel: "Xenova/multilingual-e5-small",
+  embeddingDtype: "q8",
+  embeddingIdleMinutes: 10,
 };
 
 function optionalString(value: unknown): string | undefined {
@@ -80,6 +84,17 @@ function parseFile(filePath: string): Partial<RuntimeSettings> {
     if (readOnly !== undefined) parsed.readOnly = readOnly;
     const maxWrite = optionalInt(values.maxWriteChars, 1000, 400_000);
     if (maxWrite !== undefined) parsed.maxWriteChars = maxWrite;
+    if (typeof values.semanticSearch === "boolean") {
+      parsed.semanticSearch = values.semanticSearch;
+    }
+    if (typeof values.embeddingModel === "string" && values.embeddingModel.trim().length > 0) {
+      parsed.embeddingModel = values.embeddingModel.trim().slice(0, 200);
+    }
+    if (typeof values.embeddingDtype === "string" && values.embeddingDtype.trim().length > 0) {
+      parsed.embeddingDtype = values.embeddingDtype.trim().slice(0, 16);
+    }
+    const idle = optionalInt(values.embeddingIdleMinutes, 0, 240);
+    if (idle !== undefined) parsed.embeddingIdleMinutes = idle;
     return parsed;
   } catch {
     return {};
@@ -108,6 +123,16 @@ function parseEnv(): Partial<RuntimeSettings> {
     ? optionalInt(Number(process.env.OBSIDIAN_SEARCH_BUDGET_CHARS), 500, 60000)
     : undefined;
   if (budget !== undefined) parsed.searchBudgetChars = budget;
+  if (process.env.OBSIDIAN_SEMANTIC_SEARCH === "0") parsed.semanticSearch = false;
+  if (process.env.OBSIDIAN_SEMANTIC_SEARCH === "1") parsed.semanticSearch = true;
+  const model = optionalString(process.env.OBSIDIAN_EMBEDDING_MODEL);
+  if (model) parsed.embeddingModel = model.slice(0, 200);
+  const dtype = optionalString(process.env.OBSIDIAN_EMBEDDING_DTYPE);
+  if (dtype) parsed.embeddingDtype = dtype.slice(0, 16);
+  const idle = process.env.OBSIDIAN_EMBEDDING_IDLE_MINUTES
+    ? optionalInt(Number(process.env.OBSIDIAN_EMBEDDING_IDLE_MINUTES), 0, 240)
+    : undefined;
+  if (idle !== undefined) parsed.embeddingIdleMinutes = idle;
   return parsed;
 }
 

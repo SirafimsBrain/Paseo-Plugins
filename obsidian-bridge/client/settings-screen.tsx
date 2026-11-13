@@ -301,6 +301,43 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
 
       <SettingsCard>
         <SettingsSection
+          title="Semantic search"
+          info="Local embeddings from @huggingface/transformers, fused with full text and the link graph. Runs in-process: no Ollama, no Python, no external service. The model is downloaded once (~118 MB for q8)."
+        >
+          <SettingsSwitch
+            label="Semantic signal"
+            hint="Adds meaning-based matches to search (works across Russian and English). Lexical search keeps working while vectors are still being built."
+            value={values.semanticSearch}
+            onValueChange={(enabled: boolean) => patch({ semanticSearch: enabled })}
+          />
+          <SettingsInput
+            label="Embedding model"
+            hint="Hugging Face repo with ONNX weights. Default: Xenova/multilingual-e5-small (384 dimensions, Russian + English)."
+            initialValue={values.embeddingModel}
+            onChangeText={(text: string) => patch({ embeddingModel: text })}
+          />
+          <SettingsInput
+            label="Model dtype"
+            hint="q8 ≈ 118 MB and is the measured default (batch 1); fp32 ≈ 470 MB; q4 is smaller and less accurate."
+            initialValue={values.embeddingDtype}
+            onChangeText={(text: string) => patch({ embeddingDtype: text })}
+          />
+          <SettingsInput
+            label="Unload model after (minutes)"
+            hint="0 keeps it loaded. Memory is a warning, not a limit: up to 2 GB is normal, 2–4 GB is reported in the panel."
+            initialValue={String(values.embeddingIdleMinutes)}
+            onChangeText={(text: string) => {
+              const parsed = Number.parseInt(text, 10);
+              if (Number.isFinite(parsed) && String(parsed) === text.trim()) {
+                patch({ embeddingIdleMinutes: parsed });
+              }
+            }}
+          />
+        </SettingsSection>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingsSection
           title="Integration"
           info="Agents receive read-only vault tools. They are available so an agent can answer an explicit request; nothing here makes an agent consult the vault on its own."
         >

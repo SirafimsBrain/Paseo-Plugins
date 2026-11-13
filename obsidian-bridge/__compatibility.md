@@ -2,7 +2,7 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Verified (2026-11-13, 0.2.1)
+## Verified (2026-11-13, 0.3.0)
 
 | Component | Version | Notes |
 | --- | --- | --- |
@@ -22,6 +22,8 @@ Nothing in 0.2.0 depends on a running app:
 | Scan, watch, reconcile | works | works |
 | Search, read, outline, list, links | works | works |
 | Append / create in `inbox`, `out`, `raw` | works | works |
+| Semantic signal (e5-small q8, ONNX Runtime) | works (Node 24, Paseo/Electron 44) | untested |
+| Short-lived embedding process | works, exits and returns ~1 GB | untested |
 | Authoritative backlinks from Obsidian's own index | not used in 0.2.0 | not used in 0.2.0 |
 | Obsidian fuzzy-search signal | not used in 0.2.0 | not used in 0.2.0 |
 | "Open note in Obsidian" | not shipped | not shipped |
@@ -29,6 +31,16 @@ Nothing in 0.2.0 depends on a running app:
 Enrichment through the Obsidian Local REST API plugin is planned for 0.4.0 and will always be optional.
 
 ## Known limitations
+
+- **A native binary is now part of the plugin.** `onnxruntime-node` ships prebuilt N-API binaries for linux-x64 (and other
+  platforms); npm 12's blocked install scripts are fine because the binaries are inside the tarball. This is still a
+  platform-specific artifact, unlike the pure-Node FTS path.
+- **First semantic run needs network.** The model (~118 MB for `q8`) is downloaded from Hugging Face into
+  `$PASEO_HOME/plugins/obsidian-bridge/models` and cached there; every later run is offline.
+- **RAM:** ~0.5 GB while the query model is loaded, ~1.1 GB peak for the embedding process. Inside 2 GB the plugin says
+  nothing; 2–4 GB is a warning in the panel and in status; there is no hard limit, by product decision.
+- **Vocabulary and language** are the model's; `Xenova/multilingual-e5-small` covers Russian and English, a monolingual
+  model would not.
 
 - **Append-only writes.** Documents can be created and appended, never edited in place, moved, renamed or deleted. The
   write boundary is the configured `vaultPath` plus the `inbox`/`out`/`raw` roles inside it.

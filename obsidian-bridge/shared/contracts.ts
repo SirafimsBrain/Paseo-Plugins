@@ -66,6 +66,33 @@ export const vaultStatusSchema = z.object({
     out: z.string().nullable(),
     raw: z.string().nullable(),
   }),
+  /** Semantic layer: model, vector coverage and background job. */
+  embedding: z.object({
+    enabled: z.boolean(),
+    model: z.string(),
+    dtype: z.string(),
+    /** `unavailable` = enabled but the model could not be loaded. */
+    state: z.enum(["idle", "running", "done", "error", "unavailable"]),
+    chunks: z.number().int(),
+    embedded: z.number().int(),
+    stale: z.number().int(),
+    done: z.number().int(),
+    total: z.number().int(),
+    modelLoaded: z.boolean(),
+    rssMb: z.number().nullable(),
+    error: z.string().nullable(),
+    note: z.string().nullable(),
+  }),
+  /**
+   * Memory of the process that answered. Policy (owner decision): up to 2 GB
+   * is normal and silent, 2-4 GB is reported as a warning, and the project
+   * never imposes a hard memory limit.
+   */
+  memory: z.object({
+    rssMb: z.number(),
+    level: z.enum(["ok", "warning", "high"]),
+    note: z.string().nullable(),
+  }),
 });
 
 export type VaultStatus = z.infer<typeof vaultStatusSchema>;
@@ -130,6 +157,8 @@ export const searchVaultRpc = defineRpc({
     query: z.string().trim().min(1).max(1000),
     limit: z.number().int().min(1).max(50).optional(),
     folder: z.string().trim().max(512).optional(),
+    /** Force the semantic signal on/off for this query. */
+    semantic: z.boolean().optional(),
   }),
   output: searchResultSchema,
 });

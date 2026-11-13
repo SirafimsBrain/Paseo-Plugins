@@ -130,7 +130,7 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
         </Text>
         {status?.watching ? (
           <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}>
-            Watching for changes · read-only
+            Watching for changes · {status.readOnly ? "writes refused" : "append-only writes"}
           </Text>
         ) : null}
         {status?.error ? (
@@ -157,6 +157,30 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
                 {role}: {value === null || value.length === 0 ? fallback : value}
               </Text>
             ))}
+          </View>
+        ) : null}
+
+        {status ? (
+          <View style={{ gap: 2 }}>
+            <Text style={{ color: fgMuted, fontSize: font(10), ...monoFontStyle }} numberOfLines={1}>
+              semantic:{" "}
+              {status.embedding.enabled
+                ? `${status.embedding.model} (${status.embedding.dtype}) · ${status.embedding.embedded}/${status.embedding.chunks} vectors · ${status.embedding.state}`
+                : "off"}
+            </Text>
+            {status.embedding.note ? (
+              <Text
+                style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}
+                numberOfLines={2}
+              >
+                {status.embedding.note}
+              </Text>
+            ) : null}
+            {status.memory.level !== "ok" && status.memory.note ? (
+              <Text style={{ color: danger, fontSize: font(10), ...uiFontStyle }} numberOfLines={3}>
+                {status.memory.note}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
