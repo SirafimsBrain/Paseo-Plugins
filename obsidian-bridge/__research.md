@@ -450,7 +450,88 @@ major digit on an explicit "release", with an annotated `<plugin>@<version>` tag
 
 ---
 
-## 12. Sources
+## 12. Spike: in-process embeddings (0.3.0 preparation)
+
+Run on 2026-11-13 against the real vault (`~/.obsidian/Main/Paseo`, 80 notes, 1 684 chunks, 1.27 M characters)
+before writing any 0.3.0 code. The spike lived in a throwaway directory and was deleted afterwards; only the numbers
+below remain. Purpose: decide whether `@huggingface/transformers` inside the existing Node processes is viable, and
+what the 0.3.0 write path must look like.
+
+Environment: Node 24.20.0, `@huggingface/transformers` 3.8.1, `onnxruntime-node` 1.21.0,
+`Xenova/multilingual-e5-small` with `dtype: "q8"` (`onnx/model_quantized.onnx`, 118 MB), Linux x64,
+Paseo 0.15.4 (Electron 44.2.0, `process.versions.modules` 149). The model was loaded once to warm the cache; load
+times below are warm-cache loads.
+
+### 12.1 Measurements
+
+| Scenario | Load | Throughput | Peak RSS | Notes |
+| --- | --- | --- | --- | --- |
+| Plain Node, 1 684 chunks, batch 1 | 1.4 s | 151 s total, 11 chunks/s | 1 137 MB | first run adds the 118 MB download |
+| Plain Node, 1 684 chunks, batch 16 | 1.7 s | 308 s total, 5 chunks/s | 1 491 MB | batching makes it *slower* |
+| 200-chunk sample, batch 1 / 4 / 8 / 16 | — | 21 / 9 / 7 / 6 chunks/s | — | same model, same texts |
+| Worker thread, 400 chunks, batch 1 | 1.5 s | 22.6 s, 18 chunks/s | 649 MB | main-thread max lag **1 ms** |
+| Paseo runtime (`ELECTRON_RUN_AS_NODE=1 /opt/Paseo/Paseo.bin`) | 1.1 s | two texts in 12 ms | 354 MB | `dims: [2, 384]`, no ABI problem |
+
+Other figures, all on the real index: embedding dim 384; query embedding latency 9.7 ms; brute-force cosine over all
+1 684 vectors 2.5 ms; `dispose()` finishes without error in 14–72 ms.
+
+### 12.2 What the spike proved
+
+1. **The stack works inside the runtime the plugin actually runs in.** `onnxruntime-node` is a prebuilt N-API binary;
+   it loaded in both plain Node 24 and Electron 44 (`ELECTRON_RUN_AS_NODE`), which is the ABI of the Paseo daemon that
+   hosts plugin server code. No compiler, no Python, no daemon.
+2. **`dtype: "q8"` is the right call, and `quantized: true` is wrong on v3.** The v2 option is gone; v3 uses
+   `dtype`. Passing `quantized` silently loads `onnx/model.onnx` (470 MB fp32) instead of the 118 MB q8 file.
+3. **Do not batch.** With this model and 1 200-character chunks, throughput drops monotonically as the batch grows
+   (21 → 6 chunks/s from batch 1 to 16), while peak RSS grows. One text per `extractor` call is both the fastest and
+   the leanest mode measured; the whole vault then takes ~2.5 minutes instead of ~5.
+4. **Memory, not speed, is the constraint.** Loading the q8 model costs ~0.4–0.5 GB of RSS on top of an 88 MB
+   baseline; a full run peaks at ~1.1 GB. `dispose()` and `gc()` do **not** reliably return that memory (0.5–1.0 GB
+   stayed resident), and terminating a worker thread releases only part of it. Only process exit reliably gives the
+   memory back.
+5. **Worker threads solve the event loop, not the memory.** While the worker embedded, the main thread's worst
+   event-loop delay was 1 ms — exactly what the plugin host needs — but `worker_threads` share the address space, so
+   the RSS belongs to the whole process.
+6. **The default model cache is inside the plugin checkout.** `transformers.js` cached the model in
+   `node_modules/@huggingface/transformers/.cache/…`, i.e. a directory that `paseo plugin update` replaces. Without an
+   override, every plugin update would re-download ~118 MB. 0.3.0 must set `env.cacheDir` to plugin data
+   (`$PASEO_HOME/plugins/obsidian-bridge/models`).
+7. **Blocked install scripts are not a blocker here.** npm 12 (with its `allow-scripts` policy) skipped
+   `onnxruntime-node`'s postinstall, and the package still loaded: the linux-x64 binaries ship inside the tarball
+   (`bin/`, `napi-v3/`). The Paseo install path (`npm ci`) only needs the npm registry.
+8. **Vector storage stays in SQLite.** With 1 684 chunks the vectors are ~2.5 MB (384 × float32) and a full cosine
+   scan is 2.5 ms. `sqlite-vec` would add a second native extension for no measurable gain at this scale.
+
+### 12.3 Consequences for 0.3.0
+
+- **Embedding provider:** `TransformersProvider` as the default, `dtype: "q8"`, `multilingual-e5-small`, batch size 1,
+  `passage:`/`query:` prefixes, `env.cacheDir` under plugin data. Custom/OpenAI-compatible providers stay an interface
+  in 0.3.0 and are only implemented on explicit request (see §12.4).
+- **Where it runs:** never permanently inside the long-lived plugin host or a long-lived MCP server. A full scan is a
+  bounded one-off job, so it belongs in a **short-lived child process** that exits and returns its ~1 GB: the plugin
+  spawns it, streams progress, and the child writes vectors into the same `index.db`. Query embedding needs the model
+  in the MCP process, so it is lazy (first semantic query) and unloaded after an idle timeout; the status must say
+  "model loaded, N MB resident". If even that is unacceptable, semantic query is simply off.
+- **Indexing UX:** first run ≈ 2–5 minutes for this vault (download + 151 s embedding), incremental runs are seconds.
+  The lexical index must be usable immediately, before vectors finish.
+- **Diagnostics:** `obsidian_diagnose` still has to prove recall; the spike says nothing about quality.
+- **Docs:** `__compatibility.md` gains the native-binary, cache-size and memory notes; the README says what the first
+  semantic run downloads.
+
+### 12.4 Principle: stay on the Paseo/Node base
+
+External models and external RAG providers are the **last resort**, not the default. The preference order is:
+
+1. what Paseo and Node already provide (`node:sqlite` + FTS5, the filesystem, the plugin RPC/hook surface);
+2. an in-process npm library with prebuilt binaries (`@huggingface/transformers`), as measured above;
+3. a model or provider outside the process (Ollama, an OpenAI-compatible endpoint, a vector database) only when 1 and 2
+   cannot meet the requirement, and behind an explicit setting.
+
+When a long one-off job (a full re-embedding of a large vault) needs isolation from the daemon, a transient
+`systemd --user` unit is acceptable: it is part of the host OS, adds no new runtime dependency, and the process exit
+returns the memory. It must stay a one-off, not a service the plugin depends on.
+
+## 13. Sources
 
 - Paseo plugin reference — <https://paseo.sh/docs/plugins/reference.md>
 - Paseo plugin hooks (MCP injection, agent tools, timeouts) — <https://paseo.sh/docs/plugins/hooks.md>

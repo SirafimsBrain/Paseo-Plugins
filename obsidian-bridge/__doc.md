@@ -241,12 +241,17 @@ and the panel says so.
 | Version | Work |
 | --- | --- |
 | 0.2.0 (shipped) | Directory roles (workspace/inbox/out/raw) with the root as a hard boundary, append-only write tools to `out`/`raw`/`inbox`, role tags on hits and listings, `maxWriteChars`, `readOnly`. |
-| 0.3.0 | Optional local embeddings (`@huggingface/transformers`, multilingual MiniLM/e5 small, worker thread), vector signal in fusion, `obsidian_diagnose` recall@k. |
+| 0.3.0 | Optional local embeddings (`@huggingface/transformers`, multilingual e5-small q8), vector signal in fusion, `obsidian_diagnose` recall@k. |
 | 0.4.0 | Obsidian-side enrichment via the Local REST API plugin (authoritative backlinks, fuzzy-search signal, SSE-driven reindex, "open in Obsidian"), composer attachment source, workspace panel. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 
-Embeddings and vectors were deliberately left out: the 230 MB / brute-force cosine design is documented in
+Embeddings and vectors were deliberately left out of 0.2.x: the 230 MB / brute-force cosine design is documented in
 `__research.md` §4.3, and the lexical + graph path has to prove its recall first (`obsidian_diagnose`).
+
+The 0.3.0 spike is done (`__research.md` §12). Measured on this vault (1 684 chunks): q8 e5-small loads in ~1.4 s,
+embeds the whole vault in ~151 s (batch 1 is 3–4× faster than batching), query embedding is ~10 ms, a full cosine scan
+is ~2.5 ms, and peak RSS is ~1.1 GB that `dispose()` does not return — so a full scan belongs in a short-lived child
+process, not in the daemon, and the model cache must be moved out of the plugin checkout.
 
 ## 9. Verification
 
