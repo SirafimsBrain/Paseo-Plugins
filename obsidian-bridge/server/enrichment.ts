@@ -19,6 +19,8 @@ import {
 export class EnrichmentService {
   private api: ObsidianApi | null = null;
   private subscription: EventSubscription | null = null;
+  private retryTimer: NodeJS.Timeout | null = null;
+  private lastSettings: RuntimeSettings | null = null;
   private state: EnrichmentStatus = {
     enabled: false,
     url: "",
@@ -34,6 +36,8 @@ export class EnrichmentService {
 
   async configure(settings: RuntimeSettings): Promise<void> {
     this.stopStreams();
+    this.clearRetry();
+    this.lastSettings = settings;
     this.api = createObsidianApi(settings);
     this.state = {
       enabled: this.api !== null,
@@ -52,7 +56,12 @@ export class EnrichmentService {
     this.state.authenticated = probe.authenticated;
     this.state.version = probe.version;
     this.state.error = probe.error;
-    if (!probe.ok) return;
+    if (!probe.ok) {
+      // Obsidian may simply be closed right now: probe again later instead of
+      // requiring the user to re-save the settings.
+      this.scheduleRetry();
+      return;
+    }
 
     const { subscription, error } = await this.api.subscribeEvents((event) => {
       this.state.lastEventAt = new Date().toISOString();
@@ -68,8 +77,24 @@ export class EnrichmentService {
   }
 
   stop(): void {
+    this.clearRetry();
     this.stopStreams();
     this.api = null;
+  }
+
+  private scheduleRetry(): void {
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      const settings = this.lastSettings;
+      if (settings) void this.configure(settings);
+    }, 60_000);
+    this.retryTimer.unref?.();
+  }
+
+  private clearRetry(): void {
+    if (!this.retryTimer) return;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   private stopStreams(): void {

@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.4.0**.
+Version covered: **0.4.1**.
 
 ## 1. Purpose and scope
 
@@ -288,7 +288,7 @@ and the panel says so.
 | 0.2.0 (shipped) | Directory roles (workspace/inbox/out/raw) with the root as a hard boundary, append-only write tools to `out`/`raw`/`inbox`, role tags on hits and listings, `maxWriteChars`, `readOnly`. |
 | 0.3.0 (shipped) | Optional local embeddings (`@huggingface/transformers`, multilingual e5-small q8), vectors in SQLite, semantic signal in fusion, `obsidian_diagnose` recall@k, memory policy in status. |
 | 0.3.1, 0.3.2 (shipped) | Forced-scan fix and per-chunk vector reuse (an edit re-embeds only changed sections); secrets and encryption-at-rest documented in §12. |
-| 0.4.0 (shipped) | Optional Local REST API enrichment (fuzzy signal, authoritative link metadata, SSE vault events, "Open in Obsidian"), composer attachment source, workspace panel. |
+| 0.4.0, 0.4.1 (shipped) | Optional Local REST API enrichment (fuzzy signal, authoritative link metadata, SSE vault events, "Open in Obsidian"), composer attachment source, workspace panel. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -343,7 +343,16 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1)
+
+### 0.4.1
+
+- **Event subscriptions now send an always-true JsonLogic filter.** An empty rule is not guaranteed to match, which could
+  have produced a healthy subscription that filtered every vault event out.
+- **No reconnect loop for permanent failures.** A rejected key or an API without event routes (401/403/404/405) is
+  reported once instead of retried every five seconds; the filesystem watcher keeps working.
+- **Enrichment self-heals.** A probe that fails because Obsidian is closed is retried every 60 s, so starting Obsidian
+  after the plugin no longer requires re-saving the settings.
 
 ### 0.3.2
 

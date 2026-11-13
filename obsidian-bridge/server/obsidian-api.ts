@@ -466,13 +466,16 @@ export class ObsidianApi {
             "Content-Type": "application/vnd.olrapi.jsonlogic+json",
             Accept: "application/json",
           },
-          body: "{}",
+          // Always-true JsonLogic: an empty rule is not guaranteed to match.
+          body: JSON.stringify({ "===": [1, 1] }),
         });
         if (response.status < 200 || response.status >= 300) {
           firstError =
             firstError ??
             `Obsidian refused the '${type}' event subscription (HTTP ${response.status}).`;
-          scheduleReconnect(type);
+          // A wrong key or an old plugin that has no event routes will not get
+          // better by retrying every five seconds; the file watcher still runs.
+          if (![401, 403, 404, 405].includes(response.status)) scheduleReconnect(type);
           return;
         }
         const data = parseJson(response.body);
