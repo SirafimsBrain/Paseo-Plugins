@@ -93,7 +93,9 @@ export default function contribute(server: PluginServerContext) {
    */
   async function syncConfigRegistration(): Promise<void> {
     const state = await settings.read().catch(() => null);
-    const wanted = state?.status === "ready" && state.values.registerOpencodeMcp;
+    // Default on, matching the schema: an unreadable store must not silently
+    // take the tools away from agents.
+    const wanted = state?.status === "ready" ? state.values.registerOpencodeMcp !== false : true;
     if (!wanted) {
       unregisterOpencodeMcp();
       unregisterKiloMcp();

@@ -20,10 +20,12 @@ export const DEFAULT_EXCLUDES = ".obsidian/**, .trash/**, .git/**, .smart-env/**
 export const obsidianBridgeSettings = defineSettings({
   id: "obsidian-bridge",
   scope: "host",
-  // 5: OpenCode/Kilo config registration (0.5.4). 4: optional Obsidian Local
-  // REST API enrichment (0.4.0). 3 added the semantic settings; 2 added
-  // directory roles and maxWriteChars.
-  version: 5,
+  // 4: optional Obsidian Local REST API enrichment (0.4.0). 3 added the
+  // semantic settings; 2 added directory roles and maxWriteChars. Adding
+  // `registerOpencodeMcp` (0.5.5) kept the version: a stored document without
+  // it validates to the schema default, while bumping the version turned every
+  // existing document invalid.
+  version: 4,
   schema: z.object({
     /**
      * Absolute path of the local Obsidian vault. Empty means "not
