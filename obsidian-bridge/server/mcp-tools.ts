@@ -606,7 +606,11 @@ export async function dispatchTool(
         const meta = runtime.store.noteMeta(relPath);
         return {
           text: note.text,
+          // The body is part of the structured result too: an MCP client that
+          // renders only `structuredContent` (OpenCode does) would otherwise
+          // see the metadata and no text at all.
           structuredContent: {
+            content: note.text,
             path: relPath,
             role: roleOfPath(relPath, runtime.dirs),
             title: note.parsed.title,

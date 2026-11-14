@@ -93,7 +93,10 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
       });
     });
   } else {
-    const chunkRows = store.searchChunks(query, 60);
+    // One rank per note: a long headingless file (a converted export, a raw
+    // JSON dump) otherwise fills the chunk list with dozens of rows that all
+    // fuse into one entry and outrank the small note that matches every word.
+    const chunkRows = uniqueByPath(store.searchChunks(query, 60));
     if (chunkRows.length > 0) signals.push("chunks");
     chunkRows.forEach((row, index) => {
       add({
@@ -135,18 +138,25 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     if (embedded.length > 0) {
       signals.push("semantic");
       const vector = options.semantic.vector;
-      embedded
+      const ranked = embedded
         .map((row) => ({ row, similarity: dotProduct(vector, row.vec) }))
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, SEMANTIC_CANDIDATES)
-        .forEach((entry, index) => {
-          add({
-            path: entry.row.path,
-            heading: entry.row.heading,
-            snippet: entry.row.text,
-            score: WEIGHT_SEMANTIC / (RRF_K + index + 1),
-          });
+        .sort((a, b) => b.similarity - a.similarity);
+      const nearest: typeof ranked = [];
+      const seen = new Set<string>();
+      for (const entry of ranked) {
+        if (seen.has(entry.row.path)) continue;
+        seen.add(entry.row.path);
+        nearest.push(entry);
+        if (nearest.length === SEMANTIC_CANDIDATES) break;
+      }
+      nearest.forEach((entry, index) => {
+        add({
+          path: entry.row.path,
+          heading: entry.row.heading,
+          snippet: entry.row.text,
+          score: WEIGHT_SEMANTIC / (RRF_K + index + 1),
         });
+      });
     }
   }
 
@@ -221,6 +231,16 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
       error: options.enrichment?.error ?? null,
     },
   };
+}
+
+/** Keeps the first (best-ranked) row per note path. */
+function uniqueByPath<T extends { path: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (seen.has(row.path)) return false;
+    seen.add(row.path);
+    return true;
+  });
 }
 
 /** Dot product of two L2-normalised vectors, i.e. their cosine similarity. */

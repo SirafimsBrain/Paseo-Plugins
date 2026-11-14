@@ -134,6 +134,34 @@ describe("dispatchTool", () => {
     expect(missing.isError).toBe(true);
   });
 
+  it("returns the body in structuredContent, which some MCP clients render exclusively", async () => {
+    const { settings } = indexed();
+    const whole = await dispatchTool("obsidian_read", { path: "Projects/orion/Plan.md" }, settings);
+    const structured = whole.structuredContent as { content: string; path: string; truncated: boolean };
+    expect(structured.content).toContain("Ship the queue in Q3");
+    expect(structured.content).toBe(whole.text);
+    expect(structured.truncated).toBe(false);
+  });
+
+  it("ranks a small exact match above a long headingless file", async () => {
+    // One converted export, no headings: its many chunks used to fuse into a
+    // single entry and outrank the note that matches every query word.
+    const noise = Array.from({ length: 400 }, (_, index) => `vnc viewer row ${index} alpha beta gamma delta`).join("\n");
+    const created = workspace({
+      "raw/export.md": noise,
+      "Test obsidian-bridge/vnc.md": "# VNC\n\n## Выжимка\n\nvncpasswd Remmina KRDC gvncviewer.\n",
+    });
+    const settings = runtimeSettings(created.vault);
+    const store = new BridgeStore(indexPathFor(created.vault), { stemming: false });
+    scanVault({ root: created.vault, store, settings, force: true });
+    store.close();
+
+    const outcome = await dispatchTool("obsidian_search", { query: "vncpasswd Remmina KRDC gvncviewer" }, settings);
+    const hits = (outcome.structuredContent as { hits: Array<{ path: string }> }).hits;
+    expect(hits[0].path).toBe("Test obsidian-bridge/vnc.md");
+    expect(hits.filter((hit) => hit.path === "raw/export.md").length).toBeLessThanOrEqual(1);
+  });
+
   it("refuses a path outside the vault", async () => {
     const { settings } = indexed();
     const escape = await dispatchTool("obsidian_read", { path: "../../etc/passwd" }, settings);

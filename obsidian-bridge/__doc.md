@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.5.5**.
+Version covered: **0.5.6**.
 
 ## 1. Purpose and scope
 
@@ -306,6 +306,7 @@ and the panel says so.
 | 0.4.3 (shipped) | Created agents receive the MCP server through `agent.create.before`, so a new OpenCode/Cline agent has the Obsidian tools on its first turn. |
 | 0.4.4 (shipped) | `obsidian_status` reports the plugin's real vault-event subscription state instead of `events: false`. |
 | 0.5.4, 0.5.5 (shipped) | OpenCode/Kilo config-file registration, so those agents get the tools where Paseo cannot inject a server. |
+| 0.5.6 (shipped) | Read body in `structuredContent` (OpenCode showed none), and per-note fusion so a long export cannot outrank an exact match. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -360,7 +361,19 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6)
+
+### 0.5.6
+
+- **An OpenCode agent read a note and got no text.** `obsidian_read` put the body in the MCP text block only; OpenCode
+  renders `structuredContent`, so the agent saw path, title, headings and `truncated: false` with nothing to read. The body
+  is now also `content` in the structured result.
+- **A long headingless file outranked the note that matched every word.** Chunk rows were fused one by one, so a converted
+  export with dozens of matching chunks under a single empty heading summed dozens of RRF contributions into one entry
+  (`0.196` against `0.05` for the real match). Chunks and semantic neighbours are now deduplicated per note before fusion,
+  which also keeps one hit per note instead of several chunks of it. Measured on the vault: the moved test note went from
+  rank 5 / miss to rank 1 for its own key phrases ("vncpasswd Remmina KRDC gvncviewer", "KRDC Vinagre gvncviewer").
+  Tests: body-in-structuredContent case and the ranking case in `tests/mcp-tools.test.ts`.
 
 ### 0.5.5
 
