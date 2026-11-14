@@ -167,8 +167,12 @@ export function configStatus(agent: AgentTarget): ConfigMcpStatus {
   const entry = resolved.document.mcp?.[CONFIG_MCP_SERVER_NAME];
   const installed = isEntry(entry);
   const registered = installed ? fromEntry(entry) : null;
+  // A registration written during a plugin update can point at a checkout the
+  // update then replaced; the path must still exist to count as current.
   const upToDate = registered
-    ? registered.command === launch.command && sameStrings(registered.args, launch.args)
+    ? registered.command === launch.command &&
+      sameStrings(registered.args, launch.args) &&
+      fs.existsSync(registered.args[0] ?? "")
     : null;
   return {
     path: target,

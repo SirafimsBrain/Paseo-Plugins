@@ -2,7 +2,7 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Verified (2026-11-14, 0.8.7)
+## Verified (2026-11-14, 0.8.8)
 
 | Component | Version | Notes |
 | --- | --- | --- |

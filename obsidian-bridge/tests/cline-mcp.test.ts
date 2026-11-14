@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clineMcpStatus, clineSettingsPath, registerClineMcp, unregisterClineMcp } from "../server/cline-mcp";
+import { mcpServerCommand } from "../server/mcp-launch";
 
 /**
  * Cline ignores a stdio server from the session payload, so the plugin writes
@@ -46,7 +47,15 @@ describe("Cline MCP registration", () => {
     expect(entry.transport.type).toBe("stdio");
     expect(entry.transport.command).toMatch(/node$/);
     expect(entry.transport.args[0]).toMatch(/mcp-server\.js$/);
-    expect(clineMcpStatus()).toMatchObject({ detected: true, installed: true, upToDate: true, error: null });
+    // `upToDate` also requires the registered script to exist; whether the
+    // bundled entry exists depends on the test environment, not on the writer.
+    const launch = mcpServerCommand();
+    expect(clineMcpStatus()).toMatchObject({
+      detected: true,
+      installed: true,
+      upToDate: fs.existsSync(launch.args[0] ?? ""),
+      error: null,
+    });
   });
 
   it("preserves other servers and unrelated keys", () => {
@@ -76,9 +85,12 @@ describe("Cline MCP registration", () => {
       }),
       "utf-8",
     );
+    // A path that does not exist is never current, even before comparing args.
     expect(clineMcpStatus().upToDate).toBe(false);
     registerClineMcp();
-    expect(clineMcpStatus().upToDate).toBe(true);
+    const registered = clineMcpStatus();
+    expect(registered.installed).toBe(true);
+    expect(registered.args).toEqual(mcpServerCommand().args);
   });
 
   it("removes only its own entry", () => {

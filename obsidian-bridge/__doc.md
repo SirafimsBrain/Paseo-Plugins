@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.8.7**.
+Version covered: **0.8.8**.
 
 ## 1. Purpose and scope
 
@@ -336,6 +336,7 @@ and the panel says so.
 | 0.6.7 (shipped) | `obsidian_edit`: exact-fragment edit of any existing note by vault path, outside the role writers. |
 | 0.7.7 (shipped) | Agent skill shipped with the plugin and installed into existing agent skills directories. |
 | 0.8.7 (shipped) | Cline MCP registration, enforced skill currency with repair, and a visible installation status in settings. |
+| 0.8.8 (shipped) | Registrations are checked for an existing target and refreshed on the timer, so an update cannot leave a dead path. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -394,7 +395,16 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8)
+
+### 0.8.8
+
+- **A registration written during `paseo plugin update` pointed at a replaced checkout.** Measured: Cline's entry named
+  `…/obsidian-bridge/efa423e0…/checkout/…/dist/mcp-server.js`, a directory the update had already removed, so Cline failed
+  to spawn the server and a real Cline agent reported `OBSIDIAN_TOOLS=no` while the same agent saw `memory-flash` tools.
+  Two fixes: `upToDate` now also requires the registered script path to exist (a moved install shows as outdated instead of
+  current), and the five-minute check re-runs `syncConfigRegistration()`, so a stale entry heals without the user opening
+  settings. Registration is skipped when the entry is already current, so the periodic check does not rewrite config files.
 
 ### 0.8.7
 

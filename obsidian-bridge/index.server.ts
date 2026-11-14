@@ -108,10 +108,13 @@ export default function contribute(server: PluginServerContext) {
     const wantedCline = state?.status === "ready" ? state.values.registerClineMcp !== false : true;
     if (!wantedCline) {
       unregisterClineMcp();
-    } else if (clineMcpStatus().detected) {
-      const result = registerClineMcp();
-      if (!result.ok) console.warn(`[obsidian-bridge] Cline config not updated: ${result.error}`);
-      else console.log(`[obsidian-bridge] Cline config carries the server: ${clineMcpStatus().path}`);
+    } else {
+      const status = clineMcpStatus();
+      if (status.detected && !(status.installed && status.upToDate === true)) {
+        const result = registerClineMcp();
+        if (!result.ok) console.warn(`[obsidian-bridge] Cline config not updated: ${result.error}`);
+        else console.log(`[obsidian-bridge] Cline config carries the server: ${status.path}`);
+      }
     }
     if (!wanted) {
       unregisterOpencodeMcp();
@@ -120,7 +123,7 @@ export default function contribute(server: PluginServerContext) {
       return;
     }
     const opencode = opencodeMcpStatus();
-    if (opencode.detected) {
+    if (opencode.detected && !(opencode.installed && opencode.upToDate === true)) {
       const result = registerOpencodeMcp();
       if (!result.ok) {
         console.warn(`[obsidian-bridge] OpenCode config not updated: ${result.error}`);
@@ -128,7 +131,8 @@ export default function contribute(server: PluginServerContext) {
         console.log(`[obsidian-bridge] OpenCode config carries the server: ${opencode.path}`);
       }
     }
-    if (kiloMcpStatus().detected) {
+    const kilo = kiloMcpStatus();
+    if (kilo.detected && !(kilo.installed && kilo.upToDate === true)) {
       const result = registerKiloMcp();
       if (!result.ok) console.warn(`[obsidian-bridge] Kilo config not updated: ${result.error}`);
     }
@@ -176,6 +180,10 @@ export default function contribute(server: PluginServerContext) {
       console.log(`[obsidian-bridge] agent skill was stale and was repaired: ${target}`);
     }
     for (const error of result.errors) console.warn(`[obsidian-bridge] agent skill check failed: ${error}`);
+    // The same check for the config files: a registration can point at a
+    // checkout that a plugin update replaced, and that must heal without the
+    // user opening settings.
+    void syncConfigRegistration();
   }, 5 * 60_000);
   skillCheckTimer.unref?.();
 

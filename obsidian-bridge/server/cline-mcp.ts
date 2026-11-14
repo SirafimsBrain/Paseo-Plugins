@@ -109,7 +109,8 @@ export function clineMcpStatus(): ClineMcpStatus {
         ? null
         : registered.command === launch.command &&
           registered.args.length === launch.args.length &&
-          registered.args.every((value, index) => value === launch.args[index]),
+          registered.args.every((value, index) => value === launch.args[index]) &&
+          fs.existsSync(registered.args[0] ?? ""),
     command: registered?.command ?? null,
     args: registered?.args ?? null,
     error: null,
