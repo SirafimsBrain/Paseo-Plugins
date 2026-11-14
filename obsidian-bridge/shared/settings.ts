@@ -129,6 +129,14 @@ export const obsidianBridgeSettings = defineSettings({
      * removed when this switch is turned off. Off = no config file is touched.
      */
     registerOpencodeMcp: z.boolean().default(true),
+    /**
+     * Install the plugin's own agent skill (`skills/obsidian-bridge/SKILL.md`)
+     * into the skills directories the installed agents actually use
+     * (`~/.config/opencode/skills`, `~/.opencode/skills`, `~/.agents/skills`,
+     * `~/.claude/skills`). It teaches the writing and reading workflow and the
+     * Obsidian Markdown vocabulary. Off = no skills directory is touched.
+     */
+    installAgentSkill: z.boolean().default(true),
   }),
 });
 

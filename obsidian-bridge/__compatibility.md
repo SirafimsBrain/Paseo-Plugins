@@ -2,7 +2,7 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Verified (2026-11-14, 0.6.7)
+## Verified (2026-11-14, 0.7.7)
 
 | Component | Version | Notes |
 | --- | --- | --- |
@@ -55,6 +55,11 @@ when it is closed every capability above falls back to the disk index and status
 - **Vocabulary and language** are the model's; `Xenova/multilingual-e5-small` covers Russian and English, a monolingual
   model would not.
 
+- **Agent skills.** Paseo 0.15.4 exposes no skill API, so the plugin's skill is installed as a file
+  (`<skills-root>/obsidian-bridge/SKILL.md`) into roots that already exist: `~/.config/opencode/skills` (OpenCode 2.3.0),
+  `~/.opencode/skills`, `~/.agents/skills` (Codex-style), `~/.claude/skills`. Skills are discovered at runtime start, so a
+  running agent needs a restart. The official skills ([obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills))
+  are the upstream reference for Bases, Canvas and the CLI and are not vendored.
 - **Writes.** Documents are created and appended inside the `inbox`/`out`/`raw` roles; `obsidian_edit` (0.6.7) additionally
   replaces one exact fragment in an existing note anywhere under the configured `vaultPath`. Nothing is moved, renamed or
   deleted, `.obsidian` is never addressed, and a symlink leading outside the directory is refused.

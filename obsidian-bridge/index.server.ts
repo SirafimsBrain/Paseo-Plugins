@@ -20,6 +20,7 @@ import { fuzzySearch } from "./server/enrichment";
 import { VaultIndexer } from "./server/indexer";
 import { createObsidianApi, ObsidianApi } from "./server/obsidian-api";
 import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
+import { agentSkillStatus, installAgentSkill, removeAgentSkill } from "./server/agent-skill";
 import {
   agentConfigCoversProvider,
   kiloMcpStatus,
@@ -117,7 +118,40 @@ export default function contribute(server: PluginServerContext) {
     }
   }
 
+  /**
+   * Installs (or removes) the plugin's agent skill.
+   *
+   * Paseo has no skill API, so the skill reaches agents as a `SKILL.md` in the
+   * skills directory their runtime already scans. Only directories that exist
+   * are touched, and a copy that already matches the checkout is left alone.
+   */
+  async function syncAgentSkill(): Promise<void> {
+    const state = await settings.read().catch(() => null);
+    const wanted = state?.status === "ready" ? state.values.installAgentSkill !== false : true;
+    if (!wanted) {
+      const { removed, errors } = removeAgentSkill();
+      for (const dir of removed) console.log(`[obsidian-bridge] agent skill removed: ${dir}`);
+      for (const error of errors) console.warn(`[obsidian-bridge] agent skill not removed: ${error}`);
+      return;
+    }
+    const result = installAgentSkill();
+    if (!result.ok) {
+      console.warn(`[obsidian-bridge] agent skill not installed: ${result.error}`);
+      return;
+    }
+    for (const target of result.targets) console.log(`[obsidian-bridge] agent skill installed: ${target}`);
+    if (result.targets.length === 0) {
+      const status = agentSkillStatus();
+      console.log(
+        status.detected.length === 0
+          ? "[obsidian-bridge] no agent skills directory found; skill not installed"
+          : `[obsidian-bridge] agent skill already current in ${status.installed.length} director(ies)`,
+      );
+    }
+  }
+
   void syncConfigRegistration();
+  void syncAgentSkill();
 
   const indexer = new VaultIndexer(readRuntimeSettings);
   void indexer.start().catch((cause) => {
@@ -131,6 +165,7 @@ export default function contribute(server: PluginServerContext) {
   const removeSettingsListener = settings.subscribe(() => {
     void mirrorSettings();
     void syncConfigRegistration();
+    void syncAgentSkill();
     void indexer.reconfigure();
   });
 

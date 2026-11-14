@@ -419,6 +419,12 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             onValueChange={(enabled: boolean) => patch({ registerOpencodeMcp: enabled })}
           />
           <SettingsSwitch
+            label="Install the obsidian-bridge skill for agents"
+            hint="Writes the plugin's SKILL.md into the skills directories the installed agents use (~/.config/opencode/skills, ~/.opencode/skills, ~/.agents/skills, ~/.claude/skills) — only where such a directory already exists. Removed again when this switch is off."
+            value={values.installAgentSkill}
+            onValueChange={(enabled: boolean) => patch({ installAgentSkill: enabled })}
+          />
+          <SettingsSwitch
             label="Refuse writes"
             hint="Turns every write tool off. Writes are already append-only and confined to the inbox/out/raw directories, so this is an extra brake."
             value={values.readOnly}

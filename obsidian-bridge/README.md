@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.6.7)
+## What it does (0.7.7)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -29,6 +29,12 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
   notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
+- **An agent skill, shipped with the plugin.** `skills/obsidian-bridge/SKILL.md` teaches the read → cite workflow,
+  where a write is allowed, the exact-fragment edit rule and the Obsidian Markdown vocabulary an agent actually needs.
+  The plugin installs it into the skills directories the installed agents already scan, and removes it when the switch is
+  off. The official Obsidian skills (Obsidian Flavored Markdown, Bases, JSON Canvas, Obsidian CLI) are a separate,
+  upstream project — [obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills); this plugin ships its own
+  skill so the workflow can be reviewed and versioned together with the tools it describes.
 - **Exact-fragment edit of any existing note.** `obsidian_edit` takes a vault path, an `old_text` that must occur exactly
   once and its `new_text`: the one tool that can change a note outside the inbox/out/raw roles (a note the user filed in a
   project folder, a moved document). The rest of the file — frontmatter, other sections, whitespace — is written back byte
@@ -160,6 +166,18 @@ attaches the equivalent `obsidian_bridge_*` tools instead.
 
 Every tool description states the rule the plugin is built around: use it only when the user explicitly asks about their
 Obsidian notes, never as a place to record agent memory.
+
+## Agent skill
+
+The plugin ships its own [Agent Skills](https://agentskills.io/specification) skill at
+[`skills/obsidian-bridge/SKILL.md`](./skills/obsidian-bridge/SKILL.md) and installs it on load into the skills directories
+that exist: `~/.config/opencode/skills`, `~/.opencode/skills`, `~/.agents/skills`, `~/.claude/skills` (each as
+`obsidian-bridge/SKILL.md`). Unchanged copies are not rewritten; the switch in the settings screen removes the directory.
+A runtime that only scans skills at startup needs a restart to pick it up.
+
+The official Obsidian skills are a separate upstream project, kept as the reference for the formats this plugin does not
+cover — [github.com/obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills) (`obsidian-markdown`,
+`obsidian-bases`, `json-canvas`, `obsidian-cli`, `knap`).
 
 ## Notes and limits
 

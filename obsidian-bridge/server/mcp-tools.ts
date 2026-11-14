@@ -69,7 +69,8 @@ export function mcpInstructions(dirs: RoleDirs): string {
     directoryGuide(dirs) +
     "\n\nWrite only where the user asked you to: authored documents go to `out`, scratch and " +
     "intermediate notes to `raw`, and appends to incoming material to `inbox`. Never create a " +
-    "note outside those directories."
+    "note outside those directories.\n\nA skill named `obsidian-bridge` documents the same workflow " +
+    "in more detail (search → read the heading → write); load it when your runtime offers skills."
   );
 }
 

@@ -78,7 +78,7 @@ function resolveBundledEntry(file: string): string {
 }
 
 /** Reads the plugin directory from the daemon config (`plugins.<id>.path`). */
-function configuredPluginPath(): string | null {
+export function configuredPluginPath(): string | null {
   try {
     const raw = JSON.parse(readFileSync(path.join(paseoHome(), "config.json"), "utf8")) as {
       plugins?: Record<string, { path?: unknown }>;

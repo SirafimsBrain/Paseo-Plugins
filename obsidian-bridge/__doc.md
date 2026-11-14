@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.6.7**.
+Version covered: **0.7.7**.
 
 ## 1. Purpose and scope
 
@@ -304,6 +304,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `obsidianApiUrl` | `https://127.0.0.1:27124` | Local REST API base URL. Self-signed TLS is accepted for loopback hosts only. |
 | `obsidianApiKey` | `""` | Bearer token for that API. Mirrored in a `0600` settings file; never logged. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
+| `installAgentSkill` | `true` | Install `skills/obsidian-bridge/SKILL.md` into every agent skills directory that exists; remove it when off. |
 | `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists); keep it across plugin restarts and remove it when the switch is off. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
@@ -332,6 +333,7 @@ and the panel says so.
 | 0.5.6 (shipped) | Read body in `structuredContent` (OpenCode showed none), and per-note fusion so a long export cannot outrank an exact match. |
 | 0.5.7 (shipped) | Keep the config entry across plugin restarts, so an update no longer empties a live agent's tool namespace. |
 | 0.6.7 (shipped) | `obsidian_edit`: exact-fragment edit of any existing note by vault path, outside the role writers. |
+| 0.7.7 (shipped) | Agent skill shipped with the plugin and installed into existing agent skills directories. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -345,7 +347,7 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
 
 ## 9. Verification
 
-`npm test` (103 tests, 12 suites, ~0.6 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (110 tests, 13 suites, ~0.9 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
@@ -390,7 +392,25 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7)
+
+### 0.7.7
+
+- **Agents had tool schemas but no instructions on how to use a vault well.** Added the plugin's own Agent Skill,
+  `skills/obsidian-bridge/SKILL.md` (frontmatter `name`/`description`, per the Agent Skills specification): the read →
+  cite workflow, heading-scoped reads for long reports, where a write is allowed, the exactly-once `old_text` rule of
+  `obsidian_edit`, the difference between appending a section and editing a note, and the Obsidian Flavored Markdown
+  vocabulary (wikilinks, embeds, callouts, properties, tags, highlights, math, Mermaid, footnotes). Paseo 0.15.x has no
+  skill API, so `server/agent-skill.ts` installs the file where the agent runtimes already look for one
+  (`~/.config/opencode/skills`, `~/.opencode/skills`, `~/.agents/skills`, `~/.claude/skills`), touching only roots that
+  exist, rewriting only when the content differs, and removing `obsidian-bridge/` when `installAgentSkill` is off. The MCP
+  `initialize` instructions also point at the skill by name.
+- **The official skills stay upstream.** `obsidianmd/obsidian-skills` is the reference for Obsidian Flavored Markdown,
+  Bases, JSON Canvas and the Obsidian CLI; it is linked from the README, `__compatibility.md` and from the skill's own
+  References section, but it is not vendored: the plugin's skill is the controllable one, versioned and reviewed in this
+  repository, and it only restates the Markdown vocabulary an agent needs for the notes the bridge writes.
+- Tests: `tests/agent-skill.test.ts` (7 cases: frontmatter of the shipped skill, source resolution, install only into
+  existing roots, idempotent reinstall, stale replacement, removal that spares other skills, no-root case).
 
 ### 0.6.7
 
