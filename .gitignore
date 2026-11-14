@@ -111,5 +111,8 @@ Documentations/Reference\ Guides/
 
 gha-creds-*.json
 
+# Imported-conversation exports the client writes into the project (local only)
+.cloud-attachments/
+
 # TypeScript incremental build info (bunny-search solution tsconfigs)
 *.tsbuildinfo
