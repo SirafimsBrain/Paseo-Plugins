@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.4.1**.
+Version covered: **0.4.2**.
 
 ## 1. Purpose and scope
 
@@ -229,7 +229,8 @@ Decision table (`server/session-open.ts`, unit-tested):
 | `purpose: "history"` | nothing |
 | Saved config already has `obsidian-bridge` | nothing (and no duplicate tool) |
 | Provider has no MCP support | attached tools |
-| Agent record missing/unreadable | attached tools |
+| Agent record missing on `create` (written after the open) | MCP server injection (0.4.2) |
+| Agent record missing/unreadable on other reasons | attached tools |
 | Provider capabilities unknown | attached tools |
 | Otherwise | MCP server injection |
 
@@ -289,6 +290,7 @@ and the panel says so.
 | 0.3.0 (shipped) | Optional local embeddings (`@huggingface/transformers`, multilingual e5-small q8), vectors in SQLite, semantic signal in fusion, `obsidian_diagnose` recall@k, memory policy in status. |
 | 0.3.1, 0.3.2 (shipped) | Forced-scan fix and per-chunk vector reuse (an edit re-embeds only changed sections); secrets and encryption-at-rest documented in §12. |
 | 0.4.0, 0.4.1 (shipped) | Optional Local REST API enrichment (fuzzy signal, authoritative link metadata, SSE vault events, "Open in Obsidian"), composer attachment source, workspace panel. |
+| 0.4.2 (shipped) | Created agents receive the MCP server: a missing agent record on `create` no longer counts as an unknown saved configuration. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -343,7 +345,21 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.2)
+
+### 0.4.2
+
+- **Agents created in Paseo never received the Obsidian tools.** `agent.open.before` fires for a new agent before Paseo
+  writes its record, so the saved-configuration lookup returned `missing`; the decision table read that as an unknown
+  saved configuration and took the attached-tools branch every time. OpenCode (and Cline) surface only MCP servers, so the
+  agent saw no `obsidian_*` tools at all, while resumes of older agents kept working. A missing record on
+  `reason: "create"` is now read for what it is — nothing saved yet, and therefore nothing that could collide — so the
+  MCP server is contributed on creation as well. Attached tools remain the fallback for providers without MCP support and
+  for unreadable records. Test: `tests/session-open.test.ts` `injects on create, where the record is written only after
+  the open`.
+- **Verified live** on a real installation (Paseo 0.15.4, vault `/home/sirafim/.obsidian/Main/Paseo`, 80 notes,
+  1 684 chunks): Local REST API 5.5.2 probe, `POST /search/simple/`, note metadata and four SSE event streams all answer;
+  semantic coverage 1 684/1 684; `obsidian_diagnose` recall@5 1.0 lexical and hybrid.
 
 ### 0.4.1
 

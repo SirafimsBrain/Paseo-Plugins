@@ -52,6 +52,12 @@ describe("decideSessionOpen", () => {
     });
   });
 
+  it("injects on create, where the record is written only after the open", () => {
+    expect(
+      decideSessionOpen(input({ reason: "create", lookup: { status: "missing" } })),
+    ).toMatchObject({ injectMcp: true, attachTool: false });
+  });
+
   it("falls back to attached tools when the agent record cannot be read", () => {
     expect(decideSessionOpen(input({ lookup: { status: "missing" } }))).toMatchObject({
       injectMcp: false,

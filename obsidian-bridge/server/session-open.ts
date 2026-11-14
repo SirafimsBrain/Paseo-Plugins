@@ -75,7 +75,13 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
   if (input.supportsMcpServers === false) {
     return { injectMcp: false, attachTool: true, why: "attaching tools: provider has no MCP support" };
   }
-  if (input.lookup.status !== "found") {
+  // A freshly created agent has no saved record yet: Paseo writes it after the
+  // session opens, so `missing` on `create` means "nothing saved that could
+  // collide", not an unknown state. Treating it as unknown sent every created
+  // agent down the attached-tools path, where most providers (OpenCode, Cline)
+  // never surface the tools at all.
+  const freshAgent = input.reason === "create" && input.lookup.status === "missing";
+  if (input.lookup.status !== "found" && !freshAgent) {
     return {
       injectMcp: false,
       attachTool: true,
