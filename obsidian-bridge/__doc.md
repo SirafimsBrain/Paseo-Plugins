@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.4.3**.
+Version covered: **0.4.4**.
 
 ## 1. Purpose and scope
 
@@ -296,6 +296,7 @@ and the panel says so.
 | 0.3.1, 0.3.2 (shipped) | Forced-scan fix and per-chunk vector reuse (an edit re-embeds only changed sections); secrets and encryption-at-rest documented in §12. |
 | 0.4.0, 0.4.1 (shipped) | Optional Local REST API enrichment (fuzzy signal, authoritative link metadata, SSE vault events, "Open in Obsidian"), composer attachment source, workspace panel. |
 | 0.4.3 (shipped) | Created agents receive the MCP server through `agent.create.before`, so a new OpenCode/Cline agent has the Obsidian tools on its first turn. |
+| 0.4.4 (shipped) | `obsidian_status` reports the plugin's real vault-event subscription state instead of `events: false`. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -350,7 +351,17 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4)
+
+### 0.4.4
+
+- **`obsidian_status` reported `events: false` while four vault streams were open.** The event subscriptions belong to the
+  plugin process; every agent spawns its own short-lived stdio MCP server, which has none, so the status builder filled
+  those two fields with literals. `EnrichmentService` now publishes `{events, lastEventAt}` to
+  `$PASEO_HOME/plugins/obsidian-bridge/enrichment-state.json` on every transition (probe, subscription, each vault event,
+  stop), and the MCP status reads that record — still only when the probe answers, so a closed Obsidian never reports
+  live events. Files: `server/enrichment-state.ts` (new), `server/enrichment.ts`, `server/indexer.ts`, `server/mcp-tools.ts`;
+  tests: `tests/enrichment-state.test.ts` (round-trip, data-directory location, absent record, corrupt record).
 
 ### 0.4.3
 

@@ -1,4 +1,5 @@
 import type { EnrichmentStatus } from "../shared/contracts";
+import type { EnrichmentEventState } from "./enrichment-state";
 import type { RuntimeSettings } from "../shared/settings";
 import {
   createObsidianApi,
@@ -32,7 +33,16 @@ export class EnrichmentService {
     error: null,
   };
 
-  constructor(private readonly onVaultEvent: (event: VaultEvent) => void) {}
+  constructor(
+    private readonly onVaultEvent: (event: VaultEvent) => void,
+    /** Publishes the live state for the MCP server (`enrichment-state.ts`). */
+    private readonly publishState: (state: EnrichmentEventState) => void = () => {},
+  ) {}
+
+  /** Mirrors the subscription flags after every transition. */
+  private publish(): void {
+    this.publishState({ events: this.state.events, lastEventAt: this.state.lastEventAt });
+  }
 
   async configure(settings: RuntimeSettings): Promise<void> {
     this.stopStreams();
@@ -49,7 +59,10 @@ export class EnrichmentService {
       lastEventAt: this.state.lastEventAt,
       error: null,
     };
-    if (!this.api) return;
+    if (!this.api) {
+      this.publish();
+      return;
+    }
 
     const probe = await this.api.probe();
     this.state.reachable = probe.ok;
@@ -59,17 +72,20 @@ export class EnrichmentService {
     if (!probe.ok) {
       // Obsidian may simply be closed right now: probe again later instead of
       // requiring the user to re-save the settings.
+      this.publish();
       this.scheduleRetry();
       return;
     }
 
     const { subscription, error } = await this.api.subscribeEvents((event) => {
       this.state.lastEventAt = new Date().toISOString();
+      this.publish();
       this.onVaultEvent(event);
     });
     this.subscription = subscription;
     this.state.events = subscription !== null;
     this.state.error = error;
+    this.publish();
   }
 
   status(): EnrichmentStatus {
@@ -80,6 +96,7 @@ export class EnrichmentService {
     this.clearRetry();
     this.stopStreams();
     this.api = null;
+    this.publish();
   }
 
   private scheduleRetry(): void {

@@ -78,6 +78,6 @@ MIT. See [LICENSE](./LICENSE).
 | [memory-flash-client](./memory-flash-client/README.md) | 0.4.2 | 0.14.0 (2026-10-29) | `>=0.14.0` | `@getpaseo/plugin ^0.14.0` | Compatible; 0.14.0 surface in use | [__compatibility.md](./memory-flash-client/__compatibility.md) |
 | [luck-planner](./luck-planner/README.md) | 0.52.2 | 0.15.0 (2026-11-03) | `>=0.15.0` | `@getpaseo/plugin ^0.15.0` | Compatible after `addHook` migration | [__compatibility.md](./luck-planner/__compatibility.md) |
 | [remote-control](./remote-control/README.md) | 1.0.0 | 0.15.0 (2026-11-03) | `>=0.11.0` | `@getpaseo/plugin 0.13.0` (dev pin) | Compatible as-is; no deprecated API used | [__compatibility.md](./remote-control/__compatibility.md) |
-| [obsidian-bridge](./obsidian-bridge/README.md) | 0.4.3 | 0.15.4 (2026-11-14) | `>=0.15.0` | `@getpaseo/plugin ^0.15.0` | Verified live with Obsidian REST API 5.5.2; created agents receive the MCP server via `agent.create.before` | [__compatibility.md](./obsidian-bridge/__compatibility.md) |
+| [obsidian-bridge](./obsidian-bridge/README.md) | 0.4.4 | 0.15.4 (2026-11-14) | `>=0.15.0` | `@getpaseo/plugin ^0.15.0` | Verified live with Obsidian REST API 5.5.2; created agents receive the MCP server via `agent.create.before`; event state is reported truthfully | [__compatibility.md](./obsidian-bridge/__compatibility.md) |
 
 Extended compatibility information — SDK surface diffs, pass evidence and footnotes — lives in each plugin's `__compatibility.md` (linked above) and in its `__doc.md`.

@@ -6,6 +6,7 @@ import type { RuntimeSettings } from "../shared/settings";
 import { resolveRoleDirs } from "./dirs";
 import { EmbedJob } from "./embed/job";
 import { EnrichmentService } from "./enrichment";
+import { writeEnrichmentState } from "./enrichment-state";
 import type { VaultEvent } from "./obsidian-api";
 import { queryProviderStatus } from "./embed/query";
 import { memoryReport } from "./memory";
@@ -43,7 +44,10 @@ export class VaultIndexer {
   private disposed = false;
   private settings: RuntimeSettings | null = null;
   private readonly embedJob = new EmbedJob();
-  private readonly enrichment = new EnrichmentService((event) => this.handleVaultEvent(event));
+  private readonly enrichment = new EnrichmentService(
+    (event) => this.handleVaultEvent(event),
+    (state) => writeEnrichmentState(state),
+  );
   private state: IndexerState = {
     lastScanAt: null,
     lastChangeAt: null,

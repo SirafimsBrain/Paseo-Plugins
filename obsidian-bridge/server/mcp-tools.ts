@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import type { RuntimeSettings } from "../shared/settings";
+import { EMPTY_EVENT_STATE, readEnrichmentState } from "./enrichment-state";
 import {
   appendToNote,
   describeRoleDirs,
@@ -723,6 +724,9 @@ export async function dispatchTool(
         const memory = memoryReport(process.memoryUsage().rss);
         const obsidianApi = createObsidianApi(settings);
         const probe = obsidianApi ? await obsidianApi.probe() : null;
+        // Event streams belong to the plugin process, not to this spawned
+        // server, so the live flags come from the record it publishes.
+        const events = obsidianApi && probe?.ok ? readEnrichmentState() : EMPTY_EVENT_STATE;
         const semanticState = !settings.semanticSearch
           ? "idle"
           : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
@@ -749,8 +753,8 @@ export async function dispatchTool(
             reachable: probe?.ok ?? false,
             authenticated: probe?.authenticated ?? false,
             version: probe?.version ?? null,
-            events: false,
-            lastEventAt: null,
+            events: events.events,
+            lastEventAt: events.lastEventAt,
             error: probe?.error ?? null,
           },
           embedding: {
