@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.4.4**.
+Version covered: **0.5.4**.
 
 ## 1. Purpose and scope
 
@@ -216,7 +216,14 @@ implementation, `appendToNote`:
 `obsidian_bridge_diagnose`, `obsidian_bridge_status` — `defineAgentTool` definitions attached through `request.tools`
 when the MCP server cannot be contributed. The prefix cannot collide with Paseo built-ins, another plugin, or this server's own MCP tool names.
 
-## 6. Injection (two hooks)
+## 6. Injection (two hooks + provider config files)
+
+A third, non-hook path covers providers Paseo cannot inject into: `server/opencode-mcp.ts` writes
+`mcp.obsidian-bridge = {type: "local", command: [node, dist/mcp-server.js], enabled: true, timeout: 20000}` into
+`~/.config/opencode/opencode.json` (and the Kilo equivalent, only when its config directory exists), preserving every
+other key and refusing to rewrite a file that is not plain JSON. The entry is refreshed on load and on every settings
+change, and removed when `registerOpencodeMcp` is off or the plugin stops. `agentConfigCoversProvider` then makes both
+hooks stand down for that provider: a launch-only or saved duplicate is refused by Paseo's shared-service check.
 
 - `server.addHook("agent.create.before")` — writes the stdio server into the new agent's **saved** `config.mcpServers`
   (`alwaysLoad: true`), gated by `injectIntoAgents`. This is the only hook whose change Paseo persists with the agent, and
@@ -274,6 +281,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `obsidianApiUrl` | `https://127.0.0.1:27124` | Local REST API base URL. Self-signed TLS is accepted for loopback hosts only. |
 | `obsidianApiKey` | `""` | Bearer token for that API. Mirrored in a `0600` settings file; never logged. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
+| `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists), and remove it again when the switch is off or the plugin stops. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
 That choice is deliberate (19 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
@@ -297,6 +305,7 @@ and the panel says so.
 | 0.4.0, 0.4.1 (shipped) | Optional Local REST API enrichment (fuzzy signal, authoritative link metadata, SSE vault events, "Open in Obsidian"), composer attachment source, workspace panel. |
 | 0.4.3 (shipped) | Created agents receive the MCP server through `agent.create.before`, so a new OpenCode/Cline agent has the Obsidian tools on its first turn. |
 | 0.4.4 (shipped) | `obsidian_status` reports the plugin's real vault-event subscription state instead of `events: false`. |
+| 0.5.4 (shipped) | OpenCode/Kilo config-file registration, so those agents get the tools where Paseo cannot inject a server. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -351,7 +360,20 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4)
+
+### 0.5.4
+
+- **An OpenCode agent never saw the Obsidian tools in Paseo 0.15.4.** Two host behaviours conspired: a saved MCP server on
+  an OpenCode agent is refused when the shared OpenCode service is registered (`Custom OpenCode MCP servers … require an
+  isolated server`), so the daemon reports `supportsMcpServers: false` and the launch-only contribution is skipped; and
+  OpenCode does not surface Paseo's attached tools. The plugin now registers its server in the agents' own config files
+  (`~/.config/opencode/opencode.json` → `mcp.obsidian-bridge`, same format for Kilo), the way `memory-flash` reaches the
+  same agents. `agentConfigCoversProvider` makes the decision skip a launch-only contribution for a covered provider, and
+  `agent.create.before` no longer saves a server for one either. Files: `server/opencode-mcp.ts` (new), `index.server.ts`,
+  `server/session-open.ts`, `shared/settings.ts` (version 5), settings screen; tests: `tests/opencode-mcp.test.ts`
+  (7 cases: create, foreign keys preserved, stale entry refreshed, selective removal, commented file untouched, absent
+  file, foreign providers) and the `configCovered` cases in `tests/session-open.test.ts`.
 
 ### 0.4.4
 

@@ -33,6 +33,12 @@ export interface SessionOpenInput {
   serverName: string;
   /** Saved `config.mcpServers` of the agent about to open. */
   lookup: AgentRecordLookup;
+  /**
+   * The plugin's server already lives in this provider's own config file
+   * (OpenCode/Kilo), so a launch-only contribution would duplicate it — and is
+   * refused by Paseo's shared-service check anyway.
+   */
+  configCovered?: boolean;
   /** `capabilities.supportsMcpServers`, or `null` when unknown. */
   supportsMcpServers: boolean | null;
 }
@@ -47,6 +53,7 @@ export interface SessionOpenDecision {
 export function needsCapabilityProbe(input: SessionOpenInput): boolean {
   if (!input.injectIntoAgents) return false;
   if (input.purpose === "history") return false;
+  if (input.configCovered === true) return false;
   if (input.reason === "create") return false;
   if (savedServersInclude(input.lookup, input.serverName)) return false;
   return true;
@@ -68,6 +75,13 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
   // answers `null`, so this hook cannot contribute a server here without
   // risking providers that do not speak MCP. Contributing twice would also
   // collide with the saved entry the create hook just wrote.
+  if (input.configCovered === true) {
+    return {
+      injectMcp: false,
+      attachTool: false,
+      why: "skipped: the provider's config file already carries the server",
+    };
+  }
   if (input.reason === "create") {
     return {
       injectMcp: false,

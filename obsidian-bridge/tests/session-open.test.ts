@@ -52,6 +52,14 @@ describe("decideSessionOpen", () => {
     });
   });
 
+  it("skips when the provider's config file already carries the server", () => {
+    expect(decideSessionOpen(input({ configCovered: true }))).toMatchObject({
+      injectMcp: false,
+      attachTool: false,
+    });
+    expect(needsCapabilityProbe(input({ configCovered: true }))).toBe(false);
+  });
+
   it("leaves creation to the create hook instead of failing on the absent record", () => {
     expect(
       decideSessionOpen(input({ reason: "create", lookup: { status: "missing" } })),

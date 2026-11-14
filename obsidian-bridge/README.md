@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.4.4)
+## What it does (0.5.4)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -31,8 +31,13 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   section, and never rewrites, moves or deletes anything.
 - **Directory roles.** One directory is available to Paseo; inside it four roles tell an agent where to work. Nothing above
   the configured directory can be addressed at all.
-- **Inert injection.** The MCP server is contributed on `agent.open.before` — no probing, no scanning, no latency in the
-  path that opens an agent. Providers without MCP support get the same operations as native agent tools.
+- **Inert injection.** The MCP server is saved into a new agent on `agent.create.before` and re-contributed on
+  `agent.open.before` — no probing, no scanning, no latency in the path that opens an agent. Providers without MCP support
+  get the same operations as native agent tools.
+- **OpenCode and Kilo config registration.** Paseo 0.15.x refuses custom MCP servers on an OpenCode agent that shares the
+  local OpenCode service, and OpenCode does not surface attached tools, so the plugin also writes an `obsidian-bridge`
+  entry into the agents' own `opencode.json`/`kilo.json` MCP config (switch in the settings screen, on by default). That
+  entry survives the idle-runtime release, and it is removed again when the switch is turned off or the plugin stops.
 - **Optional Obsidian enrichment.** With the Local REST API plugin, Obsidian's own fuzzy search joins retrieval, its
   metadata cache becomes the authoritative link source, vault events supplement the file watcher, and the panel can open
   a note in the app. Off or unavailable leaves everything else unchanged.

@@ -20,6 +20,15 @@ import { fuzzySearch } from "./server/enrichment";
 import { VaultIndexer } from "./server/indexer";
 import { createObsidianApi, ObsidianApi } from "./server/obsidian-api";
 import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
+import {
+  agentConfigCoversProvider,
+  kiloMcpStatus,
+  opencodeMcpStatus,
+  registerKiloMcp,
+  registerOpencodeMcp,
+  unregisterKiloMcp,
+  unregisterOpencodeMcp,
+} from "./server/opencode-mcp";
 import { openRuntime } from "./server/mcp-tools";
 import { searchIndex } from "./server/search";
 import { parseSettingsFile } from "./server/settings-file";
@@ -72,6 +81,42 @@ export default function contribute(server: PluginServerContext) {
   // Write once so the first agent already sees the user's configuration.
   void mirrorSettings();
 
+  /**
+   * Keeps the agent config-file registrations in step with the switch.
+   *
+   * Paseo 0.15.x refuses custom MCP servers on an OpenCode agent that uses the
+   * shared local service and does not surface attached tools to OpenCode, so a
+   * server in OpenCode's own config is what actually reaches those agents. It
+   * also survives the idle-runtime release, which a launch-only contribution
+   * does not. Only an agent whose config directory exists is touched, and no
+   * file is created for a program that is not installed.
+   */
+  async function syncConfigRegistration(): Promise<void> {
+    const state = await settings.read().catch(() => null);
+    const wanted = state?.status === "ready" && state.values.registerOpencodeMcp;
+    if (!wanted) {
+      unregisterOpencodeMcp();
+      unregisterKiloMcp();
+      console.log("[obsidian-bridge] agent config registration removed");
+      return;
+    }
+    const opencode = opencodeMcpStatus();
+    if (opencode.detected) {
+      const result = registerOpencodeMcp();
+      if (!result.ok) {
+        console.warn(`[obsidian-bridge] OpenCode config not updated: ${result.error}`);
+      } else {
+        console.log(`[obsidian-bridge] OpenCode config carries the server: ${opencode.path}`);
+      }
+    }
+    if (kiloMcpStatus().detected) {
+      const result = registerKiloMcp();
+      if (!result.ok) console.warn(`[obsidian-bridge] Kilo config not updated: ${result.error}`);
+    }
+  }
+
+  void syncConfigRegistration();
+
   const indexer = new VaultIndexer(readRuntimeSettings);
   void indexer.start().catch((cause) => {
     console.error(
@@ -83,6 +128,7 @@ export default function contribute(server: PluginServerContext) {
 
   const removeSettingsListener = settings.subscribe(() => {
     void mirrorSettings();
+    void syncConfigRegistration();
     void indexer.reconfigure();
   });
 
@@ -105,6 +151,9 @@ export default function contribute(server: PluginServerContext) {
   const removeCreateHook = server.addHook("agent.create.before", async ({ request }) => {
     const state = await settings.read().catch(() => null);
     if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
+    // A saved server on an OpenCode agent makes Paseo refuse the session when
+    // the shared service is in use; the config-file registration covers it.
+    if (agentConfigCoversProvider(request.config.provider).covered) return request;
     const { command, args } = mcpServerCommand();
     request.config.mcpServers = {
       ...(request.config.mcpServers ?? {}),
@@ -127,6 +176,7 @@ export default function contribute(server: PluginServerContext) {
       injectIntoAgents: values !== null,
       serverName: INJECTED_SERVER_NAME,
       lookup: readSavedMcpServers(request.agentId),
+      configCovered: agentConfigCoversProvider(request.provider).covered,
       supportsMcpServers: null as boolean | null,
     };
     if (values === null) return request;
@@ -389,6 +439,8 @@ export default function contribute(server: PluginServerContext) {
     removeSettingsListener();
     removeCreateHook();
     removeOpenHook();
+    unregisterOpencodeMcp();
+    unregisterKiloMcp();
     void indexer.stop();
   };
 }

@@ -20,9 +20,10 @@ export const DEFAULT_EXCLUDES = ".obsidian/**, .trash/**, .git/**, .smart-env/**
 export const obsidianBridgeSettings = defineSettings({
   id: "obsidian-bridge",
   scope: "host",
-  // 4: optional Obsidian Local REST API enrichment (0.4.0). 3 added the
-  // semantic settings; 2 added directory roles and maxWriteChars.
-  version: 4,
+  // 5: OpenCode/Kilo config registration (0.5.4). 4: optional Obsidian Local
+  // REST API enrichment (0.4.0). 3 added the semantic settings; 2 added
+  // directory roles and maxWriteChars.
+  version: 5,
   schema: z.object({
     /**
      * Absolute path of the local Obsidian vault. Empty means "not
@@ -116,6 +117,16 @@ export const obsidianBridgeSettings = defineSettings({
     obsidianApiKey: z.string().trim().max(512).default(""),
     /** Inject the MCP server (or the fallback agent tools) into agents. */
     injectIntoAgents: z.boolean().default(true),
+    /**
+     * Register the MCP server in OpenCode's and Kilo's own config files
+     * (`mcp.obsidian-bridge`). Paseo 0.15.x refuses custom MCP servers on an
+     * OpenCode agent that shares the local OpenCode service, and attached
+     * tools do not reach OpenCode, so this is the path that actually delivers
+     * the Obsidian tools to those agents. The entry is removed again when this
+     * switch is turned off or the plugin stops. Off = no config file is
+     * touched.
+     */
+    registerOpencodeMcp: z.boolean().default(true),
   }),
 });
 

@@ -413,6 +413,12 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             onValueChange={(enabled: boolean) => patch({ injectIntoAgents: enabled })}
           />
           <SettingsSwitch
+            label="Register in the OpenCode and Kilo config files"
+            hint="Writes an `obsidian-bridge` entry into the agents' own MCP config, so OpenCode and Kilo sessions get the tools even where Paseo cannot inject a server. Removed again when this switch is off or the plugin stops."
+            value={values.registerOpencodeMcp}
+            onValueChange={(enabled: boolean) => patch({ registerOpencodeMcp: enabled })}
+          />
+          <SettingsSwitch
             label="Refuse writes"
             hint="Turns every write tool off. Writes are already append-only and confined to the inbox/out/raw directories, so this is an extra brake."
             value={values.readOnly}
