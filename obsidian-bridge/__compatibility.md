@@ -2,14 +2,14 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Verified (2026-11-14, 0.4.2)
+## Verified (2026-11-14, 0.4.3)
 
 | Component | Version | Notes |
 | --- | --- | --- |
 | Paseo | `0.15.4` | Installed from Git (`paseo plugin update`), plugin `running`; `npm ci` + `npm run bundle` run in the managed checkout. |
 | Obsidian Local REST API with MCP | `5.5.2` (API route set of 5.x) | Live, not a fake server: `GET /` probe (`authenticated: true`), `POST /search/simple/?query=…&maxResults=…`, note JSON with `Accept: application/vnd.olrapi.note+json`, and four `POST /events/vault/<event>/` + SSE subscriptions held open by the plugin process. |
 | Semantic search | `Xenova/multilingual-e5-small` q8 | Model cache in `$PASEO_HOME/plugins/obsidian-bridge/models` (130 MB); 1 684/1 684 chunks embedded, query embedding ready, `obsidian_diagnose` recall@5 = 1.0 lexical and hybrid. |
-| MCP injection into agents | OpenCode provider | Fixed in 0.4.2: created agents now get the `obsidian-bridge` MCP server (`agent.open.before` on `reason: "create"`). |
+| MCP injection into agents | OpenCode provider | Fixed in 0.4.3: `agent.create.before` writes the server into the new agent's saved `config.mcpServers`, so a created agent has the `obsidian_*` tools on its first turn; `agent.open.before` skips `reason: "create"` and serves resumes/refreshes. |
 
 ## Verified (2026-11-13, 0.4.1)
 

@@ -52,10 +52,10 @@ describe("decideSessionOpen", () => {
     });
   });
 
-  it("injects on create, where the record is written only after the open", () => {
+  it("leaves creation to the create hook instead of failing on the absent record", () => {
     expect(
       decideSessionOpen(input({ reason: "create", lookup: { status: "missing" } })),
-    ).toMatchObject({ injectMcp: true, attachTool: false });
+    ).toMatchObject({ injectMcp: false, attachTool: false });
   });
 
   it("falls back to attached tools when the agent record cannot be read", () => {
@@ -93,5 +93,6 @@ describe("needsCapabilityProbe", () => {
     expect(needsCapabilityProbe(input({ injectIntoAgents: false }))).toBe(false);
     expect(needsCapabilityProbe(input({ purpose: "history" }))).toBe(false);
     expect(needsCapabilityProbe(input({ lookup: found(["obsidian-bridge"]) }))).toBe(false);
+    expect(needsCapabilityProbe(input({ reason: "create" }))).toBe(false);
   });
 });

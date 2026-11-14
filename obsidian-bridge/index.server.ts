@@ -90,6 +90,32 @@ export default function contribute(server: PluginServerContext) {
   // Injection (inert)
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // Creation (saved configuration)
+  // -------------------------------------------------------------------------
+
+  /**
+   * A new agent is created through `agent.create.before`, which is the only
+   * hook whose change is saved with the agent. `agent.open.before` cannot do
+   * this reliably: it fires before Paseo writes the agent record, and a
+   * capability probe on an agent that has not started answers `null`, so the
+   * launch-only path degraded to attached tools that OpenCode and Cline never
+   * surface (fixed in 0.4.3).
+   */
+  const removeCreateHook = server.addHook("agent.create.before", async ({ request }) => {
+    const state = await settings.read().catch(() => null);
+    if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
+    const { command, args } = mcpServerCommand();
+    request.config.mcpServers = {
+      ...(request.config.mcpServers ?? {}),
+      [INJECTED_SERVER_NAME]: { type: "stdio", command, args, alwaysLoad: true } as const,
+    };
+    console.log(
+      `[obsidian-bridge] MCP saved for the new agent: ${command} ${args.join(" ")}`,
+    );
+    return request;
+  });
+
   const agentTools = createObsidianTools(readRuntimeSettings);
 
   const removeOpenHook = server.addHook("agent.open.before", async ({ request }, { paseo }) => {
@@ -361,6 +387,7 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     removeSettingsListener();
+    removeCreateHook();
     removeOpenHook();
     void indexer.stop();
   };

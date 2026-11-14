@@ -47,6 +47,7 @@ export interface SessionOpenDecision {
 export function needsCapabilityProbe(input: SessionOpenInput): boolean {
   if (!input.injectIntoAgents) return false;
   if (input.purpose === "history") return false;
+  if (input.reason === "create") return false;
   if (savedServersInclude(input.lookup, input.serverName)) return false;
   return true;
 }
@@ -61,6 +62,18 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
   }
   if (input.purpose === "history") {
     return { injectMcp: false, attachTool: false, why: "skipped: purpose is history" };
+  }
+  // Creation is owned by `agent.create.before`: a fresh agent has no saved
+  // record yet, and the capability probe on an agent that has not started
+  // answers `null`, so this hook cannot contribute a server here without
+  // risking providers that do not speak MCP. Contributing twice would also
+  // collide with the saved entry the create hook just wrote.
+  if (input.reason === "create") {
+    return {
+      injectMcp: false,
+      attachTool: false,
+      why: "skipped: reason=create is handled by the agent.create.before hook",
+    };
   }
   // Already provisioned by this plugin in the saved configuration: contributing
   // again would either collide or duplicate the same tools.
@@ -80,8 +93,7 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
   // collide", not an unknown state. Treating it as unknown sent every created
   // agent down the attached-tools path, where most providers (OpenCode, Cline)
   // never surface the tools at all.
-  const freshAgent = input.reason === "create" && input.lookup.status === "missing";
-  if (input.lookup.status !== "found" && !freshAgent) {
+  if (input.lookup.status !== "found") {
     return {
       injectMcp: false,
       attachTool: true,
