@@ -2,7 +2,7 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Verified (2026-11-14, 0.5.7)
+## Verified (2026-11-14, 0.6.7)
 
 | Component | Version | Notes |
 | --- | --- | --- |
@@ -55,8 +55,9 @@ when it is closed every capability above falls back to the disk index and status
 - **Vocabulary and language** are the model's; `Xenova/multilingual-e5-small` covers Russian and English, a monolingual
   model would not.
 
-- **Append-only writes.** Documents can be created and appended, never edited in place, moved, renamed or deleted. The
-  write boundary is the configured `vaultPath` plus the `inbox`/`out`/`raw` roles inside it.
+- **Writes.** Documents are created and appended inside the `inbox`/`out`/`raw` roles; `obsidian_edit` (0.6.7) additionally
+  replaces one exact fragment in an existing note anywhere under the configured `vaultPath`. Nothing is moved, renamed or
+  deleted, `.obsidian` is never addressed, and a symlink leading outside the directory is refused.
 - **Retrieval needs either vocabulary or the local model.** FTS + graph cover exact terms; a query with no shared
   vocabulary relies on the semantic signal, which needs the model download and a built vector index (or Obsidian's fuzzy
   signal when enrichment is on).

@@ -11,6 +11,7 @@ import {
   type RoleDirs,
   type WritableRole,
 } from "./dirs";
+import { replaceInNote } from "./edit";
 import { embedQuery, queryProviderStatus } from "./embed/query";
 import { fuzzySearch } from "./enrichment";
 import { createObsidianApi } from "./obsidian-api";
@@ -192,6 +193,31 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         path: { type: "string", description: "Path relative to the configured directory. Empty = unresolved links." },
         limit: { type: "number", description: "Maximum entries, 1–500 (default 100)." },
       },
+    },
+  },
+  {
+    name: "obsidian_edit",
+    title: "Edit an existing Obsidian note",
+    description:
+      `${CONTRACT_SENTENCE} Replaces one exact fragment in an existing note addressed by its vault ` +
+      "path — the tool that reaches notes outside the inbox/out/raw roles. The fragment must occur " +
+      "exactly once (include surrounding context to make it unique); everything else in the note is " +
+      "kept byte for byte. It never creates a note.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Vault-relative path of the existing note to edit." },
+        old_text: {
+          type: "string",
+          description:
+            "Exact text to replace, whitespace and line breaks included. Must occur exactly once.",
+        },
+        new_text: {
+          type: "string",
+          description: "Replacement text; an empty string removes the fragment.",
+        },
+      },
+      required: ["path", "old_text", "new_text"],
     },
   },
   {
@@ -623,6 +649,37 @@ export async function dispatchTool(
             truncated: note.truncated,
           },
         };
+      }
+
+      case "obsidian_edit": {
+        if (settings.readOnly) {
+          return fail(
+            "Writes are disabled (readOnly is on). Ask the user to turn them off in " +
+              "Settings → Plugins → Obsidian Bridge.",
+          );
+        }
+        const relPath = typeof input.path === "string" ? input.path.trim() : "";
+        if (relPath.length === 0) return fail("path is required.");
+        const outcome = replaceInNote({
+          root: runtime.root,
+          relPath,
+          oldText: typeof input.old_text === "string" ? input.old_text : "",
+          newText: typeof input.new_text === "string" ? input.new_text : "",
+          maxWriteChars: settings.maxWriteChars,
+        });
+        if ("error" in outcome) return fail(outcome.error);
+        return json({
+          path: outcome.path,
+          role: roleOfPath(outcome.path, runtime.dirs),
+          replaced: true,
+          occurrences: 1,
+          charsBefore: outcome.charsBefore,
+          charsAfter: outcome.charsAfter,
+          bytesBefore: outcome.bytesBefore,
+          bytesAfter: outcome.bytesAfter,
+          normalizedLineEndings: outcome.normalizedLineEndings,
+          note: "Search reflects the change once the plugin's indexer sees the file.",
+        });
       }
 
       case "obsidian_outline": {

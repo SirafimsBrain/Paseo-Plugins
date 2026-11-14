@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { indexPathFor } from "../server/paths";
 import { scanVault } from "../server/scan";
@@ -27,6 +29,7 @@ describe("tool catalogue", () => {
       "obsidian_outline",
       "obsidian_list",
       "obsidian_links",
+      "obsidian_edit",
       "obsidian_write_document",
       "obsidian_write_scratch",
       "obsidian_append_inbox",
@@ -48,6 +51,7 @@ describe("tool catalogue", () => {
         "obsidian_outline",
         "obsidian_list",
         "obsidian_links",
+        "obsidian_edit",
         "obsidian_write_document",
         "obsidian_write_scratch",
         "obsidian_append_inbox",
@@ -160,6 +164,54 @@ describe("dispatchTool", () => {
     const hits = (outcome.structuredContent as { hits: Array<{ path: string }> }).hits;
     expect(hits[0].path).toBe("Test obsidian-bridge/vnc.md");
     expect(hits.filter((hit) => hit.path === "raw/export.md").length).toBeLessThanOrEqual(1);
+  });
+
+  it("edits an existing note in a folder without a writable role", async () => {
+    const { workspace: created, settings } = indexed();
+    const outcome = await dispatchTool(
+      "obsidian_edit",
+      {
+        path: "Projects/orion/Plan.md",
+        old_text: "Ship the queue in Q3 with bounded retries.",
+        new_text: "Ship the queue in Q4 with bounded retries.",
+      },
+      settings,
+    );
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.structuredContent).toMatchObject({ path: "Projects/orion/Plan.md", role: "workspace" });
+    expect(fs.readFileSync(path.join(created.vault, "Projects/orion/Plan.md"), "utf-8")).toContain(
+      "Ship the queue in Q4",
+    );
+    // Append-only writers still cannot reach that path.
+    const append = await dispatchTool("obsidian_write_document", { name: "Plan", body: "x" }, settings);
+    expect(
+      fs.readFileSync(path.join(created.vault, "Documentation/Plan.md"), "utf-8"),
+    ).toContain("x");
+    expect(append.isError).toBeUndefined();
+  });
+
+  it("refuses to edit when writes are switched off", async () => {
+    const { workspace: created } = indexed();
+    const settings = runtimeSettings(created.vault, { readOnly: true });
+    const outcome = await dispatchTool(
+      "obsidian_edit",
+      { path: "Projects/orion/Plan.md", old_text: "Q3", new_text: "Q4" },
+      settings,
+    );
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toMatch(/readOnly/);
+    expect(fs.readFileSync(path.join(created.vault, "Projects/orion/Plan.md"), "utf-8")).toContain("Q3");
+  });
+
+  it("refuses an edit above the vault", async () => {
+    const { settings } = indexed();
+    const outcome = await dispatchTool(
+      "obsidian_edit",
+      { path: "../../etc/hostname", old_text: "root", new_text: "nobody" },
+      settings,
+    );
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toMatch(/outside the configured directory/);
   });
 
   it("refuses a path outside the vault", async () => {

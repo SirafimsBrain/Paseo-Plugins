@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.5.7**.
+Version covered: **0.6.7**.
 
 ## 1. Purpose and scope
 
@@ -167,8 +167,8 @@ BM25 afterwards. An empty query lists recent notes — the "show me what I was w
 Definitions in `server/mcp-tools.ts`, shared by the stdio server, the attached agent tools and the tests:
 
 `obsidian_directories`, `obsidian_search`, `obsidian_read`, `obsidian_outline`, `obsidian_list`, `obsidian_links`,
-`obsidian_write_document`, `obsidian_write_scratch`, `obsidian_append_inbox`, `obsidian_index`, `obsidian_diagnose`,
-`obsidian_status`.
+`obsidian_edit`, `obsidian_write_document`, `obsidian_write_scratch`, `obsidian_append_inbox`, `obsidian_index`,
+`obsidian_diagnose`, `obsidian_status`.
 
 `obsidian_diagnose` measures recall@k over cases the caller supplies (`{query, expected_paths}`), for lexical and for
 hybrid retrieval, so "semantic helps here" is a measurement rather than a claim. Without cases it reports vector
@@ -190,6 +190,28 @@ the vault root, and refuses `.obsidian/` (plugin code and settings are not the a
 `obsidian_list` and `obsidian_search` goes through the same `normalizeRoleDir` used for the role directories, so `..`, an
 absolute path or `.obsidian` is refused instead of being used as a `LIKE` prefix. A path like `../../etc/passwd` returns an
 explicit error, covered by tests.
+
+### Editing an existing note (`server/edit.ts`, 0.6.7)
+
+`obsidian_edit` is the deliberate exception to role-scoped writing: a note the user filed outside `inbox`/`out`/`raw`
+(project folders, a moved document, the workspace itself) could be read but never changed, which made the bridge useless
+for "append a line to this report". It takes `path`, `old_text`, `new_text` and:
+
+- resolves the path with `resolveInsideVault` (no absolute paths, no `..`, no `.obsidian`) and additionally compares
+  `realpath` of the note with `realpath` of the root, so a symlink pointing outside the directory is refused;
+- requires an existing regular file — it never creates a note (`create` stays the write tools' job);
+- requires `old_text` to occur **exactly once**. Zero occurrences report "not found", several report the count and ask for
+  more context: the tool never picks a place to edit. A CRLF note is retried with the fragment's line breaks converted,
+  reported as `normalizedLineEndings: true`, so LF input from an agent still matches a Windows-written vault;
+- rewrites only the matched span: everything else (frontmatter, other sections, untouched whitespace) is written back as
+  read. Empty `new_text` deletes the fragment;
+- is bounded by `readOnly`, `maxWriteChars` for both fragments and `MAX_NOTE_BYTES` (4 MiB) for the result;
+- writes through a temp file and `renameSync`, after re-checking size and mtime against the initial read: if Obsidian saved
+  the note meanwhile the edit is refused with "changed on disk while it was being edited" rather than overwriting the new
+  content.
+
+Search reflects an edit once the plugin's indexer sees the file (the same path every other write takes); the MCP process
+never writes the index itself.
 
 ### Write tools
 
@@ -309,6 +331,7 @@ and the panel says so.
 | 0.5.4, 0.5.5 (shipped) | OpenCode/Kilo config-file registration, so those agents get the tools where Paseo cannot inject a server. |
 | 0.5.6 (shipped) | Read body in `structuredContent` (OpenCode showed none), and per-note fusion so a long export cannot outrank an exact match. |
 | 0.5.7 (shipped) | Keep the config entry across plugin restarts, so an update no longer empties a live agent's tool namespace. |
+| 0.6.7 (shipped) | `obsidian_edit`: exact-fragment edit of any existing note by vault path, outside the role writers. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -322,13 +345,16 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
 
 ## 9. Verification
 
-`npm test` (75 tests, 9 suites, ~0.8 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (103 tests, 12 suites, ~0.6 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
   unresolved links, deletion cleanup, graph neighbours.
-- `tests/mcp-tools.test.ts` — the tool catalogue is read-only and carries the explicit-use contract; search/filters/read/
-  outline/list/status/index against a temporary vault; path escape refused; missing-vault message.
+- `tests/mcp-tools.test.ts` — the tool catalogue carries the explicit-use contract; search/filters/read/outline/list/
+  status/index against a temporary vault; `obsidian_edit` on a role-less path, with `readOnly` and an escaping path refused;
+  missing-vault message.
+- `tests/edit.test.ts` — exact-fragment editing: role-less folder, multi-line and deletion, ambiguous/missing fragment,
+  missing file, path and symlink escape, CRLF notes, no-op and size limits.
 - `tests/indexer.test.ts` — idle without a path, scan, changed/added/removed notes, bad path error, include folders.
 - `tests/session-open.test.ts` — the injection decision matrix and probe conditions.
 - `tests/directories.test.ts` — role normalization (absolute paths, `..`, `.obsidian`), most-specific role matching,
@@ -353,8 +379,9 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - A slow first scan is expected on a large vault (one read + parse per note, ~5 000 notes/second on a warm cache in local
   tests). Reindexing is safe at any time.
 - `index.db` is disposable: delete it and run `obsidian_index` (or restart the plugin) to rebuild.
-- Writes are append-only and confined to the `inbox`/`out`/`raw` roles. There is no tool that edits, moves, renames or
-deletes a note, and `readOnly` switches every write off.
+- Appends are confined to the `inbox`/`out`/`raw` roles. The one exception is `obsidian_edit`: an exact one-occurrence
+  fragment replacement by vault path (0.6.7). No tool moves, renames or deletes a note, and `readOnly` switches every write
+  off.
 - Embedding model cache: `$PASEO_HOME/plugins/obsidian-bridge/models` (not inside the checkout, which `paseo plugin update`
   replaces). First semantic run needs network; afterwards it is offline.
 - A full re-embedding runs in its own process (`dist/embed-worker.js`) and peaks around 1.1 GB for 1 684 chunks, which
@@ -363,7 +390,16 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7)
+
+### 0.6.7
+
+- **Notes outside the three roles could be read but never edited**, so a document the user moved into a project folder was
+  untouchable: every write tool is role-scoped and append-only. Added `obsidian_edit` (`server/edit.ts`): exact-fragment
+  replacement by vault path, exactly-one-occurrence rule, realpath symlink boundary, atomic replace guarded by size+mtime,
+  CRLF-aware matching, `readOnly`/`maxWriteChars`/4 MiB limits. Tests: `tests/edit.test.ts` (10 cases: role-less folder,
+  multi-line and deletion, ambiguity, missing fragment, missing file, path escape, symlink escape, CRLF, no-op/empty, size
+  limit) plus the tool-level cases in `tests/mcp-tools.test.ts` (workspace role, `readOnly`, path above the vault).
 
 ### 0.5.7
 

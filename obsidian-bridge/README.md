@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.5.7)
+## What it does (0.6.7)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -29,6 +29,11 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
   notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
+- **Exact-fragment edit of any existing note.** `obsidian_edit` takes a vault path, an `old_text` that must occur exactly
+  once and its `new_text`: the one tool that can change a note outside the inbox/out/raw roles (a note the user filed in a
+  project folder, a moved document). The rest of the file — frontmatter, other sections, whitespace — is written back byte
+  for byte; the file is replaced atomically and only when it did not change while being read; a symlink leading outside the
+  directory is refused, and nothing is ever created.
 - **Directory roles.** One directory is available to Paseo; inside it four roles tell an agent where to work. Nothing above
   the configured directory can be addressed at all.
 - **Inert injection.** The MCP server is saved into a new agent on `agent.create.before` and re-contributed on
@@ -142,6 +147,7 @@ If the path is not configured, nothing is indexed and every tool answers with an
 | `obsidian_outline` | Headings, frontmatter keys, tags, links and backlinks of one note. |
 | `obsidian_list` | Notes under a folder with size, modification time and role. |
 | `obsidian_links` | Resolved links and backlinks of a note, or the vault's unresolved links. |
+| `obsidian_edit` | Replace one exact fragment (`old_text` → `new_text`) in an existing note by vault path. |
 | `obsidian_write_document` | Append an authored document in `out`. |
 | `obsidian_write_scratch` | Append a scratch note in `raw`. |
 | `obsidian_append_inbox` | Append to a note in `inbox`. |
