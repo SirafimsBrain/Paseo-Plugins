@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.5.6**.
+Version covered: **0.5.7**.
 
 ## 1. Purpose and scope
 
@@ -222,7 +222,8 @@ A third, non-hook path covers providers Paseo cannot inject into: `server/openco
 `mcp.obsidian-bridge = {type: "local", command: [node, dist/mcp-server.js], enabled: true, timeout: 20000}` into
 `~/.config/opencode/opencode.json` (and the Kilo equivalent, only when its config directory exists), preserving every
 other key and refusing to rewrite a file that is not plain JSON. The entry is refreshed on load and on every settings
-change, and removed when `registerOpencodeMcp` is off or the plugin stops. `agentConfigCoversProvider` then makes both
+change, and removed when `registerOpencodeMcp` is off (not on plugin shutdown — an update would otherwise take the
+namespace away from a live OpenCode session). `agentConfigCoversProvider` then makes both
 hooks stand down for that provider: a launch-only or saved duplicate is refused by Paseo's shared-service check.
 
 - `server.addHook("agent.create.before")` — writes the stdio server into the new agent's **saved** `config.mcpServers`
@@ -281,7 +282,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `obsidianApiUrl` | `https://127.0.0.1:27124` | Local REST API base URL. Self-signed TLS is accepted for loopback hosts only. |
 | `obsidianApiKey` | `""` | Bearer token for that API. Mirrored in a `0600` settings file; never logged. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
-| `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists), and remove it again when the switch is off or the plugin stops. |
+| `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists); keep it across plugin restarts and remove it when the switch is off. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
 That choice is deliberate (19 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
@@ -307,6 +308,7 @@ and the panel says so.
 | 0.4.4 (shipped) | `obsidian_status` reports the plugin's real vault-event subscription state instead of `events: false`. |
 | 0.5.4, 0.5.5 (shipped) | OpenCode/Kilo config-file registration, so those agents get the tools where Paseo cannot inject a server. |
 | 0.5.6 (shipped) | Read body in `structuredContent` (OpenCode showed none), and per-note fusion so a long export cannot outrank an exact match. |
+| 0.5.7 (shipped) | Keep the config entry across plugin restarts, so an update no longer empties a live agent's tool namespace. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -361,7 +363,15 @@ deletes a note, and `readOnly` switches every write off.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7)
+
+### 0.5.7
+
+- **A plugin update took the tools away from a running agent.** `paseo plugin update` stops the old plugin, whose cleanup
+  removed the config entry; the live OpenCode session reloaded its config in that window and dropped the whole
+  `obsidian-bridge` namespace mid-turn (`the obsidian-bridge namespace is no longer available`), with the new plugin
+  re-registering a moment later. The entry now stays on shutdown and is removed only through the settings switch; a stale
+  entry after an uninstall is the cheaper failure.
 
 ### 0.5.6
 

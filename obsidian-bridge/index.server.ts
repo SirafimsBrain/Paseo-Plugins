@@ -441,8 +441,10 @@ export default function contribute(server: PluginServerContext) {
     removeSettingsListener();
     removeCreateHook();
     removeOpenHook();
-    unregisterOpencodeMcp();
-    unregisterKiloMcp();
+    // The config entry stays on shutdown. Paseo reloads the plugin on every
+    // update, and a live OpenCode session drops a namespace that disappears
+    // from its config mid-turn; a stale entry after an uninstall is the smaller
+    // price, and the switch still removes it on request.
     void indexer.stop();
   };
 }

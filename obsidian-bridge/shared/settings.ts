@@ -124,9 +124,9 @@ export const obsidianBridgeSettings = defineSettings({
      * (`mcp.obsidian-bridge`). Paseo 0.15.x refuses custom MCP servers on an
      * OpenCode agent that shares the local OpenCode service, and attached
      * tools do not reach OpenCode, so this is the path that actually delivers
-     * the Obsidian tools to those agents. The entry is removed again when this
-     * switch is turned off or the plugin stops. Off = no config file is
-     * touched.
+     * the Obsidian tools to those agents. The entry survives a plugin restart
+     * (an update would otherwise yank the namespace from a live session) and is
+     * removed when this switch is turned off. Off = no config file is touched.
      */
     registerOpencodeMcp: z.boolean().default(true),
   }),
