@@ -173,6 +173,44 @@ export const verifyVault = defineRpc({
   output: verifyVaultResultSchema,
 });
 
+/**
+ * Where the plugin registered itself: agent MCP config files and installed
+ * skill copies. Backs the settings screen's "installed correctly" view.
+ */
+export const agentIntegrationStatusSchema = z.object({
+  refreshedAt: z.string(),
+  configs: z.array(
+    z.object({
+      label: z.string(),
+      path: z.string(),
+      detected: z.boolean(),
+      installed: z.boolean(),
+      upToDate: z.boolean().nullable(),
+      error: z.string().nullable(),
+    }),
+  ),
+  skills: z.array(
+    z.object({
+      label: z.string(),
+      root: z.string(),
+      path: z.string(),
+      detected: z.boolean(),
+      installed: z.boolean(),
+      upToDate: z.boolean().nullable(),
+    }),
+  ),
+  skillSource: z.string().nullable(),
+});
+
+export type AgentIntegrationStatus = z.infer<typeof agentIntegrationStatusSchema>;
+
+/** Registration and skill state, refreshed on demand from the settings screen. */
+export const agentIntegrationStatus = defineRpc({
+  name: "obsidian-bridge.agent-integration",
+  input: z.object({}),
+  output: agentIntegrationStatusSchema,
+});
+
 /** Runs a retrieval query through the same engine the agents use. */
 export const searchVaultRpc = defineRpc({
   name: "obsidian-bridge.search",

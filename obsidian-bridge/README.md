@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.7.7)
+## What it does (0.8.7)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -31,8 +31,10 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   section, and never rewrites, moves or deletes anything.
 - **An agent skill, shipped with the plugin.** `skills/obsidian-bridge/SKILL.md` teaches the read → cite workflow,
   where a write is allowed, the exact-fragment edit rule and the Obsidian Markdown vocabulary an agent actually needs.
-  The plugin installs it into the skills directories the installed agents already scan, and removes it when the switch is
-  off. The official Obsidian skills (Obsidian Flavored Markdown, Bases, JSON Canvas, Obsidian CLI) are a separate,
+  The plugin installs it into every skills directory that exists (`~/.agents/skills` first, then OpenCode, Cline, Kilo,
+  Kimi, Qwen, Codex, Claude Code), verifies the copies on load, after a settings change and every five minutes, repairs
+  anything that drifted, and removes them when the switch is off. The settings screen shows the state of every agent
+  config entry and skill copy, so "is it installed correctly?" is a visible answer rather than a guess. The official Obsidian skills (Obsidian Flavored Markdown, Bases, JSON Canvas, Obsidian CLI) are a separate,
   upstream project — [obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills); this plugin ships its own
   skill so the workflow can be reviewed and versioned together with the tools it describes.
 - **Exact-fragment edit of any existing note.** `obsidian_edit` takes a vault path, an `old_text` that must occur exactly
@@ -45,10 +47,11 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Inert injection.** The MCP server is saved into a new agent on `agent.create.before` and re-contributed on
   `agent.open.before` — no probing, no scanning, no latency in the path that opens an agent. Providers without MCP support
   get the same operations as native agent tools.
-- **OpenCode and Kilo config registration.** Paseo 0.15.x refuses custom MCP servers on an OpenCode agent that shares the
+- **OpenCode, Kilo and Cline config registration.** Paseo 0.15.x refuses custom MCP servers on an OpenCode agent that shares the
   local OpenCode service, and OpenCode does not surface attached tools, so the plugin also writes an `obsidian-bridge`
-  entry into the agents' own `opencode.json`/`kilo.json` MCP config (switch in the settings screen, on by default). That
-  entry survives the idle-runtime release and plugin updates, and it is removed when the switch is turned off.
+  entry into the agents' own `opencode.json`/`kilo.jsonc` MCP config, and Cline never spawns a stdio server from the
+  session payload, so its entry goes into `~/.cline/data/settings/cline_mcp_settings.json` (separate switch, on by
+  default). The entries survive the idle-runtime release and plugin updates, and are removed when a switch is turned off.
 - **Optional Obsidian enrichment.** With the Local REST API plugin, Obsidian's own fuzzy search joins retrieval, its
   metadata cache becomes the authoritative link source, vault events supplement the file watcher, and the panel can open
   a note in the app. Off or unavailable leaves everything else unchanged.

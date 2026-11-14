@@ -137,6 +137,12 @@ export const obsidianBridgeSettings = defineSettings({
      * Obsidian Markdown vocabulary. Off = no skills directory is touched.
      */
     installAgentSkill: z.boolean().default(true),
+    /**
+     * Register the MCP server in Cline's own settings file. Cline ignores a
+     * stdio server from the session payload, so this is the only way its agents
+     * see the Obsidian tools. Off = the file is not touched.
+     */
+    registerClineMcp: z.boolean().default(true),
   }),
 });
 

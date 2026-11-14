@@ -1,6 +1,7 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { VerifyVaultResult } from "./shared/contracts";
 import {
+  agentIntegrationStatus,
   notePreviewSchema,
   openInObsidian,
   readNote,
@@ -20,7 +21,14 @@ import { fuzzySearch } from "./server/enrichment";
 import { VaultIndexer } from "./server/indexer";
 import { createObsidianApi, ObsidianApi } from "./server/obsidian-api";
 import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
-import { agentSkillStatus, installAgentSkill, removeAgentSkill } from "./server/agent-skill";
+import {
+  agentSkillStatus,
+  installAgentSkill,
+  removeAgentSkill,
+  skillStatuses,
+  verifyAgentSkill,
+} from "./server/agent-skill";
+import { clineMcpStatus, registerClineMcp, unregisterClineMcp } from "./server/cline-mcp";
 import {
   agentConfigCoversProvider,
   kiloMcpStatus,
@@ -97,6 +105,14 @@ export default function contribute(server: PluginServerContext) {
     // Default on, matching the schema: an unreadable store must not silently
     // take the tools away from agents.
     const wanted = state?.status === "ready" ? state.values.registerOpencodeMcp !== false : true;
+    const wantedCline = state?.status === "ready" ? state.values.registerClineMcp !== false : true;
+    if (!wantedCline) {
+      unregisterClineMcp();
+    } else if (clineMcpStatus().detected) {
+      const result = registerClineMcp();
+      if (!result.ok) console.warn(`[obsidian-bridge] Cline config not updated: ${result.error}`);
+      else console.log(`[obsidian-bridge] Cline config carries the server: ${clineMcpStatus().path}`);
+    }
     if (!wanted) {
       unregisterOpencodeMcp();
       unregisterKiloMcp();
@@ -134,24 +150,34 @@ export default function contribute(server: PluginServerContext) {
       for (const error of errors) console.warn(`[obsidian-bridge] agent skill not removed: ${error}`);
       return;
     }
-    const result = installAgentSkill();
-    if (!result.ok) {
-      console.warn(`[obsidian-bridge] agent skill not installed: ${result.error}`);
-      return;
-    }
-    for (const target of result.targets) console.log(`[obsidian-bridge] agent skill installed: ${target}`);
-    if (result.targets.length === 0) {
-      const status = agentSkillStatus();
+    const result = verifyAgentSkill();
+    for (const target of result.repaired) console.log(`[obsidian-bridge] agent skill installed: ${target}`);
+    for (const error of result.errors) console.warn(`[obsidian-bridge] agent skill not installed: ${error}`);
+    if (result.checked.length === 0) {
+      console.log("[obsidian-bridge] no agent skills directory found; skill not installed");
+    } else if (result.repaired.length === 0 && result.errors.length === 0) {
       console.log(
-        status.detected.length === 0
-          ? "[obsidian-bridge] no agent skills directory found; skill not installed"
-          : `[obsidian-bridge] agent skill already current in ${status.installed.length} director(ies)`,
+        `[obsidian-bridge] agent skill verified: ${result.checked.length} director(ies), up to date`,
       );
     }
   }
 
   void syncConfigRegistration();
   void syncAgentSkill();
+
+  /**
+   * Currency check for the installed skill: the copies live in directories that
+   * users and other tools also write to, and an agent must not be left running
+   * on stale instructions. Anything that drifted is repaired and logged.
+   */
+  const skillCheckTimer = setInterval(() => {
+    const result = verifyAgentSkill();
+    for (const target of result.repaired) {
+      console.log(`[obsidian-bridge] agent skill was stale and was repaired: ${target}`);
+    }
+    for (const error of result.errors) console.warn(`[obsidian-bridge] agent skill check failed: ${error}`);
+  }, 5 * 60_000);
+  skillCheckTimer.unref?.();
 
   const indexer = new VaultIndexer(readRuntimeSettings);
   void indexer.start().catch((cause) => {
@@ -253,6 +279,45 @@ export default function contribute(server: PluginServerContext) {
   // -------------------------------------------------------------------------
 
   server.handle(vaultStatus, async () => indexer.status());
+
+  // "Is the plugin actually installed for my agents?" — the settings screen
+  // asks this directly instead of leaving the user to inspect config files.
+  server.handle(agentIntegrationStatus, async () => {
+    const opencode = opencodeMcpStatus();
+    const kilo = kiloMcpStatus();
+    const cline = clineMcpStatus();
+    return {
+      refreshedAt: new Date().toISOString(),
+      configs: [
+        {
+          label: "OpenCode",
+          path: opencode.path,
+          detected: opencode.detected,
+          installed: opencode.installed,
+          upToDate: opencode.upToDate,
+          error: null,
+        },
+        {
+          label: "Kilo",
+          path: kilo.path,
+          detected: kilo.detected,
+          installed: kilo.installed,
+          upToDate: kilo.upToDate,
+          error: null,
+        },
+        {
+          label: "Cline",
+          path: cline.path,
+          detected: cline.detected,
+          installed: cline.installed,
+          upToDate: cline.upToDate,
+          error: cline.error,
+        },
+      ],
+      skills: skillStatuses(),
+      skillSource: agentSkillStatus().source,
+    };
+  });
 
   server.handle(verifyVault, async ({ path }) => {
     const check = checkVault(path);
@@ -473,6 +538,7 @@ export default function contribute(server: PluginServerContext) {
   // -------------------------------------------------------------------------
 
   return () => {
+    clearInterval(skillCheckTimer);
     removeSettingsListener();
     removeCreateHook();
     removeOpenHook();

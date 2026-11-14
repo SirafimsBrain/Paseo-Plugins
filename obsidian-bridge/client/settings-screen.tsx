@@ -10,10 +10,12 @@ import {
   SettingsSwitch,
 } from "@getpaseo/plugin/client/ui";
 import {
+  agentIntegrationStatus,
   reindexVault,
   testEnrichment,
   vaultStatus,
   verifyVault,
+  type AgentIntegrationStatus,
   type VerifyVaultResult,
 } from "../shared/contracts";
 import { obsidianBridgeSettings } from "../shared/settings";
@@ -42,6 +44,25 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
   const statusRpc = useRpc(vaultStatus);
   const reindexRpc = useRpc(reindexVault);
   const testRpc = useRpc(testEnrichment);
+  const integrationRpc = useRpc(agentIntegrationStatus);
+
+  const [integration, setIntegration] = useState<AgentIntegrationStatus | null>(null);
+  const [checkingIntegration, setCheckingIntegration] = useState(false);
+
+  const refreshIntegration = useCallback(async () => {
+    setCheckingIntegration(true);
+    try {
+      setIntegration(await integrationRpc({}));
+    } catch {
+      setIntegration(null);
+    } finally {
+      setCheckingIntegration(false);
+    }
+  }, [integrationRpc]);
+
+  useEffect(() => {
+    void refreshIntegration();
+  }, [refreshIntegration]);
 
   const [check, setCheck] = useState<VerifyVaultResult | null>(null);
   const [enrichmentCheck, setEnrichmentCheck] = useState<string | null>(null);
@@ -425,6 +446,12 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             onValueChange={(enabled: boolean) => patch({ installAgentSkill: enabled })}
           />
           <SettingsSwitch
+            label="Register in Cline"
+            hint="Cline never spawns a stdio server from the session payload; it reads its own ~/.cline/data/settings/cline_mcp_settings.json. This writes the obsidian-bridge entry there and keeps it current."
+            value={values.registerClineMcp}
+            onValueChange={(enabled: boolean) => patch({ registerClineMcp: enabled })}
+          />
+          <SettingsSwitch
             label="Refuse writes"
             hint="Turns every write tool off. Writes are already append-only and confined to the inbox/out/raw directories, so this is an extra brake."
             value={values.readOnly}
@@ -444,6 +471,68 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
           <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}>
             The vault is read from disk; the Obsidian application does not have to be running.
           </Text>
+        </SettingsSection>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingsSection
+          title="Installation"
+          info="Where this plugin registered itself. The state is checked on load, after every settings change and on a timer; a stale skill copy is rewritten automatically, and a config entry pointing at an old install is reported as outdated."
+        >
+          <SettingsAction
+            label="Agent integration"
+            hint={
+              integration
+                ? `Checked ${new Date(integration.refreshedAt).toLocaleTimeString()}`
+                : "Reads the agent config files and installed skill copies."
+            }
+            actionLabel={checkingIntegration ? "Checking…" : "Check again"}
+            onPress={() => void refreshIntegration()}
+            disabled={checkingIntegration}
+          />
+          {integration
+            ? integration.configs.map((row) => (
+                <Text
+                  key={`config-${row.label}`}
+                  style={{ color: row.installed && row.upToDate ? success : fgMuted, fontSize: font(10), ...uiFontStyle }}
+                  numberOfLines={2}
+                >
+                  {`${row.label} MCP: ${
+                    !row.detected
+                      ? "not installed"
+                      : row.error
+                        ? `error — ${row.error}`
+                        : row.installed
+                          ? row.upToDate
+                            ? "registered, current"
+                            : "registered, outdated — save a setting to refresh"
+                          : "detected, not registered"
+                  } · ${row.path}`}
+                </Text>
+              ))
+            : null}
+          {integration
+            ? integration.skills
+                .filter((row) => row.detected)
+                .map((row) => (
+                  <Text
+                    key={`skill-${row.root}`}
+                    style={{ color: row.installed && row.upToDate ? success : fgMuted, fontSize: font(10), ...uiFontStyle }}
+                    numberOfLines={2}
+                  >{`Skill · ${row.label}: ${
+                    row.installed
+                      ? row.upToDate
+                        ? "installed, current"
+                        : "installed, outdated — repaired on the next check"
+                      : "missing — installed on the next check"
+                  } · ${row.path}`}</Text>
+                ))
+            : null}
+          {integration && integration.skills.every((row) => !row.detected) ? (
+            <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }}>
+              No agent skills directory found on this machine.
+            </Text>
+          ) : null}
         </SettingsSection>
       </SettingsCard>
     </ScrollView>

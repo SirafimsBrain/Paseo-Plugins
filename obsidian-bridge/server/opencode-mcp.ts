@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
+import { clineMcpStatus } from "./cline-mcp";
 import { mcpServerCommand } from "./mcp-launch";
 
 /**
@@ -248,7 +249,14 @@ export function opencodeConfigPath(): string {
  */
 export function agentConfigCoversProvider(provider: string): { covered: boolean; path: string | null } {
   const base = provider.split("/")[0] ?? provider;
-  const status = base === "opencode" ? opencodeMcpStatus() : base === "kilo" ? kiloMcpStatus() : null;
+  const status =
+    base === "opencode"
+      ? opencodeMcpStatus()
+      : base === "kilo"
+        ? kiloMcpStatus()
+        : base === "cline"
+          ? clineMcpStatus()
+          : null;
   if (!status) return { covered: false, path: null };
   return { covered: status.installed && status.upToDate === true, path: status.path };
 }

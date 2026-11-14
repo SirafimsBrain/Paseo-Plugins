@@ -106,6 +106,6 @@ describe("agent config registration", () => {
 
   it("does not claim providers it never registers", () => {
     expect(agentConfigCoversProvider("codex")).toEqual({ covered: false, path: null });
-    expect(agentConfigCoversProvider("cline")).toEqual({ covered: false, path: null });
+    expect(agentConfigCoversProvider("qwen-code")).toEqual({ covered: false, path: null });
   });
 });

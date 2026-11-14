@@ -9,6 +9,8 @@ import {
   removeAgentSkill,
   resolveSkillSource,
   skillRoots,
+  skillStatuses,
+  verifyAgentSkill,
 } from "../server/agent-skill";
 
 /**
@@ -96,6 +98,39 @@ describe("agent skill", () => {
     const { removed } = removeAgentSkill();
     expect(removed).toEqual([path.join(root, SKILL_NAME)]);
     expect(fs.existsSync(path.join(root, "other-skill", "SKILL.md"))).toBe(true);
+  });
+
+  it("verifies and repairs what drifted, including a hand-edited skill", () => {
+    const [shared] = roots();
+    makeRoot(shared);
+    const file = path.join(shared, SKILL_NAME, "SKILL.md");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "stale", "utf-8");
+    const result = verifyAgentSkill();
+    expect(result.checked).toContain(shared);
+    expect(result.repaired).toEqual([file]);
+    expect(fs.readFileSync(file, "utf-8")).toBe(fs.readFileSync(repoSkill, "utf-8"));
+    // A second pass has nothing to repair.
+    expect(verifyAgentSkill().repaired).toEqual([]);
+  });
+
+  it("covers the shared, Cline and Kilo skills directories", () => {
+    const labels = skillRoots().map((root) => `${root.label}:${root.dir}`);
+    expect(labels.some((entry) => entry.includes(".agents/skills"))).toBe(true);
+    expect(labels.some((entry) => entry.includes(".cline/skills"))).toBe(true);
+    expect(labels.some((entry) => entry.includes(".kilo/skills"))).toBe(true);
+    expect(labels[0]).toContain(".agents/skills");
+  });
+
+  it("reports a per-root status list for the settings screen", () => {
+    const [shared, opencode] = roots();
+    makeRoot(shared);
+    makeRoot(opencode);
+    installAgentSkill();
+    const statuses = skillStatuses().filter((row) => row.detected);
+    expect(statuses.length).toBe(2);
+    expect(statuses.every((row) => row.installed && row.upToDate === true)).toBe(true);
+    expect(statuses.map((row) => row.root).sort()).toEqual([opencode, shared].sort());
   });
 
   it("reports no root when no agent is installed", () => {

@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.7.7**.
+Version covered: **0.8.7**.
 
 ## 1. Purpose and scope
 
@@ -304,7 +304,8 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `obsidianApiUrl` | `https://127.0.0.1:27124` | Local REST API base URL. Self-signed TLS is accepted for loopback hosts only. |
 | `obsidianApiKey` | `""` | Bearer token for that API. Mirrored in a `0600` settings file; never logged. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
-| `installAgentSkill` | `true` | Install `skills/obsidian-bridge/SKILL.md` into every agent skills directory that exists; remove it when off. |
+| `installAgentSkill` | `true` | Install `skills/obsidian-bridge/SKILL.md` into every agent skills directory that exists; verify and repair it on load, on a settings change and every five minutes; remove it when off. |
+| `registerClineMcp` | `true` | Register the MCP server in `~/.cline/data/settings/cline_mcp_settings.json` (Cline ignores a stdio server from the session payload). |
 | `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists); keep it across plugin restarts and remove it when the switch is off. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
@@ -334,6 +335,7 @@ and the panel says so.
 | 0.5.7 (shipped) | Keep the config entry across plugin restarts, so an update no longer empties a live agent's tool namespace. |
 | 0.6.7 (shipped) | `obsidian_edit`: exact-fragment edit of any existing note by vault path, outside the role writers. |
 | 0.7.7 (shipped) | Agent skill shipped with the plugin and installed into existing agent skills directories. |
+| 0.8.7 (shipped) | Cline MCP registration, enforced skill currency with repair, and a visible installation status in settings. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -347,7 +349,7 @@ process, not in the daemon, and the model cache must be moved out of the plugin 
 
 ## 9. Verification
 
-`npm test` (110 tests, 13 suites, ~0.9 s) plus `npm run typecheck` (`tsc -b`, three project references):
+`npm test` (119 tests, 14 suites, ~0.9 s) plus `npm run typecheck` (`tsc -b`, three project references):
 
 - `tests/parse.test.ts` — frontmatter subset, tag/link extraction, heading chunking, oversized sections.
 - `tests/store.test.ts` — FTS over English and Russian text, title ranking, backlinks, path/basename/alias resolution,
@@ -392,7 +394,28 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7)
+
+### 0.8.7
+
+- **A Cline agent had no Obsidian tools.** Measured with a real Cline agent on Paseo 0.15.4: it loaded the skill and
+  answered `OBSIDIAN_TOOLS=no` — Cline accepts `mcpServers` in the session payload but only connects remote servers from
+  it and spawns no stdio server. `server/cline-mcp.ts` writes the entry into Cline's own
+  `~/.cline/data/settings/cline_mcp_settings.json` (`{ mcpServers: { "obsidian-bridge": { transport: { type: "stdio",
+  command, args } } } }`), preserving other servers, refusing an unparseable file, and skipping a machine without
+  `~/.cline`. `agentConfigCoversProvider("cline")` now reports the same coverage as OpenCode/Kilo, so no duplicate
+  injection is attempted. New switch `registerClineMcp` (default on).
+- **Skill currency is now enforced, not hoped for.** `verifyAgentSkill()` compares every installed copy with the checkout
+  and rewrites what drifted; it runs on load, after a settings change and on a five-minute timer (`skillCheckTimer`,
+  cleared on shutdown). The skill roots grew to the directories the installed agents actually read: `~/.agents/skills`
+  (checked first), `~/.config/opencode/skills`, `~/.opencode/skills`, `~/.cline/skills`, `~/.kilo/skills`,
+  `$KIMI_CODE_HOME/skills`, `~/.qwen/skills`, `~/.codex/skills`, `~/.claude/skills` — still only those that exist.
+- **"Installed correctly" is visible.** New RPC `obsidian-bridge.agent-integration` and an *Installation* card in the
+  settings screen list every agent config (detected / registered / outdated / error, with the path) and every skill copy
+  (installed / current / stale / missing), with a *Check again* action.
+- Tests: `tests/cline-mcp.test.ts` (6 cases: entry shape, foreign servers preserved, outdated entry reported, selective
+  removal, Cline absent, unparseable file untouched) and three new `tests/agent-skill.test.ts` cases (repair of a
+  hand-edited skill, root list incl. shared/Cline/Kilo with `~/.agents` first, per-root status rows).
 
 ### 0.7.7
 

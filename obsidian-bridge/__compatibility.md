@@ -2,7 +2,7 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Verified (2026-11-14, 0.7.7)
+## Verified (2026-11-14, 0.8.7)
 
 | Component | Version | Notes |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ Detailed compatibility notes. The main README keeps only the summary table row a
 | Obsidian Local REST API with MCP | `5.5.2` (API route set of 5.x) | Live, not a fake server: `GET /` probe (`authenticated: true`), `POST /search/simple/?query=…&maxResults=…`, note JSON with `Accept: application/vnd.olrapi.note+json`, and four `POST /events/vault/<event>/` + SSE subscriptions held open by the plugin process. |
 | Semantic search | `Xenova/multilingual-e5-small` q8 | Model cache in `$PASEO_HOME/plugins/obsidian-bridge/models` (130 MB); 1 684/1 684 chunks embedded, query embedding ready, `obsidian_diagnose` recall@5 = 1.0 lexical and hybrid. |
 | MCP injection into agents | OpenCode provider | 0.4.3 saved the server via `agent.create.before`, but Paseo 0.15.4 refuses a saved MCP server on an OpenCode agent that shares the local OpenCode service (`Custom OpenCode MCP servers … require an isolated server`) and reports `supportsMcpServers: false`; attached tools are not surfaced by OpenCode either. 0.5.4 registers `mcp.obsidian-bridge` in OpenCode's (and Kilo's) own config file and stands both hooks down for such a provider. |
+| Cline MCP registration | `~/.cline/data/settings/cline_mcp_settings.json` | Live: a Cline agent saw the skill and no `obsidian_*` tool before the entry existed; after registration the same agent answers `obsidian_status`. Cline connects only remote MCP servers from the session payload, so the file is the only working path. |
 | OpenCode config | `~/.config/opencode/opencode.json`, `mcp[].type = "local"` | Live: the plugin writes and refreshes the entry on load, and a real OpenCode agent then sees `obsidian-bridge_obsidian_status` and the rest of the tools. |
 
 ## Verified (2026-11-13, 0.4.1)

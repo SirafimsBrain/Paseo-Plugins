@@ -27,6 +27,35 @@ export interface SkillRoot {
   dir: string;
 }
 
+export interface SkillTargetStatus {
+  label: string;
+  root: string;
+  path: string;
+  detected: boolean;
+  installed: boolean;
+  upToDate: boolean | null;
+}
+
+/** Per-root state of the installed skill, for the settings screen. */
+export function skillStatuses(): SkillTargetStatus[] {
+  const source = resolveSkillSource();
+  const content = source === null ? null : readIfExists(source);
+  return skillRoots().map((root) => {
+    const skillDir = path.join(root.dir, SKILL_NAME);
+    const file = path.join(skillDir, SKILL_FILE);
+    const detected = isDirectory(root.dir);
+    const existing = readIfExists(file);
+    return {
+      label: root.label,
+      root: root.dir,
+      path: file,
+      detected,
+      installed: existing !== null,
+      upToDate: existing === null || content === null ? null : existing === content,
+    };
+  });
+}
+
 export interface SkillStatus {
   /** Absolute path of the skill in the checkout, or `null` when it is missing. */
   source: string | null;
@@ -38,12 +67,28 @@ export interface SkillStatus {
   stale: string[];
 }
 
+/** Kimi Code CLI's data root: `$KIMI_CODE_HOME`, else `~/.kimi-code`. */
+function kimiCodeHome(): string {
+  const configured = (process.env.KIMI_CODE_HOME ?? "").trim();
+  return configured.length > 0 ? configured : path.join(os.homedir(), ".kimi-code");
+}
+
+/**
+ * Every skills directory the agent runtimes on this machine read, with the
+ * canonical one first: `~/.agents/skills` is the shared convention Paseo itself
+ * uses, the rest belong to individual CLIs.
+ */
 export function skillRoots(): SkillRoot[] {
   const home = os.homedir();
   return [
+    { label: "Shared (~/.agents)", dir: path.join(home, ".agents", "skills") },
     { label: "OpenCode", dir: path.join(home, ".config", "opencode", "skills") },
     { label: "OpenCode", dir: path.join(home, ".opencode", "skills") },
-    { label: "Codex", dir: path.join(home, ".agents", "skills") },
+    { label: "Cline", dir: path.join(home, ".cline", "skills") },
+    { label: "Kilo", dir: path.join(home, ".kilo", "skills") },
+    { label: "Kimi Code CLI", dir: path.join(kimiCodeHome(), "skills") },
+    { label: "Qwen Code", dir: path.join(home, ".qwen", "skills") },
+    { label: "Codex CLI", dir: path.join(home, ".codex", "skills") },
     { label: "Claude Code", dir: path.join(home, ".claude", "skills") },
   ];
 }
@@ -98,24 +143,42 @@ export function agentSkillStatus(): SkillStatus {
   return { source, detected, installed, stale };
 }
 
+export interface SkillVerifyResult {
+  /** Skills roots that exist and were inspected. */
+  checked: string[];
+  /** Copies that were missing or stale and have been rewritten. */
+  repaired: string[];
+  /** Roots whose copy could not be written. */
+  errors: string[];
+}
+
 /**
- * Writes the skill into every skills root that exists. Unchanged copies are left
- * untouched; a changed skill replaces the old file atomically.
+ * Verifies every installed copy against the checkout and repairs what drifted.
+ *
+ * This is the currency check the plugin runs on load, after a settings change
+ * and on a timer: a skill directory can be edited, replaced or removed by hand,
+ * by another plugin, or left behind by an update, and an agent then works from
+ * stale instructions without anyone noticing. `~/.agents/skills` always exists
+ * on a configured machine and is checked first; a root that does not exist is
+ * skipped, never created.
  */
-export function installAgentSkill(): { ok: boolean; targets: string[]; error?: string } {
+export function verifyAgentSkill(): SkillVerifyResult {
+  const checked: string[] = [];
+  const repaired: string[] = [];
+  const errors: string[] = [];
   const source = resolveSkillSource();
   if (source === null) {
-    return { ok: false, targets: [], error: "skills/obsidian-bridge/SKILL.md is missing from the checkout" };
+    return { checked, repaired, errors: ["skills/obsidian-bridge/SKILL.md is missing from the checkout"] };
   }
   let content: string;
   try {
     content = fs.readFileSync(source, "utf-8");
   } catch (cause) {
-    return { ok: false, targets: [], error: cause instanceof Error ? cause.message : String(cause) };
+    return { checked, repaired, errors: [cause instanceof Error ? cause.message : String(cause)] };
   }
-  const targets: string[] = [];
   for (const root of skillRoots()) {
     if (!isDirectory(root.dir)) continue;
+    checked.push(root.dir);
     const skillDir = path.join(root.dir, SKILL_NAME);
     const file = path.join(skillDir, SKILL_FILE);
     if (readIfExists(file) === content) continue;
@@ -124,13 +187,25 @@ export function installAgentSkill(): { ok: boolean; targets: string[]; error?: s
       fs.mkdirSync(skillDir, { recursive: true });
       fs.writeFileSync(temp, content, "utf-8");
       fs.renameSync(temp, file);
+      repaired.push(file);
     } catch (cause) {
       fs.rmSync(temp, { force: true });
-      return { ok: false, targets, error: `${file}: ${cause instanceof Error ? cause.message : String(cause)}` };
+      errors.push(`${file}: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
-    targets.push(file);
   }
-  return { ok: true, targets };
+  return { checked, repaired, errors };
+}
+
+/** Writes the skill wherever it is missing or stale (see `verifyAgentSkill`). */
+export function installAgentSkill(): { ok: boolean; targets: string[]; error?: string } {
+  if (resolveSkillSource() === null) {
+    return { ok: false, targets: [], error: "skills/obsidian-bridge/SKILL.md is missing from the checkout" };
+  }
+  const result = verifyAgentSkill();
+  if (result.errors.length > 0) {
+    return { ok: false, targets: result.repaired, error: result.errors.join("; ") };
+  }
+  return { ok: true, targets: result.repaired };
 }
 
 /** Removes the plugin's skill from every root that has a copy. */
