@@ -25712,7 +25712,7 @@ var MCP_TOOLS = [
   {
     name: "luck_tree_approve_goal",
     title: "Approve a high goal",
-    description: "Cross the approval gate and materialize the goal's subtree in the tree. Only a `proposed` goal may be approved; approval creates a side branch and one leaf per plan step. ADR-7: this is the human's approval gate.",
+    description: "Cross the approval gate and materialize the goal's subtree in the tree. Only a `proposed` goal may be approved; approval creates a side branch and one leaf per plan step. ADR-7: this is the human's approval gate \u2014 the store refuses a goal the calling agent created itself, so a proposal waits for the user (or for another agent the user explicitly told to approve).",
     inputSchema: {
       type: "object",
       properties: {
@@ -26099,6 +26099,13 @@ function dispatchScopedTool(name, input2, context) {
         const parsed = approveGoalInputSchema.safeParse(input2);
         if (!parsed.success) return invalidInput(parsed.error.issues);
         const value = parsed.data;
+        const approvingActor = value.actor ?? actor;
+        const proposal = store.getGoal(value.projectKey, value.goalId);
+        if (approvingActor !== UI_ACTOR && proposal !== null && proposal.createdBy !== null && proposal.createdBy === approvingActor) {
+          return error62(
+            `goal ${value.goalId} was created by '${approvingActor}': an agent cannot approve its own proposal \u2014 leave it proposed and stop; the user approves it in the luck-planner dashboard (Approve under \u2026), or a different agent approves it when the user explicitly said so`
+          );
+        }
         const goal = store.approveGoal({
           projectKey: value.projectKey,
           id: value.goalId,
@@ -26495,7 +26502,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.52.3";
+var SERVER_VERSION = "0.52.4";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

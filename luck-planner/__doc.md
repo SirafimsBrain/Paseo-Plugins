@@ -3637,3 +3637,38 @@ or pass the absolute path.
 `tests/project-key.test.ts` (resolution matrix, the daemon-file readers, and
 two dispatch cases asserting that `{ projectKey: "centurion" }` writes into
 `/projects/centurion` and creates **no** `centurion` project).
+
+### 10.15 Version 0.52.4 — an agent cannot approve its own goal (2026-11-15)
+
+**The finding.** While tracing the invisible-plan bug (§10.14) the audit trail
+of the orphaned project showed the whole sequence by one agent:
+`goal` + `create` → `goal` + `update` → `goal` + `status` (proposed) →
+**`goal` + `approve`** → two `node` + `create` → `goal` + `materialize`, every
+row stamped `opencode-agent`. The approval gate of ADR-7 was a sentence in the
+skill ("never approve your own proposal") and nothing in the code: the tool
+`luck_tree_approve_goal` accepted any `goalId`, so an agent could propose a
+plan and cross the human's gate in the same turn. The audit trail then reads
+like a human decision, which is worse than the bypass itself.
+
+**The fix.** `dispatchMcpTool`'s `luck_tree_approve_goal` case reads the goal
+and refuses when `goal.createdBy === (value.actor ?? defaultActor)`. The check
+sits at the **agent surface** — MCP and the native `luck_tree_upsert_leaf`
+sibling share this dispatcher — because that is where every agent call lands,
+and the human paths are deliberately elsewhere: the dashboard and the plugin
+RPC pass `actor: "user"` (`UI_ACTOR`), and a goal the user drafted and later
+approves is the gate working, so `UI_ACTOR` is exempt. A *different* agent can
+still approve when the user explicitly told it to, which is what the tool is
+for. The error names the way out instead of only the refusal: leave the plan
+proposed, the user approves it in the dashboard (Approve under …).
+
+Nothing is written on refusal (the check runs before `store.approveGoal`), so
+the goal stays `proposed` and no subtree is materialized — asserted in the new
+test.
+
+**Verification.** `npm run typecheck` exit 0; `npm test` — 55 suites / 959
+tests, including the new `refuses to let an agent approve its own proposal
+(0.52.4)` case in `tests/mcp-tools.test.ts` (refusal, unchanged `status`,
+`materializedNodeId === null`, then a different agent approving successfully).
+The store keeps its own state-machine rule (only a `proposed` goal may cross),
+so the two layers are: the store enforces *which status may cross*, the agent
+surface enforces *who may cross it for their own proposal*.

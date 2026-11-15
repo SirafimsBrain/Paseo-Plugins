@@ -245,8 +245,9 @@ exist for coordination, not ceremony.
 - **Never approve your own proposal.** \`luck_tree_approve_goal\` exists only
   for a managing agent whose user explicitly told it to approve on their
   behalf; calling it for a plan you wrote yourself turns the approval gate
-  and the audit trail into a false statement. Without that instruction, the
-  gate belongs to the human.
+  and the audit trail into a false statement. Since 0.52.4 the tool refuses a
+  goal whose creator is the calling agent — expect that error rather than a
+  success, and without an explicit instruction the gate belongs to the human.
 - \`luck_tree_update_growth\` — attach or refresh progress steps for a goal
   or node (\`steps\` when creating, \`steps\`/\`status\` when updating). Update
   it as steps complete or stall (with \`reason\`) — the dashboard renders it

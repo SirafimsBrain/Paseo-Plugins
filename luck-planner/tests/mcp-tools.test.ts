@@ -1142,6 +1142,8 @@ describe("luck_tree_approve_goal", () => {
         projectKey: P,
         goalId,
         parentBranchId: branch.id,
+        // A different agent approves: 0.52.4 refuses a goal's own creator.
+        actor: "agent:manager",
       }),
     );
     expect(result.goal.status).toBe("approved");
@@ -1168,6 +1170,7 @@ describe("luck_tree_approve_goal", () => {
         projectKey: P,
         goalId: created.goal.id,
         parentBranchId: branch.id,
+        actor: "agent:manager",
       }),
       /only a proposed goal may be approved/,
     );
@@ -1195,9 +1198,54 @@ describe("luck_tree_approve_goal", () => {
         projectKey: P,
         goalId: created.goal.id,
         parentBranchId: "00000000-0000-4000-8000-000000000000",
+        actor: "agent:manager",
       }),
       /not found/,
     );
+  });
+
+  it("refuses to let an agent approve its own proposal (0.52.4)", () => {
+    const store = openStore();
+    const { branch } = seedTree(store);
+    const created = payload<{ goal: { id: string } }>(
+      call(store, "luck_tree_set_goal", {
+        projectKey: P,
+        action: "create",
+        formalText: "Self-approved plan",
+        plan: [{ id: "s1", title: "step one", description: "" }],
+      }),
+    );
+    call(store, "luck_tree_set_goal", {
+      projectKey: P,
+      action: "propose",
+      goalId: created.goal.id,
+    });
+
+    // The goal was created by ACTOR; the same agent proposing cannot cross
+    // the gate — the proposal waits for the user.
+    expectError(
+      call(store, "luck_tree_approve_goal", {
+        projectKey: P,
+        goalId: created.goal.id,
+        parentBranchId: branch.id,
+      }),
+      /an agent cannot approve its own proposal/,
+    );
+    // Nothing was written: still proposed, nothing materialized.
+    const goal = store.getGoal(P, created.goal.id);
+    expect(goal?.status).toBe("proposed");
+    expect(goal?.materializedNodeId).toBeNull();
+
+    // A different agent may, when the user explicitly said so.
+    const approved = payload<{ goal: { status: string } }>(
+      call(store, "luck_tree_approve_goal", {
+        projectKey: P,
+        goalId: created.goal.id,
+        parentBranchId: branch.id,
+        actor: "agent:manager",
+      }),
+    );
+    expect(approved.goal.status).toBe("approved");
   });
 });
 

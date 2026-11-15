@@ -1,3 +1,4 @@
+import { UI_ACTOR } from "../shared/tree";
 import type { LeafStatus, Node, NodeKind } from "../shared/tree";
 import type { GoalStatus } from "../shared/goals";
 import type { BugStatus } from "../shared/links";
@@ -514,7 +515,10 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     description:
       "Cross the approval gate and materialize the goal's subtree in the tree. " +
       "Only a `proposed` goal may be approved; approval creates a side branch " +
-      "and one leaf per plan step. ADR-7: this is the human's approval gate.",
+      "and one leaf per plan step. ADR-7: this is the human's approval gate — " +
+      "the store refuses a goal the calling agent created itself, so a proposal " +
+      "waits for the user (or for another agent the user explicitly told to " +
+      "approve).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1035,6 +1039,30 @@ function dispatchScopedTool(
         const parsed = approveGoalInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues);
         const value: ApproveGoalInput = parsed.data;
+        // ADR-7, 0.52.4: the gate is the human's. Before this check the rule
+        // was prose in the skill only, and a real agent walked through it — it
+        // created a goal, proposed it and approved it in the same turn, which
+        // the audit trail records as `approve` by `opencode-agent` and looks
+        // exactly like a human decision. Enforced at the agent surface (MCP and
+        // the native tool share this dispatcher), where every agent call lands:
+        // proposing is where an agent's authority ends. The dashboard and the
+        // plugin RPC (actor `user`) do not come through here, and a *different*
+        // agent may still approve when the user explicitly told it to.
+        const approvingActor = value.actor ?? actor;
+        const proposal = store.getGoal(value.projectKey, value.goalId);
+        if (
+          approvingActor !== UI_ACTOR &&
+          proposal !== null &&
+          proposal.createdBy !== null &&
+          proposal.createdBy === approvingActor
+        ) {
+          return error(
+            `goal ${value.goalId} was created by '${approvingActor}': an agent ` +
+              `cannot approve its own proposal — leave it proposed and stop; the ` +
+              `user approves it in the luck-planner dashboard (Approve under …), ` +
+              `or a different agent approves it when the user explicitly said so`,
+          );
+        }
         const goal = store.approveGoal({
           projectKey: value.projectKey,
           id: value.goalId,
