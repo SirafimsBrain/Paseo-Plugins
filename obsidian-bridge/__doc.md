@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.8.9**.
+Version covered: **0.8.10**.
 
 ## 1. Purpose and scope
 
@@ -175,7 +175,8 @@ hybrid retrieval, so "semantic helps here" is a measurement rather than a claim.
 coverage and how to measure.
 
 The MCP `initialize` instructions embed the resolved role map (`mcpInstructions(dirs)`), so an agent asked to write a
-document is told which directory that document belongs to before it calls anything.
+document is told which directory that document belongs to before it calls anything; they also carry the full tool index
+(name + title, generated from `MCP_TOOLS`), because a client may render only a truncated catalogue (§11, 0.8.10).
 
 ### Directory roles (`server/dirs.ts`)
 
@@ -338,6 +339,7 @@ and the panel says so.
 | 0.8.7 (shipped) | Cline MCP registration, enforced skill currency with repair, and a visible installation status in settings. |
 | 0.8.8 (shipped) | Registrations are checked for an existing target and refreshed on the timer, so an update cannot leave a dead path. |
 | 0.8.9 (shipped) | `migrate` hook on the settings definition, so a document from an older install opens instead of failing with "Settings version 2 requires a migration". |
+| 0.8.10 (shipped) | The `initialize` instructions carry the full tool index, so a truncated tool catalogue cannot make an agent guess names. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -396,7 +398,20 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10)
+
+### 0.8.10
+
+- **An agent spent a whole turn discovering tool names instead of asking the vault.** Measured on Paseo 0.15.4 with an
+  OpenCode agent asked whether a named document existed: its catalogue showed `obsidian-bridge (13 tools, 2 shown)`, the
+  skill was visible only as its description, and the agent tried `search`, then `obsidian_find_notes`, then listed MCP
+  resources before it reached `obsidian_search` — the document was found in the end, but the cost defeats the plugin.
+  The `initialize` instructions now carry the complete index (`Tools in this server (13):` plus one line per name with its
+  title, generated from `MCP_TOOLS`), and state the shortcut explicitly: call `obsidian_search` with words from the
+  title, then `obsidian_read` (or `obsidian_outline` first for a long note), and do not probe for names or fall back to
+  `glob`/`grep`/`read`. The skill description in `SKILL.md` frontmatter now names the tools too, so a runtime that shows
+  only the description still answers "what can I call?". Tests: `tests/mcp-tools.test.ts` (every `MCP_TOOLS` name and
+  the count appear in the instructions).
 
 ### 0.8.9
 

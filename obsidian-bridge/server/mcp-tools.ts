@@ -67,6 +67,12 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "memory — memory-flash does — and it does not plan work — luck-planner does. Results are " +
     "snippets: read the note before quoting it.\n\n" +
     directoryGuide(dirs) +
+    "\n\nTo find a document the user names, call `obsidian_search` with words from its title " +
+    "(no path needed); read it with `obsidian_read`, and a long one by heading after " +
+    "`obsidian_outline`. Call these tools by their exact names — do not probe for names, guess " +
+    "a vault path, or fall back to `glob`/`grep`/`read`: the index finds a note by its title, " +
+    "aliases, tags and body in one call.\n\n" +
+    toolIndex() +
     "\n\nWrite only where the user asked you to: authored documents go to `out`, scratch and " +
     "intermediate notes to `raw`, and appends to incoming material to `inbox`. Never create a " +
     "note outside those directories.\n\nA skill named `obsidian-bridge` documents the same workflow " +
@@ -91,6 +97,21 @@ export interface McpToolDefinition {
     properties: Record<string, JsonSchemaProperty>;
     required?: string[];
   };
+}
+
+/**
+ * Every tool name with its one-line title, appended to the `initialize`
+ * instructions.
+ *
+ * A client may show only a truncated tool catalogue — measured on Paseo 0.15.4
+ * with an OpenCode agent: `obsidian-bridge (13 tools, 2 shown)` — and an agent
+ * then spends turns guessing names (`search`, `obsidian_find_notes`, …) instead
+ * of asking the vault a question, exactly the cost this plugin exists to avoid.
+ * The instructions block arrives whole, so the complete index belongs here.
+ */
+function toolIndex(): string {
+  const lines = MCP_TOOLS.map((tool) => `- \`${tool.name}\` — ${tool.title}`);
+  return [`Tools in this server (${MCP_TOOLS.length}):`, ...lines].join("\n");
 }
 
 export const MCP_TOOLS: McpToolDefinition[] = [

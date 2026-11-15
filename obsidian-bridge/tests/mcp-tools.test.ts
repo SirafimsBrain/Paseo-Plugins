@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { indexPathFor } from "../server/paths";
 import { scanVault } from "../server/scan";
 import { BridgeStore } from "../server/store";
-import { dispatchTool, MCP_TOOLS } from "../server/mcp-tools";
+import { dispatchTool, MCP_TOOLS, mcpInstructions } from "../server/mcp-tools";
+import { resolveRoleDirs } from "../server/dirs";
 import { makeWorkspace, runtimeSettings, type TestWorkspace } from "./fixtures";
 
 const workspaces: TestWorkspace[] = [];
@@ -40,6 +41,17 @@ describe("tool catalogue", () => {
     for (const tool of MCP_TOOLS) {
       expect(tool.name.startsWith("obsidian_")).toBe(true);
     }
+  });
+
+  it("names every tool in the initialize instructions", () => {
+    // A client can truncate the tool catalogue (measured: OpenCode showed 2 of
+    // 13 tools), and the agent then guesses names instead of calling search.
+    // The instructions block arrives whole, so it carries the full index.
+    const instructions = mcpInstructions(resolveRoleDirs(runtimeSettings("/tmp/vault")));
+    expect(instructions).toContain(`Tools in this server (${MCP_TOOLS.length})`);
+    for (const tool of MCP_TOOLS) expect(instructions).toContain(`\`${tool.name}\``);
+    expect(instructions).toContain("do not probe for names");
+    expect(instructions).toContain("`obsidian_search`");
   });
 
   it("states the explicit-use contract in every content tool", async () => {
