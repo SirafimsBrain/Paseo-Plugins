@@ -3743,3 +3743,63 @@ into work. That is the half of the fix the incident actually required.
 copied text's marker/fact/plan/"do not re-research" lines, the no-brief
 sentence, and the MCP round trip: `upsert_leaf` with a brief → stored as
 `payload.brief` → returned by `get_context` with the description).
+
+### 10.17 Version 0.54.0 — the details become a drawer under the diagram (2026-11-15)
+
+**The report.** The 2D view was broken: the planning strip and the details
+occupied the main area, the diagram was squeezed into a narrow column on the
+right. The owner asked for the details to move **below** the diagram, to be
+hidden by default behind a button, and for that choice to be remembered for the
+session.
+
+**The cause.** `.lp-body` was `display: grid` with
+`grid-template-columns: 1fr var(--lp-details-width, 450px)` — two cells for
+two items, the canvas and the right-hand panel. The 0.51.2 planning strip was
+added as a **third child of the same container**, so the strip took cell 1 of
+row 1, the canvas took cell 2 (the 450 px column — the narrow diagram in the
+report) and the panel wrapped into cell 1 of row 2 (the huge *DETAILS* block
+on the left). No CSS was wrong on its own; the container's contract had
+silently changed.
+
+**The fix.**
+
+- `.lp-body` is a **flex column**: the strip (`flex: none`), the diagram
+  (`flex: 1`), the drawer (`flex: none`). `.lp-plain` takes the room in the
+  board view through the same rule, so one layout model covers all three
+  views.
+- `DetailsPanel` is a **drawer**: a header row that is always visible (a
+  `lp-details-toggle` button with `aria-expanded`, the word *Details* and, while
+  closed, the selected node's name), and a body rendered only while open — a
+  collapsed panel costs nothing, not even a hidden DOM subtree.
+- The drag edge moved with the panel: it sits on the drawer's **top** border,
+  `aria-orientation="horizontal"`, and dragging up makes the drawer taller
+  (`origin.height + (origin.y - event.clientY)`); a double-click still
+  restores the default. `--lp-details-width` is gone with the column.
+- `dashboard/src/details-width.ts` became `dashboard/src/details-panel.ts`:
+  the height rules are the same (280 px default, 140–640 px window, clamped,
+  forgiving read, injected storage, `localStorage`) and **the open state is
+  new**: `DEFAULT_DETAILS_OPEN = false`, stored in `sessionStorage` under
+  `luck-planner:details-open`, so the choice survives a reload of the tab but
+  a new tab starts with the diagram at full height — exactly "remember it for
+  the active session". Anything but the literal `"true"`/`"false"` falls back
+  to the default.
+- `tests/details-width.test.ts` became `tests/details-drawer.test.ts`: the
+  height matrix, the session open state, the hostile storage, the source
+  assertions (horizontal drag edge, `aria-expanded` toggle, one-column layout
+  and the absence of the old grid template), plus the growth-schema leniency
+  cases it already carried.
+
+**A second bug, found while looking at it.** The detail request's `finally`
+skips the loading flag once the effect is stale, so a selection cleared while
+its request was in flight left `detailLoading` on for good — the drawer said
+*Loading…* forever. The early-return branch now clears the flag too.
+
+**Verification.** `npm run typecheck` exit 0 (both configurations);
+`npm test` — 56 suites / 972 tests; `dist/dashboard` rebuilt and its
+determinism test (hash of a fresh rebuild) passes. The layout was also looked
+at in a browser: a local `DashboardHttpServer` over a seeded throwaway store,
+serving the freshly built `dist/dashboard`. The diagram takes the whole area,
+the drawer sits under it closed by default (canvas 445 px, header reading
+`DETAILS · click a node…`), the header button opens it (canvas 196 px, drawer
+280 px, the selected node's content), closing it names the selected node in the
+header, and the open state survived a page reload through `sessionStorage`.

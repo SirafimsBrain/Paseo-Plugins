@@ -1056,37 +1056,59 @@ function parseDashboardParams(search) {
   };
 }
 
-// dashboard/src/details-width.ts
-var DEFAULT_DETAILS_WIDTH = 450;
-var MIN_DETAILS_WIDTH = 280;
-var MAX_DETAILS_WIDTH = 720;
-var DETAILS_WIDTH_KEY = "luck-planner:details-width";
-function clampDetailsWidth(width) {
-  if (!Number.isFinite(width)) return DEFAULT_DETAILS_WIDTH;
-  return Math.min(MAX_DETAILS_WIDTH, Math.max(MIN_DETAILS_WIDTH, Math.round(width)));
+// dashboard/src/details-panel.ts
+var DEFAULT_DETAILS_HEIGHT = 280;
+var MIN_DETAILS_HEIGHT = 140;
+var MAX_DETAILS_HEIGHT = 640;
+var DETAILS_HEIGHT_KEY = "luck-planner:details-height";
+var DETAILS_OPEN_KEY = "luck-planner:details-open";
+var DEFAULT_DETAILS_OPEN = false;
+function clampDetailsHeight(height) {
+  if (!Number.isFinite(height)) return DEFAULT_DETAILS_HEIGHT;
+  return Math.min(
+    MAX_DETAILS_HEIGHT,
+    Math.max(MIN_DETAILS_HEIGHT, Math.round(height))
+  );
 }
-function readStoredDetailsWidth(storage) {
-  if (storage === null) return DEFAULT_DETAILS_WIDTH;
+function readStoredDetailsHeight(storage) {
+  if (storage === null) return DEFAULT_DETAILS_HEIGHT;
   try {
-    const stored = Number.parseInt(storage.getItem(DETAILS_WIDTH_KEY) ?? "", 10);
-    if (Number.isInteger(stored) && stored >= MIN_DETAILS_WIDTH && stored <= MAX_DETAILS_WIDTH) {
+    const stored = Number.parseInt(storage.getItem(DETAILS_HEIGHT_KEY) ?? "", 10);
+    if (Number.isInteger(stored) && stored >= MIN_DETAILS_HEIGHT && stored <= MAX_DETAILS_HEIGHT) {
       return stored;
     }
   } catch {
   }
-  return DEFAULT_DETAILS_WIDTH;
+  return DEFAULT_DETAILS_HEIGHT;
 }
-function storeDetailsWidth(storage, width) {
+function storeDetailsHeight(storage, height) {
   if (storage === null) return;
   try {
-    storage.setItem(DETAILS_WIDTH_KEY, String(clampDetailsWidth(width)));
+    storage.setItem(DETAILS_HEIGHT_KEY, String(clampDetailsHeight(height)));
   } catch {
   }
 }
-function forgetDetailsWidth(storage) {
+function forgetDetailsHeight(storage) {
   if (storage === null) return;
   try {
-    storage.removeItem(DETAILS_WIDTH_KEY);
+    storage.removeItem(DETAILS_HEIGHT_KEY);
+  } catch {
+  }
+}
+function readStoredDetailsOpen(storage) {
+  if (storage === null) return DEFAULT_DETAILS_OPEN;
+  try {
+    const stored = storage.getItem(DETAILS_OPEN_KEY);
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+  } catch {
+  }
+  return DEFAULT_DETAILS_OPEN;
+}
+function storeDetailsOpen(storage, open) {
+  if (storage === null) return;
+  try {
+    storage.setItem(DETAILS_OPEN_KEY, open ? "true" : "false");
   } catch {
   }
 }
@@ -11744,14 +11766,14 @@ function NodeDetailContent(props) {
 var import_jsx_runtime6 = __toESM(require_jsx_runtime());
 function ResizeHandle(props) {
   const start2 = (0, import_react7.useRef)(null);
-  const last = (0, import_react7.useRef)(props.width);
+  const last = (0, import_react7.useRef)(props.height);
   const onPointerMove = (0, import_react7.useCallback)(
     (event) => {
       const origin = start2.current;
       if (origin === null) return;
-      const next = origin.width + (origin.x - event.clientX);
+      const next = origin.height + (origin.y - event.clientY);
       last.current = next;
-      props.onWidthChange(next);
+      props.onHeightChange(next);
     },
     [props]
   );
@@ -11761,59 +11783,85 @@ function ResizeHandle(props) {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", stop);
     window.removeEventListener("pointercancel", stop);
-    props.onWidthCommit(last.current);
+    props.onHeightCommit(last.current);
   }, [onPointerMove, props]);
   const onPointerDown2 = (0, import_react7.useCallback)(
     (event) => {
       event.preventDefault();
-      start2.current = { x: event.clientX, width: props.width };
-      last.current = props.width;
+      start2.current = { y: event.clientY, height: props.height };
+      last.current = props.height;
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", stop);
       window.addEventListener("pointercancel", stop);
     },
-    [onPointerMove, props.width, stop]
+    [onPointerMove, props.height, stop]
   );
   return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
     "div",
     {
       className: "lp-resize-handle",
       role: "separator",
-      "aria-orientation": "vertical",
-      "aria-label": "Resize the details panel",
-      "aria-valuenow": Math.round(props.width),
+      "aria-orientation": "horizontal",
+      "aria-label": "Resize the details drawer",
+      "aria-valuenow": Math.round(props.height),
       title: "Drag to resize \xB7 double-click to reset",
       onPointerDown: onPointerDown2,
-      onDoubleClick: props.onWidthReset
+      onDoubleClick: props.onHeightReset
     }
   );
 }
 function DetailsPanel(props) {
   const { detail, loading, error, resolveName } = props;
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("aside", { className: "lp-details", "aria-label": "Node details", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-      ResizeHandle,
-      {
-        width: props.width,
-        onWidthChange: props.onWidthChange,
-        onWidthCommit: props.onWidthCommit,
-        onWidthReset: props.onWidthReset
-      }
-    ),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h2", { className: "lp-details-title", children: "Details" }),
-    error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-      NodeDetailContent,
-      {
-        detail,
-        resolveName,
-        onSetStatus: props.onSetStatus,
-        pendingStatus: props.pendingStatus,
-        writeError: props.writeError,
-        override: props.override,
-        onSelectBug: props.onSelectBug
-      }
-    )
-  ] });
+  const selected2 = detail === null ? "" : detail.node.name;
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+    "aside",
+    {
+      className: props.open ? "lp-details lp-details-open" : "lp-details lp-details-closed",
+      "aria-label": "Node details",
+      style: props.open ? { height: `${props.height}px` } : void 0,
+      children: [
+        props.open ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          ResizeHandle,
+          {
+            height: props.height,
+            onHeightChange: props.onHeightChange,
+            onHeightCommit: props.onHeightCommit,
+            onHeightReset: props.onHeightReset
+          }
+        ) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "lp-details-head", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+            "button",
+            {
+              type: "button",
+              className: "lp-details-toggle",
+              "aria-expanded": props.open,
+              "aria-controls": "lp-details-body",
+              onClick: props.onToggle,
+              title: props.open ? "Hide the details and give the diagram the room" : "Show the details of the selected node",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-details-chevron", "aria-hidden": "true", children: props.open ? "\u25BE" : "\u25B4" }),
+                /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-details-title", children: "Details" })
+              ]
+            }
+          ),
+          props.open ? null : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "lp-details-summary", children: loading ? "loading\u2026" : selected2.length > 0 ? selected2 : "click a node on the diagram, then open the details" })
+        ] }),
+        props.open ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "lp-details-content", id: "lp-details-body", children: error.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-error", role: "alert", children: error }) : loading ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Loading\u2026" }) : detail === null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "lp-details-empty", children: "Click a node on the diagram to see its version, revision, status, influence links, incidents and history here." }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          NodeDetailContent,
+          {
+            detail,
+            resolveName,
+            onSetStatus: props.onSetStatus,
+            pendingStatus: props.pendingStatus,
+            writeError: props.writeError,
+            override: props.override,
+            onSelectBug: props.onSelectBug
+          }
+        ) }) : null
+      ]
+    }
+  );
 }
 
 // dashboard/src/components/DetailModal.tsx
@@ -13069,6 +13117,13 @@ function detailsStorage() {
     return null;
   }
 }
+function detailsSessionStorage() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 var GROWTH_EMPTY_HINT = "No growth records in this project yet \u2014 the heat layer stays neutral (agents write them with luck_tree_update_growth).";
 var SCENE_EMPTY_HINT = "No nodes match the filters \u2014 the 3D tree is empty. Loosen or clear the kind/status/version filters.";
 function safeStorage() {
@@ -13114,8 +13169,11 @@ function App() {
     () => themeCatalog === null ? "" : initialThemeId(themeChoice, themeCatalog, appearance),
     [appearance, themeCatalog, themeChoice]
   );
-  const [detailsWidth, setDetailsWidth] = (0, import_react13.useState)(
-    () => readStoredDetailsWidth(detailsStorage())
+  const [detailsOpen, setDetailsOpen] = (0, import_react13.useState)(
+    () => readStoredDetailsOpen(detailsSessionStorage())
+  );
+  const [detailsHeight, setDetailsHeight] = (0, import_react13.useState)(
+    () => readStoredDetailsHeight(detailsStorage())
   );
   const [selectedId, setSelectedId] = (0, import_react13.useState)(null);
   const [modal, setModal] = (0, import_react13.useState)(null);
@@ -13234,6 +13292,7 @@ function App() {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
+      setDetailLoading(false);
       return;
     }
     let stale = false;
@@ -13569,17 +13628,24 @@ function App() {
     return decision.ok ? decision.branchId : null;
   }, [tree]);
   const filtersActive = isFilterActive(filters);
-  const onDetailsWidthChange = (0, import_react13.useCallback)((width) => {
-    setDetailsWidth(clampDetailsWidth(width));
+  const onDetailsHeightChange = (0, import_react13.useCallback)((height) => {
+    setDetailsHeight(clampDetailsHeight(height));
   }, []);
-  const onDetailsWidthCommit = (0, import_react13.useCallback)((width) => {
-    const clamped = clampDetailsWidth(width);
-    setDetailsWidth(clamped);
-    storeDetailsWidth(detailsStorage(), clamped);
+  const onDetailsHeightCommit = (0, import_react13.useCallback)((height) => {
+    const clamped = clampDetailsHeight(height);
+    setDetailsHeight(clamped);
+    storeDetailsHeight(detailsStorage(), clamped);
   }, []);
-  const onDetailsWidthReset = (0, import_react13.useCallback)(() => {
-    setDetailsWidth(DEFAULT_DETAILS_WIDTH);
-    forgetDetailsWidth(detailsStorage());
+  const onDetailsHeightReset = (0, import_react13.useCallback)(() => {
+    setDetailsHeight(DEFAULT_DETAILS_HEIGHT);
+    forgetDetailsHeight(detailsStorage());
+  }, []);
+  const onDetailsToggle = (0, import_react13.useCallback)(() => {
+    setDetailsOpen((current) => {
+      const next = !current;
+      storeDetailsOpen(detailsSessionStorage(), next);
+      return next;
+    });
   }, []);
   return /* @__PURE__ */ (0, import_jsx_runtime15.jsxs)("div", { className: "lp-app", children: [
     /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
@@ -13611,9 +13677,6 @@ function App() {
       "div",
       {
         className: view === "plain" ? "lp-body lp-body-plain" : "lp-body",
-        style: {
-          "--lp-details-width": `${detailsWidth}px`
-        },
         children: [
           view === "plain" ? /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
             PlainView,
@@ -13685,10 +13748,12 @@ function App() {
               loading: detailLoading,
               error: detailError,
               resolveName,
-              width: detailsWidth,
-              onWidthChange: onDetailsWidthChange,
-              onWidthCommit: onDetailsWidthCommit,
-              onWidthReset: onDetailsWidthReset,
+              open: detailsOpen,
+              onToggle: onDetailsToggle,
+              height: detailsHeight,
+              onHeightChange: onDetailsHeightChange,
+              onHeightCommit: onDetailsHeightCommit,
+              onHeightReset: onDetailsHeightReset,
               onSetStatus: client === null ? void 0 : (status) => void setStatusAction(status),
               pendingStatus: writePending,
               writeError,

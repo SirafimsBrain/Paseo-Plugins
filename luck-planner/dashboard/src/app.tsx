@@ -94,13 +94,15 @@ import {
 } from "./graph";
 import { parseDashboardParams } from "./params";
 import {
-  clampDetailsWidth,
-  DEFAULT_DETAILS_WIDTH,
-  forgetDetailsWidth,
-  readStoredDetailsWidth,
-  storeDetailsWidth,
-  type DetailsWidthStorage,
-} from "./details-width";
+  clampDetailsHeight,
+  DEFAULT_DETAILS_HEIGHT,
+  forgetDetailsHeight,
+  readStoredDetailsHeight,
+  readStoredDetailsOpen,
+  storeDetailsHeight,
+  storeDetailsOpen,
+  type DetailsPanelStorage,
+} from "./details-panel";
 import { createChangeStream } from "./live";
 import { buildSceneOverlay, EMPTY_OVERLAY } from "./overlay-3d";
 import {
@@ -194,12 +196,25 @@ function filterExcludesNode(
 }
 
 /**
- * The details panel's width (stage I4 follow-up) — the rules live in
- * `dashboard/src/details-width.ts` (pure, testable without a DOM).
+ * The details drawer's height — remembered across visits. The rules live in
+ * `dashboard/src/details-panel.ts` (pure, testable without a DOM).
  */
-function detailsStorage(): DetailsWidthStorage | null {
+function detailsStorage(): DetailsPanelStorage | null {
   try {
     return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The drawer's open/closed state — remembered for the browsing session only
+ * (`sessionStorage`): a new tab starts with the diagram at full height, which
+ * is what the owner asked for.
+ */
+function detailsSessionStorage(): DetailsPanelStorage | null {
+  try {
+    return window.sessionStorage;
   } catch {
     return null;
   }
@@ -283,9 +298,13 @@ export function App(): ReactElement {
         : initialThemeId(themeChoice, themeCatalog, appearance),
     [appearance, themeCatalog, themeChoice],
   );
-  // The details panel is resizable; the width survives a reload.
-  const [detailsWidth, setDetailsWidth] = useState(() =>
-    readStoredDetailsWidth(detailsStorage()),
+  // The details drawer: closed by default, opened by its header button. The
+  // open state lives for the session, the dragged height across reloads.
+  const [detailsOpen, setDetailsOpen] = useState(() =>
+    readStoredDetailsOpen(detailsSessionStorage()),
+  );
+  const [detailsHeight, setDetailsHeight] = useState(() =>
+    readStoredDetailsHeight(detailsStorage()),
   );
 
   // G4 interaction state.
@@ -477,6 +496,10 @@ export function App(): ReactElement {
     if (client === null || selectedId === null) {
       setDetail(null);
       setDetailError("");
+      // A cleared selection cancels the request that was in flight; its own
+      // `finally` skips the flag (it is stale by then), so clear it here —
+      // otherwise the panel says "Loading…" forever after a quick deselect.
+      setDetailLoading(false);
       return;
     }
     let stale = false;
@@ -980,22 +1003,31 @@ export function App(): ReactElement {
 
   const filtersActive = isFilterActive(filters);
 
-  /** A new width while the user drags the panel's edge. */
-  const onDetailsWidthChange = useCallback((width: number): void => {
-    setDetailsWidth(clampDetailsWidth(width));
+  /** A new height while the user drags the drawer's top edge. */
+  const onDetailsHeightChange = useCallback((height: number): void => {
+    setDetailsHeight(clampDetailsHeight(height));
   }, []);
 
-  /** The width once the drag ends — the moment to remember it. */
-  const onDetailsWidthCommit = useCallback((width: number): void => {
-    const clamped = clampDetailsWidth(width);
-    setDetailsWidth(clamped);
-    storeDetailsWidth(detailsStorage(), clamped);
+  /** The height once the drag ends — the moment to remember it. */
+  const onDetailsHeightCommit = useCallback((height: number): void => {
+    const clamped = clampDetailsHeight(height);
+    setDetailsHeight(clamped);
+    storeDetailsHeight(detailsStorage(), clamped);
   }, []);
 
-  /** Back to the default width (double-click on the edge). */
-  const onDetailsWidthReset = useCallback((): void => {
-    setDetailsWidth(DEFAULT_DETAILS_WIDTH);
-    forgetDetailsWidth(detailsStorage());
+  /** Back to the default height (double-click on the edge). */
+  const onDetailsHeightReset = useCallback((): void => {
+    setDetailsHeight(DEFAULT_DETAILS_HEIGHT);
+    forgetDetailsHeight(detailsStorage());
+  }, []);
+
+  /** Open/close the drawer, remembered for this session. */
+  const onDetailsToggle = useCallback((): void => {
+    setDetailsOpen((current) => {
+      const next = !current;
+      storeDetailsOpen(detailsSessionStorage(), next);
+      return next;
+    });
   }, []);
 
   return (
@@ -1024,11 +1056,6 @@ export function App(): ReactElement {
       />
       <div
         className={view === "plain" ? "lp-body lp-body-plain" : "lp-body"}
-        style={
-          {
-            "--lp-details-width": `${detailsWidth}px`,
-          } as React.CSSProperties
-        }
       >
         {view === "plain" ? (
           <PlainView
@@ -1106,10 +1133,12 @@ export function App(): ReactElement {
             loading={detailLoading}
             error={detailError}
             resolveName={resolveName}
-            width={detailsWidth}
-            onWidthChange={onDetailsWidthChange}
-            onWidthCommit={onDetailsWidthCommit}
-            onWidthReset={onDetailsWidthReset}
+            open={detailsOpen}
+            onToggle={onDetailsToggle}
+            height={detailsHeight}
+            onHeightChange={onDetailsHeightChange}
+            onHeightCommit={onDetailsHeightCommit}
+            onHeightReset={onDetailsHeightReset}
             onSetStatus={client === null ? undefined : (status) => void setStatusAction(status)}
             pendingStatus={writePending}
             writeError={writeError}
