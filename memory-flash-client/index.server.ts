@@ -40,7 +40,7 @@ import {
 } from "./server/identity";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideClientSessionOpen } from "./server/session-open";
-import { detectSharedOpenCodeService, sharedOpenCodeMcpBlock } from "./server/opencode-service";
+import { sharedOpenCodeMcpBlockFor } from "./server/opencode-service";
 
 /**
  * Plugin server for Memory Flash Client.
@@ -175,10 +175,7 @@ export default function contribute(server: PluginServerContext) {
     // agent whose config carries custom MCP servers, so writing the remote
     // entries here would make creation fail outright. Degrade instead and say so
     // in the log. See server/opencode-service.ts.
-    const openCodeBlock = sharedOpenCodeMcpBlock(
-      request.config.provider,
-      detectSharedOpenCodeService(),
-    );
+    const openCodeBlock = sharedOpenCodeMcpBlockFor(request.config.provider);
     if (openCodeBlock !== null) {
       console.log(
         `[memory-flash-client] agent.create injection skipped for ${request.config.provider}: ${openCodeBlock}`,
@@ -225,10 +222,7 @@ export default function contribute(server: PluginServerContext) {
       // A shared OpenCode v2 service cannot carry an injected MCP server at all
       // (Paseo 0.15.0, #7435), and knowing that makes the capability probe
       // pointless: no contribution is possible on this open.
-      const openCodeMcpBlock = sharedOpenCodeMcpBlock(
-        request.provider,
-        detectSharedOpenCodeService(),
-      );
+      const openCodeMcpBlock = sharedOpenCodeMcpBlockFor(request.provider);
 
       let supportsMcpServers: boolean | null = null;
       const needsCapability =

@@ -20,7 +20,7 @@ import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
 import { createWebSearchTool } from "./server/agent-tools";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideSessionOpen, needsCapabilityProbe, providerExcluded } from "./server/session-open";
-import { detectSharedOpenCodeService, sharedOpenCodeMcpBlock } from "./server/opencode-service";
+import { sharedOpenCodeMcpBlockFor } from "./server/opencode-service";
 import { probeMcpServer } from "./server/probe";
 import { parseSettingsFile } from "./server/settings-file";
 import { settingsMirrorPath, writeSettingsMirror } from "./server/settings-mirror";
@@ -151,10 +151,7 @@ export default function contribute(server: PluginServerContext) {
     // agent whose config carries custom MCP servers, so writing the entry here
     // would make creation fail outright. Degrade instead: the agent gets
     // `bunny_web_search` on its first open. See server/opencode-service.ts.
-    const openCodeBlock = sharedOpenCodeMcpBlock(
-      request.config.provider,
-      detectSharedOpenCodeService(),
-    );
+    const openCodeBlock = sharedOpenCodeMcpBlockFor(request.config.provider);
     if (openCodeBlock !== null) {
       console.log(
         `[bunny-search] create skipped: ${openCodeBlock} (bunny_web_search stays available)`,
@@ -223,10 +220,7 @@ export default function contribute(server: PluginServerContext) {
         lookup: readSavedMcpServers(request.agentId),
         // A shared OpenCode v2 service cannot carry an injected MCP server at
         // all (Paseo 0.15.0, #7435) — the tool-only path takes over.
-        openCodeMcpBlock: sharedOpenCodeMcpBlock(
-          request.provider,
-          detectSharedOpenCodeService(),
-        ),
+        openCodeMcpBlock: sharedOpenCodeMcpBlockFor(request.provider),
       };
 
       // The daemon is only consulted when an MCP contribution is still possible;

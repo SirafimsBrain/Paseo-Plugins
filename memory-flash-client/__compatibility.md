@@ -1,6 +1,6 @@
 # Compatibility — memory-flash-client
 
-Current: plugin **0.5.2**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
+Current: plugin **0.5.3**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
@@ -222,10 +222,12 @@ OpenCode service.` — the agent can then be neither created nor opened.
 Reproduced and controlled on this machine; details and the proposed
 plugin-side fix in
 [bunny-search §16.3](../bunny-search/__doc.md#163-compatibility-finding-injected-mcp-vs-opencodes-shared-service-0150).
-**Implemented for this plugin in 0.5.2:** `server/opencode-service.ts`
-reproduces the host's selection rule from local files only, and on a shared
-service the `opencode` provider gets no remote HTTP server and no capability
-probe — the agent opens normally instead of failing, and the log line names the
+**Implemented for this plugin in 0.5.2, provider settings in 0.5.3:**
+`server/opencode-service.ts` reproduces the host's selection rule from local
+state only, including the `agents.providers.opencode.env` overlay from
+`$PASEO_HOME/config.json` that `V2Runtime` applies on top of `process.env`, and
+on a shared service the `opencode` provider gets no remote HTTP server and no
+capability probe — the agent opens normally instead of failing, and the log line names the
 reason. Design, trade-offs and evidence:
 [§18](./__doc.md#18-paseo-0150--shared-opencode-service-graceful-degradation-052).
 bunny-search still records the fix as a recommendation.

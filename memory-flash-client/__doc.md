@@ -523,7 +523,15 @@ the contribution made creation fail and every reopen fail the same way.
 
 `server/opencode-service.ts` reproduces the selection rule from local files and
 returns `{shared, detail, path}`; `sharedOpenCodeMcpBlock(provider, service)`
-turns it into a block reason **only for `opencode`**. Both hooks consult it:
+turns it into a block reason **only for `opencode`**. The environment is read the
+way the host reads it: `agents.providers.opencode.env` from
+`$PASEO_HOME/config.json` is overlaid on the daemon's `process.env`, so a
+`PASEO_OPENCODE_SERVER_URL` or `XDG_STATE_HOME` set in Paseo's provider settings
+wins over the shell — the same values `V2Runtime` would use.
+`readProviderConfigEnv()` tolerates a missing or malformed config and ignores
+non-string values; `XDG_STATE_HOME` keeps the host's `??` semantics. The hooks
+call `sharedOpenCodeMcpBlockFor(provider)`, which reads that map and skips the
+filesystem entirely for non-`opencode` providers. Both hooks consult it:
 
 - **`agent.create`** — returns the request untouched instead of adding the HTTP
   entries, so the saved configuration never makes creation impossible. Log:
@@ -561,8 +569,12 @@ in the log, instead of a failed creation or open.
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | exit 0 |
-| `npm test` | **7 suites / 76 tests pass** — new `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch) and three wiring tests in `tests/server-contribution.test.ts` (create skipped for opencode, other providers unaffected, session open skipped) |
+| `npm test` | **7 suites / 84 tests pass** — `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch; plus `agents.providers.opencode.env` parsing and both provider overrides) and five wiring tests in `tests/server-contribution.test.ts` (create skipped for opencode, other providers unaffected, session open skipped, both settings overrides honoured) |
 | Host rule source | extracted from the installed `0.15.0` `app.asar` (`v2/service-selection.js`, `v2/runtime.js`) |
 
 Version `0.4.2 → 0.5.2` (new capability: the OpenCode guard → second digit),
 annotated tag `memory-flash-client@0.5.2`.
+`0.5.3` extends the guard to Paseo's own provider settings: it reads
+`agents.providers.opencode.env` from `$PASEO_HOME/config.json` and overlays it on
+`process.env` exactly as `V2Runtime` does (patch bump, tag
+`memory-flash-client@0.5.3`).

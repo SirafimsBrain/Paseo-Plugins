@@ -85,7 +85,7 @@ import {
 import { withLiveSpawn } from "./server/mcp-probe";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideSessionOpen } from "./server/session-open";
-import { detectSharedOpenCodeService, sharedOpenCodeMcpBlock } from "./server/opencode-service";
+import { sharedOpenCodeMcpBlockFor } from "./server/opencode-service";
 import { createMemoryRecallTool } from "./server/agent-tools";
 import { skillStatuses, skillMarkdown, installSkill as installSkillOnDisk, uninstallSkill as uninstallSkillOnDisk } from "./server/skill";
 import {
@@ -195,10 +195,7 @@ export default function contribute(server: PluginServerContext) {
     // would make creation fail outright. Degrade instead: memory stays reachable
     // through the config-file registration or the recall tool attached on
     // session open. See server/opencode-service.ts.
-    const openCodeBlock = sharedOpenCodeMcpBlock(
-      request.config.provider,
-      detectSharedOpenCodeService(),
-    );
+    const openCodeBlock = sharedOpenCodeMcpBlockFor(request.config.provider);
     if (openCodeBlock !== null) {
       console.log(
         `[memory-flash] agent.create injection skipped for ${request.config.provider}: ${openCodeBlock}`,
@@ -276,10 +273,7 @@ export default function contribute(server: PluginServerContext) {
       // A shared OpenCode v2 service cannot carry an injected MCP server at all
       // (Paseo 0.15.0, #7435), and knowing that also makes the capability probe
       // pointless: no MCP contribution is possible on this open.
-      const openCodeMcpBlock = sharedOpenCodeMcpBlock(
-        request.provider,
-        detectSharedOpenCodeService(),
-      );
+      const openCodeMcpBlock = sharedOpenCodeMcpBlockFor(request.provider);
 
       // Capability is only needed when an MCP contribution is still possible;
       // every other branch is decided without touching the daemon.

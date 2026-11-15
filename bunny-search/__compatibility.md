@@ -1,6 +1,6 @@
 # Compatibility — bunny-search
 
-Current: plugin **0.6.3**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.0`.
+Current: plugin **0.6.4**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
@@ -51,7 +51,10 @@ are in [__doc.md](./__doc.md) §16.3, the fix itself as recommendation
 §16.4 item 1. **Implemented in 0.6.3** ([§17](./__doc.md#17-shared-opencode-service--graceful-degradation-063)):
 the plugin detects the shared service itself and withholds the MCP server on
 the `opencode` provider, so the agent opens normally with the native
-`bunny_web_search` tool. Adding `opencode` to `skipProviders` is no longer
+`bunny_web_search` tool. Since **0.6.4** the detection also reads
+`agents.providers.opencode.env` from `$PASEO_HOME/config.json` and overlays it
+on `process.env` exactly as the host does, so a URL or `XDG_STATE_HOME` set in
+Paseo's provider settings is honoured. Adding `opencode` to `skipProviders` is no longer
 needed for this failure — and it also removes the native tool.
 
 **Recommendations for improvement — recorded, not implemented in the pass:**

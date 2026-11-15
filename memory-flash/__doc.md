@@ -1095,7 +1095,18 @@ same way. The interaction was reproduced and controlled in the bunny-search
 `server/opencode-service.ts` reproduces the selection rule from local files and
 returns `{shared, detail, path}`; `sharedOpenCodeMcpBlock(provider, service)`
 turns that into a block reason **only for `opencode`** (no other provider goes
-through `V2Runtime`). Two call sites:
+through `V2Runtime`).
+
+The environment is read the way the host reads it: `agents.providers.opencode.env`
+from `$PASEO_HOME/config.json` is overlaid on the daemon's `process.env`, so a
+`PASEO_OPENCODE_SERVER_URL` or `XDG_STATE_HOME` set in Paseo's provider settings
+wins over the shell — the same values `V2Runtime` would use. `readProviderConfigEnv()`
+tolerates a missing or malformed config (empty map) and ignores non-string
+values; `XDG_STATE_HOME` keeps the host's `??` semantics (a set-but-empty value
+counts as set). The hooks call `sharedOpenCodeMcpBlockFor(provider)`, which reads
+that map and skips the filesystem entirely for non-`opencode` providers.
+
+There are two call sites:
 
 - **`agent.create`** — after the config-file cover check, the hook returns the
   request untouched when the block applies, so the saved configuration never
@@ -1140,8 +1151,12 @@ degradation. The log line names that path when it applies.
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | exit 0 |
-| `npm test` | **18 suites / 215 tests pass** — new `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch) and three wiring tests in `tests/agent-hooks.test.ts` (create skipped for opencode, other providers unaffected, session open degrades to the recall tool) |
+| `npm test` | **18 suites / 223 tests pass** — `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch; plus `agents.providers.opencode.env` parsing, both provider overrides and their precedence over the daemon env) and five wiring tests in `tests/agent-hooks.test.ts` (create skipped for opencode, other providers unaffected, session open degrades to the recall tool, and both settings overrides honoured through `$PASEO_HOME/config.json`) |
 | Host rule source | extracted from the installed `0.15.0` `app.asar` (`v2/service-selection.js`, `v2/runtime.js`): the version predicate, the file path and the local-host check are copied from it |
 
 Version `0.10.4 → 0.11.4` (new capability: the OpenCode guard → second digit),
 annotated tag `memory-flash@0.11.4`.
+`0.11.5` extends the guard to Paseo's own provider settings: it reads
+`agents.providers.opencode.env` from `$PASEO_HOME/config.json` and overlays it on
+`process.env` exactly as `V2Runtime` does, so a URL or `XDG_STATE_HOME` set in
+the Paseo UI is honoured (patch bump, tag `memory-flash@0.11.5`).

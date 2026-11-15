@@ -849,8 +849,15 @@ The host rule (read from the installed `0.15.0` `app.asar`,
 
 `server/opencode-service.ts` reproduces that rule from local files and returns
 `{shared, detail, path}`; `sharedOpenCodeMcpBlock(provider, service)` turns it
-into a block reason **only for `opencode`**. That reason is a new
-`SessionOpenInput.openCodeMcpBlock` field:
+into a block reason **only for `opencode`**. The environment is read the way the
+host reads it: `agents.providers.opencode.env` from `$PASEO_HOME/config.json` is
+overlaid on the daemon's `process.env`, so a `PASEO_OPENCODE_SERVER_URL` or
+`XDG_STATE_HOME` set in Paseo's provider settings wins over the shell — the same
+values `V2Runtime` would use. `readProviderConfigEnv()` tolerates a missing or
+malformed config and ignores non-string values; `XDG_STATE_HOME` keeps the host's
+`??` semantics. The hooks call `sharedOpenCodeMcpBlockFor(provider)`, which reads
+that map and skips the filesystem entirely for non-`opencode` providers. That
+reason is a new `SessionOpenInput.openCodeMcpBlock` field:
 
 - `mcpBlockReason()` returns it first, so `decideSessionOpen` yields
   `injectMcp: false, attachTool: true` — the existing "tool only" branch. This
@@ -886,10 +893,14 @@ into a block reason **only for `opencode`**. That reason is a new
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | exit 0 |
-| `npm test` | **11 suites pass, 1 skipped (live DDGS), 148 tests pass, 2 skipped** — new `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch, probe skipping) and three wiring tests in `tests/agent-hooks.test.ts` (create skipped for opencode, other providers unaffected, session open degrades to `bunny_web_search`) |
+| `npm test` | **11 suites pass, 1 skipped (live DDGS), 156 tests pass, 2 skipped** — `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch, probe skipping; plus `agents.providers.opencode.env` parsing and both provider overrides) and five wiring tests in `tests/agent-hooks.test.ts` (create skipped for opencode, other providers unaffected, session open degrades to `bunny_web_search`, both settings overrides honoured) |
 | Host rule source | extracted from the installed `0.15.0` `app.asar` (`v2/service-selection.js`, `v2/runtime.js`) |
 
 Version `0.5.3 → 0.6.3` (new capability: the OpenCode guard → second digit),
 annotated tag `bunny-search@0.6.3`.
+`0.6.4` extends the guard to Paseo's own provider settings: it reads
+`agents.providers.opencode.env` from `$PASEO_HOME/config.json` and overlays it on
+`process.env` exactly as `V2Runtime` does (patch bump, tag
+`bunny-search@0.6.4`).
 The same guard ships in memory-flash 0.11.4 (§19 there) and
 memory-flash-client 0.5.2 (§18 there), which have the same failure mode.

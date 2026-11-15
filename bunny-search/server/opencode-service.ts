@@ -9,18 +9,24 @@
  * and cannot be used with a shared OpenCode service.` An injected MCP server is
  * exactly that case, so on such a host the injection is not an improvement — it
  * makes agent creation and every reopen fail (#7435). The plugin therefore
- * reproduces the host's rule from local files only, so a hook can decide to
+ * reproduces the host's rule from local state only, so a hook can decide to
  * degrade instead of breaking the open.
  *
  * The rule, read out of the installed 0.15.0 host:
- * 1. `PASEO_OPENCODE_SERVER_URL` set → selection `explicit` → shared.
- * 2. Otherwise `$XDG_STATE_HOME/opencode/service.json` (default
- *    `~/.local/state/opencode/service.json`), when its `version` is a
- *    compatible `2.x` (at least `2.0.10`) and its `url` points at this host.
- *    The host additionally probes that URL; this module substitutes a pid
- *    liveness check, which is local and cheap and covers the common stale-file
- *    case (a `service.json` left behind by a crashed service).
- * 3. Everything else → the host owns its own server, and MCP injection is fine.
+ * 1. `V2Runtime` reads the OpenCode connection from
+ *    `{...process.env, ...agents.providers.opencode.env}` — the provider env in
+ *    `$PASEO_HOME/config.json` is overlaid on the daemon's own environment, so a
+ *    setting wins over the shell.
+ * 2. `PASEO_OPENCODE_SERVER_URL` set → selection `explicit` → shared.
+ * 3. Otherwise `service-selection.js` resolves the state directory as
+ *    `providerEnv.XDG_STATE_HOME ?? process.env.XDG_STATE_HOME ??
+ *    ~/.local/state` and reads `<state>/opencode/service.json`; when its
+ *    `version` is a compatible `2.x` (at least `2.0.10`) and its `url` points at
+ *    this host, selection is `discovered` → shared. The host additionally probes
+ *    that URL; this module substitutes a pid liveness check, which is local and
+ *    cheap and covers the common stale-file case (a `service.json` left behind
+ *    by a crashed service).
+ * 4. Everything else → the host owns its own server, and MCP injection is fine.
  *
  * Diagnostics only: detection never throws and never writes.
  */
@@ -38,18 +44,84 @@ export interface SharedOpenCodeService {
   path: string | null;
 }
 
+export type EnvRecord = Record<string, string | undefined>;
+
 export interface DetectionOptions {
-  /** Environment to read (defaults to `process.env`). */
-  env?: NodeJS.ProcessEnv;
+  /** Environment to start from (defaults to `process.env`). */
+  env?: EnvRecord;
+  /**
+   * `agents.providers.opencode.env` from `$PASEO_HOME/config.json`. The host
+   * overlays it on its own environment, so it is applied the same way here.
+   */
+  providerEnv?: EnvRecord | null;
   /** Overrides the discovery path; `null` means "pretend there is no file". */
   file?: string | null;
   /** Liveness probe for the recorded pid (tests). */
   isProcessAlive?: (pid: number) => boolean;
 }
 
-/** `$XDG_STATE_HOME/opencode/service.json` — the file the host and OpenCode share. */
-export function openCodeServiceFile(env: NodeJS.ProcessEnv = process.env): string {
-  const state = env.XDG_STATE_HOME?.trim() || path.join(os.homedir(), ".local", "state");
+/** `$PASEO_HOME`, as the daemon resolves it (`~` expanded). */
+export function paseoHome(env: EnvRecord = process.env): string {
+  const raw = env.PASEO_HOME?.trim() || "~/.paseo";
+  if (raw === "~") return os.homedir();
+  if (raw.startsWith("~/")) return path.join(os.homedir(), raw.slice(2));
+  return path.resolve(raw);
+}
+
+/**
+ * `agents.providers.<id>.env` from `$PASEO_HOME/config.json` — the same map the
+ * daemon overlays on its environment before choosing an OpenCode service.
+ * Missing, unreadable or malformed state resolves to an empty map: a broken
+ * config must never look like a shared service.
+ */
+export function readProviderConfigEnv(
+  providerId: string,
+  options: {
+    paseoHome?: string;
+    env?: EnvRecord;
+    readFile?: (file: string) => string;
+  } = {},
+): EnvRecord {
+  const home = options.paseoHome ?? paseoHome(options.env ?? process.env);
+  const file = path.join(home, "config.json");
+  const read = options.readFile ?? ((target: string) => fs.readFileSync(target, "utf8"));
+
+  let raw: string;
+  try {
+    raw = read(file);
+  } catch {
+    return {};
+  }
+
+  let config: unknown;
+  try {
+    config = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+
+  const providers = (config as { agents?: { providers?: unknown } })?.agents?.providers;
+  if (!providers || typeof providers !== "object" || Array.isArray(providers)) return {};
+  const entry = (providers as Record<string, unknown>)[providerId];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return {};
+  const env = (entry as { env?: unknown }).env;
+  if (!env || typeof env !== "object" || Array.isArray(env)) return {};
+
+  const out: EnvRecord = {};
+  for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * `<state>/opencode/service.json`, where the state directory follows the host:
+ * provider setting first, then the daemon environment, then `~/.local/state`.
+ * `??` rather than a blank-string fallback, because the host treats a set-but-
+ * empty value as set.
+ */
+export function openCodeServiceFile(mergedEnv: EnvRecord = process.env): string {
+  const state = mergedEnv.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state");
   return path.join(state, "opencode", "service.json");
 }
 
@@ -85,9 +157,11 @@ function processAlive(pid: number): boolean {
 export function detectSharedOpenCodeService(
   options: DetectionOptions = {},
 ): SharedOpenCodeService {
-  const env = options.env ?? process.env;
+  // The host merges the provider's own env over the daemon env (`explicit` and
+  // the `XDG_STATE_HOME` lookup both read that merged map).
+  const merged: EnvRecord = { ...(options.env ?? process.env), ...(options.providerEnv ?? {}) };
 
-  const explicit = env.PASEO_OPENCODE_SERVER_URL?.trim();
+  const explicit = merged.PASEO_OPENCODE_SERVER_URL?.trim();
   if (explicit) {
     return {
       shared: true,
@@ -96,7 +170,7 @@ export function detectSharedOpenCodeService(
     };
   }
 
-  const file = options.file === undefined ? openCodeServiceFile(env) : options.file;
+  const file = options.file === undefined ? openCodeServiceFile(merged) : options.file;
   if (file === null) {
     return { shared: false, detail: "no OpenCode service file configured", path: null };
   }
@@ -156,5 +230,35 @@ export function sharedOpenCodeMcpBlock(
   return (
     `shared OpenCode service ${service.detail} (Paseo 0.15.0 #7435) — ` +
     "an injected MCP server would fail the open"
+  );
+}
+
+/**
+ * Hook-facing convenience: reads the provider env from Paseo's config the way
+ * the host does, then answers whether this provider must not receive MCP.
+ * Non-opencode providers return `null` without touching the filesystem.
+ */
+export function sharedOpenCodeMcpBlockFor(
+  provider: string,
+  options: {
+    env?: EnvRecord;
+    paseoHome?: string;
+    file?: string | null;
+    isProcessAlive?: (pid: number) => boolean;
+  } = {},
+): string | null {
+  if (provider !== "opencode") return null;
+  const providerEnv = readProviderConfigEnv("opencode", {
+    paseoHome: options.paseoHome,
+    env: options.env,
+  });
+  return sharedOpenCodeMcpBlock(
+    provider,
+    detectSharedOpenCodeService({
+      env: options.env,
+      providerEnv,
+      file: options.file,
+      isProcessAlive: options.isProcessAlive,
+    }),
   );
 }

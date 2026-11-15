@@ -6,7 +6,9 @@ import {
   detectSharedOpenCodeService,
   isCompatibleOpenCodeServiceVersion,
   openCodeServiceFile,
+  readProviderConfigEnv,
   sharedOpenCodeMcpBlock,
+  sharedOpenCodeMcpBlockFor,
 } from "../server/opencode-service";
 import {
   decideSessionOpen,
@@ -46,6 +48,10 @@ describe("openCodeServiceFile", () => {
     );
     expect(openCodeServiceFile({} as NodeJS.ProcessEnv)).toBe(
       path.join(os.homedir(), ".local", "state", "opencode", "service.json"),
+    );
+    // The host uses `??`, so a set-but-empty value counts as set.
+    expect(openCodeServiceFile({ XDG_STATE_HOME: "" } as NodeJS.ProcessEnv)).toBe(
+      path.join("", "opencode", "service.json"),
     );
   });
 });
@@ -148,6 +154,108 @@ describe("sharedOpenCodeMcpBlock", () => {
     expect(sharedOpenCodeMcpBlock("opencode", shared)).toContain("#7435");
     expect(sharedOpenCodeMcpBlock("cline", shared)).toBeNull();
     expect(sharedOpenCodeMcpBlock("opencode", owned)).toBeNull();
+  });
+});
+
+describe("provider settings overlaid like the host", () => {
+  it("reads agents.providers.opencode.env from $PASEO_HOME/config.json", () => {
+    const home = path.join(dir, "home");
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(
+      path.join(home, "config.json"),
+      JSON.stringify({
+        agents: { providers: { opencode: { env: { XDG_STATE_HOME: "/from/settings" } } } },
+      }),
+    );
+    expect(readProviderConfigEnv("opencode", { paseoHome: home })).toEqual({
+      XDG_STATE_HOME: "/from/settings",
+    });
+  });
+
+  it("treats missing or malformed settings as no overrides", () => {
+    expect(readProviderConfigEnv("opencode", { paseoHome: path.join(dir, "absent") })).toEqual({});
+    fs.writeFileSync(path.join(dir, "config.json"), "{not json");
+    expect(readProviderConfigEnv("opencode", { paseoHome: dir })).toEqual({});
+    fs.writeFileSync(
+      path.join(dir, "config.json"),
+      JSON.stringify({ agents: { providers: { opencode: { env: { OTHER: 7, KEEP: "yes" } } } } }),
+    );
+    expect(readProviderConfigEnv("opencode", { paseoHome: dir })).toEqual({ KEEP: "yes" });
+  });
+
+  it("a provider PASEO_OPENCODE_SERVER_URL forces a shared service", () => {
+    const result = detectSharedOpenCodeService({
+      env: {} as NodeJS.ProcessEnv,
+      providerEnv: { PASEO_OPENCODE_SERVER_URL: "http://127.0.0.1:4096" },
+      file: null,
+    });
+    expect(result.shared).toBe(true);
+    expect(result.detail).toContain("PASEO_OPENCODE_SERVER_URL");
+  });
+
+  it("a blank provider URL does not shadow the discovery file", () => {
+    const file = writeService({ version: "2.2.5", url: "http://127.0.0.1:37999", pid: 4242 });
+    const result = detectSharedOpenCodeService({
+      env: {} as NodeJS.ProcessEnv,
+      providerEnv: { PASEO_OPENCODE_SERVER_URL: "" },
+      file,
+      isProcessAlive: alive,
+    });
+    expect(result.shared).toBe(true);
+    expect(result.detail).toContain("2.2.5");
+  });
+
+  it("a provider XDG_STATE_HOME redirects discovery and wins over the daemon env", () => {
+    const stateDir = path.join(dir, "provider-state");
+    fs.mkdirSync(path.join(stateDir, "opencode"), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "opencode", "service.json"),
+      JSON.stringify({ version: "2.2.5", url: "http://127.0.0.1:37999", pid: 4242 }),
+    );
+    const daemonState = path.join(dir, "daemon-state");
+
+    const viaProvider = detectSharedOpenCodeService({
+      env: { XDG_STATE_HOME: daemonState } as NodeJS.ProcessEnv,
+      providerEnv: { XDG_STATE_HOME: stateDir },
+      isProcessAlive: alive,
+    });
+    expect(viaProvider.shared).toBe(true);
+    expect(viaProvider.path).toBe(path.join(stateDir, "opencode", "service.json"));
+
+    // The other direction: the provider points at an empty directory, so the
+    // daemon env's discovery file must not be consulted.
+    const viaProviderEmpty = detectSharedOpenCodeService({
+      env: { XDG_STATE_HOME: stateDir } as NodeJS.ProcessEnv,
+      providerEnv: { XDG_STATE_HOME: daemonState },
+      isProcessAlive: alive,
+    });
+    expect(viaProviderEmpty.shared).toBe(false);
+  });
+
+  it("sharedOpenCodeMcpBlockFor reads the settings itself", () => {
+    const home = path.join(dir, "home2");
+    fs.mkdirSync(path.join(home, "xdg", "opencode"), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, "xdg", "opencode", "service.json"),
+      JSON.stringify({ version: "2.2.5", url: "http://127.0.0.1:37999", pid: 4242 }),
+    );
+    fs.writeFileSync(
+      path.join(home, "config.json"),
+      JSON.stringify({
+        agents: { providers: { opencode: { env: { XDG_STATE_HOME: path.join(home, "xdg") } } } },
+      }),
+    );
+
+    expect(
+      sharedOpenCodeMcpBlockFor("opencode", {
+        env: {} as NodeJS.ProcessEnv,
+        paseoHome: home,
+        isProcessAlive: alive,
+      }),
+    ).toContain("#7435");
+    expect(
+      sharedOpenCodeMcpBlockFor("cline", { env: {} as NodeJS.ProcessEnv, paseoHome: home }),
+    ).toBeNull();
   });
 });
 

@@ -163,6 +163,14 @@ afterEach(() => {
  * Writes a discovery file the way `opencode serve --service` does and points
  * `XDG_STATE_HOME` at it, so the hooks see a shared OpenCode v2 service.
  */
+/** Writes provider settings into the daemon config the way Paseo stores them. */
+function useProviderSettingsEnv(env: Record<string, string>): void {
+  fs.writeFileSync(
+    path.join(tempHome, "config.json"),
+    JSON.stringify({ version: 1, agents: { providers: { opencode: { env } } } }),
+  );
+}
+
 function useSharedOpenCodeService(): void {
   const dir = path.join(tempHome, "xdg-state", "opencode");
   fs.mkdirSync(dir, { recursive: true });
@@ -551,6 +559,34 @@ describe("shared OpenCode service (0.15.0 #7435)", () => {
 
     const request = await server.runCreateHook({ provider: "claude" });
     expect(Object.keys(request.config.mcpServers ?? {})).toEqual(["memory-flash"]);
+    cleanup();
+  });
+
+  it("honours the provider's PASEO_OPENCODE_SERVER_URL from $PASEO_HOME/config.json", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    useProviderSettingsEnv({ PASEO_OPENCODE_SERVER_URL: "http://127.0.0.1:4096" });
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runCreateHook({ provider: "opencode" });
+    expect(request.config.mcpServers).toBeUndefined();
+    cleanup();
+  });
+
+  it("honours the provider's XDG_STATE_HOME from $PASEO_HOME/config.json", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    const stateDir = path.join(tempHome, "provider-state");
+    fs.mkdirSync(path.join(stateDir, "opencode"), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "opencode", "service.json"),
+      JSON.stringify({ version: "2.2.5", url: "http://127.0.0.1:37999", pid: process.pid }),
+    );
+    useProviderSettingsEnv({ XDG_STATE_HOME: stateDir });
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runCreateHook({ provider: "opencode" });
+    expect(request.config.mcpServers).toBeUndefined();
     cleanup();
   });
 
