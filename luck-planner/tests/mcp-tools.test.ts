@@ -135,13 +135,17 @@ describe("MCP tool surface", () => {
     for (const tool of MCP_TOOLS) {
       expect(tool.inputSchema.type).toBe("object");
       expect(tool.description.length).toBeGreaterThan(10);
-      expect(tool.inputSchema.required).toContain("projectKey");
+      // 0.52.3: `projectKey` is optional in the published schema — the server
+      // scopes an omitted key to the session's workspace (server/project-key.ts).
+      // Requiring it was what let an agent guess a second, invisible key.
+      expect(tool.inputSchema.required ?? []).not.toContain("projectKey");
+      expect(tool.inputSchema.properties.projectKey).toBeDefined();
     }
   });
 
   it("rejects an unknown tool with the list of available ones", () => {
     const store = openStore();
-    const result = call(store, "luck_tree_nope", {});
+    const result = call(store, "luck_tree_nope", { projectKey: P });
     expectError(result, /Unknown tool: luck_tree_nope/);
     expect(result.content[0].text).toContain("luck_tree_search");
   });

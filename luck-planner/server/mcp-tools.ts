@@ -1,6 +1,7 @@
 import type { LeafStatus, Node, NodeKind } from "../shared/tree";
 import type { GoalStatus } from "../shared/goals";
 import type { BugStatus } from "../shared/links";
+import { resolveProjectKey } from "./project-key";
 import type {
   AddBeeInput,
   ApproveGoalInput,
@@ -123,8 +124,10 @@ function num(description: string): JsonSchemaProperty {
 
 const PROJECT_KEY = str(
   "Canonical absolute path of the project this call addresses — the current " +
-    "workspace only. Do not probe other projectKeys; expanding scope requires " +
-    "an explicit user request.",
+    "workspace only. Optional: omit it and the call is scoped to this " +
+    "session's workspace key, and a relative or otherwise equivalent path is " +
+    "resolved onto that key (the answer says so). Do not probe other " +
+    "projectKeys; expanding scope requires an explicit user request.",
 );
 
 /**
@@ -191,7 +194,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
             "`truncated` reports how many entries were dropped.",
         },
       },
-      required: ["projectKey"],
+
     },
   },
   {
@@ -241,7 +244,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         limit: num("Max results (default 50, max 200)."),
       },
-      required: ["projectKey", "query"],
+      required: ["query"],
     },
   },
   {
@@ -293,7 +296,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         ),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey"],
+
     },
   },
   {
@@ -347,7 +350,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         ),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey"],
+
     },
   },
   {
@@ -366,7 +369,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         newParentId: str("Its new parent."),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "nodeId", "newParentId"],
+      required: ["nodeId", "newParentId"],
     },
   },
   {
@@ -385,7 +388,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         reason: str("Why it is archived (kept in the audit trail)."),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "nodeId"],
+      required: ["nodeId"],
     },
   },
   {
@@ -409,7 +412,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "sourceLeafId", "targetLeafId"],
+      required: ["sourceLeafId", "targetLeafId"],
     },
   },
   {
@@ -440,7 +443,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         nodeIds: strArray("Leaves this incident blocks right away."),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "title", "severity"],
+      required: ["title", "severity"],
     },
   },
   {
@@ -467,7 +470,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey"],
+
     },
   },
   {
@@ -502,7 +505,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey"],
+
     },
   },
   {
@@ -525,7 +528,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         ),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "goalId"],
+      required: ["goalId"],
     },
   },
   {
@@ -559,7 +562,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "action"],
+      required: ["action"],
     },
   },
   {
@@ -594,7 +597,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         ),
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "entityType", "entityId", "status"],
+      required: ["entityType", "entityId", "status"],
     },
   },
   {
@@ -633,7 +636,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         actor: str("Who performs the change (agent id)."),
       },
-      required: ["projectKey", "subjectType", "subjectId"],
+      required: ["subjectType", "subjectId"],
     },
   },
   {
@@ -649,7 +652,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         projectKey: PROJECT_KEY,
         entityId: str("Entity id (node/bee/bug/goal/growth)."),
       },
-      required: ["projectKey", "entityId"],
+      required: ["entityId"],
     },
   },
   {
@@ -678,7 +681,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
             "Absolute path of the archive. Omit for `backups/` beside the plugin database.",
         },
       },
-      required: ["projectKey"],
+
     },
   },
   {
@@ -721,7 +724,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
             "Carry the audit trail when the file holds one (default true).",
         },
       },
-      required: ["projectKey", "file"],
+      required: ["file"],
     },
   },
 ];
@@ -767,20 +770,53 @@ export interface McpDispatchContext {
   store: LuckPlannerStore;
   /** Actor stamped into the audit trail when a tool call omits one. */
   defaultActor?: string;
+  /**
+   * Project key this session belongs to (0.52.3, `server/project-key.ts`).
+   * It scopes a call that omits `projectKey` and is the target of the
+   * correction when the given key names the same directory in another
+   * spelling.
+   */
+  defaultProjectKey?: string | null;
 }
 
 /**
  * Dispatches one tool call. Never throws: validation failures, unknown
  * tools and store errors all come back as `isError` results with a
  * readable message — the stdio server maps them onto JSON-RPC responses.
+ *
+ * 0.52.3: the call's `projectKey` is resolved **before** the tool runs
+ * (`server/project-key.ts`). An omitted key defaults to the session's
+ * workspace key and a relative or equivalent one is corrected onto it, so an
+ * agent that passes `"centurion"` writes the tree the dashboard reads
+ * instead of a second, invisible one. A corrected call says so in an extra
+ * text part.
  */
 export function dispatchMcpTool(
   name: string,
   args: unknown,
   context: McpDispatchContext,
 ): ToolResult {
+  const given = (args ?? {}) as Record<string, unknown>;
+  const resolved = resolveProjectKey(given.projectKey, context.defaultProjectKey);
+  const result = dispatchScopedTool(
+    name,
+    { ...given, projectKey: resolved.projectKey },
+    context,
+  );
+  if (resolved.note === null) return result;
+  return {
+    ...result,
+    content: [...result.content, { type: "text", text: resolved.note }],
+  };
+}
+
+/** The tool switch itself, with the call already scoped to one project. */
+function dispatchScopedTool(
+  name: string,
+  input: Record<string, unknown>,
+  context: McpDispatchContext,
+): ToolResult {
   const { store } = context;
-  const input = (args ?? {}) as Record<string, unknown>;
   const actor =
     (typeof input.actor === "string" && input.actor.trim()) ||
     context.defaultActor ||

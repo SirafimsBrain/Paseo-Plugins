@@ -919,10 +919,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1262,11 +1262,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a4;
     (_a4 = iss).path ?? (_a4.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -1728,16 +1728,16 @@ function flattenError(error63, mapper = (issue2) => issue2.message) {
 }
 function formatError(error63, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error64, path6 = []) => {
+  const processError = (error64, path8 = []) => {
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1776,17 +1776,17 @@ function formatError(error63, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error63, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error64, path6 = []) => {
+  const processError = (error64, path8 = []) => {
     var _a4;
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1825,8 +1825,8 @@ function treeifyError(error63, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -5169,7 +5169,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve) {
+function isRecursive(inst, stack, resolve2) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -5179,7 +5179,7 @@ function isRecursive(inst, stack, resolve) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve);
+      const answer = isRecursive(child, stack, resolve2);
       if (answer > result)
         result = answer;
     }
@@ -5190,7 +5190,7 @@ function isRecursive(inst, stack, resolve) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve2) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -5254,7 +5254,7 @@ function isRecursive(inst, stack, resolve) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve2 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -18964,13 +18964,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path8 = ref.slice(1).split("/").filter(Boolean);
+  if (path8.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
+  if (path8[0] === defsKey) {
+    const key = path8[1] === void 0 ? void 0 : decodeJSONPointerSegment(path8[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -20502,17 +20502,17 @@ var LuckPlannerStore = class {
    * Read-only.
    */
   getNodePath(projectKey, id) {
-    const path6 = [];
+    const path8 = [];
     const seen = /* @__PURE__ */ new Set();
     let currentId = id;
     while (currentId !== null && !seen.has(currentId)) {
       seen.add(currentId);
       const node2 = this.getNode(projectKey, currentId);
       if (!node2) break;
-      path6.unshift(node2);
+      path8.unshift(node2);
       currentId = node2.parentId;
     }
-    return path6;
+    return path8;
   }
   /**
    * Every node of one project, oldest first — the single read the dashboard
@@ -23358,6 +23358,65 @@ function ftsQuery(raw) {
   return terms.length > 0 ? terms.join(" OR ") : null;
 }
 
+// server/project-key.ts
+import * as fs3 from "node:fs";
+import * as path3 from "node:path";
+
+// server/agent-record.ts
+import * as fs2 from "node:fs";
+import * as os2 from "node:os";
+import * as path2 from "node:path";
+
+// server/project-seed.ts
+function normalizeProjectKey(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const uncollapsed = trimmed.length > 1 ? trimmed.replace(/[\\/]+$/, "") : trimmed;
+  return uncollapsed.length === 0 ? trimmed : uncollapsed;
+}
+
+// server/project-key.ts
+function samePath(left, right) {
+  try {
+    const a = path3.resolve(left);
+    const b = path3.resolve(right);
+    return a.replace(/[\\/]+$/, "") === b.replace(/[\\/]+$/, "");
+  } catch {
+    return left === right;
+  }
+}
+function isTailOf(key, full) {
+  const keyParts = key.split(/[\\/]+/).filter((part) => part.length > 0);
+  const fullParts = full.split(/[\\/]+/).filter((part) => part.length > 0);
+  if (keyParts.length === 0 || keyParts.length > fullParts.length) return false;
+  const offset = fullParts.length - keyParts.length;
+  return keyParts.every((part, index) => part === fullParts[offset + index]);
+}
+function resolveProjectKey(requested, defaultKey) {
+  const fallback = normalizeProjectKey(defaultKey ?? null);
+  const raw = typeof requested === "string" ? requested.trim() : "";
+  if (raw.length === 0) {
+    return {
+      projectKey: fallback ?? "",
+      note: null
+    };
+  }
+  const given = normalizeProjectKey(raw) ?? raw;
+  if (fallback === null || given === fallback) {
+    return { projectKey: given, note: null };
+  }
+  const note = (why) => ({
+    projectKey: fallback,
+    note: `projectKey '${raw}' ${why} this session's workspace key '${fallback}'; the call was scoped there.`
+  });
+  if (samePath(given, fallback)) return note("names the same directory as");
+  if (!path3.isAbsolute(given) && isTailOf(given, fallback)) {
+    return note("is a relative tail of");
+  }
+  return { projectKey: given, note: null };
+}
+
 // shared/tools.ts
 var contextSectionSchema = external_exports.enum([
   "path",
@@ -23779,8 +23838,8 @@ function nodeBeeCycle(store, projectKey, nodeId) {
 }
 
 // server/export.ts
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
-import path2 from "node:path";
+import { existsSync, mkdirSync, statSync as statSync2, writeFileSync } from "node:fs";
+import path4 from "node:path";
 
 // node_modules/fflate/esm/index.mjs
 import { createRequire } from "module";
@@ -24803,7 +24862,7 @@ function exportZipBytes(document) {
   });
 }
 function defaultBackupDir(dbPath) {
-  return path2.join(path2.dirname(dbPath), "backups");
+  return path4.join(path4.dirname(dbPath), "backups");
 }
 function writeExportFile(store, request) {
   const document = buildExportDocument(store, request);
@@ -24811,7 +24870,7 @@ function writeExportFile(store, request) {
   const bytes = exportZipBytes(document);
   let file2;
   if (request.file !== void 0) {
-    if (!path2.isAbsolute(request.file)) {
+    if (!path4.isAbsolute(request.file)) {
       throw new Error(`export path must be absolute: ${request.file}`);
     }
     if (existsSync(request.file)) {
@@ -24827,29 +24886,29 @@ function writeExportFile(store, request) {
       EXPORT_FILE_EXTENSION
     );
   }
-  const parent = path2.dirname(file2);
+  const parent = path4.dirname(file2);
   mkdirSync(parent, { recursive: true });
-  if (existsSync(file2) && statSync(file2).isDirectory()) {
+  if (existsSync(file2) && statSync2(file2).isDirectory()) {
     throw new Error(`export path is a directory: ${file2}`);
   }
   writeFileSync(file2, bytes);
   return { file: file2, bytes: bytes.byteLength, document };
 }
 function freeName(dir, name, compoundExtension) {
-  const candidate = path2.join(dir, name);
+  const candidate = path4.join(dir, name);
   if (!existsSync(candidate)) return candidate;
-  const extension = name.endsWith(compoundExtension) ? compoundExtension : path2.extname(name);
+  const extension = name.endsWith(compoundExtension) ? compoundExtension : path4.extname(name);
   const stem = name.slice(0, name.length - extension.length);
   for (let index = 2; index < 1e3; index += 1) {
-    const next = path2.join(dir, `${stem}-${index}${extension}`);
+    const next = path4.join(dir, `${stem}-${index}${extension}`);
     if (!existsSync(next)) return next;
   }
   throw new Error(`no free file name for ${candidate}`);
 }
 
 // server/import.ts
-import { existsSync as existsSync2, readFileSync, statSync as statSync2 } from "node:fs";
-import path3 from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync3, statSync as statSync3 } from "node:fs";
+import path5 from "node:path";
 
 // shared/import.ts
 var IMPORT_ISSUE_LIMIT = 8;
@@ -25211,19 +25270,19 @@ var EMPTY_WRITE = {
   history: 0
 };
 function readImportDocument(file2) {
-  if (!path3.isAbsolute(file2)) {
+  if (!path5.isAbsolute(file2)) {
     throw new Error(`import path must be absolute: ${file2}`);
   }
   if (!existsSync2(file2)) {
     throw new Error(`import file not found: ${file2}`);
   }
-  if (statSync2(file2).isDirectory()) {
+  if (statSync3(file2).isDirectory()) {
     throw new Error(`import path is a directory: ${file2}`);
   }
   if (file2.toLowerCase().endsWith(".zip")) {
     let entries;
     try {
-      entries = unzipSync(new Uint8Array(readFileSync(file2)));
+      entries = unzipSync(new Uint8Array(readFileSync3(file2)));
     } catch (cause) {
       throw new Error(
         `not a readable zip archive (${file2}): ${cause instanceof Error ? cause.message : String(cause)}`
@@ -25239,7 +25298,7 @@ function readImportDocument(file2) {
     }
     return parseExport(strFromU8(entries[json2[0]]));
   }
-  return parseExport(readFileSync(file2, "utf8"));
+  return parseExport(readFileSync3(file2, "utf8"));
 }
 function planImportFile(store, request) {
   const document = readImportDocument(request.file);
@@ -25280,16 +25339,16 @@ function runImport(store, request) {
 }
 
 // server/plugin-paths.ts
-import * as fs2 from "node:fs";
-import * as path5 from "node:path";
+import * as fs4 from "node:fs";
+import * as path7 from "node:path";
 
 // server/module-dir.ts
-import * as path4 from "node:path";
+import * as path6 from "node:path";
 import { fileURLToPath } from "node:url";
 function moduleDirectory() {
   const meta3 = import.meta;
   if (typeof meta3.url === "string" && meta3.url.length > 0) {
-    return path4.dirname(fileURLToPath(meta3.url));
+    return path6.dirname(fileURLToPath(meta3.url));
   }
   return typeof __dirname === "string" ? __dirname : process.cwd();
 }
@@ -25299,7 +25358,7 @@ var PLUGIN_ID = "luck-planner";
 function configuredPluginRoot() {
   try {
     const raw = JSON.parse(
-      fs2.readFileSync(path5.join(paseoHome(), "config.json"), "utf8")
+      fs4.readFileSync(path7.join(paseoHome(), "config.json"), "utf8")
     );
     const entry = raw.plugins?.[PLUGIN_ID];
     if (entry && typeof entry.path === "string" && entry.path.length > 0) {
@@ -25311,21 +25370,21 @@ function configuredPluginRoot() {
 }
 function candidateRoots() {
   const roots = [];
-  roots.push(path5.join(moduleDirectory(), ".."));
+  roots.push(path7.join(moduleDirectory(), ".."));
   const configured = configuredPluginRoot();
   if (configured !== null) roots.push(configured);
   return roots;
 }
 function resolveManifestPath() {
-  const candidates = candidateRoots().map((root) => path5.join(root, "package.json"));
+  const candidates = candidateRoots().map((root) => path7.join(root, "package.json"));
   for (const candidate of candidates) {
-    if (fs2.existsSync(candidate)) return candidate;
+    if (fs4.existsSync(candidate)) return candidate;
   }
-  return candidates[0] ?? path5.join(process.cwd(), "package.json");
+  return candidates[0] ?? path7.join(process.cwd(), "package.json");
 }
 function resolvePluginVersion() {
   try {
-    const raw = fs2.readFileSync(resolveManifestPath(), "utf8");
+    const raw = fs4.readFileSync(resolveManifestPath(), "utf8");
     const parsed = JSON.parse(raw);
     return typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : "0.0.0";
   } catch {
@@ -25357,7 +25416,7 @@ function num(description) {
   return { type: "number", description };
 }
 var PROJECT_KEY = str(
-  "Canonical absolute path of the project this call addresses \u2014 the current workspace only. Do not probe other projectKeys; expanding scope requires an explicit user request."
+  "Canonical absolute path of the project this call addresses \u2014 the current workspace only. Optional: omit it and the call is scoped to this session's workspace key, and a relative or otherwise equivalent path is resolved onto that key (the answer says so). Do not probe other projectKeys; expanding scope requires an explicit user request."
 );
 var MCP_INSTRUCTIONS = "Luck Planner is the project's durable planning tree: leaves record facts, bees record dependencies between them, bugs record incidents that block leaves, and goals are plans a human approves. Read before writing \u2014 luck_tree_get_context or luck_tree_search first \u2014 then record a fact as a leaf when it changes, follow the leaf state machine (draft \u2192 ready \u2192 claimed \u2192 in_progress \u2192 done), and never manage the tree by hand outside these tools. Scope: one projectKey per session = the current workspace; never enumerate other projectKeys unless the user explicitly asks. When to write and what not to write is the luck-planner agent skill; this server is how the writes happen.";
 var MCP_TOOLS = [
@@ -25386,8 +25445,7 @@ var MCP_TOOLS = [
           type: "number",
           description: "Cap every listing (roots, children, siblings, bees, blocking bugs) at 1\u2013200 entries; unlimited by default. When a list is cut, `truncated` reports how many entries were dropped."
         }
-      },
-      required: ["projectKey"]
+      }
     }
   },
   {
@@ -25433,7 +25491,7 @@ var MCP_TOOLS = [
         },
         limit: num("Max results (default 50, max 200).")
       },
-      required: ["projectKey", "query"]
+      required: ["query"]
     }
   },
   {
@@ -25474,8 +25532,7 @@ var MCP_TOOLS = [
           "Why you override a status the human set in the dashboard. Required only then (the store refuses the move without it)."
         ),
         actor: str("Who performs the change (agent id).")
-      },
-      required: ["projectKey"]
+      }
     }
   },
   {
@@ -25521,8 +25578,7 @@ var MCP_TOOLS = [
           "Why you override a status the human set in the dashboard. Required only then."
         ),
         actor: str("Who performs the change (agent id).")
-      },
-      required: ["projectKey"]
+      }
     }
   },
   {
@@ -25537,7 +25593,7 @@ var MCP_TOOLS = [
         newParentId: str("Its new parent."),
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "nodeId", "newParentId"]
+      required: ["nodeId", "newParentId"]
     }
   },
   {
@@ -25552,7 +25608,7 @@ var MCP_TOOLS = [
         reason: str("Why it is archived (kept in the audit trail)."),
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "nodeId"]
+      required: ["nodeId"]
     }
   },
   {
@@ -25573,7 +25629,7 @@ var MCP_TOOLS = [
         },
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "sourceLeafId", "targetLeafId"]
+      required: ["sourceLeafId", "targetLeafId"]
     }
   },
   {
@@ -25600,7 +25656,7 @@ var MCP_TOOLS = [
         nodeIds: strArray("Leaves this incident blocks right away."),
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "title", "severity"]
+      required: ["title", "severity"]
     }
   },
   {
@@ -25621,8 +25677,7 @@ var MCP_TOOLS = [
           description: "Maximum number of incidents to return (default 50, max 200)."
         },
         actor: str("Who performs the change (agent id).")
-      },
-      required: ["projectKey"]
+      }
     }
   },
   {
@@ -25651,8 +25706,7 @@ var MCP_TOOLS = [
           description: "Maximum number of goals to return (default 50, max 200)."
         },
         actor: str("Who performs the change (agent id).")
-      },
-      required: ["projectKey"]
+      }
     }
   },
   {
@@ -25670,7 +25724,7 @@ var MCP_TOOLS = [
         ),
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "goalId"]
+      required: ["goalId"]
     }
   },
   {
@@ -25698,7 +25752,7 @@ var MCP_TOOLS = [
         },
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "action"]
+      required: ["action"]
     }
   },
   {
@@ -25724,7 +25778,7 @@ var MCP_TOOLS = [
         ),
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "entityType", "entityId", "status"]
+      required: ["entityType", "entityId", "status"]
     }
   },
   {
@@ -25757,7 +25811,7 @@ var MCP_TOOLS = [
         },
         actor: str("Who performs the change (agent id).")
       },
-      required: ["projectKey", "subjectType", "subjectId"]
+      required: ["subjectType", "subjectId"]
     }
   },
   {
@@ -25770,7 +25824,7 @@ var MCP_TOOLS = [
         projectKey: PROJECT_KEY,
         entityId: str("Entity id (node/bee/bug/goal/growth).")
       },
-      required: ["projectKey", "entityId"]
+      required: ["entityId"]
     }
   },
   {
@@ -25789,8 +25843,7 @@ var MCP_TOOLS = [
           type: "string",
           description: "Absolute path of the archive. Omit for `backups/` beside the plugin database."
         }
-      },
-      required: ["projectKey"]
+      }
     }
   },
   {
@@ -25818,7 +25871,7 @@ var MCP_TOOLS = [
           description: "Carry the audit trail when the file holds one (default true)."
         }
       },
-      required: ["projectKey", "file"]
+      required: ["file"]
     }
   }
 ];
@@ -25844,8 +25897,21 @@ function nodeSummary(node2) {
   };
 }
 function dispatchMcpTool(name, args, context) {
+  const given = args ?? {};
+  const resolved = resolveProjectKey(given.projectKey, context.defaultProjectKey);
+  const result = dispatchScopedTool(
+    name,
+    { ...given, projectKey: resolved.projectKey },
+    context
+  );
+  if (resolved.note === null) return result;
+  return {
+    ...result,
+    content: [...result.content, { type: "text", text: resolved.note }]
+  };
+}
+function dispatchScopedTool(name, input2, context) {
   const { store } = context;
-  const input2 = args ?? {};
   const actor = typeof input2.actor === "string" && input2.actor.trim() || context.defaultActor || "agent:unknown";
   const normalizedName = name.replace(/^luck[-_]planner_/, "");
   try {
@@ -26174,11 +26240,11 @@ function dispatchGetContext(store, value) {
     if (capped.dropped > 0) truncated[section] = capped.dropped;
     return capped.items;
   };
-  const path6 = keep(
+  const path8 = keep(
     "path",
     store.getNodePath(value.projectKey, node2.id).map(nodeSummary)
   );
-  if (path6 !== void 0) answer.path = path6;
+  if (path8 !== void 0) answer.path = path8;
   const children = keep(
     "children",
     store.listChildren(value.projectKey, node2.id).map(nodeSummary)
@@ -26429,7 +26495,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.52.2";
+var SERVER_VERSION = "0.52.3";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();
@@ -26506,16 +26572,26 @@ function handleJsonRpcRequest(request) {
   }
 }
 var serverContext = null;
+function defaultProjectKey() {
+  const configured = (process.env.LUCK_PLANNER_PROJECT_KEY ?? "").trim();
+  if (configured.length > 0) return configured;
+  const cwd = process.cwd();
+  return cwd.length > 0 && cwd !== "/" ? cwd : void 0;
+}
 function main() {
   const store = new LuckPlannerStore();
   serverContext = {
     store,
     // The agent id the server was launched with (stage D3 sets it per
     // agent); the audit trail must never be empty.
-    defaultActor: process.env.LUCK_PLANNER_AGENT_ID || void 0
+    defaultActor: process.env.LUCK_PLANNER_AGENT_ID || void 0,
+    // The workspace this session belongs to (0.52.3): a call that omits
+    // `projectKey` — or spells it relative — is scoped to it, so a plan
+    // cannot land in a tree the dashboard never reads.
+    defaultProjectKey: defaultProjectKey() ?? null
   };
   process.stderr.write(
-    `[luck-planner] MCP server ready (db: ${defaultDbPath()}, actor: ${serverContext.defaultActor ?? "unset"})
+    `[luck-planner] MCP server ready (db: ${defaultDbPath()}, actor: ${serverContext.defaultActor ?? "unset"}, project: ${serverContext.defaultProjectKey ?? "unset"})
 `
   );
   const writeMessage = (message) => {

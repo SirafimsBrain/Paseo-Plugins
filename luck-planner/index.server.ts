@@ -58,6 +58,7 @@ import {
   needsCapabilityProbe,
 } from "./server/session-open";
 import { createUpsertLeafTool } from "./server/agent-tool";
+import { agentWorkspaceKey } from "./server/project-key";
 import { probeOpenCodeService } from "./server/opencode-service";
 import { snapshotDatabase } from "./server/snapshot";
 import { readRestoreSource, replaceDatabase } from "./server/restore";
@@ -338,13 +339,16 @@ export default function contribute(server: PluginServerContext) {
   // fails safe to *skip the MCP map* (the native tool cannot collide).
   // -------------------------------------------------------------------------
 
-  const upsertLeafTool = createUpsertLeafTool(store);
-
   const removeSessionHook = server.addHook(
     "agent.open.before",
     async ({ request }, context) => {
       rememberPaseo(context.paseo);
       const values = await readValues();
+      // 0.52.3: the workspace this agent writes to. Read from the daemon's own
+      // files — the agent record (`workspaceId`, `cwd`) and
+      // `projects/workspaces.json` — so no daemon round trip is added here,
+      // and `null` (unknown workspace) simply keeps the old behaviour.
+      const projectKey = agentWorkspaceKey(request.agentId);
       // Host-level gate (0.40.8, §10.11 item 1): decided before the daemon is
       // asked anything, because no capability answer can make a shared
       // OpenCode service accept custom MCP servers.
@@ -357,7 +361,7 @@ export default function contribute(server: PluginServerContext) {
       // actor from `context.agent.id` instead.
       let env = request.env;
       if (values.injectIntoAgents && !service.shared) {
-        env = { ...env, ...sessionActorEnv(request.agentId) };
+        env = { ...env, ...sessionActorEnv(request.agentId, projectKey) };
       }
 
       const cover = agentConfigCoversProvider(request.provider);
@@ -396,7 +400,10 @@ export default function contribute(server: PluginServerContext) {
       }
 
       const tools = decision.attachTool
-        ? [...request.tools, upsertLeafTool]
+        ? [
+            ...request.tools,
+            createUpsertLeafTool(store, { defaultProjectKey: projectKey }),
+          ]
         : request.tools;
       let mcpServers = request.mcpServers;
       if (decision.injectMcp) {

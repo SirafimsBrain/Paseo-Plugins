@@ -302,9 +302,12 @@ describe("MCP server end-to-end (real process)", () => {
       });
       expect(unknownTool.isError).toBe(true);
 
+      // An omitted `projectKey` is no longer invalid input (0.52.3: the server
+      // scopes the call to its session key), so the invalid case is a value the
+      // contract really rejects.
       const invalidInput = await server.request("tools/call", {
         name: "luck_tree_search",
-        arguments: { query: "x" },
+        arguments: { query: "x", limit: 0 },
       });
       expect(invalidInput.isError).toBe(true);
       expect((invalidInput.content as Array<{ text: string }>)[0].text).toContain(

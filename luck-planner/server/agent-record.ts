@@ -132,6 +132,63 @@ export function readSavedMcpServers(
   return { status: "missing" };
 }
 
+/**
+ * The workspace an agent record belongs to, as the record spells it
+ * (`workspaceId` and the agent's `cwd` — verified layout: Paseo 0.15.0).
+ *
+ * Same fail-safe contract as {@link readSavedMcpServers}: every failure mode
+ * answers `null` fields, so a caller may fall back but can never act on a
+ * guess. Read-only.
+ */
+export interface AgentRecordLocation {
+  workspaceId: string | null;
+  cwd: string | null;
+}
+
+const NO_LOCATION: AgentRecordLocation = { workspaceId: null, cwd: null };
+
+export function readAgentRecordLocation(
+  agentId: string,
+  root: string = agentsRoot(),
+): AgentRecordLocation {
+  if (agentId.trim().length === 0) return NO_LOCATION;
+
+  let workspaces: string[];
+  try {
+    workspaces = fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return NO_LOCATION;
+  }
+
+  for (const workspace of workspaces) {
+    const file = path.join(root, workspace, `${agentId}.json`);
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+    } catch {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as {
+        workspaceId?: unknown;
+        cwd?: unknown;
+      };
+      if (typeof parsed !== "object" || parsed === null) return NO_LOCATION;
+      return {
+        workspaceId:
+          typeof parsed.workspaceId === "string" ? parsed.workspaceId : null,
+        cwd: typeof parsed.cwd === "string" ? parsed.cwd : null,
+      };
+    } catch {
+      return NO_LOCATION;
+    }
+  }
+
+  return NO_LOCATION;
+}
+
 /** True when `name` is already part of the agent's saved MCP configuration. */
 export function savedServersInclude(lookup: AgentRecordLookup, name: string): boolean {
   return lookup.status === "found" && lookup.savedServers.includes(name);

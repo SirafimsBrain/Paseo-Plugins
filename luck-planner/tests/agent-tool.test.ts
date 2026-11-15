@@ -96,6 +96,17 @@ describe("createUpsertLeafTool", () => {
     expect(trunks[0]!.kind).toBe("trunk");
   });
 
+  it("accepts an omitted projectKey when the session's key is known (0.52.3)", async () => {
+    const tool = createUpsertLeafTool(store, { defaultProjectKey: P });
+    // The host validates against the published schema: with a session key the
+    // agent no longer has to spell the absolute path out.
+    expect(tool.input.safeParse({ name: "no key needed" }).success).toBe(true);
+
+    const result = await exec(tool, { name: "native fact" });
+    expect(result.isError).toBeFalsy();
+    expect(store.search("native fact", { projectKey: P })).toHaveLength(1);
+  });
+
   it("rejects invalid input through the shared validation (isError, not a throw)", async () => {
     const tool = createUpsertLeafTool(store);
     const result = await exec(tool, {});

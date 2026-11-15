@@ -84,9 +84,22 @@ export function injectedMcpConfig(options: {
  * as `LUCK_PLANNER_AGENT_ID` and stamps every audit row it writes with the
  * agent that called the tool. `agent.create.before` cannot carry it — the agent id
  * does not exist yet when the create request is intercepted.
+ *
+ * 0.52.3 adds `LUCK_PLANNER_PROJECT_KEY`, the workspace's project key
+ * (`server/project-key.ts`): the server scopes a call that omits
+ * `projectKey` to it and resolves a relative one onto it, so an agent can no
+ * longer write a plan into a second, invisible tree. Omitted when the
+ * workspace key could not be derived — the tools then ask for the key
+ * exactly as before.
  */
-export function sessionActorEnv(agentId: string): Record<string, string> {
-  return { LUCK_PLANNER_AGENT_ID: agentId };
+export function sessionActorEnv(
+  agentId: string,
+  projectKey?: string | null,
+): Record<string, string> {
+  const env: Record<string, string> = { LUCK_PLANNER_AGENT_ID: agentId };
+  const key = (projectKey ?? "").trim();
+  if (key.length > 0) env.LUCK_PLANNER_PROJECT_KEY = key;
+  return env;
 }
 
 function resolveNodeCommand(): string {

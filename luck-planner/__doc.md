@@ -3566,3 +3566,74 @@ separator inside a reason, the newest-row window, the tree payload), two `overri
 and the card attachment in `tests/dashboard-plain.test.ts`, and the `keeps the 2D diagram able
 to reach what the board can do` case in `tests/dashboard-build.test.ts` (goal-frame click,
 incident row, strip, the note in both surfaces, and the bundle/CSS markers).
+
+### 10.14 Version 0.52.3 — the plan that landed in a second tree (2026-11-15)
+
+**The report.** An agent was asked to plan "stage A" of a document into the
+plugin. It read the tooling, created the plan, and told the user the plan was
+created — twice. The dashboard showed nothing, in either attempt.
+
+**The evidence (live database, read-only).** `nodes` held four project keys:
+`/DISK1/projects/Paseo Plugins`, `/DISK1/projects/Paseo Plugins/luck-planner`,
+`/DISK1/projects/centurion` and `centurion`. The agent's whole plan — the
+root "Primuspilus search — stage A", a trunk, a branch, three leaves, and a goal
+it created *and* approved itself — sat under `centurion`, while the panel and
+the dashboard address the workspace as `/DISK1/projects/centurion` (the
+`projectRootPath` in `$PASEO_HOME/projects/workspaces.json`). Every write
+succeeded; none of them was in the tree the UI reads. Nothing in the store is
+broken: the key *is* the scope (ADR-2), and the agent supplied the wrong one.
+
+**Why the agent had to guess.** `projectKey` was a required field of every
+tool (`required: ["projectKey"]` in the published JSON schema and
+`projectKeySchema` in the zod contracts), and the only description of its value
+was prose in the tool descriptions and the skill: "the canonical absolute path
+of the project root". The plugin knew the value all along — it seeds trees by
+it (`server/project-seed.ts`) — but it never told the writer. An agent working
+from a relative path in its own context (`centurion`) could not tell that its
+answer was a *different project* rather than a label.
+
+**The fix — the session's key is derived, not requested.**
+
+- `server/project-key.ts` (new, pure): `workspaceProjectKey(workspaceId)`
+  reads `$PASEO_HOME/projects/workspaces.json` (`worktreeRoot` first — a
+  Paseo-owned worktree is keyed by its root, then `projectRootPath`, then
+  `cwd`), `agentWorkspaceKey(agentId)` reads the agent record
+  (`workspaceId`, `cwd`) and falls back to `cwd`, and `resolveProjectKey(
+  requested, defaultKey)` answers the scoping decision: omitted → the session
+  key; the same directory spelled otherwise (trailing slash, `.`/`..`,
+  relative, or a bare tail such as `centurion`) → the session key **plus a
+  note**; another absolute path → untouched; no key and no session key → a
+  readable refusal instead of a guess.
+- `server/agent-record.ts`: `readAgentRecordLocation` exposes the record's
+  `workspaceId`/`cwd` with the same fail-safe contract as
+  `readSavedMcpServers` (unknown → `null`, never a guess).
+- `index.server.ts` (`agent.open.before`): resolves the key from those files —
+  no daemon round trip — and stamps `LUCK_PLANNER_PROJECT_KEY` onto the session
+  environment next to `LUCK_PLANNER_AGENT_ID`, and passes it to the native
+  `luck_tree_upsert_leaf` tool. An unknown workspace simply keeps the old
+  behaviour.
+- `server/mcp-server.ts`: the spawned server reads
+  `LUCK_PLANNER_PROJECT_KEY`, falling back to its own `cwd` (Paseo spawns it in
+  the agent's workspace — the shared-OpenCode-service case cannot receive a
+  custom environment at all), and logs the resolved key in its ready line.
+- `server/mcp-tools.ts`: `projectKey` is no longer `required` in any published
+  schema; `dispatchMcpTool` resolves the key before the tool runs (the switch
+  moved verbatim into `dispatchScopedTool`) and appends the correction as an
+  extra text part when one happened. Nothing is ever rewritten silently.
+- `server/agent-tool.ts`: `UpsertLeafToolOptions.defaultProjectKey` makes the
+  native tool's schema accept an omitted key *only when* a session key exists —
+  with no known workspace the field stays mandatory, because a tool that wrote
+  nowhere would be worse than one that asks.
+
+**Deliberately not changed.** A key that is a *different* absolute path is
+still honoured: cross-project reads and writes are legitimate when the user
+asks for them, and the plugin cannot tell a typo from an intent (a near-miss
+heuristic would silently redirect real work). The lesson is carried by the
+skill (`project_key rule`) and the tool description instead: omit the field,
+or pass the absolute path.
+
+**Verification.** `npm run typecheck` exit 0 (both configurations);
+`npm test` — 55 suites / 956 tests, including the new
+`tests/project-key.test.ts` (resolution matrix, the daemon-file readers, and
+two dispatch cases asserting that `{ projectKey: "centurion" }` writes into
+`/projects/centurion` and creates **no** `centurion` project).

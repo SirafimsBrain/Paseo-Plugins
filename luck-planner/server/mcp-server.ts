@@ -30,7 +30,7 @@ export const PROTOCOL_VERSION = "2024-11-05";
  * `package.json` by `tests/mcp-server-e2e.test.ts`, so every version bump
  * must update this constant — the handshake is what agents see.
  */
-export const SERVER_VERSION = "0.52.2";
+export const SERVER_VERSION = "0.52.3";
 
 /**
  * Default server name agents see in `initialize`. The `mcpServerName`
@@ -141,6 +141,22 @@ function handleJsonRpcRequest(request: JsonRpcRequest): JsonRpcResponse | null {
 /** Set in {@link main}; shared by every `tools/call` on this process. */
 let serverContext: McpDispatchContext | null = null;
 
+/**
+ * The project key this session writes to when a call omits one (0.52.3).
+ *
+ * `LUCK_PLANNER_PROJECT_KEY` is stamped onto the session environment by the
+ * `agent.open.before` hook from the workspace the agent belongs to. When it is
+ * absent — the shared-OpenCode-service case, which the host refuses to give a
+ * custom environment — the server's own `cwd` is the next honest answer: the
+ * agent process spawns this server in its workspace directory.
+ */
+function defaultProjectKey(): string | undefined {
+  const configured = (process.env.LUCK_PLANNER_PROJECT_KEY ?? "").trim();
+  if (configured.length > 0) return configured;
+  const cwd = process.cwd();
+  return cwd.length > 0 && cwd !== "/" ? cwd : undefined;
+}
+
 function main(): void {
   const store = new LuckPlannerStore();
   serverContext = {
@@ -148,12 +164,16 @@ function main(): void {
     // The agent id the server was launched with (stage D3 sets it per
     // agent); the audit trail must never be empty.
     defaultActor: process.env.LUCK_PLANNER_AGENT_ID || undefined,
+    // The workspace this session belongs to (0.52.3): a call that omits
+    // `projectKey` — or spells it relative — is scoped to it, so a plan
+    // cannot land in a tree the dashboard never reads.
+    defaultProjectKey: defaultProjectKey() ?? null,
   };
 
   process.stderr.write(
     `[luck-planner] MCP server ready (db: ${defaultDbPath()}, actor: ${
       serverContext.defaultActor ?? "unset"
-    })\n`,
+    }, project: ${serverContext.defaultProjectKey ?? "unset"})\n`,
   );
 
   const writeMessage = (message: unknown): void => {

@@ -35,7 +35,22 @@ const MCP_DESCRIPTION =
   MCP_TOOLS.find((tool) => tool.name === UPSERT_LEAF_TOOL_NAME)?.description ??
   "Record a planned or confirmed fact leaf.";
 
-export function createUpsertLeafTool(store: LuckPlannerStore): AgentToolDefinition {
+/** What the native tool knows about the session it was attached to. */
+export interface UpsertLeafToolOptions {
+  /**
+   * The session's workspace project key (0.52.3). When set, the tool may be
+   * called without `projectKey` — the same guarantee the MCP server gives
+   * through `LUCK_PLANNER_PROJECT_KEY` — and a relative key is resolved onto
+   * it instead of starting a second tree.
+   */
+  defaultProjectKey?: string | null;
+}
+
+export function createUpsertLeafTool(
+  store: LuckPlannerStore,
+  options: UpsertLeafToolOptions = {},
+): AgentToolDefinition {
+  const projectKey = (options.defaultProjectKey ?? "").trim();
   return defineAgentTool({
     name: UPSERT_LEAF_TOOL_NAME,
     title: "Create or update a fact leaf",
@@ -43,11 +58,17 @@ export function createUpsertLeafTool(store: LuckPlannerStore): AgentToolDefiniti
       MCP_DESCRIPTION +
       " Available natively when this provider cannot load MCP servers — same " +
       "store, same validation and same audit trail as the MCP tool of this name.",
-    input: upsertLeafInputSchema,
+    // `projectKey` stays mandatory when the session key is unknown: a tool
+    // that silently wrote nowhere would be worse than one that asks.
+    input:
+      projectKey.length > 0
+        ? upsertLeafInputSchema.partial({ projectKey: true })
+        : upsertLeafInputSchema,
     async execute(input, context) {
       const result = dispatchMcpTool(UPSERT_LEAF_TOOL_NAME, input, {
         store,
         defaultActor: context.agent.id,
+        defaultProjectKey: projectKey.length > 0 ? projectKey : null,
       });
       const text = result.content.map((part) => part.text).join("\n");
       return result.isError ? { text, isError: true } : { text };

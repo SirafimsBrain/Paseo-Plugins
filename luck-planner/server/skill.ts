@@ -54,10 +54,13 @@ is **read before work** and **written the moment something becomes true**.
 **Language rule:** write every name and description in **English** — the tree
 is shared by agents and humans working in different languages.
 
-**project_key rule:** every call needs \`projectKey\` — the canonical absolute
-path of the project root (the workspace's working directory). Use the exact
-same string every time; a slightly different path silently creates a second
-tree.
+**project_key rule:** \`projectKey\` is the canonical absolute path of the
+project root (the workspace's working directory). The tool server knows your
+session's workspace key: **omit \`projectKey\`** unless the task really names
+another project, and every write lands in the tree the dashboard shows. If you
+do pass one, use the absolute path — a relative or differently spelled path is
+resolved onto the workspace key and the answer says so, but do not rely on
+that: a key the server cannot recognise starts a second tree nobody reads.
 
 **Scope rule (hard):** \`projectKey\` is **the current workspace only**. Use one
 and the same value for every call in this session.
