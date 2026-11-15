@@ -85,6 +85,7 @@ import {
 import { withLiveSpawn } from "./server/mcp-probe";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideSessionOpen } from "./server/session-open";
+import { detectSharedOpenCodeService, sharedOpenCodeMcpBlock } from "./server/opencode-service";
 import { createMemoryRecallTool } from "./server/agent-tools";
 import { skillStatuses, skillMarkdown, installSkill as installSkillOnDisk, uninstallSkill as uninstallSkillOnDisk } from "./server/skill";
 import {
@@ -189,6 +190,21 @@ export default function contribute(server: PluginServerContext) {
       );
       return request;
     }
+    // 0.11.4: a *shared* OpenCode v2 service (Paseo 0.15.0, #7435) refuses every
+    // agent whose config carries custom MCP servers, so writing the entry here
+    // would make creation fail outright. Degrade instead: memory stays reachable
+    // through the config-file registration or the recall tool attached on
+    // session open. See server/opencode-service.ts.
+    const openCodeBlock = sharedOpenCodeMcpBlock(
+      request.config.provider,
+      detectSharedOpenCodeService(),
+    );
+    if (openCodeBlock !== null) {
+      console.log(
+        `[memory-flash] agent.create injection skipped for ${request.config.provider}: ${openCodeBlock}`,
+      );
+      return request;
+    }
     const { command, args } = mcpServerCommand();
     // `as const` instead of a named `McpStdioServerConfig` annotation: the MCP
     // config types live in @getpaseo/protocol, which is not a host-supplied
@@ -257,6 +273,14 @@ export default function contribute(server: PluginServerContext) {
           : { covered: false, path: null };
       const lookup = readSavedMcpServers(request.agentId);
 
+      // A shared OpenCode v2 service cannot carry an injected MCP server at all
+      // (Paseo 0.15.0, #7435), and knowing that also makes the capability probe
+      // pointless: no MCP contribution is possible on this open.
+      const openCodeMcpBlock = sharedOpenCodeMcpBlock(
+        request.provider,
+        detectSharedOpenCodeService(),
+      );
+
       // Capability is only needed when an MCP contribution is still possible;
       // every other branch is decided without touching the daemon.
       let supportsMcpServers: boolean | null = null;
@@ -264,7 +288,8 @@ export default function contribute(server: PluginServerContext) {
         injectIntoAgents &&
         request.purpose !== "history" &&
         request.reason !== "create" &&
-        !cover.covered;
+        !cover.covered &&
+        openCodeMcpBlock === null;
       if (needsCapability) {
         const snapshot = await paseo.agents
           .ref(request.agentId)
@@ -282,6 +307,7 @@ export default function contribute(server: PluginServerContext) {
         configCovered: cover.covered,
         lookup,
         supportsMcpServers,
+        openCodeMcpBlock,
       });
       console.log(
         `[memory-flash] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,

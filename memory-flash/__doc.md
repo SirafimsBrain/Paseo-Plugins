@@ -36,6 +36,7 @@ memory-flash/
 │   ├── cline-mcp.ts           # register/unregister in Cline's own MCP settings
 │   ├── cursor-mcp.ts          # register/unregister in Cursor's ~/.cursor/mcp.json
 │   ├── codex-mcp.ts           # register/unregister in Codex's ~/.codex/config.toml (TOML)
+│   ├── opencode-service.ts    # shared OpenCode v2 service detection (0.15.0 #7435)
 │   └── remote-hosts.ts        # hosts.json registry, paseo-ssh probe, stubs
 ├── client/
 │   ├── memory-surface.tsx     # Memories / History & tasks / Remote hosts tabs
@@ -1059,3 +1060,88 @@ Verification (2026-10-29, this machine):
 | `npm run typecheck` | **exit 0** |
 | `npm test` (pretest rebuilds `dist/mcp-server.js`) | **16 suites / 192 tests pass** — the new `tests/agent-hooks.test.ts` covers the decision matrix, the record reader, the attached tool, the reload RPC and the `initialize` instructions |
 | `@getpaseo/plugin` | `0.14.0` (the pin moved from `0.12.0` in this release: `agent.session_open`, `defineAgentTool` and `reload()` are 0.14.0 API, and `requirements.paseo` now states `>=0.14.0` accordingly) |
+
+## 19. Paseo 0.15.0 — shared OpenCode service: graceful degradation (0.11.4)
+
+The 0.15.0 host (#7435, "Reuse running OpenCode v2 services") lets the
+`opencode` provider connect to an already running OpenCode v2 service instead
+of owning one, and refuses any agent that carries custom MCP servers on such a
+service:
+`Custom OpenCode MCP servers or process environment require an isolated server
+and cannot be used with a shared OpenCode service.`
+The rule was read out of the installed host (`@getpaseo/server`,
+`agent/providers/opencode/v2/`):
+
+- `requiresDedicatedV2Server(config, launch)` is true as soon as
+  `Object.keys(config.mcpServers ?? {}).length > 0` — i.e. for every agent this
+  plugin injects into;
+- `V2Runtime.acquire()` calls `assertSharedConfiguration()` whenever
+  `selectOpenCodeService()` returns a selection other than `owned`, and that is
+  where the error is thrown;
+- `selectOpenCodeService()` returns `explicit` when `PASEO_OPENCODE_SERVER_URL`
+  is set, otherwise it reads `$XDG_STATE_HOME/opencode/service.json` (default
+  `~/.local/state/opencode/service.json`, shape `{version,url,pid,password?}`)
+  and returns `discovered` for a `2.x` version at least `2.0.10` whose URL
+  points at this host.
+
+Consequence for this plugin: on such a host the injection *is* the failure — an
+injected server makes agent creation fail (`Failed to create agent: Custom
+OpenCode MCP servers …`) and every reopen of an already created agent fail the
+same way. The interaction was reproduced and controlled in the bunny-search
+0.15.0 pass; this plugin implements the plugin-side mitigation.
+
+### 19.1 Implementation
+
+`server/opencode-service.ts` reproduces the selection rule from local files and
+returns `{shared, detail, path}`; `sharedOpenCodeMcpBlock(provider, service)`
+turns that into a block reason **only for `opencode`** (no other provider goes
+through `V2Runtime`). Two call sites:
+
+- **`agent.create`** — after the config-file cover check, the hook returns the
+  request untouched when the block applies, so the saved configuration never
+  gains an MCP entry that would make creation impossible. Log:
+  `agent.create injection skipped for opencode: shared OpenCode service …`.
+- **`agent.session_open`** — the block reason is an input of `decideSessionOpen`
+  (`openCodeMcpBlock`) and short-circuits into the existing "no MCP" branch,
+  which yields `injectMcp: false, attachTool: true`: the read-only
+  `memory_flash_recall` tool takes over as the read path, exactly as it does for
+  a provider without MCP support. The capability probe is skipped when the block
+  applies, because no MCP contribution is possible on that open anyway.
+
+Ordering inside the decision is deliberate: the config-file cover check comes
+first, because **config registration is the real fix on such a host**. OpenCode
+loads the plugin's server from its own config file, so Paseo sees no custom MCP
+server and the dedicated-server rule never fires — full tool set, no
+degradation. The log line names that path when it applies.
+
+### 19.2 Trade-offs and limitations
+
+- **The pid check replaces the host's HTTP probe.** The host probes the
+  discovered URL before choosing `discovered`; the plugin reads the recorded
+  `pid` and checks liveness with `kill(pid, 0)` instead of making a request from
+  a lifecycle hook. A `service.json` left behind by a crashed service is
+  correctly ignored; a live pid whose service no longer answers still counts as
+  shared. The cost is a degraded open (recall tool only), never a failed one.
+- **Detection is per open, not cached.** One `readFile` per hook call; the file
+  is written by OpenCode itself and can appear or disappear between opens.
+- **Agents created earlier keep their saved entries.** They carry `mcpServers`
+  in the daemon's agent record, so on a machine that later acquires a shared
+  service they cannot open until that entry is gone. A lifecycle hook cannot
+  rewrite a saved config; the practical remedies are registering OpenCode's
+  config file first (which makes the entry unnecessary) or recreating the agent.
+- **Scope.** Only `opencode` is affected, and only this plugin's own
+  contributions are withheld; another plugin's MCP server still triggers the
+  host rule.
+- bunny-search records the same fix as a recommendation (§16.4 there) and does
+  not implement it yet.
+
+### 19.3 Verification (2026-11-15, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | exit 0 |
+| `npm test` | **18 suites / 215 tests pass** — new `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch) and three wiring tests in `tests/agent-hooks.test.ts` (create skipped for opencode, other providers unaffected, session open degrades to the recall tool) |
+| Host rule source | extracted from the installed `0.15.0` `app.asar` (`v2/service-selection.js`, `v2/runtime.js`): the version predicate, the file path and the local-host check are copied from it |
+
+Version `0.10.4 → 0.11.4` (new capability: the OpenCode guard → second digit),
+annotated tag `memory-flash@0.11.4`.

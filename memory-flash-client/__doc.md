@@ -40,6 +40,7 @@ Modules:
 | `server/identity.ts` | UUID generation/validation, hostname resolution. |
 | `server/probe.ts` | Connection check: `/healthz` + `initialize` + `tools/list`. |
 | `server/conflict.ts` | Coexistence detection with a local memory-flash. |
+| `server/opencode-service.ts` | Shared OpenCode v2 service detection (0.15.0 #7435) so MCP injection can degrade instead of failing the open. |
 | `index.server.ts` | Settings, identity fallback, the `agent.create` hook, the RPCs. |
 | `client/connections-surface.tsx` | Sidebar surface: connection list, add form, Test/Check. |
 | `client/settings-screen.tsx` | Settings → Plugins → Memory Flash Client. |
@@ -497,3 +498,71 @@ Verification after the change (2026-10-29): `npm run typecheck` exit 0,
 the collision skip, `reason=create`, the three fail-safe paths, the off switch
 and the no-connection case; the reload suite covers success and a refused
 reload.
+
+## 18. Paseo 0.15.0 — shared OpenCode service: graceful degradation (0.5.2)
+
+The 0.15.0 host (#7435, "Reuse running OpenCode v2 services") lets the
+`opencode` provider connect to an already running OpenCode v2 service instead
+of owning one, and refuses any agent that carries custom MCP servers on such a
+service:
+`Custom OpenCode MCP servers or process environment require an isolated server
+and cannot be used with a shared OpenCode service.`
+The rule was read out of the installed host (`@getpaseo/server`,
+`agent/providers/opencode/v2/`): `requiresDedicatedV2Server()` is true as soon
+as the agent's config carries any `mcpServers` — which is every agent this
+plugin injects into — `V2Runtime.acquire()` calls `assertSharedConfiguration()`
+for any selection other than `owned`, and `selectOpenCodeService()` returns
+`explicit` when `PASEO_OPENCODE_SERVER_URL` is set or `discovered` for a
+compatible `2.x` `$XDG_STATE_HOME/opencode/service.json` pointing at this host.
+
+For this plugin the consequence is direct: the remote HTTP MCP servers it
+contributes to every agent *are* the "custom MCP servers" the host refuses, so
+the contribution made creation fail and every reopen fail the same way.
+
+### 18.1 Implementation
+
+`server/opencode-service.ts` reproduces the selection rule from local files and
+returns `{shared, detail, path}`; `sharedOpenCodeMcpBlock(provider, service)`
+turns it into a block reason **only for `opencode`**. Both hooks consult it:
+
+- **`agent.create`** — returns the request untouched instead of adding the HTTP
+  entries, so the saved configuration never makes creation impossible. Log:
+  `agent.create injection skipped for opencode: shared OpenCode service …`.
+- **`agent.session_open`** — the block reason is an input of
+  `decideClientSessionOpen` (`openCodeMcpBlock`) and short-circuits to
+  `injectNames: []`, with the reason in `why`. The capability probe is skipped
+  when the block applies.
+
+There is **no attached tool to fall back to**, by this plugin's own rule
+(§17.2 item 3): the tools belong to the remote host, and a local read-only copy
+would answer from a different base. Degradation therefore means "no remote
+memory on the `opencode` provider while the shared service is in use", stated
+in the log, instead of a failed creation or open.
+
+### 18.2 Trade-offs and limitations
+
+- **The pid check replaces the host's HTTP probe.** The host probes the
+  discovered URL; the plugin checks the recorded `pid` with `kill(pid, 0)`. A
+  stale `service.json` from a crashed service is ignored; a live pid whose
+  service no longer answers still counts as shared. The cost is a degraded open,
+  never a failed one.
+- **Detection is per open, not cached** — one `readFile` per hook call.
+- **Agents created earlier keep their saved entries.** A lifecycle hook cannot
+  rewrite a saved config, so on a machine that later acquires a shared service
+  such an agent cannot open until its entry is gone (recreate it).
+- **This plugin has no config-file registration path** comparable to
+  memory-flash §6, so unlike that plugin there is no full-function alternative
+  on such a host — only the degraded one.
+- bunny-search records the same fix as a recommendation (§16.4 there) and does
+  not implement it yet.
+
+### 18.3 Verification (2026-11-15, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | exit 0 |
+| `npm test` | **7 suites / 76 tests pass** — new `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch) and three wiring tests in `tests/server-contribution.test.ts` (create skipped for opencode, other providers unaffected, session open skipped) |
+| Host rule source | extracted from the installed `0.15.0` `app.asar` (`v2/service-selection.js`, `v2/runtime.js`) |
+
+Version `0.4.2 → 0.5.2` (new capability: the OpenCode guard → second digit),
+annotated tag `memory-flash-client@0.5.2`.

@@ -24,18 +24,42 @@ import { handleJsonRpcRequest, MCP_INSTRUCTIONS, PROTOCOL_VERSION } from "../ser
 
 let tempHome: string;
 let savedHome: string | undefined;
+let savedStateHome: string | undefined;
+let savedServerUrl: string | undefined;
 
 beforeEach(() => {
   tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "memory-flash-hooks-"));
   savedHome = process.env.PASEO_HOME;
   process.env.PASEO_HOME = tempHome;
+  // The OpenCode service guard reads local state; keep it hermetic per test.
+  savedStateHome = process.env.XDG_STATE_HOME;
+  savedServerUrl = process.env.PASEO_OPENCODE_SERVER_URL;
+  process.env.XDG_STATE_HOME = path.join(tempHome, "xdg-state");
+  delete process.env.PASEO_OPENCODE_SERVER_URL;
 });
 
 afterEach(() => {
   if (savedHome === undefined) delete process.env.PASEO_HOME;
   else process.env.PASEO_HOME = savedHome;
+  if (savedStateHome === undefined) delete process.env.XDG_STATE_HOME;
+  else process.env.XDG_STATE_HOME = savedStateHome;
+  if (savedServerUrl === undefined) delete process.env.PASEO_OPENCODE_SERVER_URL;
+  else process.env.PASEO_OPENCODE_SERVER_URL = savedServerUrl;
   fs.rmSync(tempHome, { recursive: true, force: true });
 });
+
+/**
+ * Writes a discovery file the way `opencode serve --service` does and points
+ * `XDG_STATE_HOME` at it, so the hook sees a shared OpenCode v2 service.
+ */
+function useSharedOpenCodeService(info: Record<string, unknown> = {}): void {
+  const dir = path.join(tempHome, "xdg-state", "opencode");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "service.json"),
+    JSON.stringify({ version: "2.2.5", url: "http://127.0.0.1:37999", pid: process.pid, ...info }),
+  );
+}
 
 /** Writes an agent record the way the daemon stores it. */
 function writeAgentRecord(
@@ -107,6 +131,7 @@ function input(overrides: Partial<SessionOpenInput> = {}): SessionOpenInput {
     configCovered: false,
     lookup: { status: "found", savedServers: [] },
     supportsMcpServers: true,
+    openCodeMcpBlock: null,
     ...overrides,
   };
 }
@@ -178,6 +203,10 @@ interface FakeServer extends PluginServerContext {
     request: Record<string, unknown>,
     context?: unknown,
   ): Promise<Record<string, unknown>>;
+  runCreateHook(config: {
+    provider?: string;
+    mcpServers?: Record<string, unknown>;
+  }): Promise<{ config: { provider?: string; mcpServers?: Record<string, unknown> } }>;
   setSettings(values: Record<string, unknown>): void;
   handlers: Map<string, (input: never, context: never) => unknown>;
 }
@@ -237,6 +266,18 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
       const handler = handlers.get(name);
       if (!handler) throw new Error(`No handler registered for ${name}`);
       return (await handler(input as never, (context ?? fakeContext()) as never)) as T;
+    },
+    async runCreateHook(config: {
+      provider?: string;
+      mcpServers?: Record<string, unknown>;
+    }) {
+      const hook = hooks.get("agent.create");
+      if (!hook) throw new Error("agent.create hook not registered");
+      const request = { config: { ...config } };
+      const result = await hook({ request } as never, fakeContext() as never);
+      return (result ?? request) as {
+        config: { provider?: string; mcpServers?: Record<string, unknown> };
+      };
     },
     async runSessionOpenHook(
       request: Record<string, unknown>,
@@ -457,6 +498,57 @@ describe("agent.session_open hook (contribution wiring)", () => {
         mcpServers: {},
       }),
     ).rejects.toThrow(/not registered/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("shared OpenCode service (0.15.0 #7435)", () => {
+  it("skips the agent.create injection for the opencode provider", async () => {
+    useSharedOpenCodeService();
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runCreateHook({ provider: "opencode" });
+    // Injecting here would make the host refuse the creation outright.
+    expect(request.config.mcpServers).toBeUndefined();
+    cleanup();
+  });
+
+  it("keeps other providers on the normal injection path", async () => {
+    useSharedOpenCodeService();
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runCreateHook({ provider: "claude" });
+    expect(Object.keys(request.config.mcpServers ?? {})).toEqual(["memory-flash"]);
+    cleanup();
+  });
+
+  it("degrades session open to the recall tool instead of failing the open", async () => {
+    useSharedOpenCodeService();
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook({
+      agentId: AGENT,
+      workspaceId: "ws",
+      provider: "opencode",
+      cwd: "/tmp/x",
+      reason: "resume",
+      purpose: "interactive",
+      title: null,
+      labels: {},
+      tools: [],
+      env: {},
+      mcpServers: {},
+    });
+
+    expect(request.mcpServers).toEqual({});
+    const tools = request.tools as Array<{ name: string }>;
+    expect(tools.map((tool) => tool.name)).toEqual(["memory_flash_recall"]);
+    cleanup();
   });
 });
 

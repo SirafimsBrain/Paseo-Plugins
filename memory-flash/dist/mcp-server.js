@@ -20047,8 +20047,23 @@ var unregisterKiloMcp = defineRpc({
   input: external_exports.object({}),
   output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
 });
+var kimiMcpStatus = defineRpc({
+  name: "memory-flash.kimi-mcp-status",
+  input: external_exports.object({}),
+  output: agentMcpStatusSchema
+});
+var registerKimiMcp = defineRpc({
+  name: "memory-flash.kimi-mcp-register",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
+var unregisterKimiMcp = defineRpc({
+  name: "memory-flash.kimi-mcp-unregister",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
 var agentMcpRegistrationResultSchema = external_exports.object({
-  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI"). */
+  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI", "Kimi"). */
   agent: external_exports.string(),
   ok: external_exports.boolean(),
   error: external_exports.string().nullable()

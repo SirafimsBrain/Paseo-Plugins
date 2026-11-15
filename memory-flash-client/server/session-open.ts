@@ -33,6 +33,13 @@ export interface ClientSessionOpenInput {
   lookup: AgentRecordLookup;
   /** `capabilities.supportsMcpServers`, or `null` when the snapshot was unavailable. */
   supportsMcpServers: boolean | null;
+  /**
+   * Block reason from `sharedOpenCodeMcpBlock` — a shared OpenCode v2 service
+   * refuses any agent whose config carries custom MCP servers, so an injection
+   * there fails the open itself (Paseo 0.15.0, #7435). `null` when injection is
+   * not blocked by that rule.
+   */
+  openCodeMcpBlock: string | null;
 }
 
 export interface ClientSessionOpenDecision {
@@ -52,6 +59,7 @@ function blockedReason(input: ClientSessionOpenInput): string | null {
     // would race them and can collide.
     return "reason=create is handled by the agent.create hook";
   }
+  if (input.openCodeMcpBlock !== null) return input.openCodeMcpBlock;
   if (input.supportsMcpServers === false) return "provider does not support MCP servers";
   if (input.supportsMcpServers === null) return "provider capabilities unknown";
   if (input.lookup.status !== "found") {

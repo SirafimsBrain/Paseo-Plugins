@@ -25,8 +25,8 @@ interface FakeServer extends PluginServerContext {
   /** Calls an RPC handler registered through `server.handle`. */
   call<T>(name: string, input: unknown, context?: unknown): Promise<T>;
   /** Runs the `agent.create` before-hook over a fresh request. */
-  runCreateHook(config: { mcpServers?: Record<string, unknown> }): Promise<{
-    config: { mcpServers?: Record<string, unknown> };
+  runCreateHook(config: { provider?: string; mcpServers?: Record<string, unknown> }): Promise<{
+    config: { provider?: string; mcpServers?: Record<string, unknown> };
   }>;
   /** Runs the `agent.session_open` before-hook over a fresh request. */
   runSessionOpenHook(
@@ -96,12 +96,14 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
       if (!handler) throw new Error(`No handler registered for ${name}`);
       return (await handler(input as never, (context ?? fakeContext()) as never)) as T;
     },
-    async runCreateHook(config: { mcpServers?: Record<string, unknown> }) {
+    async runCreateHook(config: { provider?: string; mcpServers?: Record<string, unknown> }) {
       const hook = hooks.get("agent.create");
       if (!hook) throw new Error("agent.create hook not registered");
       const request = { config: { ...config } };
       const result = await hook({ request } as never, fakeContext() as never);
-      return (result ?? request) as { config: { mcpServers?: Record<string, unknown> } };
+      return (result ?? request) as {
+        config: { provider?: string; mcpServers?: Record<string, unknown> };
+      };
     },
     async runSessionOpenHook(
       request: Record<string, unknown>,
@@ -132,18 +134,43 @@ function defaults(): Record<string, unknown> {
 }
 
 let tempHome: string;
-const previousHome = process.env.PASEO_HOME;
+let previousHome: string | undefined;
+let previousStateHome: string | undefined;
+let previousServerUrl: string | undefined;
 
 beforeEach(() => {
   tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "mfc-server-"));
+  previousHome = process.env.PASEO_HOME;
   process.env.PASEO_HOME = tempHome;
+  // The OpenCode service guard reads local state; keep it hermetic per test.
+  previousStateHome = process.env.XDG_STATE_HOME;
+  previousServerUrl = process.env.PASEO_OPENCODE_SERVER_URL;
+  process.env.XDG_STATE_HOME = path.join(tempHome, "xdg-state");
+  delete process.env.PASEO_OPENCODE_SERVER_URL;
 });
 
 afterEach(() => {
   if (previousHome === undefined) delete process.env.PASEO_HOME;
   else process.env.PASEO_HOME = previousHome;
+  if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+  else process.env.XDG_STATE_HOME = previousStateHome;
+  if (previousServerUrl === undefined) delete process.env.PASEO_OPENCODE_SERVER_URL;
+  else process.env.PASEO_OPENCODE_SERVER_URL = previousServerUrl;
   fs.rmSync(tempHome, { recursive: true, force: true });
 });
+
+/**
+ * Writes a discovery file the way `opencode serve --service` does and points
+ * `XDG_STATE_HOME` at it, so the hooks see a shared OpenCode v2 service.
+ */
+function useSharedOpenCodeService(): void {
+  const dir = path.join(tempHome, "xdg-state", "opencode");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "service.json"),
+    JSON.stringify({ version: "2.2.5", url: "http://127.0.0.1:37999", pid: process.pid }),
+  );
+}
 
 function addConnection(input: { id?: string; label: string; url: string; secret: string; enabled?: boolean }): string {
   const result = persistConnection({
@@ -500,6 +527,49 @@ describe("agent.session_open injection (0.3.2)", () => {
     });
     expect(Object.keys(none.mcpServers as object)).toEqual([]);
     cleanupEmpty();
+  });
+});
+
+describe("shared OpenCode service (0.15.0 #7435)", () => {
+  it("skips the remote servers on agent.create for the opencode provider", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    useSharedOpenCodeService();
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runCreateHook({ provider: "opencode" });
+    // Injecting here would make the host refuse the creation outright.
+    expect(request.config.mcpServers).toBeUndefined();
+    cleanup();
+  });
+
+  it("keeps other providers on the normal injection path", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    useSharedOpenCodeService();
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runCreateHook({ provider: "claude" });
+    expect(Object.keys(request.config.mcpServers ?? {})).toEqual(["memory-flash"]);
+    cleanup();
+  });
+
+  it("skips the session-open contribution instead of failing the open", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    writeAgentRecord("agent-1", {});
+    useSharedOpenCodeService();
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const out = await server.runSessionOpenHook({
+      agentId: "agent-1",
+      provider: "opencode",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    expect(out.mcpServers).toEqual({});
+    cleanup();
   });
 });
 

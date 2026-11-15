@@ -40,6 +40,7 @@ import {
 } from "./server/identity";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideClientSessionOpen } from "./server/session-open";
+import { detectSharedOpenCodeService, sharedOpenCodeMcpBlock } from "./server/opencode-service";
 
 /**
  * Plugin server for Memory Flash Client.
@@ -170,6 +171,21 @@ export default function contribute(server: PluginServerContext) {
     const entries = buildServerEntries(values, identity);
     if (entries.length === 0) return request;
 
+    // 0.5.2: a *shared* OpenCode v2 service (Paseo 0.15.0, #7435) refuses every
+    // agent whose config carries custom MCP servers, so writing the remote
+    // entries here would make creation fail outright. Degrade instead and say so
+    // in the log. See server/opencode-service.ts.
+    const openCodeBlock = sharedOpenCodeMcpBlock(
+      request.config.provider,
+      detectSharedOpenCodeService(),
+    );
+    if (openCodeBlock !== null) {
+      console.log(
+        `[memory-flash-client] agent.create injection skipped for ${request.config.provider}: ${openCodeBlock}`,
+      );
+      return request;
+    }
+
     const mcpServers = { ...(request.config.mcpServers ?? {}) };
     for (const entry of entries) {
       mcpServers[entry.name] = entry.config;
@@ -206,11 +222,20 @@ export default function contribute(server: PluginServerContext) {
       const values = await readSettings();
       const injectIntoAgents = values?.injectIntoAgents ?? false;
 
+      // A shared OpenCode v2 service cannot carry an injected MCP server at all
+      // (Paseo 0.15.0, #7435), and knowing that makes the capability probe
+      // pointless: no contribution is possible on this open.
+      const openCodeMcpBlock = sharedOpenCodeMcpBlock(
+        request.provider,
+        detectSharedOpenCodeService(),
+      );
+
       let supportsMcpServers: boolean | null = null;
       const needsCapability =
         injectIntoAgents &&
         request.purpose !== "history" &&
-        request.reason !== "create";
+        request.reason !== "create" &&
+        openCodeMcpBlock === null;
       if (needsCapability) {
         const snapshot = await paseo.agents
           .ref(request.agentId)
@@ -228,6 +253,7 @@ export default function contribute(server: PluginServerContext) {
         serverNames: entries.map((entry) => entry.name),
         lookup: readSavedMcpServers(request.agentId),
         supportsMcpServers,
+        openCodeMcpBlock,
       });
       console.log(
         `[memory-flash-client] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
