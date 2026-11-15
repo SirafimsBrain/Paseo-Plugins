@@ -3,6 +3,7 @@ import type { NodeResponse } from "../../../shared/api";
 import { LEAF_TRANSITIONS, type LeafStatus } from "../../../shared/tree";
 import { beeCycleLabel } from "../../../shared/bees";
 import { growthProgress } from "../../../shared/growth";
+import { readLeafBrief } from "../../../shared/brief";
 import type { PlainStatusOverride } from "../plain";
 import {
   BEE_STATUS_COLORS,
@@ -69,6 +70,10 @@ export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
       : null;
   const progress = growth === null ? null : growthProgress(growth.steps);
   const shownHistory = history.slice(-20).reverse();
+  // The execution brief (0.53.0): the plan the leaf exists to hand to an
+  // agent. Shown where the person reads the leaf, so a leaf without one is
+  // visible rather than a surprise at copy time.
+  const brief = readLeafBrief(node.payload);
 
   return (
     <div className="lp-details-body">
@@ -104,6 +109,63 @@ export function NodeDetailContent(props: NodeDetailContentProps): ReactElement {
           {node.updatedBy ? ` · ${node.updatedBy}` : ""}
         </Row>
       </div>
+
+      {node.kind === "leaf" ? (
+        brief === null ? (
+          <div className="lp-details-section lp-details-brief-missing">
+            <h3 className="lp-details-subtitle">Execution brief</h3>
+            <span className="lp-details-hint">
+              No plan recorded: this leaf states the fact but not how to do
+              it, so an agent has to research it again. Write one with
+              <span className="lp-details-mono"> luck_tree_upsert_leaf (brief)</span>.
+            </span>
+          </div>
+        ) : (
+          <div className="lp-details-section lp-details-brief">
+            <h3 className="lp-details-subtitle">Execution brief</h3>
+            {brief.entryPoint !== undefined ? (
+              <Row label="Entry point">
+                <span className="lp-details-mono">{brief.entryPoint}</span>
+              </Row>
+            ) : null}
+            {brief.files !== undefined && brief.files.length > 0 ? (
+              <Row label="Files">
+                <span className="lp-details-mono">{brief.files.join(", ")}</span>
+              </Row>
+            ) : null}
+            <ol className="lp-details-brief-steps">
+              {brief.steps.map((step, index) => (
+                <li key={`${index}-${step}`}>{step}</li>
+              ))}
+            </ol>
+            {brief.acceptance !== undefined && brief.acceptance.length > 0 ? (
+              <div className="lp-details-brief-block">
+                <h4 className="lp-details-brief-label">Acceptance</h4>
+                <ul className="lp-details-brief-list">
+                  {brief.acceptance.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {brief.established !== undefined && brief.established.length > 0 ? (
+              <div className="lp-details-brief-block">
+                <h4 className="lp-details-brief-label">
+                  Already established (no re-research)
+                </h4>
+                <ul className="lp-details-brief-list">
+                  {brief.established.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {brief.source !== undefined ? (
+              <Row label="Source">{brief.source}</Row>
+            ) : null}
+          </div>
+        )
+      ) : null}
 
       {override !== undefined && override !== null ? (
         <div className="lp-details-section lp-details-override">

@@ -33,6 +33,7 @@ import {
   STATUS_COLORS,
   STATUS_LABELS,
 } from "../colors";
+import { leafAgentInstruction } from "../../../shared/brief";
 import {
   PLAIN_ZONE_EMPTY_HINTS,
   PLAIN_ZONE_GLYPHS,
@@ -83,6 +84,12 @@ export interface PlainViewProps {
   /** Title of the empty state (filters that hide everything, etc.). */
   readonly emptyTitle?: string;
   readonly emptyText?: string;
+  /**
+   * The project key the tab reads (0.53.0). It goes into the copied leaf
+   * instruction so the pasted block is self-describing: the agent gets the
+   * exact `projectKey` the tool call needs instead of guessing one.
+   */
+  readonly projectKey: string;
   /** The lifecycle writes the board offers (0.51.1). */
   readonly write: PlainWriteProps;
   /** A write error from the last card action, shown above the zones. */
@@ -122,6 +129,7 @@ function cardGlyph(kind: PlainCardKind): string {
 /** One horizontal zone band. */
 function ZoneBand(props: {
   zone: PlainZone;
+  projectKey: string;
   collapsed: ReadonlySet<string>;
   onToggleSection: (key: string) => void;
   selectedEntityId: string | null;
@@ -147,6 +155,7 @@ function ZoneBand(props: {
           <Group
             key={group.id}
             group={group}
+            projectKey={props.projectKey}
             collapsed={props.collapsed}
             onToggleSection={props.onToggleSection}
             selectedEntityId={props.selectedEntityId}
@@ -162,6 +171,7 @@ function ZoneBand(props: {
 /** One (entity, status) group inside a zone. */
 function Group(props: {
   group: PlainGroup;
+  projectKey: string;
   collapsed: ReadonlySet<string>;
   onToggleSection: (key: string) => void;
   selectedEntityId: string | null;
@@ -186,6 +196,7 @@ function Group(props: {
           key={card.id}
           card={card}
           selected={card.entityId === props.selectedEntityId}
+          projectKey={props.projectKey}
           onSelectCard={props.onSelectCard}
           write={props.write}
         />
@@ -194,6 +205,7 @@ function Group(props: {
         <SectionNode
           key={section.key}
           section={section}
+          projectKey={props.projectKey}
           collapsed={props.collapsed}
           onToggleSection={props.onToggleSection}
           selectedEntityId={props.selectedEntityId}
@@ -208,6 +220,7 @@ function Group(props: {
 /** A collapsible tree section — nested by tree ancestry (the K1 depth). */
 function SectionNode(props: {
   section: PlainSection;
+  projectKey: string;
   collapsed: ReadonlySet<string>;
   onToggleSection: (key: string) => void;
   selectedEntityId: string | null;
@@ -245,6 +258,7 @@ function SectionNode(props: {
               key={card.id}
               card={card}
               selected={card.entityId === props.selectedEntityId}
+              projectKey={props.projectKey}
               onSelectCard={props.onSelectCard}
               write={props.write}
             />
@@ -253,6 +267,7 @@ function SectionNode(props: {
             <SectionNode
               key={child.key}
               section={child}
+              projectKey={props.projectKey}
               collapsed={props.collapsed}
               onToggleSection={props.onToggleSection}
               selectedEntityId={props.selectedEntityId}
@@ -330,20 +345,33 @@ function nextStepFor(card: PlainCard): string {
   }
 }
 
-/** Инструкция для агента — точное целевое описание карты и следующего шага. */
-function agentInstruction(card: PlainCard): string {
+/**
+ * Инструкция для агента — точное целевое описание карты и следующего шага.
+ *
+ * A **leaf** copies an execution brief (0.53.0): the first line is the
+ * machine-recognisable `luck-planner-leaf` reference, then the fact, then the
+ * plan (entry point, steps, acceptance, what is already established) and how
+ * to use it. The old text named the leaf and its id but carried no plan, so
+ * the agent re-researched the sources — the exact cost this fixes.
+ */
+function agentInstruction(card: PlainCard, projectKey: string): string {
+  if (card.kind === "leaf") {
+    return leafAgentInstruction({
+      projectKey,
+      leafId: card.entityId,
+      name: card.name,
+      path: card.path,
+      status: cardStatusLabel(card.kind, card.status),
+      version: card.version,
+      revision: card.revision,
+      description: card.description,
+      brief: card.brief,
+    });
+  }
   const lines: string[] = [];
   const statusLabel = cardStatusLabel(card.kind, card.status);
   const nextStep = nextStepFor(card);
-  if (card.kind === "leaf") {
-    lines.push(`Лист: ${card.name}`);
-    lines.push(`Идентификатор: ${card.entityId}`);
-    lines.push(`Путь: ${card.path || "—"}`);
-    lines.push(`Статус: ${statusLabel}`);
-    if (card.openBugCount > 0) lines.push(`Открытых инцидентов: ${card.openBugCount}`);
-    lines.push(`Следующий шаг: ${nextStep}`);
-    lines.push(`Агент: luck_tree_upsert_leaf id="${card.entityId}"`);
-  } else if (card.kind === "goal") {
+  if (card.kind === "goal") {
     lines.push(`Цель: ${card.name}`);
     lines.push(`Идентификатор: ${card.entityId}`);
     lines.push(`Статус: ${statusLabel}`);
@@ -372,6 +400,7 @@ function agentInstruction(card: PlainCard): string {
 function Card(props: {
   card: PlainCard;
   selected: boolean;
+  projectKey: string;
   onSelectCard: (kind: PlainCardKind, entityId: string) => void;
   write: PlainWriteProps;
 }): ReactElement {
@@ -407,22 +436,26 @@ function Card(props: {
           />
           {cardStatusLabel(card.kind, card.status)}
         </span>
-        {attention ? (
+        {attention || card.kind === "leaf" ? (
           <span
             role="button"
             tabIndex={0}
             className="lp-plain-card-copy"
             aria-label="Скопировать инструкцию для агента"
-            title="Скопировать инструкцию для агента (идентификатор и следующий шаг)"
+            title={
+              card.kind === "leaf"
+                ? "Скопировать задание для агента: ссылка на лист, факт и план выполнения"
+                : "Скопировать инструкцию для агента (идентификатор и следующий шаг)"
+            }
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                copyInstruction(card);
+                copyInstruction(card, props.projectKey);
               }
             }}
             onClick={(event) => {
               event.stopPropagation();
-              copyInstruction(card);
+              copyInstruction(card, props.projectKey);
             }}
           >
             📋
@@ -515,8 +548,8 @@ function Card(props: {
   );
 }
 
-function copyInstruction(card: PlainCard): void {
-  const text = agentInstruction(card);
+function copyInstruction(card: PlainCard, projectKey: string): void {
+  const text = agentInstruction(card, projectKey);
   void navigator.clipboard
     .writeText(text)
     .then(() => {
@@ -541,6 +574,27 @@ function LeafCardBody(props: { card: PlainLeafCard }): ReactElement {
           {card.path}
         </div>
       ) : null}
+      {/*
+       * The plan, where the human decides (0.53.0): a leaf without a brief is
+       * the case that sends an agent back to the sources, so the board says so
+       * — visibly — instead of hiding it behind the copy button.
+       */}
+      {card.brief === null ? (
+        <div className="lp-plain-card-brief lp-plain-card-brief-missing">
+          нет плана выполнения — агент будет искать заново
+        </div>
+      ) : (
+        <div
+          className="lp-plain-card-brief"
+          title={card.brief.steps.join("\n")}
+        >
+          <span className="lp-plain-card-brief-label">План:</span>{" "}
+          {card.brief.steps.length}{" "}
+          {card.brief.steps.length === 1 ? "шаг" : "шагов"}
+          {" · "}
+          {card.brief.steps[0]}
+        </div>
+      )}
       <div className="lp-plain-card-meta">
         <span className="lp-plain-card-mono">
           v{card.version || "—"} · r{card.revision}
@@ -675,6 +729,7 @@ export function PlainView(props: PlainViewProps): ReactElement {
         <ZoneBand
           key={zone.id}
           zone={zone}
+          projectKey={props.projectKey}
           collapsed={props.collapsed}
           onToggleSection={props.onToggleSection}
           selectedEntityId={props.selectedEntityId}

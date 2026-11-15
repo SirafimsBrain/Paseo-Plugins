@@ -38,6 +38,7 @@ import {
   LEAF_TRANSITIONS,
   statusOverrideReason,
 } from "../../shared/tree";
+import { readLeafBrief, type LeafBrief } from "../../shared/brief";
 import type {
   LeafStatus,
   Node as TreeNode,
@@ -279,6 +280,14 @@ export interface PlainLeafCard extends PlainCardBase {
   /** Breadcrumb of ancestor names, root first (`"Tech stack › Platform"`). */
   readonly path: string;
   readonly version: string;
+  /** The fact in prose — what the leaf records (`node.description`). */
+  readonly description: string;
+  /**
+   * The execution brief (0.53.0): the concrete plan an agent starts from.
+   * `null` means the leaf states a fact but not the steps — the copy
+   * instruction says so instead of letting an agent go hunting.
+   */
+  readonly brief: LeafBrief | null;
   /** Open/investigating incidents on this leaf (the 🐞 badge, same as 2D). */
   readonly openBugCount: number;
   /** Influence links touching this leaf. */
@@ -609,6 +618,8 @@ export function buildPlainBoard(
       revision: node.revision,
       path: breadcrumb(index, node),
       version: node.version,
+      description: node.description,
+      brief: readLeafBrief(node.payload),
       openBugCount: openBugs.get(node.id)?.length ?? 0,
       beeCount: beeCounts.get(node.id) ?? 0,
       growth: growth.get(node.id) ?? null,

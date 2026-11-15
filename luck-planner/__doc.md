@@ -3672,3 +3672,74 @@ tests, including the new `refuses to let an agent approve its own proposal
 The store keeps its own state-machine rule (only a `proposed` goal may cross),
 so the two layers are: the store enforces *which status may cross*, the agent
 surface enforces *who may cross it for their own proposal*.
+
+### 10.16 Version 0.53.0 — a leaf is an execution brief (2026-11-15)
+
+**The report.** A person copied a leaf's entry-point information from the
+dashboard into a task prompt. The agent did not recognise it, said it knew
+nothing about that information, searched the daemon's files and the documents,
+burned a large number of tokens on its own investigation — and only then found
+what it had been handed. The same person put the general conclusion in one
+sentence: luck-planner holds *general information* and not *a plan*, so an
+agent has to search and analyse again every time. The plugin was producing the
+opposite of its purpose.
+
+**Two measurable causes.**
+
+1. **A leaf could not carry a plan.** Its content was `name` + free prose
+   `description`; `payload` existed but nothing validated a shape for it, the
+   dashboard never rendered it, and the tool descriptions asked for a "fact",
+   not for steps. Nothing forced an agent to write down where to start.
+2. **The reader could not receive one.** `luck_tree_get_context` answered with
+   `nodeSummary` — id, kind, name, status, version, revision — for the node it
+   opened: a *label*, not content. So even an agent that found the right leaf
+   had to go back to `luck_tree_search` or to the sources. And the copied
+   instruction (`agentInstruction` in `PlainView.tsx`) was a Russian list of
+   name/id/path/next-step with **no `projectKey`, no plan and no marker**, so a
+   paste was indistinguishable from any other text. The 📋 button was also
+   rendered only on cards that "require attention", which is why copying a
+   leaf usually happened by hand.
+
+**The fix — five layers, one shape.**
+
+- `shared/brief.ts` (new, pure): `leafBriefSchema` (`entryPoint`, required
+  ordered `steps`, `files`, `acceptance`, `established`, `source`),
+  `readLeafBrief` (forgiving on read: an old or hand-written payload answers
+  `null`, never throws), `payloadWithBrief` (a brief-only edit merges into the
+  stored payload instead of replacing it), `leafBriefText`,
+  `LEAF_REFERENCE_MARKER` (`luck-planner-leaf`), `leafReference` and
+  `leafAgentInstruction` — the copy text, shared so the dashboard and the tests
+  render the same thing.
+- `shared/tools.ts` + `server/mcp-tools.ts`: `luck_tree_upsert_leaf` accepts
+  `brief` (validated, stored as `payload.brief`, merged on update); its JSON
+  schema carries the shape, and both tool descriptions say to write one for any
+  fact another agent may execute.
+- `luck_tree_get_context` in node mode returns the node's `description`,
+  `payload` and `brief` next to the summary — one call is now enough to start.
+  Listings (children, siblings, overview) stay summaries: the budget belongs to
+  the node the caller opened.
+- `server/skill.ts` gains **§2a "A leaf is an execution brief, not a note"**
+  with the shape, the reason, and the paste protocol: a block whose first line
+  starts with `luck-planner-leaf` *is* the task — open the leaf, execute the
+  steps, do not re-read the source, re-search the project or re-plan; a leaf
+  without a brief is reported in one line instead of triggering an
+  investigation. `MCP_INSTRUCTIONS` carries the same two rules for agents whose
+  skill was never installed.
+- Dashboard: `PlainLeafCard` carries `description` and `brief`; every leaf card
+  gets the 📋 button and shows its first step (the rest in the tooltip) or the
+  warning that it has no brief; the node details render the whole brief; the
+  copied text opens with `luck-planner-leaf project="…" id="…"` and closes with
+  the tool call to make and the sentence "this paste IS the task".
+
+**Why the marker line matters.** Recognition cannot depend on the agent having
+read the skill: the first line of the paste names the source, the exact
+`projectKey` and the node id, so even an agent that knows nothing about the
+plugin has an unambiguous instruction — including the call that turns the paste
+into work. That is the half of the fix the incident actually required.
+
+**Verification.** `npm run typecheck` exit 0 (both configurations);
+`npm test` — 56 suites / 969 tests, including the new
+`tests/brief.test.ts` (schema strictness, forgiving read, payload merge, the
+copied text's marker/fact/plan/"do not re-research" lines, the no-brief
+sentence, and the MCP round trip: `upsert_leaf` with a brief → stored as
+`payload.brief` → returned by `get_context` with the description).

@@ -158,6 +158,65 @@ stops showing them) when something was written in the wrong place.
 
 ---
 
+## 2a. A leaf is an execution brief, not a note
+
+A leaf that only says *what* forces the next agent to rediscover *how* — open
+the project, read the document again, re-derive the plan. That is the most
+expensive thing this tree can cause, and it happened: a human pasted a leaf
+into a task and the agent went researching instead of working. So every leaf
+whose fact another agent may execute carries a \`brief\`:
+
+\`\`\`json
+luck_tree_upsert_leaf {
+  "projectKey": "/abs/path",
+  "parentId": "…",
+  "name": "Lemmatisation in the search path",
+  "description": "Fuzzy queries miss inflected forms; lemmas fix recall.",
+  "brief": {
+    "entryPoint": "centurion/rag/search.py:118 search()",
+    "steps": [
+      "Add a lemmatiser (pymorphy2 for Russian, Snowball otherwise) before the FTS query is built",
+      "Lemmatise the stored index terms at write time and the query terms at read time",
+      "Add the dependency to requirements.txt"
+    ],
+    "files": ["centurion/rag/search.py", "centurion/requirements.txt"],
+    "acceptance": [
+      "Query «нечёткие запросы» returns the document with «нечёткий запрос»",
+      "pytest tests/test_search.py passes"
+    ],
+    "established": ["The FTS5 index is rebuilt nightly — no migration needed"],
+    "source": "Report on strengthening Primuspilus search, §5 stage A"
+  }
+}
+\`\`\`
+
+- \`entryPoint\` — where to start (\`file:line symbol\`, a command, a URL);
+- \`steps\` — ordered and concrete (required); \`files\`, \`acceptance\` — what
+  it touches and what "done" means;
+- \`established\` — what you already verified, so nobody spends tokens on it
+  again; \`source\` — where the fact came from.
+
+The brief travels with the leaf: \`luck_tree_get_context\` (with a node id or
+by opening it from a search hit) returns the node's \`description\`, \`payload\`
+and \`brief\`, so one call is enough to start working.
+
+**When the user hands you a paste.** If a task contains a block whose first
+line starts with \`luck-planner-leaf\` (a card copied from the dashboard), or
+names a leaf together with its id, that block **is the task**:
+
+1. \`luck_tree_get_context { "projectKey": …, "nodeId": … }\` — read
+   \`brief\` and \`description\` from the answer.
+2. Execute the steps in order. Do **not** re-read the source document, re-search
+   the project or re-plan: \`established\` lists what is already known, and the
+   brief exists exactly so you do not repeat that work.
+3. Move the status as you go (\`luck_tree_upsert_leaf\` with \`leafId\` + \`status\`).
+
+If the pasted leaf has no brief, do not silently start an investigation: say
+in one line that the leaf has no plan, then either fill the brief in or ask
+which source to read. Searching first is the expensive path, not the safe one.
+
+---
+
 ## 3. Status transitions — the machine is not advisory
 
 Leaf statuses run through one state machine:

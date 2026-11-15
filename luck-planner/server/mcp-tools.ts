@@ -44,6 +44,7 @@ import {
   upsertNodeInputSchema,
 } from "../shared/tools";
 import { beeCycleLabel } from "../shared/bees";
+import { payloadWithBrief, readLeafBrief } from "../shared/brief";
 import { exportCounts } from "../shared/export";
 import { nodeBeeCycle } from "./bees";
 import { writeExportFile } from "./export";
@@ -98,6 +99,9 @@ export interface JsonSchemaProperty {
   items?: { type?: string; description?: string; enum?: string[] };
   enum?: string[];
   default?: unknown;
+  /** Nested object shape (the leaf `brief`). */
+  properties?: Record<string, JsonSchemaProperty>;
+  required?: string[];
 }
 
 export interface McpToolDefinition {
@@ -149,10 +153,16 @@ export const MCP_INSTRUCTIONS =
   "luck_tree_get_context or luck_tree_search first — then record a fact as a " +
   "leaf when it changes, follow the leaf state machine (draft → ready → " +
   "claimed → in_progress → done), and never manage the tree by hand outside " +
-  "these tools. Scope: one projectKey per session = the current workspace; " +
-  "never enumerate other projectKeys unless the user explicitly asks. When to " +
-  "write and what not to write is the luck-planner agent skill; this server is " +
-  "how the writes happen.";
+  "these tools. A leaf carries an execution `brief` (entry point, ordered " +
+  "steps, files, acceptance, what is already established): write one for any " +
+  "fact another agent may execute, and when a leaf has one, execute it instead " +
+  "of re-researching the sources. If the user pastes text that starts with " +
+  "`luck-planner-leaf` (or hands you a leaf id or a leaf name), that paste is " +
+  "the task: open the leaf with luck_tree_get_context and start — do not " +
+  "re-plan and do not search the project first. Scope: one projectKey per " +
+  "session = the current workspace; never enumerate other projectKeys unless " +
+  "the user explicitly asks. When to write and what not to write is the " +
+  "luck-planner agent skill; this server is how the writes happen.";
 
 export const MCP_TOOLS: McpToolDefinition[] = [
   {
@@ -259,7 +269,11 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       "With leafId updates that leaf: any of name/description/version/payload, " +
       "plus an optional status transition in the same call. payload carries " +
       "the plan/fact pair, version the fact/code version. Follow the leaf " +
-      "state machine: draft → ready → claimed → in_progress → done.",
+      "state machine: draft → ready → claimed → in_progress → done. " +
+      "**Write a `brief` whenever another agent may execute the fact** — the " +
+      "entry point, the ordered steps, the files, what 'done' means and what " +
+      "you already established. A leaf without a brief sends the next agent " +
+      "back to the sources, which is the cost this tree exists to remove.",
     inputSchema: {
       type: "object",
       properties: {
@@ -275,6 +289,32 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           type: "object",
           description:
             "JSON payload: plan/fact pair and anything else the fact carries.",
+        },
+        brief: {
+          type: "object",
+          description:
+            "The leaf's execution brief (stored as payload.brief): where to " +
+            "start and what to do, concrete enough that an agent needs no " +
+            "other source. On update it is merged into the stored payload.",
+          required: ["steps"],
+          properties: {
+            entryPoint: str(
+              'Where the work starts, e.g. "centurion/rag/search.py:118 search()" or a command.',
+            ),
+            steps: strArray(
+              "Ordered, concrete actions — the plan itself. Required, at least one.",
+            ),
+            files: strArray("Files the work touches."),
+            acceptance: strArray(
+              'What must be true for the leaf to be done (tests, checks, observed behaviour).',
+            ),
+            source: str(
+              'Where the fact came from (a document, a message, a commit) — so the agent does not re-read it.',
+            ),
+            established: strArray(
+              "Facts already verified while writing the leaf. An agent must not re-research these.",
+            ),
+          },
         },
         status: {
           type: "string",
@@ -1248,7 +1288,16 @@ function dispatchGetContext(
   const answer: Record<string, unknown> = {
     mode: "node",
     projectKey: value.projectKey,
-    node: nodeSummary(node),
+    // 0.53.0: the opened node carries its own content, not just a label. The
+    // leaf's `brief` is the plan an agent is supposed to execute; returning it
+    // here is what makes one call enough to start, instead of sending the agent
+    // back to the sources (which was measured as the expensive path).
+    node: {
+      ...nodeSummary(node),
+      description: node.description,
+      payload: node.payload,
+      brief: readLeafBrief(node.payload),
+    },
     parentId: node.parentId,
   };
   const truncated: Record<string, number> = {};
@@ -1415,7 +1464,8 @@ function dispatchUpsertLeaf(
       value.name !== undefined ||
       value.description !== undefined ||
       value.version !== undefined ||
-      value.payload !== undefined;
+      value.payload !== undefined ||
+      value.brief !== undefined;
     let leaf: Node = existing;
     if (wantsEdit) {
       leaf = store.updateNode({
@@ -1424,7 +1474,12 @@ function dispatchUpsertLeaf(
         name: value.name,
         description: value.description,
         version: value.version,
-        payload: value.payload,
+        // A brief-only edit must not drop the rest of a stored payload.
+        payload: payloadWithBrief({
+          brief: value.brief,
+          given: value.payload,
+          previous: existing.payload,
+        }),
         actor,
       });
     }
@@ -1472,7 +1527,7 @@ function dispatchUpsertLeaf(
     name: value.name,
     description: value.description,
     version: value.version,
-    payload: value.payload,
+    payload: payloadWithBrief({ brief: value.brief, given: value.payload }),
     status: value.status ?? "draft",
     actor,
   });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { leafBriefSchema } from "./brief";
 import {
   actorSchema,
   idSchema,
@@ -112,6 +113,12 @@ export type SearchInput = z.infer<typeof searchInputSchema>;
  * bootstraps the skeleton root → trunk → branch, stage D3). `payload`
  * carries the plan/fact pair, `version` the code/fact version
  * (`__doc.md` §5).
+ *
+ * 0.53.0 adds `brief`: the leaf's execution brief (entry point, ordered
+ * steps, files, acceptance, what is already established). It is stored as
+ * `payload.brief`, validated here, and returned by `luck_tree_get_context` —
+ * a leaf without one leaves the next agent to re-research the sources, which
+ * is exactly what the tree exists to prevent.
  */
 export const upsertLeafInputSchema = z.object({
   projectKey: projectKeySchema,
@@ -121,6 +128,8 @@ export const upsertLeafInputSchema = z.object({
   description: z.string().optional(),
   version: z.string().optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
+  /** The concrete plan: where to start, what to do, when it is done. */
+  brief: leafBriefSchema.optional(),
   status: leafStatusSchema.optional(),
   /**
    * Why an agent overrides a status the owner set by hand (0.51.1). Required

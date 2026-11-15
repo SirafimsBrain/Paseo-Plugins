@@ -23417,6 +23417,39 @@ function resolveProjectKey(requested, defaultKey) {
   return { projectKey: given, note: null };
 }
 
+// shared/brief.ts
+var BRIEF_PAYLOAD_KEY = "brief";
+var leafBriefSchema = external_exports.object({
+  /** Where the work starts: `file:line symbol`, a command, a URL. */
+  entryPoint: external_exports.string().min(1).optional(),
+  /** Ordered, concrete actions — the plan itself. At least one. */
+  steps: external_exports.array(external_exports.string().min(1)).min(1).max(50),
+  /** Files the work touches (repository-relative where possible). */
+  files: external_exports.array(external_exports.string().min(1)).max(50).optional(),
+  /** What must be true for the leaf to be `done`. */
+  acceptance: external_exports.array(external_exports.string().min(1)).max(50).optional(),
+  /** Where the fact came from (a document, a message, a commit). */
+  source: external_exports.string().min(1).optional(),
+  /**
+   * Facts already verified while the leaf was written. The point of the field
+   * is negative: an agent must not spend tokens re-establishing them.
+   */
+  established: external_exports.array(external_exports.string().min(1)).max(50).optional()
+});
+function readLeafBrief(payload) {
+  if (payload === null || payload === void 0) return null;
+  const raw = payload[BRIEF_PAYLOAD_KEY];
+  if (raw === void 0 || raw === null) return null;
+  const parsed = leafBriefSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+function payloadWithBrief(options) {
+  const { brief } = options;
+  if (brief === void 0) return options.given;
+  const base = options.given ?? options.previous ?? {};
+  return { ...base, [BRIEF_PAYLOAD_KEY]: brief };
+}
+
 // shared/tools.ts
 var contextSectionSchema = external_exports.enum([
   "path",
@@ -23451,6 +23484,8 @@ var upsertLeafInputSchema = external_exports.object({
   description: external_exports.string().optional(),
   version: external_exports.string().optional(),
   payload: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
+  /** The concrete plan: where to start, what to do, when it is done. */
+  brief: leafBriefSchema.optional(),
   status: leafStatusSchema.optional(),
   /**
    * Why an agent overrides a status the owner set by hand (0.51.1). Required
@@ -25418,7 +25453,7 @@ function num(description) {
 var PROJECT_KEY = str(
   "Canonical absolute path of the project this call addresses \u2014 the current workspace only. Optional: omit it and the call is scoped to this session's workspace key, and a relative or otherwise equivalent path is resolved onto that key (the answer says so). Do not probe other projectKeys; expanding scope requires an explicit user request."
 );
-var MCP_INSTRUCTIONS = "Luck Planner is the project's durable planning tree: leaves record facts, bees record dependencies between them, bugs record incidents that block leaves, and goals are plans a human approves. Read before writing \u2014 luck_tree_get_context or luck_tree_search first \u2014 then record a fact as a leaf when it changes, follow the leaf state machine (draft \u2192 ready \u2192 claimed \u2192 in_progress \u2192 done), and never manage the tree by hand outside these tools. Scope: one projectKey per session = the current workspace; never enumerate other projectKeys unless the user explicitly asks. When to write and what not to write is the luck-planner agent skill; this server is how the writes happen.";
+var MCP_INSTRUCTIONS = "Luck Planner is the project's durable planning tree: leaves record facts, bees record dependencies between them, bugs record incidents that block leaves, and goals are plans a human approves. Read before writing \u2014 luck_tree_get_context or luck_tree_search first \u2014 then record a fact as a leaf when it changes, follow the leaf state machine (draft \u2192 ready \u2192 claimed \u2192 in_progress \u2192 done), and never manage the tree by hand outside these tools. A leaf carries an execution `brief` (entry point, ordered steps, files, acceptance, what is already established): write one for any fact another agent may execute, and when a leaf has one, execute it instead of re-researching the sources. If the user pastes text that starts with `luck-planner-leaf` (or hands you a leaf id or a leaf name), that paste is the task: open the leaf with luck_tree_get_context and start \u2014 do not re-plan and do not search the project first. Scope: one projectKey per session = the current workspace; never enumerate other projectKeys unless the user explicitly asks. When to write and what not to write is the luck-planner agent skill; this server is how the writes happen.";
 var MCP_TOOLS = [
   {
     name: "luck_tree_get_context",
@@ -25497,7 +25532,7 @@ var MCP_TOOLS = [
   {
     name: "luck_tree_upsert_leaf",
     title: "Create or update a fact leaf",
-    description: "Record a planned or confirmed fact. Without leafId creates a leaf under parentId (name required, status defaults to draft); omitting parentId is allowed only for the very first leaf of a fresh project, which bootstraps the skeleton root \u2192 trunk \u2192 branch automatically. With leafId updates that leaf: any of name/description/version/payload, plus an optional status transition in the same call. payload carries the plan/fact pair, version the fact/code version. Follow the leaf state machine: draft \u2192 ready \u2192 claimed \u2192 in_progress \u2192 done.",
+    description: "Record a planned or confirmed fact. Without leafId creates a leaf under parentId (name required, status defaults to draft); omitting parentId is allowed only for the very first leaf of a fresh project, which bootstraps the skeleton root \u2192 trunk \u2192 branch automatically. With leafId updates that leaf: any of name/description/version/payload, plus an optional status transition in the same call. payload carries the plan/fact pair, version the fact/code version. Follow the leaf state machine: draft \u2192 ready \u2192 claimed \u2192 in_progress \u2192 done. **Write a `brief` whenever another agent may execute the fact** \u2014 the entry point, the ordered steps, the files, what 'done' means and what you already established. A leaf without a brief sends the next agent back to the sources, which is the cost this tree exists to remove.",
     inputSchema: {
       type: "object",
       properties: {
@@ -25512,6 +25547,29 @@ var MCP_TOOLS = [
         payload: {
           type: "object",
           description: "JSON payload: plan/fact pair and anything else the fact carries."
+        },
+        brief: {
+          type: "object",
+          description: "The leaf's execution brief (stored as payload.brief): where to start and what to do, concrete enough that an agent needs no other source. On update it is merged into the stored payload.",
+          required: ["steps"],
+          properties: {
+            entryPoint: str(
+              'Where the work starts, e.g. "centurion/rag/search.py:118 search()" or a command.'
+            ),
+            steps: strArray(
+              "Ordered, concrete actions \u2014 the plan itself. Required, at least one."
+            ),
+            files: strArray("Files the work touches."),
+            acceptance: strArray(
+              "What must be true for the leaf to be done (tests, checks, observed behaviour)."
+            ),
+            source: str(
+              "Where the fact came from (a document, a message, a commit) \u2014 so the agent does not re-read it."
+            ),
+            established: strArray(
+              "Facts already verified while writing the leaf. An agent must not re-research these."
+            )
+          }
         },
         status: {
           type: "string",
@@ -26237,7 +26295,16 @@ function dispatchGetContext(store, value) {
   const answer = {
     mode: "node",
     projectKey: value.projectKey,
-    node: nodeSummary(node2),
+    // 0.53.0: the opened node carries its own content, not just a label. The
+    // leaf's `brief` is the plan an agent is supposed to execute; returning it
+    // here is what makes one call enough to start, instead of sending the agent
+    // back to the sources (which was measured as the expensive path).
+    node: {
+      ...nodeSummary(node2),
+      description: node2.description,
+      payload: node2.payload,
+      brief: readLeafBrief(node2.payload)
+    },
     parentId: node2.parentId
   };
   const truncated = {};
@@ -26346,7 +26413,7 @@ function dispatchUpsertLeaf(store, value, actor) {
         `node ${value.leafId} is a ${existing.kind}, not a leaf; upsert_leaf only edits leaves`
       );
     }
-    const wantsEdit = value.name !== void 0 || value.description !== void 0 || value.version !== void 0 || value.payload !== void 0;
+    const wantsEdit = value.name !== void 0 || value.description !== void 0 || value.version !== void 0 || value.payload !== void 0 || value.brief !== void 0;
     let leaf2 = existing;
     if (wantsEdit) {
       leaf2 = store.updateNode({
@@ -26355,7 +26422,12 @@ function dispatchUpsertLeaf(store, value, actor) {
         name: value.name,
         description: value.description,
         version: value.version,
-        payload: value.payload,
+        // A brief-only edit must not drop the rest of a stored payload.
+        payload: payloadWithBrief({
+          brief: value.brief,
+          given: value.payload,
+          previous: existing.payload
+        }),
         actor
       });
     }
@@ -26394,7 +26466,7 @@ function dispatchUpsertLeaf(store, value, actor) {
     name: value.name,
     description: value.description,
     version: value.version,
-    payload: value.payload,
+    payload: payloadWithBrief({ brief: value.brief, given: value.payload }),
     status: value.status ?? "draft",
     actor
   });
@@ -26502,7 +26574,7 @@ function dispatchUpdateGrowth(store, value, actor) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.52.4";
+var SERVER_VERSION = "0.53.0";
 var SERVER_NAME = "luck-planner";
 function reportedServerName() {
   const configured = (process.env.LUCK_PLANNER_SERVER_NAME ?? "").trim();

@@ -392,6 +392,7 @@ describe("shared/ import boundaries", () => {
       [
         "api.ts",
         "bees.ts",
+        "brief.ts",
         "export.ts",
         "goals.ts",
         "growth.ts",

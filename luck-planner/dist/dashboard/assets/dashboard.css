@@ -1193,6 +1193,39 @@ body {
   color: var(--lp-text-muted, #8b93a3);
   font-size: 11px;
 }
+.lp-details-brief-steps {
+  margin: 6px 0 0;
+  padding-inline-start: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.lp-details-brief-block {
+  margin-top: 8px;
+}
+.lp-details-brief-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lp-text-muted, #8b93a3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.lp-details-brief-list {
+  margin: 0;
+  padding-inline-start: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.lp-details-brief-missing .lp-details-hint {
+  display: block;
+  line-height: 1.45;
+}
 .lp-details-cycle-walk {
   margin: 0 0 4px;
   font-size: 12px;
@@ -1681,6 +1714,22 @@ body {
   font-size: 11px;
   color: var(--lp-text-muted, #8b93a3);
   flex-wrap: wrap;
+}
+.lp-plain-card-brief {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--lp-text, #d7dce5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lp-plain-card-brief-label {
+  color: var(--lp-text-muted, #8b93a3);
+  font-weight: 600;
+}
+.lp-plain-card-brief-missing {
+  color: #e0a84f;
+  font-style: italic;
 }
 .lp-plain-card-mono {
   font-variant-numeric: tabular-nums;

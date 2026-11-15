@@ -1172,6 +1172,83 @@ function createChangeStream(options) {
   };
 }
 
+// shared/brief.ts
+var BRIEF_PAYLOAD_KEY = "brief";
+var leafBriefSchema = external_exports.object({
+  /** Where the work starts: `file:line symbol`, a command, a URL. */
+  entryPoint: external_exports.string().min(1).optional(),
+  /** Ordered, concrete actions — the plan itself. At least one. */
+  steps: external_exports.array(external_exports.string().min(1)).min(1).max(50),
+  /** Files the work touches (repository-relative where possible). */
+  files: external_exports.array(external_exports.string().min(1)).max(50).optional(),
+  /** What must be true for the leaf to be `done`. */
+  acceptance: external_exports.array(external_exports.string().min(1)).max(50).optional(),
+  /** Where the fact came from (a document, a message, a commit). */
+  source: external_exports.string().min(1).optional(),
+  /**
+   * Facts already verified while the leaf was written. The point of the field
+   * is negative: an agent must not spend tokens re-establishing them.
+   */
+  established: external_exports.array(external_exports.string().min(1)).max(50).optional()
+});
+function readLeafBrief(payload) {
+  if (payload === null || payload === void 0) return null;
+  const raw = payload[BRIEF_PAYLOAD_KEY];
+  if (raw === void 0 || raw === null) return null;
+  const parsed = leafBriefSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+function line(label, value) {
+  return value === void 0 || value.length === 0 ? [] : [`${label}: ${value}`];
+}
+function leafBriefText(brief) {
+  if (brief === null) return "";
+  const lines = [];
+  lines.push(...line("Entry point", brief.entryPoint));
+  lines.push(...line("Files", brief.files?.join(", ")));
+  lines.push("Steps:");
+  brief.steps.forEach((step, index2) => lines.push(`${index2 + 1}. ${step}`));
+  if (brief.acceptance !== void 0 && brief.acceptance.length > 0) {
+    lines.push("Acceptance:");
+    for (const item of brief.acceptance) lines.push(`- ${item}`);
+  }
+  if (brief.established !== void 0 && brief.established.length > 0) {
+    lines.push("Already established (do not re-research):");
+    for (const item of brief.established) lines.push(`- ${item}`);
+  }
+  lines.push(...line("Source", brief.source));
+  return lines.join("\n");
+}
+var LEAF_REFERENCE_MARKER = "luck-planner-leaf";
+function leafReference(projectKey, leafId) {
+  return `${LEAF_REFERENCE_MARKER} project="${projectKey}" id="${leafId}"`;
+}
+function leafAgentInstruction(input) {
+  const lines = [leafReference(input.projectKey, input.leafId)];
+  lines.push(`Leaf: ${input.name}`);
+  if (input.path.length > 0) lines.push(`Path: ${input.path}`);
+  lines.push(
+    `Status: ${input.status} \xB7 v${input.version || "\u2014"} \xB7 r${input.revision}`
+  );
+  if (input.description !== void 0 && input.description.trim().length > 0) {
+    lines.push(`Fact: ${input.description.trim()}`);
+  }
+  const briefText = leafBriefText(input.brief);
+  if (briefText.length > 0) {
+    lines.push("", "Execution brief", briefText);
+  } else {
+    lines.push(
+      "",
+      "Execution brief: none recorded \u2014 the leaf states the fact but not the steps. Read the leaf's description and neighbors before starting."
+    );
+  }
+  lines.push(
+    "",
+    `How to use this: this paste IS the task. Read the leaf with luck_tree_get_context { "projectKey": "${input.projectKey}", "nodeId": "${input.leafId}" } and execute the brief \u2014 do not re-research the project, re-read the source document or re-plan the work. Move the leaf's status as you go (luck_tree_upsert_leaf with leafId + status).`
+  );
+  return lines.join("\n");
+}
+
 // dashboard/src/plain.ts
 var PLAIN_ZONES = ["plan", "active", "done"];
 var PLAIN_ZONE_LABELS = {
@@ -1440,6 +1517,8 @@ function buildPlainBoard(input, options = {}) {
       revision: node.revision,
       path: breadcrumb(index2, node),
       version: node.version,
+      description: node.description,
+      brief: readLeafBrief(node.payload),
       openBugCount: openBugs.get(node.id)?.length ?? 0,
       beeCount: beeCounts.get(node.id) ?? 0,
       growth: growth.get(node.id) ?? null,
@@ -11366,6 +11445,7 @@ function NodeDetailContent(props) {
   const allowed = node.kind === "leaf" && node.archivedAt === null ? LEAF_TRANSITIONS[node.status] : null;
   const progress = growth === null ? null : growthProgress(growth.steps);
   const shownHistory = history.slice(-20).reverse();
+  const brief = readLeafBrief(node.payload);
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-body", children: [
     /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
       "div",
@@ -11406,6 +11486,28 @@ function NodeDetailContent(props) {
         node.updatedBy ? ` \xB7 ${node.updatedBy}` : ""
       ] })
     ] }),
+    node.kind === "leaf" ? brief === null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section lp-details-brief-missing", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "lp-details-subtitle", children: "Execution brief" }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "lp-details-hint", children: [
+        "No plan recorded: this leaf states the fact but not how to do it, so an agent has to research it again. Write one with",
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-mono", children: " luck_tree_upsert_leaf (brief)" }),
+        "."
+      ] })
+    ] }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section lp-details-brief", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "lp-details-subtitle", children: "Execution brief" }),
+      brief.entryPoint !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Row, { label: "Entry point", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-mono", children: brief.entryPoint }) }) : null,
+      brief.files !== void 0 && brief.files.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Row, { label: "Files", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-mono", children: brief.files.join(", ") }) }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ol", { className: "lp-details-brief-steps", children: brief.steps.map((step, index2) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("li", { children: step }, `${index2}-${step}`)) }),
+      brief.acceptance !== void 0 && brief.acceptance.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-brief-block", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h4", { className: "lp-details-brief-label", children: "Acceptance" }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "lp-details-brief-list", children: brief.acceptance.map((item) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("li", { children: item }, item)) })
+      ] }) : null,
+      brief.established !== void 0 && brief.established.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-brief-block", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h4", { className: "lp-details-brief-label", children: "Already established (no re-research)" }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "lp-details-brief-list", children: brief.established.map((item) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("li", { children: item }, item)) })
+      ] }) : null,
+      brief.source !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Row, { label: "Source", children: brief.source }) : null
+    ] }) : null,
     override !== void 0 && override !== null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "lp-details-section lp-details-override", children: [
       /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("p", { className: "lp-details-override-line", children: [
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "lp-details-override-label", children: "\u21BA Agent override:" }),
@@ -12069,6 +12171,7 @@ function ZoneBand(props) {
       Group,
       {
         group,
+        projectKey: props.projectKey,
         collapsed: props.collapsed,
         onToggleSection: props.onToggleSection,
         selectedEntityId: props.selectedEntityId,
@@ -12100,6 +12203,7 @@ function Group(props) {
       {
         card,
         selected: card.entityId === props.selectedEntityId,
+        projectKey: props.projectKey,
         onSelectCard: props.onSelectCard,
         write: props.write
       },
@@ -12109,6 +12213,7 @@ function Group(props) {
       SectionNode,
       {
         section,
+        projectKey: props.projectKey,
         collapsed: props.collapsed,
         onToggleSection: props.onToggleSection,
         selectedEntityId: props.selectedEntityId,
@@ -12153,6 +12258,7 @@ function SectionNode(props) {
             {
               card,
               selected: card.entityId === props.selectedEntityId,
+              projectKey: props.projectKey,
               onSelectCard: props.onSelectCard,
               write: props.write
             },
@@ -12162,6 +12268,7 @@ function SectionNode(props) {
             SectionNode,
             {
               section: child,
+              projectKey: props.projectKey,
               collapsed: props.collapsed,
               onToggleSection: props.onToggleSection,
               selectedEntityId: props.selectedEntityId,
@@ -12231,19 +12338,24 @@ function nextStepFor(card) {
       return "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442\u0430.";
   }
 }
-function agentInstruction(card) {
+function agentInstruction(card, projectKey) {
+  if (card.kind === "leaf") {
+    return leafAgentInstruction({
+      projectKey,
+      leafId: card.entityId,
+      name: card.name,
+      path: card.path,
+      status: cardStatusLabel(card.kind, card.status),
+      version: card.version,
+      revision: card.revision,
+      description: card.description,
+      brief: card.brief
+    });
+  }
   const lines = [];
   const statusLabel = cardStatusLabel(card.kind, card.status);
   const nextStep = nextStepFor(card);
-  if (card.kind === "leaf") {
-    lines.push(`\u041B\u0438\u0441\u0442: ${card.name}`);
-    lines.push(`\u0418\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440: ${card.entityId}`);
-    lines.push(`\u041F\u0443\u0442\u044C: ${card.path || "\u2014"}`);
-    lines.push(`\u0421\u0442\u0430\u0442\u0443\u0441: ${statusLabel}`);
-    if (card.openBugCount > 0) lines.push(`\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0445 \u0438\u043D\u0446\u0438\u0434\u0435\u043D\u0442\u043E\u0432: ${card.openBugCount}`);
-    lines.push(`\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433: ${nextStep}`);
-    lines.push(`\u0410\u0433\u0435\u043D\u0442: luck_tree_upsert_leaf id="${card.entityId}"`);
-  } else if (card.kind === "goal") {
+  if (card.kind === "goal") {
     lines.push(`\u0426\u0435\u043B\u044C: ${card.name}`);
     lines.push(`\u0418\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440: ${card.entityId}`);
     lines.push(`\u0421\u0442\u0430\u0442\u0443\u0441: ${statusLabel}`);
@@ -12297,23 +12409,23 @@ function Card(props) {
         ),
         cardStatusLabel(card.kind, card.status)
       ] }),
-      attention ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+      attention || card.kind === "leaf" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
         "span",
         {
           role: "button",
           tabIndex: 0,
           className: "lp-plain-card-copy",
           "aria-label": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u043D\u0441\u0442\u0440\u0443\u043A\u0446\u0438\u044E \u0434\u043B\u044F \u0430\u0433\u0435\u043D\u0442\u0430",
-          title: "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u043D\u0441\u0442\u0440\u0443\u043A\u0446\u0438\u044E \u0434\u043B\u044F \u0430\u0433\u0435\u043D\u0442\u0430 (\u0438\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440 \u0438 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433)",
+          title: card.kind === "leaf" ? "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0437\u0430\u0434\u0430\u043D\u0438\u0435 \u0434\u043B\u044F \u0430\u0433\u0435\u043D\u0442\u0430: \u0441\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 \u043B\u0438\u0441\u0442, \u0444\u0430\u043A\u0442 \u0438 \u043F\u043B\u0430\u043D \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F" : "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u043D\u0441\u0442\u0440\u0443\u043A\u0446\u0438\u044E \u0434\u043B\u044F \u0430\u0433\u0435\u043D\u0442\u0430 (\u0438\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440 \u0438 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0448\u0430\u0433)",
           onKeyDown: (event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              copyInstruction(card);
+              copyInstruction(card, props.projectKey);
             }
           },
           onClick: (event) => {
             event.stopPropagation();
-            copyInstruction(card);
+            copyInstruction(card, props.projectKey);
           },
           children: "\u{1F4CB}"
         }
@@ -12385,8 +12497,8 @@ function Card(props) {
     }
   );
 }
-function copyInstruction(card) {
-  const text = agentInstruction(card);
+function copyInstruction(card, projectKey) {
+  const text = agentInstruction(card, projectKey);
   void navigator.clipboard.writeText(text).then(() => {
   }).catch(() => {
   });
@@ -12396,6 +12508,22 @@ function LeafCardBody(props) {
   const progress = card.growth === null || card.growth.total === 0 ? null : Math.round(card.growth.ratio * 100);
   return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
     card.path.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "lp-plain-card-path", title: card.path, children: card.path }) : null,
+    card.brief === null ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "lp-plain-card-brief lp-plain-card-brief-missing", children: "\u043D\u0435\u0442 \u043F\u043B\u0430\u043D\u0430 \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F \u2014 \u0430\u0433\u0435\u043D\u0442 \u0431\u0443\u0434\u0435\u0442 \u0438\u0441\u043A\u0430\u0442\u044C \u0437\u0430\u043D\u043E\u0432\u043E" }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
+      "div",
+      {
+        className: "lp-plain-card-brief",
+        title: card.brief.steps.join("\n"),
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "lp-plain-card-brief-label", children: "\u041F\u043B\u0430\u043D:" }),
+          " ",
+          card.brief.steps.length,
+          " ",
+          card.brief.steps.length === 1 ? "\u0448\u0430\u0433" : "\u0448\u0430\u0433\u043E\u0432",
+          " \xB7 ",
+          card.brief.steps[0]
+        ]
+      }
+    ),
     /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "lp-plain-card-meta", children: [
       /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "lp-plain-card-mono", children: [
         "v",
@@ -12513,6 +12641,7 @@ function PlainView(props) {
       ZoneBand,
       {
         zone,
+        projectKey: props.projectKey,
         collapsed: props.collapsed,
         onToggleSection: props.onToggleSection,
         selectedEntityId: props.selectedEntityId,
@@ -13490,6 +13619,7 @@ function App() {
             PlainView,
             {
               board: plainBoard,
+              projectKey: params.projectKey,
               loaded: tree !== null,
               collapsed: plainCollapsed,
               onToggleSection: onTogglePlainSection,

@@ -1033,6 +1033,7 @@ export function App(): ReactElement {
         {view === "plain" ? (
           <PlainView
             board={plainBoard}
+            projectKey={params.projectKey}
             loaded={tree !== null}
             collapsed={plainCollapsed}
             onToggleSection={onTogglePlainSection}
