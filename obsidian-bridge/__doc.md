@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.8.8**.
+Version covered: **0.8.9**.
 
 ## 1. Purpose and scope
 
@@ -337,6 +337,7 @@ and the panel says so.
 | 0.7.7 (shipped) | Agent skill shipped with the plugin and installed into existing agent skills directories. |
 | 0.8.7 (shipped) | Cline MCP registration, enforced skill currency with repair, and a visible installation status in settings. |
 | 0.8.8 (shipped) | Registrations are checked for an existing target and refreshed on the timer, so an update cannot leave a dead path. |
+| 0.8.9 (shipped) | `migrate` hook on the settings definition, so a document from an older install opens instead of failing with "Settings version 2 requires a migration". |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -395,7 +396,19 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9)
+
+### 0.8.9
+
+- **The settings screen refused to open after the update: "Settings are invalid: Settings version 2 requires a migration".**
+  Measured on a 0.4.1 → 0.8.8 update: the host store still held `{version: 2, values: …}` (written by the 0.3.x/0.2.x
+  schema), the definition declares version 4, and `defineSettings` had no `migrate` hook — the host only falls back to the
+  schema when the stored version matches, so it reported the document as invalid and no setting could be edited. The
+  semantic (0.3.0) and enrichment (0.4.0) bumps were additive, which is why the version was never lowered again and the
+  gap stayed invisible until an old install upgraded. `shared/settings.ts` now passes `migrate`, which keeps the stored
+  values (the schema fills every key the older document never had) and lets the host persist the document at the current
+  version — the repair therefore survives a restart. Tests: `tests/settings-migration.test.ts` (version 2 document keeps
+  its values and gains the newer defaults, unknown keys are dropped, a non-object document falls back to defaults).
 
 ### 0.8.8
 

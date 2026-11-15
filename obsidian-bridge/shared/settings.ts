@@ -26,6 +26,22 @@ export const obsidianBridgeSettings = defineSettings({
   // it validates to the schema default, while bumping the version turned every
   // existing document invalid.
   version: 4,
+  /**
+   * Convert a document written by an older install to the current schema.
+   *
+   * Every bump so far only added keys (2 → 3 the semantic settings, 3 → 4 the
+   * enrichment settings) and the schema fills a missing key from its default,
+   * so the stored values need no rewriting — only the version envelope does.
+   * The host requires this hook all the same: without it a document from an
+   * older install is reported as `Settings version N requires a migration` and
+   * the settings screen refuses to open (measured on a 0.4.1 → 0.8.8 update,
+   * stored version 2). The host persists the migrated document, so the repair
+   * is permanent.
+   */
+  migrate(values: unknown, _fromVersion: number): unknown {
+    if (typeof values !== "object" || values === null || Array.isArray(values)) return {};
+    return { ...(values as Record<string, unknown>) };
+  },
   schema: z.object({
     /**
      * Absolute path of the local Obsidian vault. Empty means "not
