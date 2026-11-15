@@ -50,6 +50,13 @@ export interface SessionOpenInput {
   lookup: AgentRecordLookup;
   /** `capabilities.supportsMcpServers`, or `null` when the snapshot was unavailable. */
   supportsMcpServers: boolean | null;
+  /**
+   * Block reason from `sharedOpenCodeMcpBlock` — a shared OpenCode v2 service
+   * refuses any agent whose config carries custom MCP servers, so an injection
+   * there fails the open itself (Paseo 0.15.0, #7435). `null` when injection is
+   * not blocked by that rule.
+   */
+  openCodeMcpBlock: string | null;
 }
 
 export interface SessionOpenDecision {
@@ -133,6 +140,8 @@ export function injectionGateBlockReason(
  */
 export function needsCapabilityProbe(input: SessionOpenInput): boolean {
   if (injectionGateBlockReason(input) !== null) return false;
+  // A shared OpenCode service blocks MCP whatever the provider reports.
+  if (input.openCodeMcpBlock !== null) return false;
   if (input.reason === "create" && createHookOwnsCreation(input)) return false;
   if (input.purpose === "history") return false;
   if (savedHasServer(input)) return false;
@@ -151,6 +160,7 @@ function savedHasServer(input: SessionOpenInput): boolean {
  * nothing.
  */
 function mcpBlockReason(input: SessionOpenInput): string | null {
+  if (input.openCodeMcpBlock !== null) return input.openCodeMcpBlock;
   if (input.supportsMcpServers === false) return "provider does not support MCP servers";
   if (input.supportsMcpServers === null) return "provider capabilities unknown";
   if (input.lookup.status !== "found") {

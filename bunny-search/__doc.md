@@ -766,7 +766,7 @@ Scope and caveats:
   change between them. The decision matrix (`server/session-open.ts`) is
   correct; the input it is given varies.
 
-**Recommended fix (recorded, not implemented — §16.4 item 1):** treat
+**Recommended fix (recorded in the pass; implemented in 0.6.3 — §17):** treat
 "shared OpenCode service discovered" as "no MCP for this open", the way the
 `supportsMcpServers === false` branch already does, so the decision becomes
 `injectMcp: false, attachTool: true` and the agent keeps search through the
@@ -777,14 +777,17 @@ discovery file is readable from the plugin (same path, same version rule).
 `opencode` to `skipProviders`. Note the gate is deliberately absolute — it
 blocks *both* contributions (`injectMcp: false, attachTool: false`), so
 opencode agents then get **no search at all** rather than the native tool.
+**Unnecessary since 0.6.3:** the plugin detects the shared service itself and
+degrades to the native tool (§17).
 
 ### 16.4 Recommendations for improvement (recorded, not implemented)
 
 Ordered by value. Items 1–3 are the actionable ones; 4–6 carry over from
-§15.2 / §9 unchanged.
+§15.2 / §9 unchanged. The list describes the 0.15.0 pass: item 1 has since
+shipped in **0.6.3** (§17), items 2–6 are still open.
 
 1. **Skip MCP contribution for `opencode` while a shared OpenCode v2 service
-   is discoverable** (read `$XDG_STATE_HOME/opencode/service.json`, default
+   is discoverable** — **implemented in 0.6.3, see §17.** (read `$XDG_STATE_HOME/opencode/service.json`, default
    `~/.local/state/opencode/service.json`, with the host's `2.x` version
    rule) and fall back to `bunny_web_search` instead. This turns the §16.3
    hard failure into a graceful degradation and keeps search working on
@@ -820,3 +823,73 @@ per worktree.
 | Hooks actually fire | **PASS** — `agent.create.before` logged `[bunny-search] MCP injected: … dist/mcp-server.js` on a real agent creation, and `agent.open.before` logged the session-open decision (`injecting 'bunny-search' …`) on a real `paseo send`. |
 | Manifest floor | `>=0.15.0` accepted by the real 0.15.0 parser (the plugin loaded and reached `running`). |
 | Host-side finding | the OpenCode shared-service failure of §16.3 was reproduced and controlled in the same daemon (plugin on / plugin off / discovery removed). |
+
+## 17. Shared OpenCode service — graceful degradation (0.6.3)
+
+§16.3 recorded a host interaction that breaks this plugin's core feature on the
+`opencode` provider and recommended a plugin-side fix. **0.6.3 implements it.**
+
+The host rule (read from the installed `0.15.0` `app.asar`,
+`@getpaseo/server` → `agent/providers/opencode/v2/`):
+
+- `requiresDedicatedV2Server(config, launch)` is true as soon as the agent's
+  config carries any `mcpServers` — i.e. for every agent this plugin injects
+  into;
+- `V2Runtime.acquire()` calls `assertSharedConfiguration()` for any selection
+  other than `owned`, and that is where the open fails with
+  `Custom OpenCode MCP servers or process environment require an isolated server
+  and cannot be used with a shared OpenCode service.`;
+- `selectOpenCodeService()` returns `explicit` when `PASEO_OPENCODE_SERVER_URL`
+  is set, otherwise `discovered` for a compatible `2.x` (at least `2.0.10`)
+  `$XDG_STATE_HOME/opencode/service.json` (default
+  `~/.local/state/opencode/service.json`, shape `{version,url,pid,password?}`)
+  whose URL points at this host.
+
+### 17.1 Implementation
+
+`server/opencode-service.ts` reproduces that rule from local files and returns
+`{shared, detail, path}`; `sharedOpenCodeMcpBlock(provider, service)` turns it
+into a block reason **only for `opencode`**. That reason is a new
+`SessionOpenInput.openCodeMcpBlock` field:
+
+- `mcpBlockReason()` returns it first, so `decideSessionOpen` yields
+  `injectMcp: false, attachTool: true` — the existing "tool only" branch. This
+  is the exact degradation §16.3 asked for: `bunny_web_search` keeps search
+  working without any MCP configuration on the agent.
+- `needsCapabilityProbe()` returns `false` for the block, so the open costs no
+  daemon round trip when no contribution is possible anyway.
+- `agent.create.before` returns the request untouched instead of writing the
+  saved entry, so creation itself no longer fails; the first open then attaches
+  the tool.
+
+### 17.2 Trade-offs and limitations
+
+- **The pid check replaces the host's HTTP probe.** The host probes the
+  discovered URL before choosing `discovered`; the plugin checks the recorded
+  `pid` with `kill(pid, 0)` from a lifecycle hook instead. A `service.json` left
+  behind by a crashed service is correctly ignored; a live pid whose service no
+  longer answers still counts as shared. The cost is a degraded open (native
+  tool only), never a failed one.
+- **Detection is per open, not cached** — one `readFile` per hook call.
+- **Agents created earlier keep their saved entries.** A lifecycle hook cannot
+  rewrite a saved config, so on a machine that later acquires a shared service
+  such an agent cannot open until its entry is gone (recreate it).
+- **Scope.** Only `opencode` is affected, and only this plugin's own
+  contribution is withheld; another plugin's MCP server still triggers the host
+  rule.
+- The existing `skipProviders` workaround stays useful for other reasons, but it
+  is no longer needed for this failure — and unlike the guard, it also removes
+  the native tool (§16.3).
+
+### 17.3 Verification (2026-11-15, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | exit 0 |
+| `npm test` | **11 suites pass, 1 skipped (live DDGS), 148 tests pass, 2 skipped** — new `tests/opencode-service.test.ts` (host version rule, explicit URL, discovery file with live/dead pid, remote host, corrupt file, `XDG_STATE_HOME` resolution, decision branch, probe skipping) and three wiring tests in `tests/agent-hooks.test.ts` (create skipped for opencode, other providers unaffected, session open degrades to `bunny_web_search`) |
+| Host rule source | extracted from the installed `0.15.0` `app.asar` (`v2/service-selection.js`, `v2/runtime.js`) |
+
+Version `0.5.3 → 0.6.3` (new capability: the OpenCode guard → second digit),
+annotated tag `bunny-search@0.6.3`.
+The same guard ships in memory-flash 0.11.4 (§19 there) and
+memory-flash-client 0.5.2 (§18 there), which have the same failure mode.

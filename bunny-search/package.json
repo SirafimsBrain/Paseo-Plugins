@@ -1,7 +1,7 @@
 {
   "name": "bunny-search",
   "private": true,
-  "version": "0.5.3",
+  "version": "0.6.3",
   "scripts": {
     "bundle": "node scripts/bundle-mcp-server.mjs",
     "pretest": "node scripts/bundle-mcp-server.mjs",

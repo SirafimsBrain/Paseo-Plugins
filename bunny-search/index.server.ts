@@ -20,6 +20,7 @@ import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
 import { createWebSearchTool } from "./server/agent-tools";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideSessionOpen, needsCapabilityProbe, providerExcluded } from "./server/session-open";
+import { detectSharedOpenCodeService, sharedOpenCodeMcpBlock } from "./server/opencode-service";
 import { probeMcpServer } from "./server/probe";
 import { parseSettingsFile } from "./server/settings-file";
 import { settingsMirrorPath, writeSettingsMirror } from "./server/settings-mirror";
@@ -146,6 +147,20 @@ export default function contribute(server: PluginServerContext) {
       );
       return request;
     }
+    // 0.6.3: a *shared* OpenCode v2 service (Paseo 0.15.0, #7435) refuses every
+    // agent whose config carries custom MCP servers, so writing the entry here
+    // would make creation fail outright. Degrade instead: the agent gets
+    // `bunny_web_search` on its first open. See server/opencode-service.ts.
+    const openCodeBlock = sharedOpenCodeMcpBlock(
+      request.config.provider,
+      detectSharedOpenCodeService(),
+    );
+    if (openCodeBlock !== null) {
+      console.log(
+        `[bunny-search] create skipped: ${openCodeBlock} (bunny_web_search stays available)`,
+      );
+      return request;
+    }
     const { command, args } = mcpServerCommand();
     // `as const` instead of a named `McpStdioServerConfig` annotation: the MCP
     // config types live in @getpaseo/protocol, which is not a host-supplied
@@ -206,6 +221,12 @@ export default function contribute(server: PluginServerContext) {
         labelGateKey: values?.labelGateKey ?? "",
         skipProviders: values?.skipProviders ?? "",
         lookup: readSavedMcpServers(request.agentId),
+        // A shared OpenCode v2 service cannot carry an injected MCP server at
+        // all (Paseo 0.15.0, #7435) — the tool-only path takes over.
+        openCodeMcpBlock: sharedOpenCodeMcpBlock(
+          request.provider,
+          detectSharedOpenCodeService(),
+        ),
       };
 
       // The daemon is only consulted when an MCP contribution is still possible;
