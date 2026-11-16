@@ -273,6 +273,9 @@ describe("decideSessionOpen with a shared OpenCode service", () => {
       lookup: { status: "found", savedServers: [] },
       supportsMcpServers: true,
       openCodeMcpBlock: null,
+      background: false,
+      skipBackgroundAgents: false,
+      knownMode: null,
       ...overrides,
     };
   }

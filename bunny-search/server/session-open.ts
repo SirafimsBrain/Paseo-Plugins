@@ -46,6 +46,19 @@ export interface SessionOpenInput {
   labelGateKey: string;
   /** `skipProviders` setting — comma-separated provider ids, may be empty. */
   skipProviders: string;
+  /**
+   * `request.background` (Paseo 0.16.0): a helper agent hidden from tabs,
+   * notifications and default agent lists.
+   */
+  background: boolean;
+  /** `skipBackgroundAgents` setting — exclude background agents (0.7.5). */
+  skipBackgroundAgents: boolean;
+  /**
+   * Mode this plugin recorded on the agent last time it provisioned it
+   * (`server/provisioning.ts`). `mcp` means the provider answered that it
+   * supports MCP servers, so the daemon capability probe can be skipped.
+   */
+  knownMode: "mcp" | "tool" | "skipped" | null;
   /** Saved `config.mcpServers` of the agent about to open. */
   lookup: AgentRecordLookup;
   /** `capabilities.supportsMcpServers`, or `null` when the snapshot was unavailable. */
@@ -117,10 +130,20 @@ export function createHookOwnsCreation(input: Pick<SessionOpenInput, "labelGateK
 export function injectionGateBlockReason(
   input: Pick<
     SessionOpenInput,
-    "injectIntoAgents" | "provider" | "labels" | "labelGateKey" | "skipProviders"
-  >,
+    | "injectIntoAgents"
+    | "provider"
+    | "labels"
+    | "labelGateKey"
+    | "skipProviders"
+  > &
+    // Optional so a caller that predates the background policy (or a test of the
+    // older gates) keeps compiling; absent means "not a background agent".
+    Partial<Pick<SessionOpenInput, "background" | "skipBackgroundAgents">>,
 ): string | null {
   if (!input.injectIntoAgents) return "injectIntoAgents is off";
+  if (input.skipBackgroundAgents === true && input.background === true) {
+    return "background agent excluded by skipBackgroundAgents";
+  }
   if (providerExcluded(input.provider, input.skipProviders)) {
     return `provider '${input.provider}' is excluded by skipProviders`;
   }
@@ -142,6 +165,9 @@ export function needsCapabilityProbe(input: SessionOpenInput): boolean {
   if (injectionGateBlockReason(input) !== null) return false;
   // A shared OpenCode service blocks MCP whatever the provider reports.
   if (input.openCodeMcpBlock !== null) return false;
+  // Already provisioned with the MCP server for this provider: the provider's
+  // capability answer cannot have changed, so the daemon round trip is wasted.
+  if (input.knownMode === "mcp") return false;
   if (input.reason === "create" && createHookOwnsCreation(input)) return false;
   if (input.purpose === "history") return false;
   if (savedHasServer(input)) return false;

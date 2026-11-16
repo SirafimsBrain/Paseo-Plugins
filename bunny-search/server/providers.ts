@@ -13,6 +13,7 @@ import type {
 } from "@overclockedsenku/duckduckjs";
 import { Agent, ProxyAgent, setGlobalDispatcher } from "undici";
 import { checkDdgsAvailability, ddgsTextSearch } from "./ddgs-python";
+import { clearSearchCache, readCachedSearch, searchCacheKey, writeCachedSearch } from "./search-cache";
 
 /**
  * Search provider adapters for the bunny-search MCP server.
@@ -55,6 +56,14 @@ export function providerBaseUrl(settings: RuntimeSettings): string | null {
     case "ddgs":
       // A local Python interpreter, not a URL.
       return null;
+    case "tavily":
+      return TAVILY_URL;
+    case "exa":
+      return EXA_URL;
+    case "kagi":
+      return KAGI_URL;
+    case "perplexity":
+      return PERPLEXITY_URL;
   }
 }
 
@@ -80,6 +89,38 @@ interface FetchOutcome<T> {
   latencyMs: number;
   value: T | null;
   error: string | null;
+}
+
+/**
+ * POST with the configured timeout, JSON body and the same error mapping as
+ * `timedGet`. Used by the API-key services added in 0.7.5 (Tavily, Exa,
+ * Perplexity) whose endpoints only accept a JSON body.
+ */
+async function timedPost(
+  url: string,
+  settings: RuntimeSettings,
+  headers: Record<string, string>,
+  body: unknown,
+  serviceLabel: string,
+): Promise<FetchOutcome<Response>> {
+  const startedAt = Date.now();
+  const signal = AbortSignal.timeout(settings.timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      signal,
+      headers: { "User-Agent": USER_AGENT, "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+    return { ok: true, latencyMs: Date.now() - startedAt, value: response, error: null };
+  } catch (cause) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+      value: null,
+      error: friendlyNetworkError(cause, serviceLabel, url),
+    };
+  }
 }
 
 /**
@@ -150,6 +191,14 @@ function serviceLabel(settings: RuntimeSettings): string {
       return "DuckDuckJS";
     case "ddgs":
       return "DDGS Python";
+    case "tavily":
+      return "Tavily";
+    case "exa":
+      return "Exa";
+    case "kagi":
+      return "Kagi Search";
+    case "perplexity":
+      return "Perplexity";
   }
 }
 
@@ -797,6 +846,234 @@ async function checkDdgs(settings: RuntimeSettings): Promise<CheckResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Tavily, Exa, Kagi, Perplexity (API-key services, 0.7.5)
+//
+// Four more adapters behind the same interface as the built-in ones. The one
+// API-key field is sent the way each vendor expects it, because only one service
+// is active at a time; a missing key fails with the same actionable message the
+// Brave adapter uses instead of a bare 401.
+// ---------------------------------------------------------------------------
+
+const TAVILY_URL = "https://api.tavily.com/search";
+const EXA_URL = "https://api.exa.ai/search";
+const KAGI_URL = "https://kagi.com/api/v0/search";
+const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
+
+function missingKey(label: string): SearchServiceError {
+  return new SearchServiceError(
+    `${label} needs an API key — set it in Bunny Search settings (Settings → Plugins → Bunny Search).`,
+  );
+}
+
+function keyRejected(label: string, status: number): SearchServiceError {
+  return new SearchServiceError(
+    `${label} rejected the API key (HTTP ${status}). Check the key in Bunny Search settings.`,
+  );
+}
+
+/**
+ * Checks the transport and the status code, then parses the body. A 401/403 is
+ * reported as a key problem, because that is the only thing it can mean for a
+ * keyed service.
+ */
+async function readJsonBody(
+  outcome: FetchOutcome<Response>,
+  label: string,
+  query: string,
+): Promise<unknown> {
+  if (!outcome.ok || outcome.value === null) {
+    throw new SearchServiceError(outcome.error ?? `${label} request failed.`);
+  }
+  const response = outcome.value;
+  if (response.status === 401 || response.status === 403) throw keyRejected(label, response.status);
+  if (!response.ok) {
+    throw new SearchServiceError(
+      `${label} returned HTTP ${response.status} for query: ${query}`,
+    );
+  }
+  try {
+    return await response.json();
+  } catch (cause) {
+    throw new SearchServiceError(
+      `${label} returned invalid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+
+async function searchTavily(
+  request: SearchRequest,
+  settings: RuntimeSettings,
+): Promise<SearchResponse> {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Tavily");
+  const outcome = await timedPost(
+    TAVILY_URL,
+    settings,
+    { Authorization: `Bearer ${key}` },
+    {
+      query: request.query,
+      max_results: clampMaxResults(request.maxResults),
+      search_depth: "basic",
+    },
+    "Tavily",
+  );
+  const parsed = await readJsonBody(outcome, "Tavily", request.query);
+  const results = isRecord(parsed) && Array.isArray(parsed["results"]) ? parsed["results"] : [];
+  return {
+    query: request.query,
+    results: results.filter(isRecord).map((entry) => ({
+      title: text(entry["title"]) || "(no title)",
+      url: text(entry["url"]),
+      content: text(entry["content"]),
+    })),
+  };
+}
+
+async function searchExa(
+  request: SearchRequest,
+  settings: RuntimeSettings,
+): Promise<SearchResponse> {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Exa");
+  const outcome = await timedPost(
+    EXA_URL,
+    settings,
+    { "x-api-key": key },
+    {
+      query: request.query,
+      numResults: clampMaxResults(request.maxResults),
+      contents: { text: { maxCharacters: 1000 } },
+    },
+    "Exa",
+  );
+  const parsed = await readJsonBody(outcome, "Exa", request.query);
+  const results = isRecord(parsed) && Array.isArray(parsed["results"]) ? parsed["results"] : [];
+  return {
+    query: request.query,
+    results: results.filter(isRecord).map((entry) => ({
+      title: text(entry["title"]) || "(no title)",
+      url: text(entry["url"]),
+      // Exa returns the page text rather than a snippet; the formatter caps it.
+      content: text(entry["text"] ?? entry["summary"]),
+      engines: ["Exa"],
+    })),
+  };
+}
+
+async function searchKagi(
+  request: SearchRequest,
+  settings: RuntimeSettings,
+): Promise<SearchResponse> {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Kagi Search");
+  const url = withQuery(KAGI_URL, {
+    q: request.query,
+    limit: String(clampMaxResults(request.maxResults)),
+  });
+  const outcome = await timedGet(
+    url,
+    settings,
+    { "User-Agent": USER_AGENT, Authorization: `Bot ${key}` },
+    "Kagi Search",
+  );
+  const parsed = await readJsonBody(outcome, "Kagi Search", request.query);
+  const data = isRecord(parsed) && Array.isArray(parsed["data"]) ? parsed["data"] : [];
+  return {
+    query: request.query,
+    // `t: 0` marks a search result; `t: 1` entries are related searches.
+    results: data
+      .filter(isRecord)
+      .filter((entry) => entry["t"] === 0)
+      .map((entry) => ({
+        title: text(entry["title"]) || "(no title)",
+        url: text(entry["url"]),
+        content: text(entry["snippet"]),
+      })),
+  };
+}
+
+async function searchPerplexity(
+  request: SearchRequest,
+  settings: RuntimeSettings,
+): Promise<SearchResponse> {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Perplexity");
+  const outcome = await timedPost(
+    PERPLEXITY_URL,
+    settings,
+    { Authorization: `Bearer ${key}` },
+    {
+      model: "sonar",
+      messages: [{ role: "user", content: request.query }],
+      max_tokens: 600,
+    },
+    "Perplexity",
+  );
+  const parsed = await readJsonBody(outcome, "Perplexity", request.query);
+  const record = isRecord(parsed) ? parsed : {};
+  const choices = Array.isArray(record["choices"]) ? record["choices"] : [];
+  const first = choices.filter(isRecord)[0];
+  const message = first && isRecord(first["message"]) ? first["message"] : null;
+  const answer = text(message?.["content"]);
+
+  const searchResults = Array.isArray(record["search_results"])
+    ? record["search_results"].filter(isRecord)
+    : [];
+  const citations = Array.isArray(record["citations"])
+    ? record["citations"].filter((entry): entry is string => typeof entry === "string")
+    : [];
+
+  const results: WebResult[] = searchResults.map((entry) => ({
+    title: text(entry["title"]) || text(entry["url"]),
+    url: text(entry["url"]),
+    content: text(entry["date"]),
+    engines: ["Perplexity"],
+  }));
+  for (const url of citations) {
+    if (results.some((entry) => entry.url === url)) continue;
+    results.push({ title: hostOf(url), url, content: "", engines: ["Perplexity"] });
+  }
+
+  return {
+    query: request.query,
+    results: results.slice(0, clampMaxResults(request.maxResults)),
+    answers: answer.length > 0 ? [answer] : undefined,
+  };
+}
+
+/** Host name of a URL, used as the title of a bare citation. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function checkKeyed(
+  label: string,
+  search: (request: SearchRequest, settings: RuntimeSettings) => Promise<SearchResponse>,
+): (settings: RuntimeSettings) => Promise<CheckResult> {
+  return (settings) =>
+    search({ query: "bunny search connection test", maxResults: 1 }, settings)
+      .then(() => ({ ok: true, latencyMs: null, error: null }))
+      .catch((cause: unknown) => ({
+        ok: false,
+        latencyMs: null,
+        error: cause instanceof Error ? cause.message : String(cause),
+      }));
+}
+
+const checkTavily = checkKeyed("Tavily", searchTavily);
+const checkExa = checkKeyed("Exa", searchExa);
+const checkKagi = checkKeyed("Kagi Search", searchKagi);
+const checkPerplexity = checkKeyed("Perplexity", searchPerplexity);
+
+// ---------------------------------------------------------------------------
 // Registry + result formatting
 // ---------------------------------------------------------------------------
 
@@ -807,6 +1084,10 @@ const PROVIDERS: Record<RuntimeSettings["searchService"], SearchProvider> = {
   duckduckgo: { id: "duckduckgo", search: searchDuckDuckGo, check: checkDuckDuckGo },
   brave: { id: "brave", search: searchBrave, check: checkBrave },
   "custom-json": { id: "custom-json", search: searchCustomJson, check: checkCustomJson },
+  tavily: { id: "tavily", search: searchTavily, check: checkTavily },
+  exa: { id: "exa", search: searchExa, check: checkExa },
+  kagi: { id: "kagi", search: searchKagi, check: checkKagi },
+  perplexity: { id: "perplexity", search: searchPerplexity, check: checkPerplexity },
 };
 
 /** Resolves the adapter for the configured service. */
@@ -814,9 +1095,34 @@ export function getProvider(settings: RuntimeSettings): SearchProvider {
   return PROVIDERS[settings.searchService];
 }
 
-/** Runs a search through the configured provider. */
-export function searchWeb(request: SearchRequest, settings: RuntimeSettings): Promise<SearchResponse> {
-  return getProvider(settings).search(request, settings);
+/**
+ * Runs a search through the configured provider, reusing an identical answer
+ * from the TTL cache when `cacheTtlSeconds` allows it (0.7.5).
+ *
+ * Every caller — the MCP `web_search` tool, the attached `bunny_web_search`
+ * tool and the UI quick search — goes through here, so a repeat inside one agent
+ * turn or between two agents costs no upstream request. The cached answer is
+ * returned with `cached: true`, which the formatter marks in the text.
+ */
+export async function searchWeb(
+  request: SearchRequest,
+  settings: RuntimeSettings,
+): Promise<SearchResponse> {
+  const ttlMs = Math.max(0, settings.cacheTtlSeconds) * 1000;
+  if (ttlMs === 0) return getProvider(settings).search(request, settings);
+
+  const key = searchCacheKey(request, settings);
+  const cached = readCachedSearch(key, ttlMs);
+  if (cached) return { ...cached, cached: true };
+
+  const fresh = await getProvider(settings).search(request, settings);
+  writeCachedSearch(key, fresh);
+  return fresh;
+}
+
+/** Drops the response cache (settings change, or a provider edit). */
+export function resetSearchCache(): void {
+  clearSearchCache();
 }
 
 /** Checks the configured provider — the backend of the connection test. */
@@ -842,7 +1148,11 @@ function truncateSnippet(value: string): string {
  * optional suggestion).
  */
 export function formatSearchResponse(response: SearchResponse): string {
-  const lines: string[] = [`Query: ${response.query}`];
+  // The cache marker lives on the query line: an agent that sees it knows the
+  // answer may be a few minutes old and can re-ask with a different query.
+  const lines: string[] = [
+    response.cached ? `Query: ${response.query} (cached)` : `Query: ${response.query}`,
+  ];
   const answer = response.answers?.[0];
   if (answer) lines.push(`Answer: ${answer}`);
   lines.push("");

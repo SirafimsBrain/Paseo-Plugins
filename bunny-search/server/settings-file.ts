@@ -30,10 +30,22 @@ const DEFAULTS: RuntimeSettings = {
   maxResults: 10,
   categories: "general,web",
   language: "",
+  cacheTtlSeconds: 300,
 };
 
 /** The search service ids accepted in the file and in the environment. */
-const SERVICES = ["duckduckjs", "ddgs", "searxng", "duckduckgo", "brave", "custom-json"] as const;
+const SERVICES = [
+  "duckduckjs",
+  "ddgs",
+  "searxng",
+  "duckduckgo",
+  "brave",
+  "custom-json",
+  "tavily",
+  "exa",
+  "kagi",
+  "perplexity",
+] as const;
 
 /** The DuckDuckJS engine ids accepted in the file and in the environment. */
 const DUCKDUCKJS_ENGINES = ["auto", "duckduckgo", "brave", "google", "mojeek", "yahoo"] as const;
@@ -90,6 +102,8 @@ function parseFile(filePath: string): Partial<RuntimeSettings> {
     if (timeoutMs !== undefined) parsed.timeoutMs = timeoutMs;
     const maxResults = optionalInt(values.maxResults, 1, 30);
     if (maxResults !== undefined) parsed.maxResults = maxResults;
+    const cacheTtlSeconds = optionalInt(values.cacheTtlSeconds, 0, 3600);
+    if (cacheTtlSeconds !== undefined) parsed.cacheTtlSeconds = cacheTtlSeconds;
     const categories = optionalString(values.categories);
     if (categories) parsed.categories = categories.slice(0, 200);
     if (typeof values.language === "string") parsed.language = values.language.trim().slice(0, 20);
@@ -131,6 +145,10 @@ function parseEnv(): Partial<RuntimeSettings> {
   if (categories) parsed.categories = categories;
   const language = optionalString(process.env.BUNNY_SEARCH_LANGUAGE);
   if (language) parsed.language = language;
+  const cacheTtlSeconds = process.env.BUNNY_SEARCH_CACHE_TTL_SECONDS
+    ? optionalInt(Number(process.env.BUNNY_SEARCH_CACHE_TTL_SECONDS), 0, 3600)
+    : undefined;
+  if (cacheTtlSeconds !== undefined) parsed.cacheTtlSeconds = cacheTtlSeconds;
   return parsed;
 }
 

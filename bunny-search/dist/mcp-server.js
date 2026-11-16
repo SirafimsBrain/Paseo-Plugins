@@ -9401,7 +9401,7 @@ var require_util2 = __commonJS({
           writable: true,
           enumerable: true,
           configurable: true,
-          value: function entries() {
+          value: function entries2() {
             webidl.brandCheck(this, object);
             return makeIterator(this, "key+value");
           }
@@ -10469,9 +10469,9 @@ Content-Type: ${value.type || "application/octet-stream"}\r
                   return fd;
                 }
                 case "application/x-www-form-urlencoded": {
-                  const entries = new URLSearchParams(value.toString());
+                  const entries2 = new URLSearchParams(value.toString());
                   const fd = new FormData3();
-                  for (const [name, value2] of entries) {
+                  for (const [name, value2] of entries2) {
                     fd.append(name, value2);
                   }
                   return fd;
@@ -15516,11 +15516,11 @@ var require_mock_utils = __commonJS({
     }
     function buildHeadersFromArray(headers) {
       const clone2 = headers.slice();
-      const entries = [];
+      const entries2 = [];
       for (let index2 = 0; index2 < clone2.length; index2 += 2) {
-        entries.push([clone2[index2], clone2[index2 + 1]]);
+        entries2.push([clone2[index2], clone2[index2 + 1]]);
       }
-      return Object.fromEntries(entries);
+      return Object.fromEntries(entries2);
     }
     function matchHeaders(mockDispatch2, headers) {
       if (typeof mockDispatch2.headers === "function") {
@@ -33828,7 +33828,7 @@ var require_util10 = __commonJS({
           writable: true,
           enumerable: true,
           configurable: true,
-          value: function entries() {
+          value: function entries2() {
             webidl.brandCheck(this, object);
             return makeIterator(this, "key+value");
           }
@@ -34887,9 +34887,9 @@ Content-Type: ${value.type || "application/octet-stream"}\r
                   return fd;
                 }
                 case "application/x-www-form-urlencoded": {
-                  const entries = new URLSearchParams(value.toString());
+                  const entries2 = new URLSearchParams(value.toString());
                   const fd = new FormData3();
-                  for (const [name, value2] of entries) {
+                  for (const [name, value2] of entries2) {
                     fd.append(name, value2);
                   }
                   return fd;
@@ -41154,11 +41154,11 @@ var require_mock_utils2 = __commonJS({
     }
     function buildHeadersFromArray(headers) {
       const clone2 = headers.slice();
-      const entries = [];
+      const entries2 = [];
       for (let index2 = 0; index2 < clone2.length; index2 += 2) {
-        entries.push([clone2[index2], clone2[index2 + 1]]);
+        entries2.push([clone2[index2], clone2[index2 + 1]]);
       }
-      return Object.fromEntries(entries);
+      return Object.fromEntries(entries2);
     }
     function matchHeaders(mockDispatch2, headers) {
       if (typeof mockDispatch2.headers === "function") {
@@ -43190,8 +43190,8 @@ var require_redirect_handler2 = __commonJS({
           }
         }
       } else if (headers && typeof headers === "object") {
-        const entries = util.hasSafeIterator(headers) ? headers : Object.entries(headers);
-        for (const [key, value] of entries) {
+        const entries2 = util.hasSafeIterator(headers) ? headers : Object.entries(headers);
+        for (const [key, value] of entries2) {
           if (!shouldRemoveHeader(key, removeContent, unknownOrigin)) {
             ret.push(key, value);
           }
@@ -45425,8 +45425,8 @@ var require_memory_cache_store = __commonJS({
         assertCacheKey(key);
         const topLevelKey = `${key.origin}:${key.path}`;
         const now = Date.now();
-        const entries = this.#entries.get(topLevelKey);
-        const entry = entries ? findEntry(key, entries, now) : null;
+        const entries2 = this.#entries.get(topLevelKey);
+        const entry = entries2 ? findEntry(key, entries2, now) : null;
         return entry == null ? void 0 : {
           statusMessage: entry.statusMessage,
           statusCode: entry.statusCode,
@@ -45465,18 +45465,18 @@ var require_memory_cache_store = __commonJS({
             callback(null);
           },
           final(callback) {
-            let entries = store.#entries.get(topLevelKey);
-            if (!entries) {
-              entries = [];
-              store.#entries.set(topLevelKey, entries);
+            let entries2 = store.#entries.get(topLevelKey);
+            if (!entries2) {
+              entries2 = [];
+              store.#entries.set(topLevelKey, entries2);
             }
-            const previousEntry = findEntry(key, entries, Date.now());
+            const previousEntry = findEntry(key, entries2, Date.now());
             if (previousEntry) {
-              const index2 = entries.indexOf(previousEntry);
-              entries.splice(index2, 1, entry);
+              const index2 = entries2.indexOf(previousEntry);
+              entries2.splice(index2, 1, entry);
               store.#size -= previousEntry.size;
             } else {
-              entries.push(entry);
+              entries2.push(entry);
               store.#count += 1;
             }
             store.#size += entry.size;
@@ -45490,12 +45490,12 @@ var require_memory_cache_store = __commonJS({
                 });
                 store.#hasEmittedMaxSizeEvent = true;
               }
-              for (const [key2, entries2] of store.#entries) {
-                for (const entry2 of entries2.splice(0, entries2.length / 2)) {
+              for (const [key2, entries3] of store.#entries) {
+                for (const entry2 of entries3.splice(0, entries3.length / 2)) {
                   store.#size -= entry2.size;
                   store.#count -= 1;
                 }
-                if (entries2.length === 0) {
+                if (entries3.length === 0) {
                   store.#entries.delete(key2);
                 }
               }
@@ -45522,9 +45522,9 @@ var require_memory_cache_store = __commonJS({
         this.#entries.delete(topLevelKey);
       }
     };
-    function findEntry(key, entries, now) {
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i];
+    function findEntry(key, entries2, now) {
+      for (let i = 0; i < entries2.length; i++) {
+        const entry = entries2[i];
         if (entry.deleteAt > now && entry.method === key.method && varyMatches(key, entry)) {
           return entry;
         }
@@ -55456,11 +55456,11 @@ var DomHandler = class {
     this.lastNode = null;
   }
   oncdatastart() {
-    const text4 = new Text2("");
-    const node = new CDATA2([text4]);
+    const text5 = new Text2("");
+    const node = new CDATA2([text5]);
     this.addNode(node);
-    text4.parent = node;
-    this.lastNode = text4;
+    text5.parent = node;
+    this.lastNode = text5;
   }
   oncdataend() {
     this.lastNode = null;
@@ -59305,13 +59305,13 @@ function getChildFunc(next2, adapter2) {
   };
 }
 var filters = {
-  contains(next2, text4, { adapter: adapter2 }) {
+  contains(next2, text5, { adapter: adapter2 }) {
     return function contains2(elem) {
-      return next2(elem) && adapter2.getText(elem).includes(text4);
+      return next2(elem) && adapter2.getText(elem).includes(text5);
     };
   },
-  icontains(next2, text4, { adapter: adapter2 }) {
-    const itext = text4.toLowerCase();
+  icontains(next2, text5, { adapter: adapter2 }) {
+    const itext = text5.toLowerCase();
     return function icontains(elem) {
       return next2(elem) && adapter2.getText(elem).toLowerCase().includes(itext);
     };
@@ -65459,22 +65459,22 @@ var defaultTreeAdapter = {
       node.parentNode = null;
     }
   },
-  insertText(parentNode, text4) {
+  insertText(parentNode, text5) {
     if (parentNode.childNodes.length > 0) {
       const prevNode = parentNode.childNodes[parentNode.childNodes.length - 1];
       if (defaultTreeAdapter.isTextNode(prevNode)) {
-        prevNode.value += text4;
+        prevNode.value += text5;
         return;
       }
     }
-    defaultTreeAdapter.appendChild(parentNode, defaultTreeAdapter.createTextNode(text4));
+    defaultTreeAdapter.appendChild(parentNode, defaultTreeAdapter.createTextNode(text5));
   },
-  insertTextBefore(parentNode, text4, referenceNode) {
+  insertTextBefore(parentNode, text5, referenceNode) {
     const prevNode = parentNode.childNodes[parentNode.childNodes.indexOf(referenceNode) - 1];
     if (prevNode && defaultTreeAdapter.isTextNode(prevNode)) {
-      prevNode.value += text4;
+      prevNode.value += text5;
     } else {
-      defaultTreeAdapter.insertBefore(parentNode, defaultTreeAdapter.createTextNode(text4), referenceNode);
+      defaultTreeAdapter.insertBefore(parentNode, defaultTreeAdapter.createTextNode(text5), referenceNode);
     }
   },
   adoptAttributes(recipient, attrs) {
@@ -69173,20 +69173,20 @@ var adapter = {
       node.parent = null;
     }
   },
-  insertText(parentNode, text4) {
+  insertText(parentNode, text5) {
     const lastChild = parentNode.children[parentNode.children.length - 1];
     if (lastChild && isText(lastChild)) {
-      lastChild.data += text4;
+      lastChild.data += text5;
     } else {
-      adapter.appendChild(parentNode, adapter.createTextNode(text4));
+      adapter.appendChild(parentNode, adapter.createTextNode(text5));
     }
   },
-  insertTextBefore(parentNode, text4, referenceNode) {
+  insertTextBefore(parentNode, text5, referenceNode) {
     const prevNode = parentNode.children[parentNode.children.indexOf(referenceNode) - 1];
     if (prevNode && isText(prevNode)) {
-      prevNode.data += text4;
+      prevNode.data += text5;
     } else {
-      adapter.insertBefore(parentNode, adapter.createTextNode(text4), referenceNode);
+      adapter.insertBefore(parentNode, adapter.createTextNode(text5), referenceNode);
     }
   },
   adoptAttributes(recipient, attrs) {
@@ -69971,9 +69971,9 @@ function envCandidates(env) {
 }
 function pathCandidates(env) {
   const candidates = [];
-  const entries = (env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const entries2 = (env.PATH ?? "").split(path.delimiter).filter(Boolean);
   const names = process.platform === "win32" ? ["python3.exe", "python.exe"] : ["python3", "python"];
-  for (const dir of entries) {
+  for (const dir of entries2) {
     for (const name of names) {
       const executable = path.join(dir, name);
       try {
@@ -70211,6 +70211,44 @@ async function runSearchOnce(call, explicitPath, env, homeDir) {
   );
 }
 
+// server/search-cache.ts
+var MAX_CACHE_ENTRIES = 64;
+var entries = /* @__PURE__ */ new Map();
+function searchCacheKey(request, settings) {
+  return JSON.stringify([
+    settings.searchService,
+    settings.duckduckjsEngine,
+    settings.searxngBaseUrl,
+    settings.customBaseUrl,
+    request.query.trim().toLowerCase().replace(/\s+/g, " "),
+    request.maxResults,
+    (request.categories ?? settings.categories).trim().toLowerCase(),
+    (request.language ?? settings.language).trim().toLowerCase()
+  ]);
+}
+function readCachedSearch(key, ttlMs) {
+  if (ttlMs <= 0) return null;
+  const entry = entries.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.storedAt >= ttlMs) {
+    entries.delete(key);
+    return null;
+  }
+  entries.delete(key);
+  entries.set(key, entry);
+  return entry.response;
+}
+function writeCachedSearch(key, response) {
+  if (response.results.length === 0) return;
+  entries.delete(key);
+  entries.set(key, { response, storedAt: Date.now() });
+  while (entries.size > MAX_CACHE_ENTRIES) {
+    const oldest = entries.keys().next();
+    if (oldest.done === true) break;
+    entries.delete(oldest.value);
+  }
+}
+
 // server/providers.ts
 var USER_AGENT = "bunny-search-mcp/1.0 (+searxng)";
 var BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -70230,6 +70268,34 @@ function providerBaseUrl(settings) {
       return null;
     case "ddgs":
       return null;
+    case "tavily":
+      return TAVILY_URL;
+    case "exa":
+      return EXA_URL;
+    case "kagi":
+      return KAGI_URL;
+    case "perplexity":
+      return PERPLEXITY_URL;
+  }
+}
+async function timedPost(url, settings, headers, body, serviceLabel2) {
+  const startedAt = Date.now();
+  const signal = AbortSignal.timeout(settings.timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      signal,
+      headers: { "User-Agent": USER_AGENT, "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body)
+    });
+    return { ok: true, latencyMs: Date.now() - startedAt, value: response, error: null };
+  } catch (cause) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+      value: null,
+      error: friendlyNetworkError(cause, serviceLabel2, url)
+    };
   }
 }
 async function timedGet(url, settings, headers, serviceLabel2) {
@@ -70280,6 +70346,14 @@ function serviceLabel(settings) {
       return "DuckDuckJS";
     case "ddgs":
       return "DDGS Python";
+    case "tavily":
+      return "Tavily";
+    case "exa":
+      return "Exa";
+    case "kagi":
+      return "Kagi Search";
+    case "perplexity":
+      return "Perplexity";
   }
 }
 function withQuery(base, params) {
@@ -70724,26 +70798,208 @@ async function checkDdgs(settings) {
   }));
   return result;
 }
+var TAVILY_URL = "https://api.tavily.com/search";
+var EXA_URL = "https://api.exa.ai/search";
+var KAGI_URL = "https://kagi.com/api/v0/search";
+var PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
+function missingKey(label) {
+  return new SearchServiceError(
+    `${label} needs an API key \u2014 set it in Bunny Search settings (Settings \u2192 Plugins \u2192 Bunny Search).`
+  );
+}
+function keyRejected(label, status) {
+  return new SearchServiceError(
+    `${label} rejected the API key (HTTP ${status}). Check the key in Bunny Search settings.`
+  );
+}
+async function readJsonBody(outcome, label, query) {
+  if (!outcome.ok || outcome.value === null) {
+    throw new SearchServiceError(outcome.error ?? `${label} request failed.`);
+  }
+  const response = outcome.value;
+  if (response.status === 401 || response.status === 403) throw keyRejected(label, response.status);
+  if (!response.ok) {
+    throw new SearchServiceError(
+      `${label} returned HTTP ${response.status} for query: ${query}`
+    );
+  }
+  try {
+    return await response.json();
+  } catch (cause) {
+    throw new SearchServiceError(
+      `${label} returned invalid JSON: ${cause instanceof Error ? cause.message : String(cause)}`
+    );
+  }
+}
+function text3(value) {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+async function searchTavily(request, settings) {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Tavily");
+  const outcome = await timedPost(
+    TAVILY_URL,
+    settings,
+    { Authorization: `Bearer ${key}` },
+    {
+      query: request.query,
+      max_results: clampMaxResults(request.maxResults),
+      search_depth: "basic"
+    },
+    "Tavily"
+  );
+  const parsed = await readJsonBody(outcome, "Tavily", request.query);
+  const results = isRecord(parsed) && Array.isArray(parsed["results"]) ? parsed["results"] : [];
+  return {
+    query: request.query,
+    results: results.filter(isRecord).map((entry) => ({
+      title: text3(entry["title"]) || "(no title)",
+      url: text3(entry["url"]),
+      content: text3(entry["content"])
+    }))
+  };
+}
+async function searchExa(request, settings) {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Exa");
+  const outcome = await timedPost(
+    EXA_URL,
+    settings,
+    { "x-api-key": key },
+    {
+      query: request.query,
+      numResults: clampMaxResults(request.maxResults),
+      contents: { text: { maxCharacters: 1e3 } }
+    },
+    "Exa"
+  );
+  const parsed = await readJsonBody(outcome, "Exa", request.query);
+  const results = isRecord(parsed) && Array.isArray(parsed["results"]) ? parsed["results"] : [];
+  return {
+    query: request.query,
+    results: results.filter(isRecord).map((entry) => ({
+      title: text3(entry["title"]) || "(no title)",
+      url: text3(entry["url"]),
+      // Exa returns the page text rather than a snippet; the formatter caps it.
+      content: text3(entry["text"] ?? entry["summary"]),
+      engines: ["Exa"]
+    }))
+  };
+}
+async function searchKagi(request, settings) {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Kagi Search");
+  const url = withQuery(KAGI_URL, {
+    q: request.query,
+    limit: String(clampMaxResults(request.maxResults))
+  });
+  const outcome = await timedGet(
+    url,
+    settings,
+    { "User-Agent": USER_AGENT, Authorization: `Bot ${key}` },
+    "Kagi Search"
+  );
+  const parsed = await readJsonBody(outcome, "Kagi Search", request.query);
+  const data2 = isRecord(parsed) && Array.isArray(parsed["data"]) ? parsed["data"] : [];
+  return {
+    query: request.query,
+    // `t: 0` marks a search result; `t: 1` entries are related searches.
+    results: data2.filter(isRecord).filter((entry) => entry["t"] === 0).map((entry) => ({
+      title: text3(entry["title"]) || "(no title)",
+      url: text3(entry["url"]),
+      content: text3(entry["snippet"])
+    }))
+  };
+}
+async function searchPerplexity(request, settings) {
+  const key = settings.apiKey.trim();
+  if (key.length === 0) throw missingKey("Perplexity");
+  const outcome = await timedPost(
+    PERPLEXITY_URL,
+    settings,
+    { Authorization: `Bearer ${key}` },
+    {
+      model: "sonar",
+      messages: [{ role: "user", content: request.query }],
+      max_tokens: 600
+    },
+    "Perplexity"
+  );
+  const parsed = await readJsonBody(outcome, "Perplexity", request.query);
+  const record = isRecord(parsed) ? parsed : {};
+  const choices = Array.isArray(record["choices"]) ? record["choices"] : [];
+  const first2 = choices.filter(isRecord)[0];
+  const message = first2 && isRecord(first2["message"]) ? first2["message"] : null;
+  const answer = text3(message?.["content"]);
+  const searchResults = Array.isArray(record["search_results"]) ? record["search_results"].filter(isRecord) : [];
+  const citations = Array.isArray(record["citations"]) ? record["citations"].filter((entry) => typeof entry === "string") : [];
+  const results = searchResults.map((entry) => ({
+    title: text3(entry["title"]) || text3(entry["url"]),
+    url: text3(entry["url"]),
+    content: text3(entry["date"]),
+    engines: ["Perplexity"]
+  }));
+  for (const url of citations) {
+    if (results.some((entry) => entry.url === url)) continue;
+    results.push({ title: hostOf(url), url, content: "", engines: ["Perplexity"] });
+  }
+  return {
+    query: request.query,
+    results: results.slice(0, clampMaxResults(request.maxResults)),
+    answers: answer.length > 0 ? [answer] : void 0
+  };
+}
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+function checkKeyed(label, search) {
+  return (settings) => search({ query: "bunny search connection test", maxResults: 1 }, settings).then(() => ({ ok: true, latencyMs: null, error: null })).catch((cause) => ({
+    ok: false,
+    latencyMs: null,
+    error: cause instanceof Error ? cause.message : String(cause)
+  }));
+}
+var checkTavily = checkKeyed("Tavily", searchTavily);
+var checkExa = checkKeyed("Exa", searchExa);
+var checkKagi = checkKeyed("Kagi Search", searchKagi);
+var checkPerplexity = checkKeyed("Perplexity", searchPerplexity);
 var PROVIDERS = {
   duckduckjs: { id: "duckduckjs", search: searchDuckduckjs, check: checkDuckduckjs },
   ddgs: { id: "ddgs", search: searchDdgs, check: checkDdgs },
   searxng: { id: "searxng", search: searchSearxng, check: checkSearxng },
   duckduckgo: { id: "duckduckgo", search: searchDuckDuckGo, check: checkDuckDuckGo },
   brave: { id: "brave", search: searchBrave, check: checkBrave },
-  "custom-json": { id: "custom-json", search: searchCustomJson, check: checkCustomJson }
+  "custom-json": { id: "custom-json", search: searchCustomJson, check: checkCustomJson },
+  tavily: { id: "tavily", search: searchTavily, check: checkTavily },
+  exa: { id: "exa", search: searchExa, check: checkExa },
+  kagi: { id: "kagi", search: searchKagi, check: checkKagi },
+  perplexity: { id: "perplexity", search: searchPerplexity, check: checkPerplexity }
 };
 function getProvider(settings) {
   return PROVIDERS[settings.searchService];
 }
-function searchWeb(request, settings) {
-  return getProvider(settings).search(request, settings);
+async function searchWeb(request, settings) {
+  const ttlMs = Math.max(0, settings.cacheTtlSeconds) * 1e3;
+  if (ttlMs === 0) return getProvider(settings).search(request, settings);
+  const key = searchCacheKey(request, settings);
+  const cached2 = readCachedSearch(key, ttlMs);
+  if (cached2) return { ...cached2, cached: true };
+  const fresh = await getProvider(settings).search(request, settings);
+  writeCachedSearch(key, fresh);
+  return fresh;
 }
 var SNIPPET_LIMIT = 300;
 function truncateSnippet(value) {
   return value.length <= SNIPPET_LIMIT ? value : `${value.slice(0, SNIPPET_LIMIT)}\u2026`;
 }
 function formatSearchResponse(response) {
-  const lines = [`Query: ${response.query}`];
+  const lines = [
+    response.cached ? `Query: ${response.query} (cached)` : `Query: ${response.query}`
+  ];
   const answer = response.answers?.[0];
   if (answer) lines.push(`Answer: ${answer}`);
   lines.push("");
@@ -70800,7 +71056,7 @@ var MCP_TOOLS = [
     inputSchema: { type: "object", properties: {} }
   }
 ];
-function text3(result) {
+function text4(result) {
   return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 }
 function error(message) {
@@ -70821,13 +71077,13 @@ function dispatchMcpTool(name, args, context) {
       return searchWeb(
         { query, maxResults, categories, language },
         settings
-      ).then((response) => text3({ text: formatSearchResponse(response) })).catch((cause) => {
+      ).then((response) => text4({ text: formatSearchResponse(response) })).catch((cause) => {
         const message = cause instanceof Error ? cause.message : String(cause);
         return error(message);
       });
     }
     case "search_status": {
-      return text3({
+      return text4({
         provider: settings.searchService,
         baseUrl: providerBaseUrl(settings),
         defaults: {
@@ -70858,9 +71114,21 @@ var DEFAULTS = {
   timeoutMs: 2e4,
   maxResults: 10,
   categories: "general,web",
-  language: ""
+  language: "",
+  cacheTtlSeconds: 300
 };
-var SERVICES = ["duckduckjs", "ddgs", "searxng", "duckduckgo", "brave", "custom-json"];
+var SERVICES = [
+  "duckduckjs",
+  "ddgs",
+  "searxng",
+  "duckduckgo",
+  "brave",
+  "custom-json",
+  "tavily",
+  "exa",
+  "kagi",
+  "perplexity"
+];
 var DUCKDUCKJS_ENGINES2 = ["auto", "duckduckgo", "brave", "google", "mojeek", "yahoo"];
 function parseService(value) {
   return SERVICES.find((service) => service === value);
@@ -70904,6 +71172,8 @@ function parseFile(filePath) {
     if (timeoutMs !== void 0) parsed.timeoutMs = timeoutMs;
     const maxResults = optionalInt(values.maxResults, 1, 30);
     if (maxResults !== void 0) parsed.maxResults = maxResults;
+    const cacheTtlSeconds = optionalInt(values.cacheTtlSeconds, 0, 3600);
+    if (cacheTtlSeconds !== void 0) parsed.cacheTtlSeconds = cacheTtlSeconds;
     const categories = optionalString(values.categories);
     if (categories) parsed.categories = categories.slice(0, 200);
     if (typeof values.language === "string") parsed.language = values.language.trim().slice(0, 20);
@@ -70938,6 +71208,8 @@ function parseEnv() {
   if (categories) parsed.categories = categories;
   const language = optionalString(process.env.BUNNY_SEARCH_LANGUAGE);
   if (language) parsed.language = language;
+  const cacheTtlSeconds = process.env.BUNNY_SEARCH_CACHE_TTL_SECONDS ? optionalInt(Number(process.env.BUNNY_SEARCH_CACHE_TTL_SECONDS), 0, 3600) : void 0;
+  if (cacheTtlSeconds !== void 0) parsed.cacheTtlSeconds = cacheTtlSeconds;
   return parsed;
 }
 function parseSettingsFile(filePath = settingsFilePath()) {
@@ -70950,7 +71222,7 @@ function parseSettingsFile(filePath = settingsFilePath()) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.6.4";
+var SERVER_VERSION = "0.6.5";
 function writeMessage(message) {
   process.stdout.write(`${JSON.stringify(message)}
 `);

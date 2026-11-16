@@ -15,6 +15,7 @@ function settings(overrides: Partial<RuntimeSettings> = {}): RuntimeSettings {
     maxResults: 10,
     categories: "general,web",
     language: "",
+    cacheTtlSeconds: 0,
     ...overrides,
   };
 }

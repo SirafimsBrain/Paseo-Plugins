@@ -14,9 +14,16 @@ import type { BunnySearchSettings } from "../shared/settings";
  */
 
 /** Built-in interface URLs for providers without a user-configured base URL. */
-const PROVIDER_INTERFACES: Record<"duckduckgo" | "brave", string> = {
+const PROVIDER_INTERFACES: Record<
+  "duckduckgo" | "brave" | "tavily" | "exa" | "kagi" | "perplexity",
+  string
+> = {
   duckduckgo: "https://duckduckgo.com",
   brave: "https://search.brave.com",
+  tavily: "https://tavily.com",
+  exa: "https://exa.ai",
+  kagi: "https://kagi.com",
+  perplexity: "https://www.perplexity.ai",
 };
 
 /** Input: the settings fields the derivation needs. */
@@ -50,6 +57,14 @@ export function searchInterfaceUrl(values: InterfaceUrlInput): string | null {
     case "ddgs":
       // A Python subprocess against many engines — no single interface.
       return null;
+    case "tavily":
+      return PROVIDER_INTERFACES.tavily;
+    case "exa":
+      return PROVIDER_INTERFACES.exa;
+    case "kagi":
+      return PROVIDER_INTERFACES.kagi;
+    case "perplexity":
+      return PROVIDER_INTERFACES.perplexity;
   }
 }
 

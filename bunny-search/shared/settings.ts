@@ -29,10 +29,22 @@ export const bunnySearchSettings = defineSettings({
      * checked, never installed); "searxng" talks to any SearXNG
      * instance's JSON API; "duckduckgo" and "brave" are built-in
      * single-engine alternatives; "custom-json" points at any JSON
-     * search endpoint the user configures.
+     * search endpoint the user configures. "tavily", "exa", "kagi" and
+     * "perplexity" are API-key services behind the same adapter (0.7.5).
      */
     searchService: z
-      .enum(["duckduckjs", "ddgs", "searxng", "duckduckgo", "brave", "custom-json"])
+      .enum([
+        "duckduckjs",
+        "ddgs",
+        "searxng",
+        "duckduckgo",
+        "brave",
+        "custom-json",
+        "tavily",
+        "exa",
+        "kagi",
+        "perplexity",
+      ])
       .default("duckduckjs"),
     /**
      * Which DuckDuckJS engine the default provider queries. "auto"
@@ -77,7 +89,12 @@ export const bunnySearchSettings = defineSettings({
      * pages).
      */
     searchUiUrl: z.string().trim().max(512).default(""),
-    /** API key for providers that need one (brave: X-Subscription-Token; custom-json: Bearer). */
+    /**
+     * API key of the selected service. One field, because only one service is
+     * active at a time: brave sends it as `X-Subscription-Token`, tavily and
+     * perplexity as a Bearer token, exa as `x-api-key`, kagi as `Bot <key>`,
+     * custom-json as a Bearer token when set.
+     */
     apiKey: z.string().trim().max(512).default(""),
     /** Per-request timeout in milliseconds (1000–60000). */
     timeoutMs: z.number().int().min(1000).max(60000).default(20000),
@@ -105,6 +122,21 @@ export const bunnySearchSettings = defineSettings({
      * want to pay search latency for. Empty = no exclusion.
      */
     skipProviders: z.string().trim().max(500).default(""),
+    /**
+     * Background agents (Paseo 0.16.0: helpers hidden from tabs, notifications and
+     * default agent lists) get search like any other agent. This switch excludes
+     * them at the session open, where `request.background` is available; the
+     * creation-time hook cannot see the flag, so an agent created as background and
+     * then excluded keeps nothing it does not already have.
+     */
+    skipBackgroundAgents: z.boolean().default(false),
+    /**
+     * How long a search answer is reused for an identical request, in seconds.
+     * 0 disables the cache. Agents re-search the same error string within a turn or
+     * two, and every repeat is a real upstream request; the cached answer is marked
+     * as such in the formatted text.
+     */
+    cacheTtlSeconds: z.number().int().min(0).max(3600).default(300),
   }),
 });
 

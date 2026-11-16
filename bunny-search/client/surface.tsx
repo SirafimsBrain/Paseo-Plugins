@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { useRpc, usePaseo } from "@getpaseo/plugin/client";
+import { useRpc, usePaseo, useSubscription } from "@getpaseo/plugin/client";
 import { openSearchInterfaceUrl } from "./open-search-ui";
 import {
   SEARCH_SERVICE_LABELS,
   connectionStatus,
   connectionTest,
   runSearch,
+  statusStream,
   type ConnectionStatus,
   type ConnectionTestResult,
+  type ProvisioningEvent,
   type SearchService,
 } from "../shared/contracts";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -21,6 +23,11 @@ import { interfaceFontFamily, scaledFont, useHostTypography } from "./use-host-t
  * search MCP connected and working": the current provider, the
  * last connection-test verdict (green/red), and a quick search
  * box that runs a real query through the configured service.
+ *
+ * Since 0.7.5 the screen also subscribes to `statusStream`, so the provider, the
+ * last verdict and the recent per-agent provisioning rows update live instead of
+ * only when the screen is opened. `params.q` seeds the search box — the Command
+ * Center item "Search the web for this agent's task" opens it that way.
  */
 
 export function BunnySearchSurface(props: PluginScreenProps) {
@@ -47,6 +54,24 @@ export function BunnySearchSurface(props: PluginScreenProps) {
   const [searching, setSearching] = useState(false);
   const [searchText, setSearchText] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [provisioning, setProvisioning] = useState<ProvisioningEvent[]>([]);
+
+  // Deep link (0.7.5): `openScreen({ params: { q } })` pre-fills the box and runs
+  // nothing — the user still decides to spend the request.
+  const paramsQuery = (props.params ?? {}).q ?? "";
+  useEffect(() => {
+    if (paramsQuery.length > 0) setQuery(paramsQuery);
+  }, [paramsQuery]);
+
+  const onStatusEvent = useCallback(
+    (event: { status: ConnectionStatus | null; recent: ProvisioningEvent[] }) => {
+      if (event.status) setStatus(event.status);
+      setProvisioning(event.recent);
+    },
+    [],
+  );
+  // Live updates; the host re-subscribes after a reconnect.
+  useSubscription(statusStream, {}, onStatusEvent);
 
   const reloadStatus = useCallback(() => {
     void statusRpc({})
@@ -171,6 +196,31 @@ export function BunnySearchSurface(props: PluginScreenProps) {
           {searchText}
         </Text>
       ) : null}
+
+      {provisioning.length > 0 ? (
+        <View style={styles.historyCard}>
+          <Text style={{ color: fgMuted, fontSize: font(10), fontWeight: "600", ...uiFontStyle }}>
+            Recent agents
+          </Text>
+          {provisioning.slice(0, 5).map((event) => (
+            <View key={`${event.agentId}-${event.at}`} style={styles.historyRow}>
+              <Text
+                style={{ color: fg, fontSize: font(10), ...uiFontStyle }}
+                numberOfLines={1}
+              >
+                {event.agentId.slice(0, 8)} · {event.provider} · {event.mode}
+                {event.background ? " · background" : ""}
+              </Text>
+              <Text
+                style={{ color: fgMuted, fontSize: font(9), ...uiFontStyle }}
+                numberOfLines={1}
+              >
+                {event.reason}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -183,6 +233,8 @@ const styles = StyleSheet.create({
   statusInfo: { flex: 1, gap: 2 },
   testButton: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
   searchCard: { gap: 6 },
+  historyCard: { gap: 4 },
+  historyRow: { gap: 1 },
   input: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6 },
   searchButton: { borderRadius: 6, paddingVertical: 6, alignItems: "center" },
 });

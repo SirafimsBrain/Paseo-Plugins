@@ -12,10 +12,30 @@ import {
   connectionStatus,
   connectionTest,
   runSearch,
+  statusStream,
   type ConnectionTestResult,
+  type ProvisioningEvent,
   type RuntimeSettings,
 } from "./shared/contracts";
-import { checkSearchService, formatSearchResponse, providerBaseUrl, searchWeb } from "./server/providers";
+import {
+  checkSearchService,
+  formatSearchResponse,
+  providerBaseUrl,
+  resetSearchCache,
+  searchWeb,
+} from "./server/providers";
+import {
+  notifyStatusChange,
+  provisioningMarker,
+  readProvisioningMarker,
+  recentProvisioning,
+  recordProvisioning,
+  subscribeProvisioning,
+  withProvisioningMarker,
+  type AgentMetadata,
+  type MetadataValue,
+  type ProvisioningMode,
+} from "./server/provisioning";
 import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
 import { createWebSearchTool } from "./server/agent-tools";
 import { readSavedMcpServers } from "./server/agent-record";
@@ -81,6 +101,7 @@ export default function contribute(server: PluginServerContext) {
       maxResults: state.values.maxResults,
       categories: state.values.categories,
       language: state.values.language,
+      cacheTtlSeconds: state.values.cacheTtlSeconds,
     };
   }
 
@@ -117,6 +138,10 @@ export default function contribute(server: PluginServerContext) {
   void mirrorSettings();
   const removeSettingsListener = settings.subscribe((state) => {
     if (state.status === "ready") {
+      // A settings edit can change the service, its URL or the key, so every
+      // cached answer is suspect: drop them and let open screens repaint.
+      resetSearchCache();
+      notifyStatusChange();
       void mirrorSettings();
     }
   });
@@ -124,6 +149,21 @@ export default function contribute(server: PluginServerContext) {
   // -------------------------------------------------------------------------
   // MCP injection (the plugin's reason to exist: agents get web search)
   // -------------------------------------------------------------------------
+
+  /**
+   * Returns `request` with this plugin's provisioning marker replaced (0.7.5).
+   *
+   * The create hook has no agent id, so it only writes the marker into the
+   * metadata Paseo persists on the agent; the session-open hook additionally
+   * appends to the event log the status stream reads.
+   */
+  function withMode(
+    request: { metadata?: AgentMetadata },
+    mode: ProvisioningMode,
+    reason: string,
+  ): Record<string, MetadataValue> {
+    return withProvisioningMarker(request.metadata, provisioningMarker(mode, reason));
+  }
 
   const removeCreateHook = server.addHook("agent.create.before", async ({ request }) => {
     // Async hooks are awaited by the host before the request proceeds,
@@ -141,11 +181,21 @@ export default function contribute(server: PluginServerContext) {
       );
       return request;
     }
+    // `background` is a session-open flag in Paseo 0.16.0; the creation request
+    // may carry it inside the config, so honour it when it is there. Otherwise the
+    // session open excludes it (the agent keeps whatever creation gave it).
+    if (
+      state.values.skipBackgroundAgents &&
+      (request.config as { background?: unknown }).background === true
+    ) {
+      const reason = "background agent excluded by skipBackgroundAgents";
+      console.log(`[bunny-search] create skipped: ${reason}`);
+      return { ...request, metadata: withMode(request, "skipped", reason) };
+    }
     if (providerExcluded(request.config.provider, state.values.skipProviders)) {
-      console.log(
-        `[bunny-search] create skipped: provider '${request.config.provider}' excluded by skipProviders`,
-      );
-      return request;
+      const reason = `provider '${request.config.provider}' is excluded by skipProviders`;
+      console.log(`[bunny-search] create skipped: ${reason}`);
+      return { ...request, metadata: withMode(request, "skipped", reason) };
     }
     // 0.6.3: a *shared* OpenCode v2 service (Paseo 0.15.0, #7435) refuses every
     // agent whose config carries custom MCP servers, so writing the entry here
@@ -156,7 +206,8 @@ export default function contribute(server: PluginServerContext) {
       console.log(
         `[bunny-search] create skipped: ${openCodeBlock} (bunny_web_search stays available)`,
       );
-      return request;
+      // The session open attaches the tool and rewrites this marker as `tool`.
+      return { ...request, metadata: withMode(request, "skipped", openCodeBlock) };
     }
     const { command, args } = mcpServerCommand();
     // `as const` instead of a named `McpStdioServerConfig` annotation: the MCP
@@ -177,7 +228,10 @@ export default function contribute(server: PluginServerContext) {
     // Diagnostic: visible in `paseo plugin logs bunny-search` — helps to
     // troubleshoot MCP spawn failures on the agent side.
     console.log(`[bunny-search] MCP injected: ${command} ${args.join(" ")}`);
-    return request;
+    return {
+      ...request,
+      metadata: withMode(request, "mcp", "MCP server contributed at creation"),
+    };
   });
 
   // -------------------------------------------------------------------------
@@ -208,6 +262,10 @@ export default function contribute(server: PluginServerContext) {
     async ({ request }, { paseo }) => {
       const state = await settings.read().catch(() => null);
       const values = state?.status === "ready" ? state.values : null;
+      // Marker written by a previous provisioning of this agent (0.7.5): a
+      // recorded `mcp` mode makes the daemon capability probe unnecessary.
+      const known = readProvisioningMarker(request.metadata);
+      const background = request.background === true;
       const base = {
         reason: request.reason,
         purpose: request.purpose,
@@ -217,6 +275,9 @@ export default function contribute(server: PluginServerContext) {
         serverName: INJECTED_SERVER_NAME,
         labelGateKey: values?.labelGateKey ?? "",
         skipProviders: values?.skipProviders ?? "",
+        background,
+        skipBackgroundAgents: values?.skipBackgroundAgents ?? false,
+        knownMode: known?.mode ?? null,
         lookup: readSavedMcpServers(request.agentId),
         // A shared OpenCode v2 service cannot carry an injected MCP server at
         // all (Paseo 0.15.0, #7435) — the tool-only path takes over.
@@ -226,8 +287,11 @@ export default function contribute(server: PluginServerContext) {
       // The daemon is only consulted when an MCP contribution is still possible;
       // every other branch (gated off, history, create owned by the create hook,
       // server already saved) is decided without touching it.
-      let supportsMcpServers: boolean | null = null;
-      if (needsCapabilityProbe({ ...base, supportsMcpServers: null })) {
+      // An agent this plugin already provisioned with the MCP server gives the
+      // answer without a round trip: the marker records that the provider accepted
+      // it for this agent (0.7.5).
+      let supportsMcpServers: boolean | null = known?.mode === "mcp" ? true : null;
+      if (supportsMcpServers === null && needsCapabilityProbe({ ...base, supportsMcpServers: null })) {
         const snapshot = await paseo.agents
           .ref(request.agentId)
           .refresh()
@@ -236,11 +300,31 @@ export default function contribute(server: PluginServerContext) {
       }
 
       const decision = decideSessionOpen({ ...base, supportsMcpServers });
+      const mode: ProvisioningMode = decision.injectMcp
+        ? "mcp"
+        : decision.attachTool
+          ? "tool"
+          : "skipped";
       console.log(
-        `[bunny-search] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
+        `[bunny-search] session_open ${request.agentId} (${request.reason}/${request.purpose}${background ? "/background" : ""}) [${mode}]: ${decision.why}`,
+      );
+      // The live status stream shows which agents got what, including the ones that
+      // only received the attached tool — the rows the repair action used to hunt
+      // for by hand.
+      recordProvisioning({
+        agentId: request.agentId,
+        provider: request.provider,
+        mode,
+        reason: decision.why,
+        background,
+        at: new Date().toISOString(),
+      });
+      const metadata = withProvisioningMarker(
+        request.metadata,
+        provisioningMarker(mode, decision.why),
       );
 
-      if (!decision.injectMcp && !decision.attachTool) return request;
+      if (!decision.injectMcp && !decision.attachTool) return { ...request, metadata };
 
       const tools = decision.attachTool ? [...request.tools, webSearchTool] : request.tools;
       let mcpServers = request.mcpServers;
@@ -256,13 +340,25 @@ export default function contribute(server: PluginServerContext) {
         console.log(`[bunny-search] session_open MCP injected: ${command} ${args.join(" ")}`);
       }
 
-      return { ...request, tools, mcpServers };
+      return { ...request, tools, mcpServers, metadata };
     },
   );
 
   // -------------------------------------------------------------------------
   // RPC surface
   // -------------------------------------------------------------------------
+
+  /** Current status snapshot — the same shape `connectionStatus` returns. */
+  async function statusSnapshot() {
+    const runtime = await readRuntimeSettings();
+    const full = await readFullSettings();
+    return {
+      provider: runtime.searchService,
+      baseUrl: providerBaseUrl(runtime),
+      uiUrl: full ? searchInterfaceUrl(full) : null,
+      lastCheck,
+    };
+  }
 
   /**
    * Tests the connection to the configured search service.
@@ -298,15 +394,45 @@ export default function contribute(server: PluginServerContext) {
       mcp,
     };
     lastCheck = result;
+    // Wake every open status screen: the probe result is why they are open.
+    notifyStatusChange();
     return result;
   });
 
-  server.handle(connectionStatus, async () => {
-    const runtime = await readRuntimeSettings();
-    const full = await readFullSettings();
-    const baseUrl = providerBaseUrl(runtime);
-    const uiUrl = full ? searchInterfaceUrl(full) : null;
-    return { provider: runtime.searchService, baseUrl, uiUrl, lastCheck };
+  server.handle(connectionStatus, async () => statusSnapshot());
+
+  // --- Live status stream (Paseo 0.16.0 `addSubscription`, 0.7.5) ----------------
+  // Pushes a full snapshot on subscribe and again on every provisioning decision,
+  // connection test and settings change, so the screen shows what happened while
+  // it was open without polling and without a manual Test.
+  server.handle(statusStream, async (_input, context) => {
+    let closed = false;
+    const emit = async (event: ProvisioningEvent | null) => {
+      await context.push({
+        kind: event === null ? "status" : "provisioning",
+        at: new Date().toISOString(),
+        status: await statusSnapshot(),
+        provisioning: event,
+        recent: recentProvisioning(),
+      });
+    };
+    await emit(null);
+    const unsubscribe = subscribeProvisioning((event) => {
+      if (closed) return;
+      void emit(event).catch((cause: unknown) => {
+        console.warn(
+          `[bunny-search] status stream push failed: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+      });
+    });
+    const stop = () => {
+      closed = true;
+      unsubscribe();
+    };
+    if (context.signal.aborted) stop();
+    else context.signal.addEventListener("abort", stop, { once: true });
   });
 
   server.handle(runSearch, async (input) => {

@@ -10,6 +10,7 @@ import {
   searchWeb,
 } from "../server/providers";
 import type { RuntimeSettings } from "../shared/contracts";
+import { clearSearchCache } from "../server/search-cache";
 
 // ---------------------------------------------------------------------------
 // DuckDuckJS mock — the real library performs live network requests; the
@@ -56,6 +57,8 @@ function settings(overrides: Partial<RuntimeSettings> = {}): RuntimeSettings {
     maxResults: 10,
     categories: "general,web",
     language: "",
+    // Off by default so a mocked `fetch` sees every call; the cache tests opt in.
+    cacheTtlSeconds: 0,
     ...overrides,
   };
 }
@@ -578,7 +581,18 @@ describe("custom-json provider", () => {
 
 describe("registry and helpers", () => {
   it("resolves every provider by id", () => {
-    for (const id of ["duckduckjs", "ddgs", "searxng", "duckduckgo", "brave", "custom-json"] as const) {
+    for (const id of [
+      "duckduckjs",
+      "ddgs",
+      "searxng",
+      "duckduckgo",
+      "brave",
+      "custom-json",
+      "tavily",
+      "exa",
+      "kagi",
+      "perplexity",
+    ] as const) {
       expect(getProvider(settings({ searchService: id })).id).toBe(id);
     }
   });
@@ -634,5 +648,178 @@ describe("formatSearchResponse", () => {
   it("renders an empty-result fallback", () => {
     const text = formatSearchResponse({ query: "q", results: [] });
     expect(text).toContain("No results found.");
+  });
+
+  it("marks an answer served from the cache", () => {
+    const text = formatSearchResponse({
+      query: "q",
+      results: [{ title: "T", url: "U", content: "C" }],
+      cached: true,
+    });
+    expect(text).toContain("Query: q (cached)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// API-key providers added in 0.7.5
+// ---------------------------------------------------------------------------
+
+describe("keyed providers", () => {
+  function headersOf(call: FetchCall | undefined): Record<string, string> {
+    return (call?.init?.headers ?? {}) as Record<string, string>;
+  }
+
+  it("advertises a base URL for every keyed service", () => {
+    expect(providerBaseUrl(settings({ searchService: "tavily" }))).toBe(
+      "https://api.tavily.com/search",
+    );
+    expect(providerBaseUrl(settings({ searchService: "exa" }))).toBe("https://api.exa.ai/search");
+    expect(providerBaseUrl(settings({ searchService: "kagi" }))).toBe(
+      "https://kagi.com/api/v0/search",
+    );
+    expect(providerBaseUrl(settings({ searchService: "perplexity" }))).toBe(
+      "https://api.perplexity.ai/chat/completions",
+    );
+  });
+
+  it("refuses to call a keyed service without a key, without touching the network", () => {
+    const calls = stubFetch(() => jsonResponse({}));
+    return Promise.all(
+      (["tavily", "exa", "kagi", "perplexity"] as const).map((searchService) =>
+        expect(
+          searchWeb({ query: "q", maxResults: 1 }, settings({ searchService })),
+        ).rejects.toThrow(/API key/),
+      ),
+    ).then(() => expect(calls).toHaveLength(0));
+  });
+
+  it("tavily: posts the query with a Bearer token and maps results", async () => {
+    const calls = stubFetch(() =>
+      jsonResponse({ results: [{ title: "T", url: "https://e.com", content: "C" }] }),
+    );
+    const response = await searchWeb(
+      { query: "vitest esm", maxResults: 3 },
+      settings({ searchService: "tavily", apiKey: "tv-key" }),
+    );
+    expect(calls[0]?.url).toBe("https://api.tavily.com/search");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(headersOf(calls[0])["Authorization"]).toBe("Bearer tv-key");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({
+      query: "vitest esm",
+      max_results: 3,
+    });
+    expect(response.results).toEqual([{ title: "T", url: "https://e.com", content: "C" }]);
+  });
+
+  it("exa: sends x-api-key and reads the page text", async () => {
+    const calls = stubFetch(() =>
+      jsonResponse({ results: [{ title: "E", url: "https://e.com", text: "body" }] }),
+    );
+    const response = await searchWeb(
+      { query: "q", maxResults: 2 },
+      settings({ searchService: "exa", apiKey: "exa-key" }),
+    );
+    expect(headersOf(calls[0])["x-api-key"]).toBe("exa-key");
+    expect(response.results[0]).toMatchObject({ title: "E", content: "body" });
+  });
+
+  it("kagi: sends Bot auth and keeps only t=0 results", async () => {
+    const calls = stubFetch(() =>
+      jsonResponse({
+        data: [
+          { t: 0, title: "K", url: "https://k.com", snippet: "s" },
+          { t: 1, title: "related" },
+        ],
+      }),
+    );
+    const response = await searchWeb(
+      { query: "q", maxResults: 5 },
+      settings({ searchService: "kagi", apiKey: "kagi-key" }),
+    );
+    expect(new URL(calls[0]?.url ?? "").searchParams.get("q")).toBe("q");
+    expect(headersOf(calls[0])["Authorization"]).toBe("Bot kagi-key");
+    expect(response.results).toHaveLength(1);
+    expect(response.results[0]).toMatchObject({ title: "K", content: "s" });
+  });
+
+  it("perplexity: answer plus citations, one result per source", async () => {
+    stubFetch(() =>
+      jsonResponse({
+        choices: [{ message: { content: "Short answer" } }],
+        search_results: [{ title: "P", url: "https://p.com" }],
+        citations: ["https://p.com", "https://c.com/page"],
+      }),
+    );
+    const response = await searchWeb(
+      { query: "q", maxResults: 5 },
+      settings({ searchService: "perplexity", apiKey: "pp-key" }),
+    );
+    expect(response.answers).toEqual(["Short answer"]);
+    expect(response.results.map((entry) => entry.url)).toEqual([
+      "https://p.com",
+      "https://c.com/page",
+    ]);
+    expect(formatSearchResponse(response)).toContain("Answer: Short answer");
+  });
+
+  it("reports a rejected key as a key problem", async () => {
+    stubFetch(() => jsonResponse({}, 401));
+    await expect(
+      searchWeb(
+        { query: "q", maxResults: 1 },
+        settings({ searchService: "tavily", apiKey: "bad" }),
+      ),
+    ).rejects.toThrow(/rejected the API key/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Response cache (0.7.5)
+// ---------------------------------------------------------------------------
+
+describe("response cache", () => {
+  beforeEach(() => {
+    clearSearchCache();
+  });
+
+  function answer(title: string) {
+    return { query: "q", results: [{ title, url: "https://e.com", content: "C" }] };
+  }
+
+  it("reuses an identical answer and marks it cached", async () => {
+    const calls = stubFetch(() => jsonResponse(answer("T")));
+    const values = settings({ cacheTtlSeconds: 300 });
+    const first = await searchWeb({ query: "q", maxResults: 10 }, values);
+    const second = await searchWeb({ query: "  Q ", maxResults: 10 }, values);
+    expect(calls).toHaveLength(1);
+    expect(first.cached).toBeUndefined();
+    expect(second.cached).toBe(true);
+    expect(formatSearchResponse(second)).toContain("Query: q (cached)");
+  });
+
+  it("keys on the query, the result count and the service", async () => {
+    const calls = stubFetch(() => jsonResponse(answer("T")));
+    const values = settings({ cacheTtlSeconds: 300 });
+    await searchWeb({ query: "q", maxResults: 10 }, values);
+    await searchWeb({ query: "other", maxResults: 10 }, values);
+    await searchWeb({ query: "q", maxResults: 5 }, values);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("neither stores nor reuses an answer when the TTL is 0", async () => {
+    const calls = stubFetch(() => jsonResponse(answer("T")));
+    const values = settings({ cacheTtlSeconds: 0 });
+    await searchWeb({ query: "q", maxResults: 10 }, values);
+    const second = await searchWeb({ query: "q", maxResults: 10 }, values);
+    expect(calls).toHaveLength(2);
+    expect(second.cached).toBeUndefined();
+  });
+
+  it("does not store an empty answer, which usually means a rate limit", async () => {
+    const calls = stubFetch(() => jsonResponse({ query: "q", results: [] }));
+    const values = settings({ cacheTtlSeconds: 300 });
+    await searchWeb({ query: "q", maxResults: 10 }, values);
+    await searchWeb({ query: "q", maxResults: 10 }, values);
+    expect(calls).toHaveLength(2);
   });
 });

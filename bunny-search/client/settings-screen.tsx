@@ -4,6 +4,7 @@ import { useSettings, useRpc, usePaseo } from "@getpaseo/plugin/client";
 import { openSearchInterfaceUrl } from "./open-search-ui";
 import { bunnySearchSettings } from "../shared/settings";
 import {
+  API_KEY_SERVICES,
   SEARCH_SERVICE_LABELS,
   DUCKDUCKJS_ENGINE_LABELS,
   connectionStatus,
@@ -37,6 +38,24 @@ import type { SearchService } from "../shared/contracts";
  */
 
 type ConnectionState = "unknown" | "checking" | "ok" | "error";
+
+/** How the one API-key field is sent for the selected service (0.7.5). */
+function apiKeyHint(service: SearchService): string {
+  switch (service) {
+    case "brave":
+      return "Brave Search subscription token (sent as X-Subscription-Token).";
+    case "tavily":
+      return "Tavily API key (sent as a Bearer token).";
+    case "exa":
+      return "Exa API key (sent as x-api-key).";
+    case "kagi":
+      return "Kagi API token (sent as `Bot <token>`).";
+    case "perplexity":
+      return "Perplexity API key (sent as a Bearer token).";
+    default:
+      return "Optional. Sent as a Bearer token when set.";
+  }
+}
 
 function stateOf(status: ConnectionStatus | null, testing: boolean): ConnectionState {
   if (testing) return "checking";
@@ -284,14 +303,11 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
               onChangeText={(text: string) => patch({ customBaseUrl: text })}
             />
           ) : null}
-          {(values.searchService === "brave" || values.searchService === "custom-json") && (
+          {(API_KEY_SERVICES.includes(values.searchService) ||
+            values.searchService === "custom-json") && (
             <SettingsInput
               label="API key"
-              hint={
-                values.searchService === "brave"
-                  ? "Brave Search subscription token (sent as X-Subscription-Token)."
-                  : "Optional. Sent as a Bearer token when set."
-              }
+              hint={apiKeyHint(values.searchService)}
               initialValue={values.apiKey}
               placeholder="(none)"
               secureTextEntry
@@ -333,6 +349,17 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
             placeholder="(auto)"
             onChangeText={(text: string) => patch({ language: text })}
           />
+          <SettingsInput
+            label="Cache TTL (seconds)"
+            hint="Identical searches are answered from memory within this window, marked (cached) in the text. 0 disables the cache, 0–3600."
+            initialValue={String(values.cacheTtlSeconds)}
+            onChangeText={(text: string) => {
+              const parsed = Number.parseInt(text, 10);
+              if (Number.isFinite(parsed) && String(parsed) === text.trim()) {
+                patch({ cacheTtlSeconds: parsed });
+              }
+            }}
+          />
         </SettingsSection>
       </SettingsCard>
 
@@ -356,6 +383,12 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
             initialValue={values.labelGateKey}
             placeholder="(no gate)"
             onChangeText={(text: string) => patch({ labelGateKey: text })}
+          />
+          <SettingsSwitch
+            label="Skip background agents"
+            hint="Background agents are helpers hidden from tabs and notifications. Off (default): they get search like any other agent. On: the session open gives them nothing."
+            value={values.skipBackgroundAgents}
+            onValueChange={(enabled: boolean) => patch({ skipBackgroundAgents: enabled })}
           />
           <SettingsInput
             label="Skipped providers"

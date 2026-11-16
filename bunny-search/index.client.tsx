@@ -4,6 +4,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { agentReload } from "./shared/contracts";
+import { BunnySearchComposerItem } from "./client/composer-item";
 import { BunnySearchSettingsScreen } from "./client/settings-screen";
 import { BunnySearchSurface } from "./client/surface";
 
@@ -53,6 +54,13 @@ export default function contribute(client: PluginClientContext) {
     },
   });
 
+  // Composer control (0.7.5, Paseo 0.16.0 `addComposerItem`): search the draft and
+  // insert the results without leaving the composer.
+  client.addComposerItem({
+    id: "bunny-search-draft",
+    Component: BunnySearchComposerItem,
+  });
+
   client.addSettingsScreen({
     id: "bunny-search-settings",
     title: "Bunny Search",
@@ -66,6 +74,20 @@ export default function contribute(client: PluginClientContext) {
   // search tools after an idle runtime release or an OpenCode location eviction —
   // instead of asking the user to recreate the agent. A throw is surfaced by the
   // host as an error toast, so a refused reload is never silent.
+  // Quick search for one agent (0.7.5): opens the screen with the agent's title as
+  // the query and runs nothing until the user presses Search — a deep link that is
+  // a starting point, not an unasked network request.
+  client.addCommandCenterItem({
+    id: "search-for-agent",
+    title: "Search the web for this agent's task",
+    icon: "Search",
+    keywords: ["bunny", "search", "web", "quick", "draft", "agent"],
+    context: "agent",
+    onSelect({ agent, openScreen }) {
+      openScreen({ screenId: SCREEN_ID, params: { q: agent.title ?? "" } });
+    },
+  });
+
   client.addCommandCenterItem({
     id: "repair-search-tools",
     title: "Repair search tools (reopen this agent's session)",

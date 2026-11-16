@@ -18,6 +18,7 @@ const SETTINGS_ENV_KEYS = [
   "BUNNY_SEARCH_MAX_RESULTS",
   "BUNNY_SEARCH_CATEGORIES",
   "BUNNY_SEARCH_LANGUAGE",
+  "BUNNY_SEARCH_CACHE_TTL_SECONDS",
 ] as const;
 
 const savedEnv: Record<string, string | undefined> = {};
@@ -61,7 +62,25 @@ describe("parseSettingsFile", () => {
       maxResults: 10,
       categories: "general,web",
       language: "",
+      cacheTtlSeconds: 300,
     });
+  });
+
+  it("accepts the keyed services and the cache TTL (0.7.5)", () => {
+    for (const searchService of ["tavily", "exa", "kagi", "perplexity"] as const) {
+      const filePath = tempSettingsFile(JSON.stringify({ searchService }));
+      expect(parseSettingsFile(filePath).searchService).toBe(searchService);
+    }
+
+    const filePath = tempSettingsFile(JSON.stringify({ cacheTtlSeconds: 60 }));
+    expect(parseSettingsFile(filePath).cacheTtlSeconds).toBe(60);
+
+    process.env.BUNNY_SEARCH_CACHE_TTL_SECONDS = "0";
+    expect(parseSettingsFile(filePath).cacheTtlSeconds).toBe(0);
+
+    // Out of range: clamped to the documented 0–3600 window.
+    process.env.BUNNY_SEARCH_CACHE_TTL_SECONDS = "99999";
+    expect(parseSettingsFile(filePath).cacheTtlSeconds).toBe(3600);
   });
 
   it("reads the ddgs python path from the file and environment", () => {

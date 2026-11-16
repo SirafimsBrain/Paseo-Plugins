@@ -986,7 +986,12 @@ daemon (no agent was created there). Their matrix is covered by
 `tests/agent-hooks.test.ts` (43 tests) and the registration was proven by the
 plugin reaching `running` with no hook errors.
 
-### 18.4 Recommendations for improvement (recorded, not implemented)
+### 18.4 Recommendations for improvement (recorded 2026-11-16)
+
+> Items 1–7 below were implemented in **0.7.5** — see §19 for the design and
+> the verification. Item 8 (host-managed processes for the probe) stays a
+> long-term prospect: Linux is the priority platform and the current spawn path
+> already works there.
 
 1. **Live status through `addSubscription` (new in 0.16.0).** The connected
    indicator and the quick-search box poll on demand (`connectionStatus`). A
@@ -1025,3 +1030,163 @@ plugin reaching `running` with no hook errors.
    from `@getpaseo/plugin/server`, still open from §16.4). Its benefit is
    Windows `.cmd` launching and a host-owned process tree; Linux stays the
    priority, so this remains a long-term prospect.
+
+## 19. Plugin 0.7.5 — the 0.16.0 recommendations, implemented (2026-11-16)
+
+Seven of the eight items in §18.4 are implemented in 0.7.5. The eighth —
+host-managed probe processes — is deliberately left out and remains a prospect
+(§19.8). Nothing in this release changes the Paseo API surface the plugin uses:
+every feature below is built on capabilities the 0.15.0/0.16.0 host already
+offers (`addSubscription`, `addComposerItem`, hook `metadata`,
+`request.background`, `PluginScreenProps.params`).
+
+### 19.1 Live status stream (`bunny-search.status-stream`)
+
+- **Contract** (`shared/contracts.ts`): `statusStream = defineSubscription({ name,
+  input: {}, event })`. The event carries the whole snapshot — `kind`
+  (`status` | `provisioning`), `at`, `status` (the same shape
+  `connectionStatus` returns: provider, base URL, interface URL, `lastCheck`),
+  the event that just happened (`provisioning`, null for a status-only push) and
+  `recent`, a newest-first ring of the last 20 decisions. A subscriber that
+  missed an event is still correct after the next one, because the snapshot is
+  self-contained.
+- **Server** (`index.server.ts`): `server.handle(statusStream, …)` pushes the
+  snapshot on subscribe, then one snapshot per event, and unsubscribes on
+  `context.signal` abort. The wake-ups come from `server/provisioning.ts`
+  (`recordProvisioning`, `notifyStatusChange`, `clearProvisioningLog`), which is
+  called by the session-open hook, the connection test and the settings
+  subscription (a settings edit also calls `resetSearchCache()`).
+- **Client**: the sidebar screen uses `useSubscription(statusStream, {}, …)`, so
+  the dot, latency and the provider label update without pressing *Test*.
+  Hosts older than 0.16.0 have no `useSubscription`; the screen still loads its
+  status once through `connectionStatus`, which is why the initial RPC stayed.
+
+### 19.2 Composer control: “search the draft”
+
+`client/composer-item.tsx` registers a host `Action` through
+`client.addComposerItem`. It reads `useComposer().prompt`, caps the query at 512
+characters, runs the existing `runSearch` RPC and inserts the formatted answer at
+the cursor with `composer.insertText`. The promise returned from `onPress` is what
+the host renders as pending; a rejection (provider error, empty answer) becomes a
+host error toast. Nothing is sent until the user presses the control, and the
+inserted text is editable text, not an attachment.
+
+### 19.3 Per-agent provisioning marker in `metadata`
+
+- `server/provisioning.ts` owns one metadata key, `bunny-search`:
+  `{ mode: "mcp" | "tool" | "skipped", reason, at }`.
+- `agent.create.before` writes it on every branch it decides (injected, provider
+  excluded, shared-OpenCode block, background excluded) and leaves it untouched
+  while it defers to the label gate.
+- `agent.open.before` writes it on every open, and appends the same decision to
+  the event log the status stream reads. `reason` is the decision text the log
+  already prints, so the marker explains itself.
+- The read-back is used for one thing only: when the marker says `mcp`, the
+  session-open hook skips the daemon capability probe and treats the provider as
+  MCP-capable for this agent — the answer cannot have changed for an agent the
+  plugin already provisioned. A `tool` or `skipped` marker never suppresses the
+  probe, so an agent cannot be degraded forever by a stale decision.
+- Unknown or malformed values resolve to “no claim” (`null`), never to a guess.
+
+### 19.4 Background agents: policy
+
+The decision, recorded here and in the settings screen: **background agents get
+search like any other agent by default**. They are agents the user started for a
+task (a review helper, a summariser); withholding search makes them worse at the
+job they exist for.
+
+The policy is nonetheless switchable: `skipBackgroundAgents` (off by default)
+excludes them at `agent.open.before`, where `request.background` exists, and the
+log line gains a `/background` tag. The creation hook has no `background` field
+in `PluginHookRequests["agent.create.before"]`, so it honours
+`config.background` when a caller passes one and otherwise leaves the decision
+to the session open — documented in `shared/settings.ts` rather than implied by
+code.
+
+### 19.5 Deep-linked quick search
+
+- `PluginScreenProps.params.q` pre-fills the quick-search box (a `useEffect` on
+  the param, so re-opening the screen with a different `q` refills it).
+- A new Command Center item, *Search the web for this agent's task* (agent
+  context), opens the screen with `params: { q: agent.title }`.
+- The deep link never runs the search by itself: the user still presses the
+  button, so no network request is spent by opening a menu item.
+
+### 19.6 Response cache
+
+`server/search-cache.ts` is a process-local LRU (64 entries) with a TTL taken
+from `cacheTtlSeconds` (default 300 s, 0 disables, 0–3600 accepted).
+
+- **Where**: inside `searchWeb`, so the MCP `web_search` tool, the attached
+  `bunny_web_search` tool and the UI quick search share it. Connection tests call
+  the adapters directly and are never answered from the cache.
+- **Key**: service, engine pin, SearXNG/custom URLs, normalised query (trimmed,
+  lower-cased, whitespace collapsed), result count, categories, language. The API
+  key is deliberately absent — a rotated key does not change the answer.
+- **Empty answers are never stored**: an empty result is what a rate limit looks
+  like, and caching it would starve an agent for the whole TTL.
+- **Visible**: the formatted text says `Query: … (cached)`, so an agent can tell
+  a reused answer from a fresh one and rephrase if it needs newer data.
+- **Invalidation**: every settings change clears the cache; the MCP server
+  process keeps its own cache, which dies with the agent session.
+
+### 19.7 Four more providers
+
+One adapter each in `server/providers.ts`, behind the same interface:
+
+| Service | Endpoint | Auth | Mapping |
+| --- | --- | --- | --- |
+| Tavily | `POST https://api.tavily.com/search` | `Authorization: Bearer` | `results[].title/url/content` |
+| Exa | `POST https://api.exa.ai/search` | `x-api-key` | `results[].title/url/text` (page text, truncated by the formatter) |
+| Kagi | `GET https://kagi.com/api/v0/search` | `Authorization: Bot <token>` | `data[]` with `t: 0` only (skips related searches) |
+| Perplexity | `POST https://api.perplexity.ai/chat/completions` | `Authorization: Bearer` | `choices[0].message.content` → `answers`, `search_results`/`citations` → results |
+
+All four share one API-key field, because only one service is active at a time;
+the settings screen explains how the key is sent for the selected service. A
+missing key fails before any request with the same actionable message the Brave
+adapter uses, and 401/403 is reported as “rejected the API key”. The SDK-free
+`providerBaseUrl` and `searchInterfaceUrl` cover the new ids, so the *Open*
+button and the status screen keep working.
+
+### 19.8 Deliberately not implemented: host-managed probe processes
+
+`spawnProcess` / `terminateProcess` from `@getpaseo/plugin/server` would give the
+MCP handshake probe a host-owned process tree and Windows `.cmd` launching. Linux
+is the priority platform, the current `spawn` path is verified there, and the
+probe is a diagnostic rather than a runtime dependency — so this stays a prospect
+(also noted in §16.4 and §18.4).
+
+### 19.9 Settings, contracts and files touched
+
+- `shared/settings.ts`: `searchService` gains `tavily | exa | kagi | perplexity`;
+  new `skipBackgroundAgents` (bool, default false) and `cacheTtlSeconds`
+  (default 300, 0–3600). No migration is needed: both fields have defaults, so a
+  stored document without them parses.
+- `shared/contracts.ts`: `RuntimeSettings.cacheTtlSeconds`, `SearchResponse.cached`,
+  `API_KEY_SERVICES`, labels for the new services, `provisioningEventSchema` and
+  `statusStream`.
+- `server/settings-file.ts`: the same four ids, `cacheTtlSeconds` from the file
+  and from `BUNNY_SEARCH_CACHE_TTL_SECONDS` — the MCP process must see what the
+  host shows.
+- `server/session-open.ts`: `background`, `skipBackgroundAgents` and `knownMode`
+  in the decision input; the background gate; the probe skipped on a `mcp`
+  marker.
+- New files: `server/search-cache.ts`, `server/provisioning.ts`,
+  `client/composer-item.tsx`, `tests/provisioning.test.ts`.
+
+### 19.10 Verification (2026-11-16, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc -b`, three projects) | exit 0 |
+| `npm test` (hermetic vitest) | 12 passed / 1 skipped suites, 179 passed / 2 skipped tests |
+| New provider tests | mapping, headers, missing key, rejected key (401), base URLs |
+| New cache tests | reuse + `(cached)` marker, key separation, TTL 0, empty answer not stored |
+| New provisioning tests | marker round-trip, foreign shapes, LRU ring, listeners |
+| New hook tests | background gate on/off, marker written on open, probe skipped when the marker says `mcp` |
+| Live daemon | not repeated for this patch: the hooks, RPCs and subscription use the same registration path verified for 0.6.5 against a real 0.16.0 daemon; the subscription handler and composer item are exercised by the host at runtime, so a live `addSubscription`/`addComposerItem` round trip is the one thing this build does not prove on its own |
+
+The composer pill, the subscription push and the metadata marker are all
+host-visible behaviour: `paseo plugin logs bunny-search` shows the
+`session_open … [mode]` lines and the status stream's push failures, which is the
+first place to look if a host build renders the control but never answers.

@@ -1,4 +1,4 @@
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc, defineSubscription } from "@getpaseo/plugin";
 import { z } from "zod";
 import type { BunnySearchSettings } from "./settings";
 
@@ -15,6 +15,10 @@ export const searchServiceSchema = z.enum([
   "duckduckgo",
   "brave",
   "custom-json",
+  "tavily",
+  "exa",
+  "kagi",
+  "perplexity",
 ]);
 
 export type SearchService = z.infer<typeof searchServiceSchema>;
@@ -27,7 +31,20 @@ export const SEARCH_SERVICE_LABELS: Record<SearchService, string> = {
   duckduckgo: "DuckDuckGo (HTML, no key)",
   brave: "Brave Search (API key)",
   "custom-json": "Custom JSON endpoint",
+  tavily: "Tavily (API key)",
+  exa: "Exa (API key, neural search)",
+  kagi: "Kagi Search (API key)",
+  perplexity: "Perplexity (API key, answer + citations)",
 };
+
+/** Services that need an API key before they can answer anything. */
+export const API_KEY_SERVICES: readonly SearchService[] = [
+  "brave",
+  "tavily",
+  "exa",
+  "kagi",
+  "perplexity",
+];
 
 /** DuckDuckJS engine ids, mirroring the settings enum. */
 export type DuckduckjsEngine = BunnySearchSettings["duckduckjsEngine"];
@@ -55,10 +72,16 @@ export interface WebResult {
 export interface SearchResponse {
   query: string;
   results: WebResult[];
-  /** Instant answers (SearXNG `answers`). */
+  /** Instant answers (SearXNG `answers`, Perplexity answer). */
   answers?: string[];
   /** Did-you-mean suggestion. */
   suggestion?: string;
+  /**
+   * Served from the in-process response cache instead of a new upstream request
+   * (0.7.5). The formatted text marks it, so an agent can tell a fresh answer
+   * from a reused one.
+   */
+  cached?: boolean;
 }
 
 /** Request handed to a provider adapter. */
@@ -84,6 +107,8 @@ export interface RuntimeSettings {
   maxResults: number;
   categories: string;
   language: string;
+  /** Seconds an identical search is reused; 0 disables the cache (0.7.5). */
+  cacheTtlSeconds: number;
 }
 
 /** Result of one connection test (the settings-screen button). */
@@ -107,6 +132,23 @@ export const connectionTestResultSchema = z.object({
 });
 
 export type ConnectionTestResult = z.infer<typeof connectionTestResultSchema>;
+
+/**
+ * One provisioning decision, as recorded for the status stream (0.7.5).
+ *
+ * `mcp` — the launch-only MCP server was contributed; `tool` — only the attached
+ * `bunny_web_search` tool was; `skipped` — the gates excluded the agent.
+ */
+export const provisioningEventSchema = z.object({
+  agentId: z.string(),
+  provider: z.string(),
+  mode: z.enum(["mcp", "tool", "skipped"]),
+  reason: z.string(),
+  background: z.boolean(),
+  at: z.string(),
+});
+
+export type ProvisioningEvent = z.infer<typeof provisioningEventSchema>;
 
 /** Connection status snapshot shown in the settings screen. */
 export const connectionStatusSchema = z.object({
@@ -160,6 +202,29 @@ export const agentReload = defineRpc({
     ok: z.boolean(),
     /** Set when the reload was refused (unknown agent, busy session, …). */
     error: z.string().nullable(),
+  }),
+});
+
+/**
+ * Live status stream (0.7.5, Paseo 0.16.0 `addSubscription`).
+ *
+ * The screen no longer needs a manual Test to learn two things that change on
+ * their own: the last probe result / configured service, and which agents were
+ * provisioned since it opened — including the ones that only got the attached tool.
+ * Every event carries the whole current snapshot, so a subscriber that missed an
+ * event is still correct after the next one.
+ */
+export const statusStream = defineSubscription({
+  name: "bunny-search.status-stream",
+  input: z.object({}),
+  event: z.object({
+    kind: z.enum(["status", "provisioning"]),
+    at: z.string(),
+    status: connectionStatusSchema.nullable(),
+    /** The event that just happened, null for the initial snapshot. */
+    provisioning: provisioningEventSchema.nullable(),
+    /** Newest-first ring of recent decisions, at most 20. */
+    recent: z.array(provisioningEventSchema),
   }),
 });
 

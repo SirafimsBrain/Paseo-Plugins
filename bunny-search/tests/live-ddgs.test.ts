@@ -22,6 +22,7 @@ const settings: RuntimeSettings = {
   maxResults: 5,
   categories: "general",
   language: "",
+  cacheTtlSeconds: 0,
 };
 
 describeLive("live ddgs provider", () => {

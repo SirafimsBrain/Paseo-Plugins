@@ -17,6 +17,11 @@ import {
 } from "../server/session-open";
 import { createWebSearchTool } from "../server/agent-tools";
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from "../server/mcp-tools";
+import {
+  PROVISIONING_METADATA_KEY,
+  clearProvisioningLog,
+  recentProvisioning,
+} from "../server/provisioning";
 
 /**
  * 0.5.2 coverage: the session-open contribution, the injection gate, the
@@ -223,6 +228,9 @@ function input(overrides: Partial<SessionOpenInput> = {}): SessionOpenInput {
     lookup: { status: "found", savedServers: [] },
     supportsMcpServers: true,
     openCodeMcpBlock: null,
+    background: false,
+    skipBackgroundAgents: false,
+    knownMode: null,
     ...overrides,
   };
 }
@@ -431,6 +439,8 @@ function defaults(): Record<string, unknown> {
     maxResults: 10,
     categories: "general,web",
     language: "",
+    skipBackgroundAgents: false,
+    cacheTtlSeconds: 0,
   };
 }
 
@@ -719,11 +729,22 @@ describe("bunny_web_search tool", () => {
       maxResults: 10,
       categories: "general,web",
       language: "",
+      // Off in tests: mocked fetches should count every call.
+      cacheTtlSeconds: 0,
     };
   }
 
   const toolContext = (): AgentToolContext => ({
-    agent: { id: "tester", workspaceId: null, parentAgentId: null, provider: "opencode", cwd: "/tmp", title: null },
+    agent: {
+      id: "tester",
+      workspaceId: null,
+      parentAgentId: null,
+      provider: "opencode",
+      cwd: "/tmp",
+      title: null,
+      background: false,
+      metadata: {},
+    },
     paseo: {} as never,
     signal: new AbortController().signal,
   });
@@ -813,5 +834,79 @@ describe("MCP initialize instructions", () => {
     expect(MCP_INSTRUCTIONS).toContain("outside world");
     expect(MCP_INSTRUCTIONS).toContain("failing build");
     expect(MCP_INSTRUCTIONS).toContain("open the returned URLs");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0.7.5: background policy and the per-agent provisioning marker
+// ---------------------------------------------------------------------------
+
+describe("background agents and known provisioning", () => {
+  it("gives a background agent nothing only when the setting says so", () => {
+    const skipped = decideSessionOpen(input({ background: true, skipBackgroundAgents: true }));
+    expect(skipped.injectMcp).toBe(false);
+    expect(skipped.attachTool).toBe(false);
+    expect(skipped.why).toContain("background");
+
+    // Default policy: background agents are served like any other agent.
+    const served = decideSessionOpen(input({ background: true }));
+    expect(served.injectMcp).toBe(true);
+  });
+
+  it("skips the capability probe only when the provider already answered yes", () => {
+    expect(needsCapabilityProbe(input({ knownMode: "mcp" }))).toBe(false);
+    expect(needsCapabilityProbe(input({ knownMode: "tool" }))).toBe(true);
+    expect(needsCapabilityProbe(input({ knownMode: "skipped" }))).toBe(true);
+  });
+
+  it("writes the marker on the session open and records the decision", async () => {
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    clearProvisioningLog();
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook(openRequest());
+    const metadata = request.metadata as Record<string, { mode: string; reason: string }>;
+    expect(metadata[PROVISIONING_METADATA_KEY]?.mode).toBe("mcp");
+    expect(recentProvisioning()[0]).toMatchObject({
+      agentId: AGENT,
+      provider: "opencode",
+      mode: "mcp",
+      background: false,
+    });
+    cleanup();
+  });
+
+  it("does not ask the daemon again when the agent's marker says mcp", async () => {
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    const refresh = vi.fn(async () => ({
+      agent: { id: AGENT, capabilities: { supportsMcpServers: false } },
+    }));
+    const context = {
+      paseo: {
+        agents: {
+          ref: () => ({ refresh, reload: async () => ({ agent: { id: AGENT } }) }),
+        },
+      },
+      signal: new AbortController().signal,
+    };
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook(
+      openRequest({
+        metadata: {
+          [PROVISIONING_METADATA_KEY]: {
+            mode: "mcp",
+            reason: "earlier open",
+            at: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      context,
+    );
+    expect(refresh).not.toHaveBeenCalled();
+    expect(Object.keys(request.mcpServers as Record<string, unknown>)).toEqual(["bunny-search"]);
+    cleanup();
   });
 });
