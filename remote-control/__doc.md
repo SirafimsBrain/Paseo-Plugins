@@ -1381,3 +1381,116 @@ plugin, so the finding is recorded instead of a button that cannot work.
    worktree creation (the `after` one is awaited before workspace setup and
    agents start) — an always-on hook there would tax every worktree for a
    feature nobody uses.
+
+## Paseo 0.16.0 — compatibility pass (2026-11-16)
+
+### What 0.16.0 changed for plugins
+- **Plugin subscriptions** (`defineSubscription` + client `useSubscription`), and
+  **binary payloads** (`Uint8Array`) for plugin RPCs and events.
+- **Plugin composer controls** (`addComposerItem`), draft editing, agent
+  settings, "New workspace" items, and plugin-owned `metadata` on agents and
+  workspaces.
+- **Plugin sidebar views** (`addSidebarView`): a plugin can replace the sidebar
+  layout across hosts, chosen per device in Settings → Sidebar.
+- **Built-in plugin gallery**; Settings → Plugins opens a plugin's settings from
+  a cog with a tab per settings screen; composer pills that open a menu show an
+  upward chevron.
+- **Background agents**: a `background` flag in agent snapshots and hooks plus
+  `backgroundWork.count`; daemon startup launches configured plugins
+  **concurrently**.
+- **Fixed** plugin RPCs whose input/output schema uses a transform.
+- **Breaking**: the deprecated `agent.turn.after.timeline` SDK field is removed.
+
+### Why this plugin is unaffected
+remote-control touches none of the removed or changed surfaces. It registers
+`addWorkspacePanel` (two panels), `addSidebarHeaderItem`, `addScreen`,
+three `addCommandCenterItem`s and `addSlashCommand("remote")`; all of those are
+unchanged in 0.16.0. It reads no `agent.turn.after` event at all (the removed
+`timeline` field is irrelevant), imports only `PluginServerContext`,
+`PaseoApi`, `PluginClientContext`, `PluginWorkspacePanelProps`,
+`PluginScreenProps`, `PluginSidebarItemProps`, `usePaseo`, `useRpc`,
+`useWorkspace`, `openExternalUrl`, `SidebarRow` and `defineRpc`, and has no
+deprecated `client/react-native` import. Its eight RPCs are plain `server.handle`
+handlers — including four that return synchronously (`console-url`, `state`,
+`connections.list`, `vault.lock`) — and all of them resolve on 0.16.0 (see the
+live run below), so the handler-resolution change that bit command-center does
+not apply here.
+
+### Dependency pin and version
+The dev pin `@getpaseo/plugin 0.13.0` was the last release the plugin had been
+typechecked against. It now pins **0.16.0**, the release verified below; the
+floor stays `>=0.11.0` because no 0.16.0-only API is used (the floor follows the
+API actually used, not the newest host tested). A dependency-only change without
+behaviour changes moves the last digit ⇒ **1.0.0 → 1.0.1**.
+
+### Verification (2026-11-16, this machine)
+- `npm run typecheck` — clean for the plugin **and** `console/` against SDK
+  `0.16.0` (362 packages, `@getpaseo/plugin` 0.16.0 resolved in
+  `node_modules`); a scratch copy pinned to 0.16.0 typechecked clean as well
+  before the repository pin was moved.
+- `npm test` — **20 suites / 223 tests** (the `pretest` bundle step rebuilt
+  `dist/`).
+- Live, isolated daemon: scratch home `/tmp/rc-home`, `listen
+  127.0.0.1:6798`, `paseo daemon run` from **0.16.0** (CLI `paseo --version`
+  = 0.16.0); `paseo plugin add <absolute directory>` installed and built it,
+  status `running`; logs `[remote-control] plugin ready (version 1.0.1)` and
+  `console listening on http://127.0.0.1:<port>/?token=…` with no plugin errors
+  (only Node `DEP0093`/`DEP0176` warnings raised inside a dependency).
+- RPCs over `DaemonClient.invokePluginRpc` (`ws://127.0.0.1:6798/ws`): `state`,
+  `console-url`, `connections.list` and `vault.lock` all answered in 1–18 ms,
+  and the console URL answered **HTTP 200**. `paseo plugin reload` restarted the
+  process on the new build, rotated the console port and token, and every RPC
+  answered again.
+- Not exercised live: an actual SSH/RDP/VNC launch (it needs a configured
+  connection and the `pass` vault to be initialised), and the UI panels inside
+  the app — the client bundle was only typechecked, not rendered.
+
+### Recommendations for improvement (recorded, not implemented)
+Ordered by value to a user of the plugin.
+
+1. **Move the console's live updates onto 0.16.0 plugin subscriptions.** The
+   console runs its own HTTP+SSE endpoint (`sessions.onChange` → `broadcast`)
+   guarded by a token in the URL. A `remote-control.sessions` subscription
+   (`defineSubscription`) plus `useSubscription` in the Explorer panel would
+   show live sessions and vault state without the token-in-URL bridge, keep the
+   standalone console as an option, and delete the SSE plumbing from
+   `server/http-server.ts`.
+2. **Stop putting the token in the query string.** `?token=…` leaks through
+   browser history, proxies and any log of the URL. A one-time ticket exchanged
+   for a short-lived cookie (or an `Authorization` header on the console's own
+   fetch calls) would keep the same security model without the leak — and item 1
+   makes the token optional for in-app use.
+3. **A real sidebar view (`addSidebarView`).** 0.16.0 lets a plugin replace the
+   sidebar with its own layout across hosts, chosen per device. Remote-control's
+   tree (groups → connections → sessions) is exactly that shape; today it is one
+   row in the sidebar header plus an Explorer panel.
+4. **A composer item: "Connect to host".** `addComposerItem` could insert a
+   prepared `ssh user@host` / `scp` line into the prompt, or open the console at
+   a connection, turning "I need to run this on the box" into one click.
+5. **Stamp sessions with plugin metadata.** 0.16.0 lets plugins write
+   `metadata` on agents and workspaces. A `remote-control: { connectionId,
+   protocol, sessionId }` stamp on the terminal's agent (and on the workspace for
+   a "new workspace for this host" flow) would let the panel offer "reconnect
+   the last terminal for this connection" instead of keeping that link only in
+   the console store.
+6. **Badges and "New workspace" items.** 0.16.0 adds plugin badges on sidebar
+   workspace rows and plugin-contributed New Workspace items: a badge for
+   workspaces that have a live session, and a "New workspace on <host>" entry
+   that prefills the remote directory, both reuse the data this plugin already
+   holds.
+7. **Binary RPC payloads.** `Uint8Array` payloads (new in 0.16.0) would let the
+   export/import flow and the public-key copy hand over real bytes instead of
+   strings, and would make a "download session log" action cheap.
+8. **Gallery metadata.** With the built-in plugin gallery in 0.16.0, richer
+   `paseo-plugin.json` metadata (category, longer description, screenshot
+   reference) is what a user sees while browsing; today the file carries only
+   `id`, `description`, `requirements` and `build`.
+9. **Concurrent plugin startup.** The daemon now launches plugins in parallel;
+   the console binds a loopback port with retry already, but the first-run
+   ordering (store open, vault state, endpoint start) is worth a deliberate
+   once-over under parallel start and a slow `pass` daemon.
+10. **A small maintenance item.** The plugin log shows Node 24 deprecation
+    warnings (`crypto.fips`, `fs.F_OK`) raised inside a bundled dependency, not
+    in this plugin's code; updating that dependency would keep the startup log
+    clean.
+

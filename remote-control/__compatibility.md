@@ -319,3 +319,23 @@ tool, session-open MCP re-derivation, the reload action, turn-aware
 dispatch and deep links; floor `>=0.14.0`). **luck-planner** is now the
 only plugin not re-checked since its own pass.
 
+- **Paseo 0.16.0 re-check (2026-11-16).** remote-control was the last plugin
+  verified only against 0.15.0. It uses no surface that 0.16.0 removed
+  (`agent.turn.after.timeline` is unused) and none of the changed handler
+  semantics bite its RPCs: all eight `server.handle` methods — four of them
+  synchronous — answer on 0.16.0. The dev pin moved `@getpaseo/plugin 0.13.0 →
+  0.16.0` (the release it is now typechecked and run against), the floor stayed
+  `>=0.11.0` because no 0.16.0-only API is in use, and a dependency-only change
+  moves the last digit ⇒ **remote-control 1.0.1**. Evidence: typecheck clean for
+  the plugin and the console against SDK 0.16.0, **20 suites / 223 tests**, and a
+  live isolated 0.16.0 daemon (scratch home, `127.0.0.1:6798`) where the plugin
+  installed, logged `[remote-control] plugin ready (version 1.0.1)`, served its
+  console with HTTP 200, answered `state` / `console-url` / `connections.list` /
+  `vault.lock` in 1–18 ms, and kept answering after `paseo plugin reload`
+  (port and token rotated). Not exercised: a real SSH/RDP/VNC launch and the
+  in-app panels rendering. Improvement recommendations from 0.16.0 (plugin
+  subscriptions instead of the console's SSE bridge, a token out of the query
+  string, `addSidebarView`, a composer item, plugin metadata stamps, badges,
+  binary payloads, gallery metadata) are recorded in
+  [`__doc.md`](./__doc.md#recommendations-for-improvement-recorded-not-implemented).
+

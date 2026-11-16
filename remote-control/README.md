@@ -32,6 +32,6 @@ See `__doc.md` for the technical design and `PLAN.md` for the roadmap.
 
 ## Compatibility
 
-Paseo **0.15.0 (2026-11-03)** verified, `requirements.paseo >=0.11.0`, SDK `@getpaseo/plugin 0.13.0` — compatible as-is; no deprecated API used.
+Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.11.0`, SDK `@getpaseo/plugin 0.16.0` — compatible as-is; no deprecated or removed API used, and every RPC (including the synchronous ones) answers on 0.16.0. Version **1.0.1** moves only the dependency pin.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
