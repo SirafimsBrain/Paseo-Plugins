@@ -3,6 +3,10 @@ import { RemoteControlPanel } from "./client/console-panel";
 import { RemoteControlSidebarItem } from "./client/console-sidebar-item";
 import { RemoteControlSettingsPanel } from "./client/console-settings-panel";
 import { RemoteControlScreen, SCREEN_ID } from "./client/console-screen";
+import { RemoteControlSidebarView } from "./client/sidebar-view";
+import { RemoteControlWorkspaceBadge } from "./client/workspace-badge";
+import { RemoteControlComposerItem } from "./client/composer-item";
+import { RemoteControlNewWorkspaceItem } from "./client/new-workspace-item";
 import { state, vaultLock } from "./shared/rpc";
 
 export default function contribute(client: PluginClientContext): () => void {
@@ -32,6 +36,39 @@ export default function contribute(client: PluginClientContext): () => void {
     id: "remote-control-console-row",
     title: "Remote Control",
     Component: RemoteControlSidebarItem,
+  });
+
+  // Stage 1.1.0 (Paseo 0.16.0): a sidebar view of its own, chosen per device in
+  // Settings → Sidebar, replacing the host's tree with connections and the
+  // live sessions of the active workspace.
+  client.addSidebarView({
+    id: "remote-control-sidebar-view",
+    title: "Remote Control",
+    description: "Connections and live remote sessions, with the console one press away.",
+    Component: RemoteControlSidebarView,
+  });
+
+  // Stage 1.1.0: `2 remote` on a workspace row while that workspace has live
+  // sessions. The item can be switched off from the sidebar's Show menu.
+  client.addWorkspaceRowBadgeItem({
+    id: "remote-control-workspace-badge",
+    title: "Remote sessions",
+    icon: "Terminal",
+    Component: RemoteControlWorkspaceBadge,
+  });
+
+  // Stage 1.1.0: "Connect to host" in the composer — insert the ssh line of a
+  // saved connection at the cursor.
+  client.addComposerItem({
+    id: "remote-control-composer-connect",
+    Component: RemoteControlComposerItem,
+  });
+
+  // Stage 1.1.0: remember which remote host a new workspace belongs to, in the
+  // workspace's own metadata.
+  client.addNewWorkspaceItem({
+    id: "remote-control-new-workspace",
+    Component: RemoteControlNewWorkspaceItem,
   });
 
   // Global entry points.

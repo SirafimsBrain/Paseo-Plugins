@@ -3,13 +3,27 @@ import { RDP_CHOICES, RDP_PAYLOAD_DEFAULTS } from "../../shared/rdp-fields";
 import { VNC_CHOICES, VNC_CLIENT_LABELS, VNC_PAYLOAD_DEFAULTS } from "../../shared/vnc-fields";
 
 const params = new URLSearchParams(window.location.search);
+/**
+ * Access token (stage 1.1.0). Opening the console with `?token=` makes the
+ * server set an HttpOnly session cookie and redirect to the same URL without
+ * it, so by the time this script runs the token is normally empty and every
+ * request below rides the cookie. The token is still honoured when present
+ * (a script or a bookmark that keeps it), which is what keeps the console
+ * usable against an older plugin build.
+ */
 let token = params.get("token") ?? "";
+
+/** Appends the token to a same-origin URL only when this page still has one. */
+function authorized(path: string): string {
+  if (token.length === 0) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+}
 // The opener (Paseo panel/screen) passes the workspace it opened the console
 // from; terminals created here become tabs of that workspace.
 const workspaceId = params.get("workspaceId") ?? "";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
-  const res = await fetch(`${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`, init);
+  const res = await fetch(authorized(path), { credentials: "same-origin", ...init });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`${res.status} ${text}`.trim());
@@ -1355,7 +1369,7 @@ function openExportButton(): HTMLButtonElement {
       ok.textContent = "Download";
       ok.addEventListener("click", async () => {
         try {
-          const res = await fetch(`/api/export?token=${encodeURIComponent(token)}`, {
+          const res = await fetch(authorized("/api/export"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ passphrase: passI.value }),
@@ -1684,7 +1698,7 @@ const VIEWS: Record<string, (m: HTMLElement) => void> = {
 // ---------- SSE + polling ----------
 function startLiveUpdates(): void {
   try {
-    const events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    const events = new EventSource(authorized("/api/events"));
     events.onopen = () => {
       state.live = true;
       if (state.view === "sessions") render();

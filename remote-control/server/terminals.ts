@@ -58,6 +58,12 @@ export interface TerminalServiceOptions {
   /** Base directory for per-terminal material (identity files, askpass helpers). */
   runDirBase?: string;
   now?: () => number;
+  /**
+   * Called when the set of terminals this plugin knows about changes (stage
+   * 1.1.0): open, kill, exit detected on the next list, dispose. The plugin
+   * entry point turns it into an activity snapshot.
+   */
+  onChange?: () => void;
 }
 
 interface TerminalMeta {
@@ -108,6 +114,7 @@ export class TerminalService {
   private readonly vault: import("./vault").VaultService | null;
   private readonly runDirBase: string;
   private readonly now: () => number;
+  private readonly onChange: (() => void) | null;
 
   constructor(options: TerminalServiceOptions) {
     this.paseo = options.paseo;
@@ -115,6 +122,40 @@ export class TerminalService {
     this.vault = options.vault ?? null;
     this.runDirBase = options.runDirBase ?? defaultRunDirBase();
     this.now = options.now ?? (() => Date.now());
+    this.onChange = options.onChange ?? null;
+  }
+
+  /** Wakes the activity feed; a broken listener must never break a launch. */
+  private notify(): void {
+    if (this.onChange === null) return;
+    try {
+      this.onChange();
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Terminals this plugin opened and that are still known to it (stage 1.1.0):
+   * the source of the live count in the panel, the badge and the activity
+   * snapshot. Liveness of the underlying PTY is the daemon's business — a
+   * scoped `list()` prunes what no longer exists.
+   */
+  liveTerminals(): TerminalInfo[] {
+    return [...this.meta.entries()]
+      .sort((a, b) => a[1].startedAt - b[1].startedAt)
+      .map(([id, meta]) =>
+        this.info(id, meta.workspaceId, "", meta.title),
+      );
+  }
+
+  /** Live SSH terminals, optionally only those of one workspace. */
+  liveSsh(workspaceId?: string | null): TerminalInfo[] {
+    return this.liveTerminals().filter(
+      (terminal) =>
+        terminal.kind === "ssh" &&
+        (workspaceId === undefined || workspaceId === null || terminal.workspaceId === workspaceId),
+    );
   }
 
   private api(): PaseoApi {
@@ -221,12 +262,15 @@ export class TerminalService {
     // directory and metadata with them on the next refresh. A scoped listing
     // only proves absence inside its own workspace, so other workspaces'
     // entries are left alone.
+    let pruned = false;
     for (const [id, meta] of [...this.meta]) {
       if (live.has(id)) continue;
       if (trimmed && meta.workspaceId !== trimmed) continue;
       if (meta.runDir) cleanupRunDir(meta.runDir);
       this.meta.delete(id);
+      pruned = true;
     }
+    if (pruned) this.notify();
 
     return entries.map((entry) => this.info(entry.id, entry.workspaceId, entry.cwd, entry.name));
   }
@@ -271,6 +315,7 @@ export class TerminalService {
 
   private remember(id: string, meta: Omit<TerminalMeta, "startedAt">): void {
     this.meta.set(id, { ...meta, startedAt: this.now() });
+    this.notify();
   }
 
   private forget(id: string): void {
@@ -278,6 +323,7 @@ export class TerminalService {
     if (!meta) return;
     if (meta.runDir) cleanupRunDir(meta.runDir);
     this.meta.delete(id);
+    this.notify();
   }
 
   private info(id: string, workspaceId: string, cwd: string, name: string): TerminalInfo {

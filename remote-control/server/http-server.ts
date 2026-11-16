@@ -225,6 +225,26 @@ export class ConsoleHttpServer {
       return;
     }
 
+    // Session cookie (stage 1.1.0): a tokenized page request trades the token
+    // for an HttpOnly cookie and redirects to the same URL without it, so the
+    // secret stops appearing in browser history, the Referer header and any
+    // proxy or access log that records query strings.
+    if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
+      const fromQuery = url.searchParams.get("token");
+      if (fromQuery !== null && this.tokenMatches(fromQuery)) {
+        const target = new URL(url.toString());
+        target.searchParams.delete("token");
+        res.writeHead(302, {
+          Location: `${target.pathname}${target.search}`,
+          "Set-Cookie": this.sessionCookie(),
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        });
+        res.end();
+        return;
+      }
+    }
+
     if (url.pathname.startsWith("/api/")) {
       if (!this.authorized(req, url)) {
         this.sendJson(res, 401, { error: "unauthorized" });
@@ -968,9 +988,23 @@ export class ConsoleHttpServer {
     });
   }
 
+  /** The cookie the tokenized page request installs (see `handleRequest`). */
+  private sessionCookie(): string {
+    return `rc_session=${this.token}; HttpOnly; SameSite=Strict; Path=/`;
+  }
+
   private authorized(req: http.IncomingMessage, url: URL): boolean {
     const fromQuery = url.searchParams.get("token");
     if (fromQuery !== null && this.tokenMatches(fromQuery)) return true;
+    const cookie = req.headers.cookie;
+    if (typeof cookie === "string") {
+      for (const part of cookie.split(";")) {
+        const separator = part.indexOf("=");
+        if (separator < 0) continue;
+        if (part.slice(0, separator).trim() !== "rc_session") continue;
+        if (this.tokenMatches(part.slice(separator + 1).trim())) return true;
+      }
+    }
     const header = req.headers.authorization;
     if (typeof header === "string") {
       const match = /^Bearer\s+(.+)$/i.exec(header.trim());

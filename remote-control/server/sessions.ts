@@ -39,6 +39,8 @@ export interface ExternalSessionInfo {
   kind: ExternalSessionProtocol;
   name: string;
   connectionId: string;
+  /** Workspace the console was opened from (stage 1.1.0); null when unknown. */
+  workspaceId: string | null;
   target: string;
   pid: number;
   binary: string;
@@ -56,6 +58,8 @@ export interface RegisterExternalSessionInput {
   pid: number;
   binary: string;
   runDir?: string | null;
+  /** Workspace the window was opened from, when the launcher knows it. */
+  workspaceId?: string | null;
 }
 
 export interface ExternalSessionRegistryOptions {
@@ -152,6 +156,7 @@ export class ExternalSessionRegistry {
       kind: input.protocol,
       name: input.connection.name,
       connectionId: input.connection.id,
+      workspaceId: input.workspaceId ?? null,
       target: `${input.connection.host}${input.connection.port ? `:${input.connection.port}` : ""}`,
       pid: input.pid,
       binary: input.binary,

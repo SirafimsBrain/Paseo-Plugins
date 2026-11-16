@@ -37,6 +37,8 @@ export interface ConsoleEndpointOptions {
 }
 
 const SETTLE_MS = 150;
+/** Pause between bind attempts on a pinned port (stage 1.1.0). */
+const RETRY_DELAY_MS = 200;
 
 export class ConsoleEndpoint {
   private queue: Promise<void> = Promise.resolve();
@@ -166,8 +168,27 @@ export class ConsoleEndpoint {
       this.options.onServerStarted?.(server);
       return server;
     };
+    // Stage 1.1.0: Paseo 0.16.0 starts configured plugins concurrently, so two
+    // processes can race for the same pinned port while the previous listener
+    // is still closing. A short bounded retry absorbs that window before the
+    // endpoint gives up and falls back to an ephemeral port.
+    const attemptWithRetry = async (targetPort: number): Promise<ConsoleHttpServer> => {
+      const attempts = targetPort === 0 ? 1 : 3;
+      let lastError: unknown = null;
+      for (let index = 0; index < attempts; index += 1) {
+        try {
+          return await attempt(targetPort);
+        } catch (cause) {
+          lastError = cause;
+          if (index + 1 < attempts) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          }
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    };
     try {
-      this.server = await attempt(port);
+      this.server = await attemptWithRetry(port);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       if (port === 0) {

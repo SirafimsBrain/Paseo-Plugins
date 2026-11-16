@@ -69,6 +69,45 @@ export const connectionsList = defineRpc({
   }),
 });
 
+// Per-workspace activity (stage 1.1.0): what the sidebar workspace row badge
+// shows. `sessions` counts the live remote sessions (ssh terminals this plugin
+// opened plus running RDP/VNC windows) that belong to this workspace, and the
+// connection name is the newest one, so the badge can read "2 remote".
+export const workspaceActivity = defineRpc({
+  name: "remote-control.workspace.activity",
+  input: z.object({ workspaceId: z.string().min(1) }),
+  output: z.object({
+    sessions: z.number().int().nonnegative(),
+    connectionName: z.string().nullable(),
+    host: z.string().nullable(),
+  }),
+});
+
+// Binary export (stage 1.1.0, Paseo 0.16.0 binary RPC payloads): writes the
+// same bundle /api/export serves to a file on the daemon host and returns its
+// bytes as `Uint8Array` — no base64 inflation for a backup that can be tens of
+// megabytes once secrets are embedded. The protocol allows a byte payload only
+// as the *whole* value of an RPC, so the file it wrote is reported by
+// `exportStatus` instead of riding along in an object.
+export const exportBundle = defineRpc({
+  name: "remote-control.export",
+  input: z.object({ passphrase: z.string().optional() }),
+  output: z.instanceof(Uint8Array),
+});
+
+/** Where the last `remote-control.export` landed (null = nothing exported yet). */
+export const exportStatus = defineRpc({
+  name: "remote-control.export.status",
+  input: z.object({}),
+  output: z
+    .object({
+      path: z.string(),
+      bytes: z.number().int().nonnegative(),
+      at: z.string(),
+    })
+    .nullable(),
+});
+
 // Launch from the sidebar panel: ssh opens a Paseo terminal tab, rdp/vnc
 // open their own desktop window on the daemon machine.
 export const connectionLaunch = defineRpc({

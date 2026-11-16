@@ -157,9 +157,13 @@ var VNC_PAYLOAD_DEFAULTS = {
 // console/src/main.ts
 var params = new URLSearchParams(window.location.search);
 var token = params.get("token") ?? "";
+function authorized(path) {
+  if (token.length === 0) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+}
 var workspaceId = params.get("workspaceId") ?? "";
 async function api(path, init) {
-  const res = await fetch(`${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`, init);
+  const res = await fetch(authorized(path), { credentials: "same-origin", ...init });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`${res.status} ${text}`.trim());
@@ -1275,7 +1279,7 @@ function openExportButton() {
       ok.textContent = "Download";
       ok.addEventListener("click", async () => {
         try {
-          const res = await fetch(`/api/export?token=${encodeURIComponent(token)}`, {
+          const res = await fetch(authorized("/api/export"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ passphrase: passI.value })
@@ -1571,7 +1575,7 @@ var VIEWS = {
 };
 function startLiveUpdates() {
   try {
-    const events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    const events = new EventSource(authorized("/api/events"));
     events.onopen = () => {
       state.live = true;
       if (state.view === "sessions") render();

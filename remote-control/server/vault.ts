@@ -21,6 +21,12 @@ export interface VaultOptions {
   /** Auto-lock after this many ms of inactivity; 0 disables. */
   autoLockMs?: number;
   log?: (message: string) => void;
+  /**
+   * Called whenever the lock state changes: setup, unlock, lock (including the
+   * auto-lock timer). The plugin entry point turns it into an activity push so
+   * every open panel stops showing a stale "unlocked" (stage 1.1.0).
+   */
+  onChange?: () => void;
 }
 
 export interface VaultStatus {
@@ -82,6 +88,7 @@ export class VaultService {
   private autoLockTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly now: () => number;
   private readonly log: (m: string) => void;
+  private readonly onChange: (() => void) | null;
 
   constructor(options: VaultOptions = {}) {
     const home = options.paseoHome ?? process.env.PASEO_HOME ?? path.join(process.env.HOME ?? "", ".paseo");
@@ -90,6 +97,7 @@ export class VaultService {
     this.autoLockMs = options.autoLockMs ?? 0;
     this.now = options.now ?? (() => Date.now());
     this.log = options.log ?? (() => {});
+    this.onChange = options.onChange ?? null;
     fs.mkdirSync(this.gnupgHome, { recursive: true, mode: 0o700 });
     try {
       fs.chmodSync(this.gnupgHome, 0o700);
@@ -249,6 +257,7 @@ export class VaultService {
 
     // Create the probe secret so unlock() can verify the password.
     await this.writeProbe(masterPassword);
+    this.notify();
     return { generated };
   }
 
@@ -299,6 +308,7 @@ export class VaultService {
       // No probe: accept any password (legacy). Cache it.
       this.cachePassphrase(masterPassword);
       this.touch();
+      this.notify();
       return { ok: true };
     }
     const result = await run(
@@ -312,7 +322,18 @@ export class VaultService {
     }
     this.cachePassphrase(masterPassword);
     this.touch();
+    this.notify();
     return { ok: true };
+  }
+
+  /** Wakes the activity feed; a broken listener must never break a lock. */
+  private notify(): void {
+    if (this.onChange === null) return;
+    try {
+      this.onChange();
+    } catch {
+      // ignore
+    }
   }
 
   private cachePassphrase(password: string): void {
@@ -334,6 +355,7 @@ export class VaultService {
     }
     // Kill the gpg-agent for this GNUPGHOME.
     void run("gpgconf", ["--kill", "gpg-agent"], this.env());
+    this.notify();
   }
 
   private requireUnlocked(): Buffer {

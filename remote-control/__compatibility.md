@@ -339,3 +339,27 @@ only plugin not re-checked since its own pass.
   binary payloads, gallery metadata) are recorded in
   [`__doc.md`](./__doc.md#recommendations-for-improvement-recorded-not-implemented).
 
+- **The 0.16.0 recommendations shipped (2026-11-16).** remote-control went from
+  "verified compatible" to using the release: `defineSubscription` +
+  `useSubscription` for a live activity snapshot (terminals, RDP/VNC windows,
+  vault, console URL) replacing the panel's `state` poll; `addSidebarView`,
+  `addWorkspaceRowBadgeItem`, `addComposerItem` and `addNewWorkspaceItem` for the
+  new client surfaces; plugin `metadata` on workspaces (a launch stamp, and the
+  same key from the New-workspace item); `Uint8Array` RPC output for the export
+  bundle; `name`/`icon`/`description` in `paseo-plugin.json` for the built-in
+  gallery. The console token moved out of the URL into an `HttpOnly`
+  `SameSite=Strict` session cookie (query and `Bearer` still accepted). A pinned
+  console port is retried three times, 200 ms apart, before the ephemeral
+  fallback, which covers 0.16.0 launching plugins concurrently. Because those
+  contributions register on every client load, `requirements.paseo` moved
+  `>=0.11.0 → >=0.16.0`, and new functionality moves the second digit ⇒
+  **remote-control 1.1.1**. The startup `DEP0093`/`DEP0176` warnings were traced
+  to the host runtime, not this plugin (evidence in [`__doc.md`](./__doc.md)
+  §1.1.10). Typecheck clean, **21 suites / 232 tests**, plus a live isolated
+  0.16.0 daemon: manifest with gallery fields accepted, `plugin ready (version
+  1.1.1)`, cookie trade and cookie-authenticated `/api/state`,
+  `state` / `connections.list` / `workspace.activity` answered, the export
+  returned a binary payload with its file written `0600`, and the activity
+  method registered as a subscription (its fan-out is unit-tested; no real
+  plugin client received it in the pilot).
+

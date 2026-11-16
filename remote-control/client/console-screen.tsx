@@ -6,7 +6,8 @@ import {
   useRpc,
 } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { consoleUrl, state, vaultLock, vaultSetup, vaultUnlock } from "../shared/rpc";
+import { consoleUrl, vaultLock, vaultSetup, vaultUnlock } from "../shared/rpc";
+import { useRemoteActivity } from "./use-activity";
 import { openConsoleUrl } from "./open-console";
 
 const SCREEN_ID = "remote-control";
@@ -19,36 +20,21 @@ export function RemoteControlScreen(props: PluginScreenProps) {
   // open the screen with `action=new`; the console then starts on the
   // connection form instead of the Sessions list.
   const action = props.params?.action ?? "";
-  const stateRpc = useRpc(state);
+  // Stage 1.1.0: listening state, the console URL and the vault state arrive
+  // through `remote-control.activity`; the screen no longer polls `state`.
+  const activity = useRemoteActivity();
   const consoleUrlRpc = useRpc(consoleUrl);
   const vaultSetupRpc = useRpc(vaultSetup);
   const vaultUnlockRpc = useRpc(vaultUnlock);
   const vaultLockRpc = useRpc(vaultLock);
   const paseo = usePaseo();
 
-  const [listening, setListening] = useState(false);
-  const [url, setUrl] = useState<string | null>(null);
-  const [vault, setVault] = useState<{ initialized: boolean; unlocked: boolean; entries: number } | null>(null);
+  const listening = activity?.listening ?? false;
+  const url = activity?.consoleUrl ?? null;
+  const vault = activity?.vault ?? null;
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const result = await stateRpc({});
-      setListening(result.listening);
-      setUrl(result.consoleUrl);
-      setVault(result.vault);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, [stateRpc]);
-
-  useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), 3000);
-    return () => clearInterval(timer);
-  }, [refresh]);
 
   const open = useCallback(async () => {
     setMessage(null);
@@ -108,11 +94,10 @@ export function RemoteControlScreen(props: PluginScreenProps) {
       if (!result.ok) setError("unlock failed");
       else setMessage(vault?.initialized ? "unlocked" : "vault set up and unlocked");
       setPassword("");
-      await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [password, vault, refresh, vaultSetupRpc, vaultUnlockRpc]);
+  }, [password, vault, vaultSetupRpc, vaultUnlockRpc]);
 
   const doLock = useCallback(async () => {
     setError(null);
@@ -120,11 +105,10 @@ export function RemoteControlScreen(props: PluginScreenProps) {
     try {
       await vaultLockRpc({});
       setMessage("locked");
-      await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [refresh, vaultLockRpc]);
+  }, [vaultLockRpc]);
 
   const fg = theme.colors.foreground;
   const muted = theme.colors.foregroundMuted;

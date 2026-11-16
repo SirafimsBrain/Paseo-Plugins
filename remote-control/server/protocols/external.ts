@@ -50,6 +50,12 @@ export interface ExternalLaunchOptions {
   vncBinary?: string | null;
   /** Session registry: RDP/VNC windows become killable "Sessions" rows. */
   sessions?: ExternalSessionRegistry | null;
+  /**
+   * Workspace the console was opened from (stage 1.1.0): recorded with the
+   * window so the sidebar badge can count the remote sessions of one workspace
+   * instead of every window on the host.
+   */
+  workspaceId?: string | null;
   log?: (message: string) => void;
 }
 
@@ -231,7 +237,13 @@ export async function launchExternalWindow(
       },
       log,
       options.sessions,
-      (childPid) => ({ connection, protocol: "rdp", pid: childPid, binary: path.basename(binary) }),
+      (childPid) => ({
+        connection,
+        protocol: "rdp",
+        pid: childPid,
+        binary: path.basename(binary),
+        workspaceId: options.workspaceId ?? null,
+      }),
     );
     return { protocol: "rdp", binary: path.basename(binary), pid, ...(session ? { sessionId: session.id } : {}) };
   }
@@ -258,6 +270,7 @@ export async function launchExternalWindow(
     (childPid) => ({
       connection,
       protocol: "vnc",
+      workspaceId: options.workspaceId ?? null,
       pid: childPid,
       binary,
       runDir: prepared.runDir,

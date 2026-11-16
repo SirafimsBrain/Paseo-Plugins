@@ -46,7 +46,7 @@ paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:obsidian-bri
 | [memory-flash](./memory-flash/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
 | [bunny-search](./bunny-search/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
 | [luck-planner](./luck-planner/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
-| [remote-control](./remote-control/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the console web app |
+| [remote-control](./remote-control/README.md) | 1.1.1 | 0.16.0 (2026-11-16) | `>=0.16.0` | `@getpaseo/plugin 0.16.0` (dev pin) | Compatible; 1.1.1 adopts 0.16.0 subscriptions, sidebar views, badges, composer items, workspace metadata and binary RPC payloads | [__compatibility.md](./remote-control/__compatibility.md) |
 | [obsidian-bridge](./obsidian-bridge/README.md) | `npm ci`, `npm run bundle` | `esbuild` for the standalone MCP server bundle |
 
 The four plugins with a build step need npm-registry access on the host during install and update; the other two have no external dependency at all.

@@ -1445,7 +1445,7 @@ behaviour changes moves the last digit ⇒ **1.0.0 → 1.0.1**.
   connection and the `pass` vault to be initialised), and the UI panels inside
   the app — the client bundle was only typechecked, not rendered.
 
-### Recommendations for improvement (recorded, not implemented)
+### Recommendations for improvement (implemented as 1.1.1 — see the next section)
 Ordered by value to a user of the plugin.
 
 1. **Move the console's live updates onto 0.16.0 plugin subscriptions.** The
@@ -1493,4 +1493,141 @@ Ordered by value to a user of the plugin.
     warnings (`crypto.fips`, `fs.F_OK`) raised inside a bundled dependency, not
     in this plugin's code; updating that dependency would keep the startup log
     clean.
+
+## Stage 1.1.0 — the 0.16.0 recommendations implemented (2026-11-16)
+
+All ten items, in the order they were recorded. They are new functionality, so
+the second digit moves: **1.0.1 → 1.1.1** (shipped as **1.1.1**, the tag carries
+the full number). The floor moves with the API actually used,
+`>=0.11.0 → >=0.16.0`: the sidebar view, the workspace badge, the composer item,
+the New-workspace item and the activity subscription are registered on every
+client load, so a 0.15 host would throw on the missing `client` methods instead
+of degrading.
+
+### 1.1.1 Activity subscriptions instead of polling (`remote-control.activity`)
+`shared/activity.ts` defines the contract (`defineSubscription`, input `{}`,
+event = one snapshot: `{ at, reason, listening, consoleUrl, vault, terminals,
+sessions }`); `server/activity.ts` is the in-process hub
+(`setActivityProvider`, `activitySnapshot`, `publishActivity`,
+`subscribeActivity`, `clearActivity`). The plugin entry point owns the snapshot
+builder and wires every producer that already knows when state moved: the
+terminal service (`onChange` on open/kill/exit-detected/dispose), the external
+session registry, the vault (setup, unlock, lock including the auto-lock timer)
+and the console endpoint. `remote-control.activity` pushes the snapshot on
+subscribe and on every change; `client/use-activity.ts` wraps
+`useSubscription`, and the panel and the screen read `listening`, the console
+URL and the vault state from it. The panel's `state` poll is gone; the
+connection list (edited in the console) is still re-read on mount, on
+`remote-control.activity`-driven mounts and every 10 s.
+
+### 1.1.2 The console token leaves the URL
+`GET /` with a valid `?token=` now answers `302` to the same path and query
+*without* the token, with `Set-Cookie: rc_session=<token>; HttpOnly;
+SameSite=Strict; Path=/` and `Referrer-Policy: no-referrer`. `authorized()`
+accepts the cookie as a third credential (query and `Authorization: Bearer`
+still work, which keeps scripts and older browsers alive), and
+`console/src/main.ts` only appends the token to a request when the page still
+has one — on a normal visit it has none, so `/api/*` calls and the `/api/events`
+SSE stream ride the cookie. The token stops appearing in browser history, the
+`Referer` header and any access log that records query strings.
+
+### 1.1.3 A sidebar view (`addSidebarView`)
+`client/sidebar-view.tsx` registers as `remote-control-sidebar-view` and is
+chosen per device in Settings → Sidebar. It lists the live sessions of the
+active workspace, the connection tree (groups nested by depth) with a launch
+button per row, "Open console" and "Reload connections". Launching needs a
+workspace — the view says so instead of guessing when none is active.
+
+### 1.1.4 A composer item (`addComposerItem`)
+`client/composer-item.tsx` offers one `Action` per ssh connection (up to three):
+it inserts `ssh -p <port> user@host` at the cursor, so an agent prompt can say
+where to run something. RDP/VNC have no shell line and are not offered. The
+shared helpers in `client/connection-tree.ts` (`connectionTarget`,
+`connectionShellLine`, `orderedGroups`) keep the panel, the view and the item
+rendering the same shapes.
+
+### 1.1.5 Workspace metadata stamp
+`remote-control.connections.launch` writes
+`remote-control: { connectionId, connectionName, protocol, host, at }` onto the
+workspace through `workspaces.ref(id).setMetadata()`, for both the ssh terminal
+path and the RDP/VNC window path. The stamp is best effort (a host that refuses
+it does not fail the launch) and it is what the badge, the New-workspace item
+and any other plugin read.
+
+### 1.1.6 Workspace badge and New-workspace item
+`client/workspace-badge.tsx` (`addWorkspaceRowBadgeItem`) renders
+`N remote` with `WorkspaceRowBadge` while a workspace has live sessions, from
+`remote-control.workspace.activity` (ssh terminals of that workspace plus
+running windows launched from it). The RDP/VNC registry gained a `workspaceId`
+so that count can be per workspace; the activity schema carries it too.
+`client/new-workspace-item.tsx` (`addNewWorkspaceItem`) lets the user pick the
+connection a workspace being created belongs to and writes the same metadata
+key through `newWorkspace.setMetadata()`; nothing is created there — the host's
+own Create button still does that.
+
+### 1.1.7 Binary export
+`remote-control.export({ passphrase? })` builds the same bundle `/api/export`
+serves (via `buildExportBundle`), writes it to
+`$PASEO_HOME/plugins/remote-control/exports/<filename>` with mode `0600` and
+returns the bundle as a `Uint8Array` — the 0.16.0 binary RPC payload, so a
+backup with embedded secrets never has to travel as a base64 string. The
+protocol allows a byte payload only as the *whole* value of an RPC (a live run
+rejected the first shape, which wrapped the bytes in an object), so the file it
+wrote is reported by a second call, `remote-control.export.status`
+(`{ path, bytes, at } | null`). The workspace panel exposes the pair as
+"Export bundle to host" and shows where the file landed and its size.
+
+### 1.1.8 Gallery metadata
+`paseo-plugin.json` gained `name`, an `icon` (`assets/icon.png`, a 128×128 PNG
+generated for this plugin — the schema accepts a relative PNG or an https URL)
+and a description that names what 0.16.0 added, which is what the built-in
+plugin gallery shows while browsing. `assets/` was added to the package `files`
+list so the icon ships with the plugin. `media` (screenshots) was not added:
+there is no screenshot of this plugin in the repository to point at.
+
+### 1.1.9 A deliberate look at concurrent plugin startup
+Paseo 0.16.0 launches configured plugins in parallel. The endpoint now retries a
+pinned-port bind up to three times, 200 ms apart, before falling back to an
+ephemeral port (`server/http-lifecycle.ts`), which absorbs the window where a
+reloading plugin is still closing its old listener. The first-run ordering was
+re-checked and is already safe: the store opens and the vault loads before the
+endpoint starts, and the activity provider is installed right after `sync()`,
+so a push can never run before the snapshot builder exists.
+
+### 1.1.10 The startup deprecation warnings are not this plugin's
+`DEP0093` (`crypto.fips`) and `DEP0176` (`fs.F_OK`) appear in the plugin's log
+at load, but nothing in this plugin or its dependencies references either: the
+plugin imports no `open`, `crypto.fips` has no match in `node_modules`, and the
+only `fs.F_OK` hit is the dev-only `open@7.4.2` that react-native's dev
+middleware pulls in (`npm ls open`, not reachable from the plugin's entries).
+The warnings come from the host runtime that loads the plugin, so there is
+nothing to change here; the recorded recommendation is closed as
+not-this-codebase.
+
+### 1.1.11 Tests and verification
+`tests/activity.test.ts` (hub without a provider, fan-out with the reason,
+unsubscribe, a throwing provider and a throwing subscriber, clearing, contract)
+and four new cases in `tests/http-server.test.ts` (cookie trade and redirect,
+cookie accepted beside another cookie, wrong cookie rejected, wrong query token
+does not redirect). `npm run typecheck` is clean for the plugin and `console/`;
+`npm test` reports **21 suites / 230 tests**.
+
+Live check on an isolated 0.16.0 daemon (scratch home, `127.0.0.1:6798`):
+`paseo plugin ls` reports the new manifest fields (`name: "Remote Control"`,
+`icon: "assets/icon.png"`, the longer description) and the plugin reloaded to
+`plugin ready (version 1.1.1)`; `GET /?token=…&workspaceId=w1` answered `302`
+with `Location: /?workspaceId=w1` and the `rc_session` `HttpOnly;
+SameSite=Strict` cookie, the cookie authenticated `/api/state` (200) while the
+same request without it was 401, and `remote-control.state`,
+`remote-control.connections.list` and `remote-control.workspace.activity`
+answered over `invokePluginRpc`. `remote-control.export` returned the bundle as
+a binary payload (164 bytes) with the file written `0600`, and
+`remote-control.export.status` reported its path. `remote-control.activity` is
+registered as a subscription, not an RPC (invoking it over `invokePluginRpc`
+answers "does not contribute RPC remote-control.activity"); its snapshot
+fan-out is covered by `tests/activity.test.ts`. Not exercised live: a
+subscription as a real plugin client receives it, an actual SSH/RDP/VNC launch
+(needs a configured connection and an initialised `pass` vault), and the in-app
+rendering of the sidebar view, the badge, the composer item and the
+New-workspace item — those were typechecked, not rendered.
 

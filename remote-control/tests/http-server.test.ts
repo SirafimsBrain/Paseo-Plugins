@@ -40,4 +40,32 @@ describe("console http server", () => {
     const res = await fetch(`${base}/api/state?token=${TOKEN}`);
     expect(res.status).toBe(200);
   });
+
+  // Stage 1.1.0: the token is traded for an HttpOnly cookie on the first page
+  // request and dropped from the URL, so it stops living in browser history.
+  it("trades the page token for a session cookie", async () => {
+    const res = await fetch(`${base}/?token=${TOKEN}&workspaceId=w1`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/?workspaceId=w1");
+    const cookie = res.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain(`rc_session=${TOKEN}`);
+    expect(cookie.toLowerCase()).toContain("httponly");
+    expect(cookie.toLowerCase()).toContain("samesite=strict");
+  });
+
+  it("accepts the session cookie on api calls", async () => {
+    const res = await fetch(`${base}/api/state`, {
+      headers: { cookie: `other=1; rc_session=${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a wrong cookie and does not redirect a wrong token", async () => {
+    const withCookie = await fetch(`${base}/api/state`, {
+      headers: { cookie: `rc_session=nope` },
+    });
+    expect(withCookie.status).toBe(401);
+    const page = await fetch(`${base}/?token=nope`, { redirect: "manual" });
+    expect(page.status).not.toBe(302);
+  });
 });

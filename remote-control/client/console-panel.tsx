@@ -5,76 +5,39 @@ import { openExternalUrl } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { openConsoleUrl } from "./open-console";
 import {
+  connectionTarget,
+  orderedGroups,
+  type ConnectionRow,
+  type GroupRow,
+} from "./connection-tree";
+import { useRemoteActivity } from "./use-activity";
+import {
   consoleUrl,
   connectionLaunch,
   connectionsList,
-  state,
+  exportBundle,
+  exportStatus,
   vaultSetup,
   vaultUnlock,
 } from "../shared/rpc";
 
-interface GroupRow {
-  id: string;
-  name: string;
-  parentId: string | null;
-}
-
-interface ConnectionRow {
-  id: string;
-  groupId: string | null;
-  name: string;
-  protocol: "ssh" | "rdp" | "vnc";
-  host: string;
-  port: number | null;
-  username: string;
-  hasPassword: boolean;
-}
-
-interface VaultState {
-  initialized: boolean;
-  unlocked: boolean;
-  entries: number;
-}
-
-/** Groups in tree order with their nesting depth (orphans last, at depth 0). */
-function orderedGroups(groups: GroupRow[]): Array<{ group: GroupRow; depth: number }> {
-  const children = new Map<string | null, GroupRow[]>();
-  for (const group of groups) {
-    const key = group.parentId ?? null;
-    const list = children.get(key) ?? [];
-    list.push(group);
-    children.set(key, list);
-  }
-  const out: Array<{ group: GroupRow; depth: number }> = [];
-  const seen = new Set<string>();
-  const walk = (parentId: string | null, depth: number): void => {
-    for (const group of children.get(parentId) ?? []) {
-      if (seen.has(group.id)) continue;
-      seen.add(group.id);
-      out.push({ group, depth });
-      walk(group.id, depth + 1);
-    }
-  };
-  walk(null, 0);
-  for (const group of groups) {
-    if (!seen.has(group.id)) out.push({ group, depth: 0 });
-  }
-  return out;
-}
-
 export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
   const { theme, workspaceId } = props;
   const projectRootPath = useWorkspace(workspaceId, (workspace) => workspace.projectRootPath);
-  const stateRpc = useRpc(state);
+  const activity = useRemoteActivity();
   const consoleUrlRpc = useRpc(consoleUrl);
+  const exportRpc = useRpc(exportBundle);
+  const exportStatusRpc = useRpc(exportStatus);
   const connectionsRpc = useRpc(connectionsList);
   const launchRpc = useRpc(connectionLaunch);
   const vaultSetupRpc = useRpc(vaultSetup);
   const vaultUnlockRpc = useRpc(vaultUnlock);
   const paseo = usePaseo();
 
-  const [listening, setListening] = useState(false);
-  const [vault, setVault] = useState<VaultState | null>(null);
+  // Stage 1.1.0: `listening` and the vault state come from the activity
+  // subscription instead of a 3-second `state` poll; only the connection list
+  // (edited in the console) is still read here.
+  const [bundle, setBundle] = useState<{ path: string; bytes: number } | null>(null);
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [masterPassword, setMasterPassword] = useState("");
@@ -85,26 +48,47 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await stateRpc({});
-      setListening(result.listening);
-      setVault(result.vault);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-    try {
       const list = await connectionsRpc({});
       setGroups(list.groups);
       setConnections(list.connections);
     } catch {
       // The daemon may be reconnecting; the next tick retries.
     }
-  }, [stateRpc, connectionsRpc]);
+  }, [connectionsRpc]);
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 3000);
+    const timer = setInterval(() => void refresh(), 10_000);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  const listening = activity?.listening ?? false;
+  const vault = activity?.vault ?? null;
+  const sessions = (activity?.terminals ?? [])
+    .filter((terminal) => terminal.kind === "ssh" && terminal.workspaceId === workspaceId)
+    .length +
+    (activity?.sessions ?? []).filter(
+      (session) => session.state === "running" && session.workspaceId === workspaceId,
+    ).length;
+
+  // Binary export (stage 1.1.0): the daemon writes the bundle and hands back
+  // its bytes as `Uint8Array`, so the panel only shows where it landed.
+  const exportToFile = useCallback(async () => {
+    setError(null);
+    setMessage(null);
+    try {
+      // The bytes are the RPC's whole value (a byte payload cannot ride inside
+      // an object); the file they were written to is reported separately.
+      const bytes = await exportRpc({});
+      const status = await exportStatusRpc({});
+      setBundle({
+        path: status?.path ?? "(unknown)",
+        bytes: status?.bytes ?? bytes.byteLength,
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [exportRpc, exportStatusRpc]);
 
   const open = useCallback(async () => {
     setMessage(null);
@@ -196,10 +180,7 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
           {connection.hasPassword ? " 🔒" : ""}
         </Text>
         <Text style={{ color: muted, fontSize: 11 }} numberOfLines={1}>
-          {connection.protocol.toUpperCase()} ·{" "}
-          {connection.username ? `${connection.username}@` : ""}
-          {connection.host}
-          {connection.port ? `:${connection.port}` : ""}
+          {connectionTarget(connection)}
         </Text>
       </View>
       <Pressable
@@ -226,14 +207,28 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={{ color: fg, fontSize: 13, fontWeight: "600" }}>Remote Control</Text>
       <Text style={{ color: muted, fontSize: 12 }}>
-        Console: {listening ? "listening" : "stopped"} · storage: {storageLabel}
+        Console: {listening ? "listening" : "stopped"} · storage: {storageLabel} · remote
+        sessions here: {sessions}
       </Text>
       <Text style={{ color: muted, fontSize: 12 }}>Project: {projectRootPath ?? "(none)"}</Text>
       {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
       {message ? <Text style={{ color: theme.colors.statusSuccess, fontSize: 12 }}>{message}</Text> : null}
-      <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>
-        <Text style={{ color: accent, fontSize: 12 }}>Open console</Text>
-      </Pressable>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable onPress={open} style={[styles.button, { borderColor: accent }]}>
+          <Text style={{ color: accent, fontSize: 12 }}>Open console</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => void exportToFile()}
+          style={[styles.button, { borderColor: theme.colors.border }]}
+        >
+          <Text style={{ color: muted, fontSize: 12 }}>Export bundle to host</Text>
+        </Pressable>
+      </View>
+      {bundle ? (
+        <Text style={{ color: muted, fontSize: 11 }} numberOfLines={2}>
+          Bundle written: {bundle.path} ({bundle.bytes} bytes)
+        </Text>
+      ) : null}
 
       {needsSetup ? (
         <View style={styles.vaultForm}>

@@ -30,8 +30,45 @@ Requires a Paseo daemon with workspace terminals (>= 0.7.3) and Linux for the sh
 
 See `__doc.md` for the technical design and `PLAN.md` for the roadmap.
 
+## Version 1.1.0 — the Paseo 0.16.0 recommendations (2026-11-16)
+The ten improvements recorded after the compatibility pass, built on the 0.16.0
+surface:
+
+- **Live activity** — a `remote-control.activity` subscription pushes one
+  snapshot (terminals, RDP/VNC windows, vault state, console URL), so the panel
+  and the screen stop polling `state` and a lock or a window launch shows up
+  everywhere at once.
+- **The console token leaves the URL** — `GET /?token=…` answers `302` with an
+  `HttpOnly; SameSite=Strict` session cookie and the token is dropped from the
+  address, so it stops living in browser history and access logs.
+- **A sidebar view** (`addSidebarView`) — connections and the active
+  workspace's live sessions instead of the host's tree, chosen per device.
+- **"Connect to host" in the composer** (`addComposerItem`) — inserts
+  `ssh -p <port> user@host` for a saved connection at the cursor.
+- **Workspace memory** — a launch stamps `remote-control: { connectionId,
+  connectionName, protocol, host, at }` onto the workspace; the New-workspace
+  item writes the same key while a workspace is being created.
+- **`N remote` badge** (`addWorkspaceRowBadgeItem`) on workspace rows with live
+  sessions, from `remote-control.workspace.activity`.
+- **Binary export** (`remote-control.export`) — writes the backup bundle to the
+  daemon host, returns it as `Uint8Array` and reports the file through
+  `remote-control.export.status`; the panel has the button.
+- **Gallery metadata** — `name`, an icon PNG and a description the built-in
+  plugin gallery can show.
+- **Concurrent startup** — a pinned console port is retried briefly before the
+  ephemeral fallback (0.16.0 starts plugins in parallel).
+
+`requirements.paseo` moved to `>=0.16.0` (the sidebar view, badge, composer item
+and subscription are registered on every client load). The Node deprecation
+warnings in the plugin log were traced to the host runtime, not this plugin.
+
+**Verification:** typecheck clean (plugin + `console/`), vitest **21 suites /
+232 tests**, and a live isolated 0.16.0 daemon where the gallery fields showed
+up in `paseo plugin ls`, the cookie trade and cookie-authenticated `/api/state`
+worked, and the new RPCs (including the binary export and its status) answered.
+
 ## Compatibility
 
-Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.11.0`, SDK `@getpaseo/plugin 0.16.0` — compatible as-is; no deprecated or removed API used, and every RPC (including the synchronous ones) answers on 0.16.0. Version **1.0.1** moves only the dependency pin.
+Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin 0.16.0` — compatible, and 1.1.1 adopts the release's plugin subscriptions, binary RPC payloads, sidebar views, composer items, New-workspace items, workspace badges and agent/workspace metadata. Version **1.1.1**.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
