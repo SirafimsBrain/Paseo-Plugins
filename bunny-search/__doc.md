@@ -904,3 +904,124 @@ annotated tag `bunny-search@0.6.3`.
 `bunny-search@0.6.4`).
 The same guard ships in memory-flash 0.11.4 (§19 there) and
 memory-flash-client 0.5.2 (§18 there), which have the same failure mode.
+
+## 18. Paseo 0.16.0 — compatibility pass (2026-11-16)
+
+Verified against the **stable 0.16.0** release. **No code change was needed and
+no deprecated API exists in this plugin.** What moved is the SDK pin
+(`^0.15.0` → `^0.16.0`, lockfile refreshed) and the documentation, so the
+plugin takes a patch release **0.6.5** (tag `bunny-search@0.6.5`);
+`requirements.paseo` stays `>=0.15.0` because no 0.16.0 API is adopted.
+
+### 18.1 The SDK diff, as it reaches this plugin
+
+`@getpaseo/plugin@0.15.4` and `@0.16.0` were unpacked and diffed. The plugin's
+surface is untouched:
+
+* **The one breaking change — `agent.turn.after.timeline` removed (#9573)** —
+  cannot reach a plugin with no turn hook. This plugin registers
+  `agent.create.before` and `agent.open.before` only.
+* **Hook payloads gained `metadata` and `background`** (`PluginHookAgent`,
+  `PluginHookWorkspace`, `PluginSessionOpenRequest`, and the
+  `agent.create.before` payload). Neither hook body reads them; `readSavedMcpServers`,
+  the label gate and the provider gate work from `agentId`, `labels` and
+  `provider` exactly as before.
+* **`agent.open.before` may now return a partial result** — `PluginHookRequestResults`
+  is `Omit<PluginSessionOpenRequest, "metadata" | "background"> & { background?; metadata? }`.
+  The hook returns `{ ...request, tools, mcpServers }`, which still type-checks
+  against that type (verified by `tsc -b`, not assumed).
+* **`SettingsDefinition.scope` widened to `"host" | "device"`.** Additive; the
+  plugin keeps `scope: "host"`, because its values configure the daemon host that
+  spawns the MCP server, not the device showing the screen.
+* **Client: additions only** — `useSubscription`, composer controls
+  (`Toggle`/`Select`/`Action`/`Combobox`), New-workspace items, reference API,
+  sidebar views, workspace row badges, `useProject`/`useTerminals`. **No new
+  `@deprecated` mark**, and every symbol this plugin uses (`addScreen`,
+  `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem`,
+  `PluginScreenProps`, `useRpc`, `useSettings`, `useTabState`, `SidebarRow`,
+  `SettingsSection`/`SettingsSelect`/`SettingsSwitch`/`SettingsAction`) is
+  unchanged.
+
+### 18.2 The OpenCode shared-service guard is still needed
+
+0.6.3/0.6.4 withhold the MCP server on the `opencode` provider when a shared
+OpenCode v2 service is discoverable, because Paseo's #7435 refuses any agent
+whose config carries custom MCP servers on such a service. That rule is
+**unchanged in 0.16.0** — read out of the installed `app.asar`, not assumed:
+
+```js
+export function requiresDedicatedV2Server(config, launch) {
+    if (Object.keys(config.mcpServers ?? {}).length > 0) return true;
+    return Object.keys(launch?.env ?? {}).some((key) => !V2_SESSION_ENV_KEYS.has(key));
+}
+// service lease, shared/discovered selection:
+if (input.env || input.dedicated || processOverrides.length) {
+    throw new Error(`Custom OpenCode MCP servers or process environment require an isolated server
+        and cannot be used with a shared OpenCode service…`);
+}
+```
+
+So the detection in `server/opencode-service.ts` (explicit
+`PASEO_OPENCODE_SERVER_URL`, then `<XDG_STATE_HOME>/opencode/service.json` with a
+compatible 2.x version, a local host and a live pid) still reproduces the host's
+own selection rule and must stay.
+
+**One 0.16.0 fix improves the degraded path:** #9426 — *“Fixed OpenCode v2
+failing to discover plugin tools available only to its session”*. The fallback
+the guard leaves in place is the session-scoped `bunny_web_search` agent tool, so
+on 0.16.0 the tool-only mode is more reliable than it was on 0.15.0.
+
+### 18.3 Verification (2026-11-16, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc -b`: server / client / tests projects) against `@getpaseo/plugin@0.16.0` | **exit 0** |
+| `npm test` (`pretest` rebuilds `dist/mcp-server.js` with esbuild) | **11 suites / 156 tests pass**, 1.09 s; `tests/live-ddgs.test.ts` skipped without `BUNNY_LIVE=1` (1 suite / 2 tests) |
+| Deprecated API scan | `grep` for `server.on(`, `server.before(`, `addSurface`, `addSidebarItem`, `openSurface`, `client/react-native` over the plugin: **no matches** |
+| Live 0.16.0 daemon | isolated scratch home on its own loopback port, `pluginsEnabled: true`, installed from the published Git tag `bunny-search@0.6.5` (so the manifest `npm ci` + `npm run bundle` ran as on a real install): status `running`, `[paseo] Plugin ready`, settings mirror written, six RPC methods registered, no plugin/contribution errors |
+| Host rule | `requiresDedicatedV2Server` + the refusal message read from `/opt/Paseo/resources/app.asar` (0.16.0) |
+
+Not verified: the hooks were not fired on a live agent inside the isolated
+daemon (no agent was created there). Their matrix is covered by
+`tests/agent-hooks.test.ts` (43 tests) and the registration was proven by the
+plugin reaching `running` with no hook errors.
+
+### 18.4 Recommendations for improvement (recorded, not implemented)
+
+1. **Live status through `addSubscription` (new in 0.16.0).** The connected
+   indicator and the quick-search box poll on demand (`connectionStatus`). A
+   daemon subscription would let the sidebar screen update the dot, latency and
+   last-check time without a manual Test, and — more usefully — surface
+   “agent X was created without search tools” the moment it happens instead of
+   waiting for the user to press *Repair search tools*.
+2. **A composer control for search (new in 0.16.0).** `Toggle`/`Action` in the
+   composer would give a one-click “search this draft” pill: take the composer
+   text (or the selected text) as the query, run `runSearch`, and insert the
+   formatted result as a Markdown block. Today the same flow needs a separate
+   screen and copy-paste.
+3. **Per-agent marker in `metadata` (new in 0.16.0).** `agent.create.before`
+   may return `metadata`, and `PluginHookAgent` now exposes it. Writing
+   `bunny-search: { mode: "mcp" | "tool", at: <iso> }` would let the repair
+   action list the agents that never received tools, and let the session-open
+   hook skip the daemon capability probe for agents it already provisioned.
+4. **Decide and document the `background` agents policy (new in 0.16.0).**
+   Background agents (hidden from tabs and default lists) currently get search
+   like any other agent. Either keep that and say so, or gate them with the
+   existing `skipProviders`-style logic — a one-line decision, but it should be
+   written down rather than emergent.
+5. **Deep-link quick search** (still open from §16.4). A Command Center item
+   (“Search the web…”) that opens the screen with `PluginScreenProps.params`
+   pre-filled, plus `?q=` deep links, would make the search box reachable from
+   the Command Center like the other plugins' actions.
+6. **Response cache with a TTL.** Repeated identical queries (agents often
+   re-search the same error string) hit the upstream engines every time. A
+   small in-process LRU with a 5–10 minute TTL, shown as “cached” in the result
+   header, would cut rate-limit failures at no correctness cost.
+7. **More providers behind the existing adapter.** The adapter already
+   normalises title/url/snippet, so Tavily, Exa, Kagi and Perplexity are one
+   provider module each — the four most requested APIs a coding agent actually
+   benefits from (fresh indexes and answer fields).
+8. **Host-managed processes for the probe** (`spawnProcess` / `terminateProcess`
+   from `@getpaseo/plugin/server`, still open from §16.4). Its benefit is
+   Windows `.cmd` launching and a host-owned process tree; Linux stays the
+   priority, so this remains a long-term prospect.

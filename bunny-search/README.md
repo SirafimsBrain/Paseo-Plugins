@@ -28,7 +28,7 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.15.0 (verified against the stable release of 2026-11-03;
+Requires Paseo ≥ 0.15.0 (verified against the stable release of 2026-11-16;
 uses the plugin SDK screen/sidebar API, settings screens and `server.addHook`). Node ≥ 18 on the daemon host (global `fetch`).
 
 ### Python requirement (for the DDGS Python service)
@@ -66,7 +66,7 @@ The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugi
 ```bash
 npm install
 npm run bundle   # dist/mcp-server.js — standalone stdio server (esbuild)
-npm test         # vitest: 9 hermetic suites / 95 tests (providers, discovery, settings, probe, tools, stdio e2e)
+npm test         # vitest: 11 hermetic suites / 156 tests (providers, discovery, settings, probe, tools, hooks, stdio e2e)
 BUNNY_LIVE=1 npx vitest run tests/live-ddgs.test.ts   # live smoke: real Python + PyPI ddgs + network
 npm run typecheck   # tsc -b: three projects — server, client (react-native), tests
 ```
@@ -96,6 +96,6 @@ The host keeps the authoritative settings in its own store (exposed to the plugi
 
 ## Compatibility
 
-Paseo **0.15.0 (2026-11-03)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.0` — compatible after migration to `server.addHook` (0.5.3).
+Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.16.0` — compatible with no API migration; 0.16.0's one breaking change (`agent.turn.after.timeline` removed) is not used, and the shared OpenCode-service guard is still required by the 0.16.0 host. Current version: **0.6.5**.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
