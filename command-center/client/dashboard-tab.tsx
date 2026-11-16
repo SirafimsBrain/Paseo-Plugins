@@ -5,12 +5,17 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import type { CommandDefinition, HistoryEntry } from "../shared/commands";
 import { listCommands, listHistory } from "../shared/commands";
 import { dashboardSummary } from "../shared/dashboard";
+import type { CommandEvent } from "../shared/events";
 import { interfaceFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 
 interface Props {
   theme: PluginTheme;
   /** Bumped by the surface after any run/edit so the dashboard reloads. */
   reloadKey: number;
+  /** Live feed pushed by `command-center.events` (0.13.0). */
+  events?: CommandEvent[];
+  /** True once the subscription has delivered anything. */
+  live?: boolean;
 }
 
 function typeLabel(command: CommandDefinition): string {
@@ -26,7 +31,7 @@ function typeLabel(command: CommandDefinition): string {
  * the external browser: the same data the library/history tabs use, rendered
  * with the host theme and typography, with no actions and no HTTP surface.
  */
-export function DashboardTab({ theme, reloadKey }: Props) {
+export function DashboardTab({ theme, reloadKey, events = [], live = false }: Props) {
   const listRpc = useRpc(listCommands);
   const historyRpc = useRpc(listHistory);
   const [commands, setCommands] = useState<CommandDefinition[] | null>(null);
@@ -93,6 +98,55 @@ export function DashboardTab({ theme, reloadKey }: Props) {
           <Text style={[styles.smallButtonText, { color: foreground, fontSize: font(12) }]}>Refresh</Text>
         </Pressable>
       </View>
+
+      {events.length > 0 ? (
+        <>
+          <View style={styles.liveHeader}>
+            <View
+              style={[
+                styles.liveDot,
+                { backgroundColor: live ? theme.colors.statusSuccess : foregroundMuted },
+              ]}
+            />
+            <Text style={[styles.section, { color: foregroundMuted, fontSize: font(11) }]}>
+              Live activity
+            </Text>
+          </View>
+          {events.slice(0, 8).map((event) => (
+            <View key={event.id} style={[styles.row, { borderColor: theme.colors.border }]}>
+              <View style={styles.rowHeader}>
+                <Text
+                  style={[styles.name, { color: foreground }, fontFamilyStyle, { fontSize: font(12) }]}
+                  numberOfLines={1}
+                >
+                  {event.title}
+                </Text>
+                <Text
+                  style={[
+                    styles.badge,
+                    {
+                      color:
+                        event.ok === false ? theme.colors.statusDanger : foregroundMuted,
+                      fontSize: font(10),
+                    },
+                  ]}
+                >
+                  {event.kind}
+                </Text>
+              </View>
+              <Text
+                style={[styles.body, { color: foregroundMuted, fontSize: font(10) }]}
+                numberOfLines={2}
+              >
+                {event.detail}
+              </Text>
+              <Text style={[styles.timestamp, { color: foregroundMuted, fontSize: font(9) }]}>
+                {new Date(event.at).toLocaleTimeString()}
+              </Text>
+            </View>
+          ))}
+        </>
+      ) : null}
 
       <Text style={[styles.section, { color: foregroundMuted, fontSize: font(11) }]}>Most used</Text>
       {summary.mostUsed.length === 0 ? (
@@ -183,6 +237,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   smallButtonText: { fontSize: 12, fontWeight: "600" },
+  liveHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 },
+  liveDot: { width: 7, height: 7, borderRadius: 4 },
   section: {
     fontSize: 11,
     textTransform: "uppercase",

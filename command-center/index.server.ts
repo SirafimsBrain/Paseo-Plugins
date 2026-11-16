@@ -52,6 +52,21 @@ import { createCommandCenterTool } from "./server/agent-tool";
 import { readSavedMcpServers } from "./server/agent-record";
 import { forgetAgentMcp, loadAgentMcpRegistry } from "./server/agent-mcp";
 import { decideSessionOpen, needsCapabilityProbe } from "./server/session-open";
+import { eventsStream, type CommandEvent } from "./shared/events";
+import {
+  notifyCommandEventListeners,
+  publishCommandEvent,
+  recentCommandEvents,
+  subscribeCommandEvents,
+} from "./server/event-bus";
+import {
+  provisioningMarker,
+  readProvisioningMarker,
+  readWorkspaceStamp,
+  withProvisioningMarker,
+  workspaceStamp,
+  type ProvisioningMode,
+} from "./server/metadata";
 import { renderTemplate } from "./shared/template";
 import { browseFiles } from "./shared/variables";
 import { getDaemonClient } from "./server/daemon-connection";
@@ -120,6 +135,9 @@ export default function contribute(server: PluginServerContext) {
   settings.subscribe((state) => {
     if (state.status === "ready") setHistoryLimit(state.values.historyLimit);
     enforceHistoryLimit();
+    // A policy change (background agents, workflow waits) is worth a repaint of
+    // the live feed, even though it produces no event of its own.
+    notifyCommandEventListeners();
   });
 
   // Automation: run a configured command when an agent turn completes. The
@@ -142,6 +160,10 @@ export default function contribute(server: PluginServerContext) {
   // Automation: bootstrap every newly created workspace with a configured
   // command (install deps, lint…). Same defaults-and-swallow-errors policy.
   server.addHook("workspace.create.after", async (event, { paseo }) => {
+    // Idempotency (0.13.0): the stamp lives on the workspace itself, so a lost
+    // plugin store cannot bootstrap the same workspace twice, and other plugins
+    // can see what was run.
+    if (readWorkspaceStamp(event.workspace.metadata) !== null) return;
     const state = await settings.read();
     if (state.status !== "ready") return;
     const name = state.values.bootstrapCommand.trim();
@@ -150,11 +172,22 @@ export default function contribute(server: PluginServerContext) {
       (candidate) => candidate.name.toLowerCase() === name.toLowerCase(),
     );
     if (!command) return;
-    await executeCommand(
+    const result = await executeCommand(
       command,
       { values: {}, newWorktree: false, workspaceId: event.workspace.id },
       { paseo },
-    ).catch(() => undefined);
+    ).catch(() => null);
+    if (!result?.ok) return;
+    await paseo.workspaces
+      .ref(event.workspace.id)
+      .setMetadata({
+        "command-center": workspaceStamp({
+          commandId: command.id,
+          commandName: command.name,
+          bootstrappedAt: new Date().toISOString(),
+        }),
+      })
+      .catch(() => undefined);
   });
 
   // The MCP registry tracks live agents only; an archived agent's entry is
@@ -186,17 +219,28 @@ export default function contribute(server: PluginServerContext) {
 
   server.addHook("agent.open.before", async ({ request }, { paseo }) => {
     const registry = loadAgentMcpRegistry()[request.agentId] ?? null;
+    const state = await settings.read().catch(() => null);
+    const values = state?.status === "ready" ? state.values : null;
+    const background = request.background === true;
+    // Background policy (0.13.0, Paseo 0.16.0): a background agent is a helper the
+    // user asked to keep out of the way; with the setting off it gets neither the
+    // agent tool nor the launch-only MCP servers.
+    const backgroundExcluded = background && values?.injectIntoBackgroundAgents === false;
+    // Marker from an earlier open (0.13.0): a recorded `mcp` mode makes the daemon
+    // capability probe unnecessary — the provider already accepted MCP servers
+    // for this agent, so the answer cannot have changed.
+    const known = readProvisioningMarker(request.metadata);
     const decisionInput = {
       reason: request.reason,
       purpose: request.purpose,
       lookup: readSavedMcpServers(request.agentId),
       registry,
-      supportsMcpServers: null as boolean | null,
+      supportsMcpServers: known?.mode === "mcp" ? true : (null as boolean | null),
     };
 
     // The daemon is only consulted when an MCP contribution is still possible;
     // every other branch is decided without touching it.
-    if (needsCapabilityProbe(decisionInput)) {
+    if (!backgroundExcluded && needsCapabilityProbe(decisionInput)) {
       const snapshot = await paseo.agents
         .ref(request.agentId)
         .refresh()
@@ -204,15 +248,36 @@ export default function contribute(server: PluginServerContext) {
       decisionInput.supportsMcpServers = snapshot?.agent.capabilities.supportsMcpServers ?? null;
     }
 
-    const decision = decideSessionOpen(decisionInput);
+    const decision = backgroundExcluded
+      ? {
+          contribute: [] as string[],
+          why: "skipped: background agent policy (injectIntoBackgroundAgents is off)",
+        }
+      : decideSessionOpen(decisionInput);
+    const attachTool = request.purpose === "interactive" && !backgroundExcluded;
+    const mode: ProvisioningMode =
+      decision.contribute.length > 0 ? "mcp" : attachTool ? "tool" : "skipped";
     console.log(
-      `[command-center] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
+      `[command-center] session_open ${request.agentId} (${request.reason}/${request.purpose}${background ? "/background" : ""}) [${mode}]: ${decision.why}`,
+    );
+    // Only a changed decision reaches the live feed: idle-runtime resumes reopen
+    // agents constantly, and repeating the same line would drown the runs.
+    if (known?.mode !== mode) {
+      publishCommandEvent({
+        kind: "provisioning",
+        title: request.agentId,
+        detail: decision.why,
+        ok: mode !== "skipped",
+      });
+    }
+    const metadata = withProvisioningMarker(
+      request.metadata,
+      provisioningMarker(mode, decision.why),
     );
 
-    const tools =
-      request.purpose === "interactive" ? [...request.tools, commandCenterTool] : request.tools;
+    const tools = attachTool ? [...request.tools, commandCenterTool] : request.tools;
     if (decision.contribute.length === 0) {
-      return { ...request, tools };
+      return { ...request, tools, metadata };
     }
 
     const contributed = Object.fromEntries(
@@ -225,6 +290,7 @@ export default function contribute(server: PluginServerContext) {
       ...request,
       tools,
       mcpServers: { ...request.mcpServers, ...contributed } as typeof request.mcpServers,
+      metadata,
     };
   });
 
@@ -444,6 +510,8 @@ export default function contribute(server: PluginServerContext) {
       };
       return miss;
     }
+    const state = await settings.read().catch(() => null);
+    const values = state?.status === "ready" ? state.values : null;
     const result = await executeCommand(
       command,
       {
@@ -452,6 +520,14 @@ export default function contribute(server: PluginServerContext) {
         agentId: input.agentId,
         newWorktree: input.newWorktree ?? false,
         provider: input.provider,
+        activeTurnBehavior: input.activeTurnBehavior,
+        background: input.background,
+        providerOptions: input.providerOptions,
+        // Workflow steps wait for their agent's real outcome (0.13.0).
+        waitForOutcome:
+          command.type === "workflow" && values?.waitForWorkflowSteps !== false
+            ? { timeoutMs: (values?.workflowStepTimeoutSeconds ?? 900) * 1000 }
+            : undefined,
       },
       { paseo },
     );
@@ -483,9 +559,20 @@ export default function contribute(server: PluginServerContext) {
         ),
       };
     }
+    const state = await settings.read().catch(() => null);
+    const values = state?.status === "ready" ? state.values : null;
     const results = await executeBatch(
       command,
-      { values: input.values, targets: input.targets, batchId: input.batchId },
+      {
+        values: input.values,
+        targets: input.targets,
+        batchId: input.batchId,
+        providerOptions: input.providerOptions,
+        waitForOutcome:
+          command.type === "workflow" && values?.waitForWorkflowSteps !== false
+            ? { timeoutMs: (values?.workflowStepTimeoutSeconds ?? 900) * 1000 }
+            : undefined,
+      },
       { paseo },
     );
     const succeeded = results.filter((result) => result.ok).length;
@@ -508,7 +595,52 @@ export default function contribute(server: PluginServerContext) {
       at: now.toISOString(),
     };
     appendHistoryEntry(loadHistory(), entry);
+    // The client-side dispatcher (non-local hosts) records its own history; the
+    // live feed still learns about the run here (0.13.0).
+    publishCommandEvent({
+      kind: "run",
+      title: entry.commandName,
+      detail:
+        entry.kind === "terminal"
+          ? "terminal"
+          : entry.targetAgentId
+            ? `agent ${entry.targetAgentId}`
+            : "dispatched",
+      ok: entry.ok,
+    });
     return { ok: true, id: entry.id };
+  });
+
+  // --- Live activity feed (Paseo 0.16.0 `addSubscription`, 0.13.0) --------------
+  // Pushes the current feed on subscribe and again on every event, so the History
+  // and Schedules tabs refresh themselves and the dashboard can show what just
+  // happened without a manual reload.
+  server.handle(eventsStream, async (_input, context) => {
+    let closed = false;
+    const emit = async (event: CommandEvent | null) => {
+      await context.push({
+        at: new Date().toISOString(),
+        event,
+        recent: recentCommandEvents(),
+      });
+    };
+    await emit(null);
+    const unsubscribe = subscribeCommandEvents((event) => {
+      if (closed) return;
+      void emit(event).catch((cause: unknown) => {
+        console.warn(
+          `[command-center] event push failed: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+      });
+    });
+    const stop = () => {
+      closed = true;
+      unsubscribe();
+    };
+    if (context.signal.aborted) stop();
+    else context.signal.addEventListener("abort", stop, { once: true });
   });
 
   // Annotated return type: 0.16.0's `handle` is overloaded for RPC and
@@ -567,7 +699,7 @@ export default function contribute(server: PluginServerContext) {
         error: "Workflows cannot be scheduled — schedule their steps instead.",
       };
     }
-    return createScheduleFromCommand({
+    const created = await createScheduleFromCommand({
       commandId: input.commandId,
       name: input.name ?? null,
       values: input.values,
@@ -583,9 +715,29 @@ export default function contribute(server: PluginServerContext) {
       workspaceDirectory,
       render: renderTemplate,
     });
+    if (created.ok && created.id) {
+      publishCommandEvent({
+        kind: "schedule",
+        title: created.view?.name ?? input.commandId,
+        detail: "scheduled",
+        ok: true,
+      });
+    }
+    return created;
   });
 
-  server.handle(scheduleAction, (input) => runScheduleAction(input.id, input.action));
+  server.handle(scheduleAction, async (input) => {
+    const result = await runScheduleAction(input.id, input.action);
+    if (result.ok) {
+      publishCommandEvent({
+        kind: "schedule",
+        title: input.id,
+        detail: input.action,
+        ok: true,
+      });
+    }
+    return result;
+  });
 
   // "Refresh Command Center tools" (0.6.0): `agents.ref(id).reload()` (new in
   // 0.14.0) reopens the provider session with the current configuration,
@@ -638,13 +790,22 @@ export default function contribute(server: PluginServerContext) {
     fetchScheduleRuns(input.id).then((runs) => ({ runs })),
   );
 
-  server.handle(updateSchedule, (input) =>
-    updateScheduleOnDaemon({
+  server.handle(updateSchedule, async (input) => {
+    const result = await updateScheduleOnDaemon({
       id: input.id,
       cron: input.cron,
       maxRuns: input.maxRuns,
-    }),
-  );
+    });
+    if (result.ok) {
+      publishCommandEvent({
+        kind: "schedule",
+        title: input.id,
+        detail: "cadence updated",
+        ok: true,
+      });
+    }
+    return result;
+  });
 
   return () => {};
 }

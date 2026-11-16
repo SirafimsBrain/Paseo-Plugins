@@ -165,8 +165,41 @@ entries built by the real 0.14.0 host compiler with zero deprecated strings
 (plus a negative control), the manifest gate rejecting an older daemon and accepting 0.14.0, and `running` with `[paseo] Plugin ready` and **21 RPC
 methods** in an isolated 0.14.0 daemon.
 
+## Version 0.13.0 — the §20.5 recommendations (2026-11-16)
+The eight suggestions recorded in [`__doc.md`](./__doc.md) §20.5, all built on
+the 0.16.0 surface:
+
+- **Live activity feed** — a `command-center.events` subscription
+  (`defineSubscription`). Every run, schedule change and session-open decision is
+  pushed to the screen with the whole current feed (20 events), so History and
+  Schedules refresh themselves and the dashboard shows a "Live activity" list.
+- **Agent metadata** — a prompt run stamps `command-center: { commandId,
+  commandName, runId, at }` on the agent it created, and every session open
+  records `command-center.provisioning: { mode: mcp|tool|skipped, reason, at }`.
+  A recorded `mcp` mode skips the next capability probe.
+- **Idempotent workspace bootstrap** — the bootstrap automation stamps
+  `command-center: { bootstrappedAt, commandId, commandName }` on the workspace
+  via `setMetadata` and skips a workspace that already carries it.
+- **Quiet runs** — a "Quiet run" toggle in the run dialog creates the agents as
+  `background` agents (out of tabs, lists and attention); a new setting decides
+  whether background agents get the agent tool and the launch-only MCP servers
+  at all.
+- **Save as command** — a composer item (`addComposerItem`) saves the current
+  prompt into the `Inbox` category, named after its first line.
+- **Deep links** — `run=<commandId>` opens the run dialog prefilled, and the
+  screen title follows the params (`PluginScreenTitle` as a function).
+- **Provider controls** — the run dialog and the command editor render what the
+  provider declares (`providers.listControls`: toggles and selects); a command
+  can pin them (`providerOptions`) and a run can override them.
+- **Real workflow outcomes** — each workflow step waits for its agent's turn
+  (`waitForFinish`, default 900 s, 30–3600 s) so `on success` / `on failure`
+  gates on the actual result; a timeout or provider error records the step as
+  failed.
+
+**Verification:** typecheck clean, vitest **21 suites / 208 tests**.
+
 ## Compatibility
 
-Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.16.0` + `@getpaseo/client ^0.16.0` — compatible with no API migration (0.16.0's removed `agent.turn.after.timeline` is unused, and the nine `schedule*` methods the scheduler bridge calls are unchanged); the only changes were two typings. Current plugin version: **0.12.2**.
+Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin ^0.16.0` + `@getpaseo/client ^0.16.0` — compatible with no API migration (0.16.0's removed `agent.turn.after.timeline` is unused, and the nine `schedule*` methods the scheduler bridge calls are unchanged); the only changes were two typings. 0.13.0 then adopted the 0.16.0 additions it was waiting for — subscriptions, `addComposerItem`, hook `metadata`/`request.background`, `waitForFinish` and `providers.listControls` — and raised the floor to `>=0.16.0` because the composer item and the screen subscription are registered on every load. Current plugin version: **0.13.2**.
 
-Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) §20.
+Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) §20–§21.

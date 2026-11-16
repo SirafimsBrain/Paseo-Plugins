@@ -464,3 +464,18 @@ tool, session-open MCP re-derivation, the reload action, turn-aware
 dispatch and deep links; floor `>=0.14.0`). **luck-planner** is now the
 only plugin not re-checked since its own pass.
 
+- **The 0.16.0 additions were then adopted, not just tolerated (2026-11-16).**
+  The same day's improvement pass (command-center `__doc.md` §20.5, shipped as
+  **command-center 0.13.0 / 0.13.2**) uses `defineSubscription` +
+  `useSubscription` for the activity feed, `addComposerItem` for "Save as
+  command", the hook's `metadata` and `request.background` for the provisioning
+  marker and the background policy, `agents.create({ metadata, background,
+  options })` for the run stamp and quiet runs, `waitForFinish` for real
+  workflow outcomes, and `providers.listControls` for provider controls.
+  `requirements.paseo` moved `>=0.15.0 → >=0.16.0` for a concrete reason: the
+  composer item and the screen subscription are registered on every client
+  load, so on a 0.15 host the missing exports would break the plugin instead of
+  degrading (bunny-search 0.7.5 keeps `>=0.15.0` because it registers both
+  lazily). Typecheck clean, 21 suites / 208 tests; the 0.12.2 evidence for the
+  bare compatibility pass is §20 of the same document.
+

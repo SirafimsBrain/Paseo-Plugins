@@ -14,7 +14,8 @@ import {
   searchCommandsForAttachment,
 } from "./shared/commands";
 import { createSchedule } from "./shared/schedules";
-import { SCREEN_ID, screenParams, toOpenScreenParams } from "./shared/screen-params";
+import { SCREEN_ID, screenParams, screenTitle, toOpenScreenParams } from "./shared/screen-params";
+import { CommandCenterComposerItem } from "./client/composer-item";
 
 /**
  * Sidebar header row for the Command Center screen.
@@ -36,10 +37,18 @@ function CommandCenterSidebarItem({
 }
 
 export default function contribute(client: PluginClientContext) {
+  // The header title follows the deep link (0.13.0): a link to the history or a
+  // schedule names that place instead of showing the generic title.
   client.addScreen({
     id: SCREEN_ID,
-    title: "Command Center",
+    title: (params) => screenTitle(params),
     Component: CommandCenterSurface,
+  });
+
+  // "Save this prompt as a command" in the composer (0.13.0, `addComposerItem`).
+  client.addComposerItem({
+    id: "command-center-save-draft",
+    Component: CommandCenterComposerItem,
   });
 
   client.addSidebarHeaderItem({

@@ -97,12 +97,37 @@ export function CommandCenterSettingsScreen({ theme }: PluginSurfaceProps) {
             onChangeText={(text: string) => patch({ bootstrapCommand: text })}
           />
           <SettingsSwitch
+            label="Inject into background agents"
+            hint="Quiet (background) agents get neither the Command Center MCP servers nor the agent tool. Off = leave those agents alone."
+            value={values.injectIntoBackgroundAgents}
+            onValueChange={(enabled: boolean) => patch({ injectIntoBackgroundAgents: enabled })}
+          />
+          <SettingsSwitch
             label="Automation enabled"
             hint="Master switch: clear both automation commands to disable them."
             value={values.autoRunCommandOnTurnEnd.trim() !== "" || values.bootstrapCommand.trim() !== ""}
             onValueChange={(enabled: boolean) => {
               if (!enabled) {
                 patch({ autoRunCommandOnTurnEnd: "", bootstrapCommand: "" });
+              }
+            }}
+          />
+        </SettingsSection>
+        <SettingsSection title="Workflows">
+          <SettingsSwitch
+            label="Wait for step outcomes"
+            hint="Each step waits for its agent's turn to finish, so on-success/on-failure conditions see the real result instead of assuming success."
+            value={values.waitForWorkflowSteps}
+            onValueChange={(enabled: boolean) => patch({ waitForWorkflowSteps: enabled })}
+          />
+          <SettingsInput
+            label="Step timeout (seconds)"
+            hint="Between 30 and 3600 (default 900). A step that runs longer is recorded as timed out."
+            initialValue={String(values.workflowStepTimeoutSeconds)}
+            onChangeText={(text: string) => {
+              const parsed = Number.parseInt(text, 10);
+              if (Number.isFinite(parsed) && String(parsed) === text.trim()) {
+                patch({ workflowStepTimeoutSeconds: parsed });
               }
             }}
           />

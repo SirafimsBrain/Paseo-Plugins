@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
+import { getPaseoClient, useHosts, usePaseo, useRpc, useSubscription } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderWithModels } from "../shared/commands";
+import type { CommandDefinition, CommandCategory, HistoryEntry, ProviderOptions, ProviderWithModels } from "../shared/commands";
 import { defaultValuesForCommand, isFullModelRef, normalizeProviderModels, resolveModelRef } from "../shared/commands";
 import { commandMatchesCategory, commandMatchesQuery } from "../shared/search";
 import { mostUsedCommands, sortCommands, type CommandSort } from "../shared/analytics";
@@ -23,6 +23,7 @@ import {
 import { createSchedule } from "../shared/schedules";
 import { exportCommands, importCommands, importCommandsFromUrl } from "../shared/share";
 import { parseScreenParams, screenParams, type ScreenParams, type ScreenView } from "../shared/screen-params";
+import { eventsStream, type CommandEvent } from "../shared/events";
 import { CommandForm, type CommandFormResult } from "./command-form";
 import { DashboardTab } from "./dashboard-tab";
 import { ShareDialog } from "./share-dialog";
@@ -133,6 +134,11 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
   /** Deep links (0.6.0): command/schedule the screen params asked to focus. */
   const [focusedCommandId, setFocusedCommandId] = useState<string | null>(null);
   const [highlightScheduleId, setHighlightScheduleId] = useState<string | null>(null);
+  /** Live activity feed (0.13.0): pushed by `command-center.events`. */
+  const [events, setEvents] = useState<CommandEvent[]>([]);
+  const [live, setLive] = useState(false);
+  /** Deep link `run=`: the dialog opens once the library is loaded. */
+  const [pendingRunId, setPendingRunId] = useState<string | null>(null);
 
   /**
    * Apply validated screen params (`shared/screen-params.ts`) — the one path
@@ -151,11 +157,37 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
     if (next.view === "schedules" && next.scheduleId) {
       setHighlightScheduleId(next.scheduleId);
     }
+    if (next.runCommandId) setPendingRunId(next.runCommandId);
   }, []);
 
   useEffect(() => {
     applyParams(parseScreenParams(params));
   }, [params, applyParams]);
+
+  // Live feed: runs and schedule changes invalidate what the tabs are showing, so
+  // they reload themselves instead of waiting for the next visit (0.13.0).
+  const onCommandEvent = useCallback(
+    (payload: { event: CommandEvent | null; recent: CommandEvent[] }) => {
+      setLive(true);
+      setEvents(payload.recent);
+      if (payload.event && payload.event.kind !== "provisioning") {
+        setReloadKey((key) => key + 1);
+      }
+    },
+    [],
+  );
+  useSubscription(eventsStream, {}, onCommandEvent);
+
+  // A `run=<command id>` link opens the run dialog only once the library is
+  // loaded (the params arrive before the RPC answers).
+  useEffect(() => {
+    if (!pendingRunId || !commands) return;
+    const target = commands.find((command) => command.id === pendingRunId);
+    setPendingRunId(null);
+    if (!target) return;
+    setRepeatPreset(null);
+    setRunning(target);
+  }, [pendingRunId, commands]);
 
   /** Manual tab switches drop any deep-link focus. */
   const selectTab = useCallback((next: ScreenView) => {
@@ -480,6 +512,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
           scope: form.scope,
           category: form.category ?? undefined,
           variables: form.variables,
+          providerOptions: form.providerOptions ?? undefined,
           favorite: base?.favorite ?? false,
           createdAt: base?.createdAt ?? now,
           updatedAt: now,
@@ -585,6 +618,8 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
     command: CommandDefinition;
     values: Record<string, string>;
     targets: BatchTarget[];
+    /** Provider option picks from the run dialog (0.13.0). */
+    providerOptions?: ProviderOptions;
   }): Promise<BatchItemResult[]> => {    const resolved = input.targets.map((target) => {
       const workspace =
         target.workspaceKey !== null
@@ -635,12 +670,14 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
           commandId: input.command.id,
           values: input.values,
           batchId,
+          providerOptions: input.providerOptions,
           targets: localIndices.map((index) => ({
             workspaceId: resolved[index]!.workspaceId,
             agentId: resolved[index]!.target.agentId,
             provider: resolved[index]!.target.provider,
             newWorktree: resolved[index]!.target.newWorktree,
             activeTurnBehavior: resolved[index]!.target.activeTurnBehavior,
+            background: resolved[index]!.target.background,
           })),
         });
         results.forEach((result, position) => {
@@ -835,7 +872,7 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
           onShowCommand={(commandId) => applyParams(screenParams("library", { commandId }))}
         />
       ) : tab === "dashboard" ? (
-        <DashboardTab theme={theme} reloadKey={reloadKey} />
+        <DashboardTab theme={theme} reloadKey={reloadKey} events={events} live={live} />
       ) : tab === "library" ? (
         <ScrollView contentContainerStyle={styles.list}>
           <View style={styles.toolbar}>
@@ -1090,7 +1127,14 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
               initialWorkspaceKey={repeatPreset?.workspaceKey}
               initialAgentId={repeatPreset?.agentId}
               onCancel={closeRunDialog}
-              onRun={(input) => handleRunBatch({ command: running, values: input.values, targets: input.targets })}
+              onRun={(input) =>
+                handleRunBatch({
+                  command: running,
+                  values: input.values,
+                  targets: input.targets,
+                  providerOptions: input.providerOptions,
+                })
+              }
               // Workflows are not schedulable (the schedule bridge cannot model
               // per-step conditions); the card hides the button for the same reason.
               onSchedule={

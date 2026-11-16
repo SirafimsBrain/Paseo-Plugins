@@ -1143,7 +1143,7 @@ hook/entity `metadata`, and `request.background`.
 | Live scheduler bridge | `command-center.schedules` → `{schedules: []}` and `command-center.schedule-runs` → the daemon's own `Schedule not found` answer. Both prove the plugin's own `DaemonClient` connection reached 0.16.0's `schedule/list` and `schedule/logs` RPCs — the bridge is not a stub |
 | Not exercised live | UI rendering (no client was driven), a real prompt/shell dispatch into an agent, the agent tool call, and streamed schedule run output; those are covered by the hermetic suites and unchanged by this pass |
 
-### 20.5 Recommendations for improvement (recorded, not implemented)
+### 20.5 Recommendations for improvement (implemented as 0.13.0 — see §21)
 
 1. **Live schedule and history updates through `addSubscription` (0.16.0).**
    Today the Schedules and History tabs read on mount and on action. A
@@ -1197,3 +1197,99 @@ hook/entity `metadata`, and `request.background`.
 
 None of these is a compatibility issue: 0.12.2 runs correctly on 0.16.0 as it
 is. They are listed in the order of value to a user of the plugin.
+
+## 21. The §20.5 recommendations, implemented (0.13.0, 2026-11-16)
+
+All eight items, in the order §20.5 listed them. They are new functionality, so
+the version moves the second digit: **0.12.2 → 0.13.0** (patch kept for the
+compatibility fix, shipped as **0.13.2** with the full test count). The floor
+moves with the API actually used, `>=0.15.0 → >=0.16.0`: the composer item and
+the screen subscription are registered on every client load, so a 0.15 host
+would throw at import rather than degrade.
+
+### 21.1 Live activity feed (`command-center.events`)
+`shared/events.ts` defines the contract (`defineSubscription`, input `{}`, event
+`{ at, event | null, recent[] }`, `EVENT_FEED_LIMIT = 20`); `server/event-bus.ts`
+is the in-process feed (`publishCommandEvent`, `recentCommandEvents`,
+`subscribeCommandEvents`, `notifyCommandEventListeners`, `clearCommandEvents`).
+Producers: the executor (shell runs, new and existing agents, failures, workflow
+finish), `command-center.append-history` (runs dispatched by a remote host's
+client), the schedule handlers (create / action / cadence update) and the
+session-open hook (only when the decision changed). The handler pushes a
+snapshot on subscribe and one on every change, so a reconnecting subscriber is
+correct after the next push without a replay window. The screen subscribes with
+`useSubscription`, reloads its tabs on any non-provisioning event and hands the
+feed to the dashboard's "Live activity" list, which also marks the feed live.
+
+### 21.2 Plugin-owned metadata (`server/metadata.ts`)
+Two separate keys, deliberately: `command-center` (the run stamp written into
+`agents.create({ metadata })`: `commandId`, `commandName`, `runId`, `at`) and
+`command-center.provisioning` (`mode: mcp | tool | skipped`, `reason`, `at`).
+The hook writes the marker on every open and *only* reads it back to skip the
+daemon capability probe when it says `mcp`: the provider already accepted the
+servers for this agent, so the answer cannot change. Unknown or malformed values
+resolve to "no claim"; other plugins' keys are preserved verbatim
+(`withProvisioningMarker` copies the record and replaces one key).
+
+### 21.3 Idempotent workspace bootstrap
+`workspace.create.after` now skips a workspace whose metadata already carries
+`command-center` (`readWorkspaceStamp`) and, after a successful run, writes
+`workspaceStamp({ commandId, commandName, bootstrappedAt })` through
+`paseo.workspaces.ref(id).setMetadata()`. The plugin store is no longer the only
+memory of what was bootstrapped, so losing it cannot bootstrap a workspace twice,
+and other plugins can see the stamp.
+
+### 21.4 Background fan-out and the background policy
+`CreateAgentRequestOptions.background` is threaded end to end: `BatchTarget`
+(`planTargets`, `runTarget`), the run dialog's "Quiet run" toggle,
+`runCommand`/`runBatch` inputs, and `executeCommand`/`executeWorkflow`/
+`executeBatch`. New host setting `injectIntoBackgroundAgents` (default `true`)
+decides the session-open policy: when off, a background agent gets neither the
+`command_center_run` agent tool nor the launch-only MCP servers, and the marker
+records `skipped: background agent policy`.
+
+### 21.5 "Save as command" composer control
+`client/composer-item.tsx` registers through `addComposerItem`. It takes
+`useComposer().prompt`, names the command after the first non-empty line
+(48 chars, ellipsised), saves it as a prompt command in the `Inbox` category via
+the existing `saveCommand` RPC and raises a toast; `{{input:…}}` tokens in the
+text are picked up by the editor's declaration pass on the next open, so nothing
+is rewritten. A rejected save throws, so the host reports it instead of a silent
+no-op.
+
+### 21.6 Deep links and parametric titles
+`shared/screen-params.ts` gains `run=<commandId>` (round-tripped by
+`toOpenScreenParams`, parsed into `runCommandId`) and `screenTitle(params)`.
+`addScreen` now passes `title: (params) => screenTitle(params)`, so "History"
+and "Schedules" links name the place they open. The surface keeps the id in
+`pendingRunId` and opens the run dialog once the library has loaded (params
+arrive before the RPC answers), falling back to silence for a deleted command.
+
+### 21.7 Provider controls
+`client/provider-controls.tsx` calls `paseo.providers.listControls({ provider,
+cwd })`, narrows the payload to the two protocol kinds (`toggle`, `select`),
+skips anything else and shows a provider error as one line. It is rendered in
+the run dialog (workspace directory as `cwd`) and in the command editor under
+the model picker. Values are `command.providerOptions` (saved with the command,
+shown as "saved with the command") and are merged per run; `runCommand` /
+`runBatch` accept `providerOptions`, which the executor merges over the
+command's own when it builds the create options.
+
+### 21.8 Real workflow outcomes
+`executeWorkflow` passes `waitForOutcome` into every step: after the step's
+dispatch it awaits `paseo.agents.ref(id).waitForFinish(timeoutMs)` and maps
+`idle` to success (the step's `ok` stays true through `outcome`), `permission`,
+`error` and `timeout` to a failed step with the reason in `error`, and only
+then decides whether the next step's condition matches. Settings:
+`waitForWorkflowSteps` (default `true`) and `workflowStepTimeoutSeconds`
+(default `900`, clamped 30–3600). A background step is waited for like any
+other, and the batch executor passes the same `waitForOutcome` for workflow
+fan-out.
+
+### 21.9 Tests and verification
+New suites `tests/events.test.ts` (feed order, bound, limit, listeners,
+contract) and `tests/metadata.test.ts` (run/provisioning markers, foreign keys,
+malformed values, workspace stamp); `tests/screen-params.test.ts` extended for
+`run=`. `npm run typecheck` is clean and `npm test` reports **21 suites / 208
+tests**.
+

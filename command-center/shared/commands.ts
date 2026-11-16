@@ -56,6 +56,18 @@ export const commandVariableSchema = z.object({
   kind: commandVariableKindSchema.default("text"),
 });
 
+/**
+ * Provider-declared option values (0.13.0): the keys a provider publishes through
+ * `providers.listControls` (`thinking`, mode flags, …). Stored on a command so
+ * a saved command can pin them, and sent per run as `options`.
+ */
+export const providerOptionsSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.boolean(), z.null()]),
+);
+
+export type ProviderOptions = z.infer<typeof providerOptionsSchema>;
+
 export const commandSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -75,6 +87,12 @@ export const commandSchema = z.object({
   terminalName: z.string().optional(),
   /** Prompt commands only: `provider/model` of the agent created for a run. */
   provider: z.string().optional(),
+  /**
+   * Prompt commands only: provider option values the command pins (0.13.0), the
+   * same keys `providers.listControls` reports (thinking level, mode flags, …).
+   * A run-time pick in the run dialog overrides them for that run only.
+   */
+  providerOptions: providerOptionsSchema.optional(),
   /**
    * Prompt commands only: MCP servers attached to every agent created by this
    * command. Keys are server names, values are daemon MCP configs
@@ -383,6 +401,14 @@ export const runCommand = defineRpc({
      * (`interrupt`).
      */
     activeTurnBehavior: activeTurnBehaviorSchema.optional(),
+    /**
+     * Create the agent as a background agent (0.13.0, Paseo 0.16.0): hidden from
+     * tabs, default lists and attention, still addressable by id. Ignored for
+     * existing-agent and shell targets.
+     */
+    background: z.boolean().optional(),
+    /** Run-time provider option overrides (0.13.0); merged over the command's own. */
+    providerOptions: providerOptionsSchema.optional(),
   }),
   output: runResultSchema,
 });
@@ -396,6 +422,8 @@ export const runTargetSchema = z.object({
   newWorktree: z.boolean().optional(),
   /** Only meaningful for targets with an existing `agentId`. */
   activeTurnBehavior: activeTurnBehaviorSchema.optional(),
+  /** Create the new agent for this target as a background agent (0.13.0). */
+  background: z.boolean().optional(),
 });
 
 export type RunTarget = z.infer<typeof runTargetSchema>;
@@ -409,6 +437,8 @@ export const runBatch = defineRpc({
     targets: z.array(runTargetSchema).min(1).max(20),
     /** Groups the recorded history entries; generated server-side when omitted. */
     batchId: z.string().optional(),
+    /** Run-time provider option overrides (0.13.0); merged over the command's own. */
+    providerOptions: providerOptionsSchema.optional(),
   }),
   output: z.object({
     results: z.array(runResultSchema),

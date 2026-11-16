@@ -10,6 +10,8 @@ import { renderPreview } from "./preview";
 import { ScheduleDialog } from "./schedule-dialog";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 import { ProviderModelPicker } from "./provider-model-picker";
+import { ProviderControls } from "./provider-controls";
+import type { ProviderOptions } from "../shared/commands";
 
 export interface DialogWorkspaceOption {
   id: string;
@@ -59,7 +61,12 @@ interface Props {
   /** JSON workspace key; null/unknown falls back to the default target. */
   initialWorkspaceKey?: string | null;
   initialAgentId?: string | null;
-  onRun: (input: { values: Record<string, string>; targets: BatchTarget[] }) => Promise<BatchItemResult[]>;
+  onRun: (input: {
+    values: Record<string, string>;
+    targets: BatchTarget[];
+    /** Provider option values picked in this dialog (0.13.0). */
+    providerOptions?: ProviderOptions;
+  }) => Promise<BatchItemResult[]>;
   /** Creates a schedule from the current dialog state; absent on old hosts. */
   onSchedule?: (input: {
     values: Record<string, string>;
@@ -140,6 +147,12 @@ export function RunDialog({
     return match ? [`${match.serverId}:${match.id}`] : [];
   });
   const [newWorktree, setNewWorktree] = useState(false);
+  /** Quiet run (0.13.0): create the agents as background agents. */
+  const [quietRun, setQuietRun] = useState(false);
+  /** Provider-declared option values (0.13.0), starting from the command's own. */
+  const [optionValues, setOptionValues] = useState<ProviderOptions>(() => ({
+    ...(command.providerOptions ?? {}),
+  }));
   /** What happens when the existing-agent target is mid-turn (0.6.0). */
   const [activeTurn, setActiveTurn] = useState<ActiveTurnBehavior>("interrupt");
   const [busy, setBusy] = useState(false);
@@ -302,10 +315,15 @@ export function RunDialog({
       newWorktree,
       workflow: isWorkflow,
       activeTurnBehavior: selectedAgents.length > 0 ? activeTurn : undefined,
+      background: quietRun && !isShell,
     });
     setBusy(true);
     setResults(null);
-    void onRun({ values, targets })
+    void onRun({
+      values,
+      targets,
+      providerOptions: Object.keys(optionValues).length > 0 ? optionValues : undefined,
+    })
       .then((items) => setResults(items))
       .catch((error: unknown) =>
         setResults([
@@ -496,6 +514,29 @@ export function RunDialog({
                 Pick a provider/model — Paseo requires the full format, e.g. cline/claude-opus-4-6.
               </Text>
             ) : null}
+            {/* What the provider itself declares (thinking level, flags …), merged
+                over the command's saved values for this run only (0.13.0). */}
+            <ProviderControls
+              theme={theme}
+              provider={provider || null}
+              cwd={firstWorkspace?.directory ?? null}
+              values={optionValues}
+              onChange={(next) => {
+                setOptionValues(next);
+                setResults(null);
+              }}
+              title="Provider options"
+            />
+          </View>
+          ) : null}
+          {!isWorkflow ? (
+          <View style={styles.field}>
+            <Pressable style={styles.checkRow} onPress={() => setQuietRun((value) => !value)}>
+              <Text style={[styles.check, { color: foreground }]}>{quietRun ? "☑" : "☐"}</Text>
+              <Text style={[styles.checkLabel, { color: foreground }]}>
+                Quiet run — created agents stay out of tabs, lists and notifications
+              </Text>
+            </Pressable>
           </View>
           ) : null}
           {!isWorkflow ? (

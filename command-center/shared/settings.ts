@@ -26,6 +26,22 @@ export const commandCenterSettings = defineSettings({
      * bootstrap: install deps, lint, etc.). Empty = disabled.
      */
     bootstrapCommand: z.string().trim().max(120).default(""),
+    /**
+     * Background agents (Paseo 0.16.0: helpers hidden from tabs, lists and
+     * attention) get the `command_center_run` tool and the launch-only MCP
+     * servers like any other agent. Off = the session open gives them neither,
+     * for users who run large quiet fan-outs and do not want orchestration inside
+     * the helpers they spawned.
+     */
+    injectIntoBackgroundAgents: z.boolean().default(true),
+    /**
+     * Workflow steps that create an agent wait for its turn to finish and gate
+     * the next step on the real result (0.13.0, Paseo 0.16.0 `waitForFinish`).
+     * Off = a step counts as successful once dispatched. A shell step never waits.
+     */
+    waitForWorkflowSteps: z.boolean().default(true),
+    /** Upper bound for one step's wait, 30–3600 seconds. */
+    workflowStepTimeoutSeconds: z.number().int().min(30).max(3600).default(900),
   }),
 });
 

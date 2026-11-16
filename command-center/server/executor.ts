@@ -4,6 +4,9 @@ import { defaultValuesForCommand, isFullModelRef } from "../shared/commands";
 import { renderTemplate, worktreeBranchFor } from "../shared/template";
 import { forgetAgentMcp, rememberAgentMcp } from "./agent-mcp";
 import { appendHistory, loadCommands, loadHistory } from "./store";
+import { publishCommandEvent } from "./event-bus";
+import { runStamp } from "./metadata";
+import type { ProviderOptions } from "../shared/commands";
 
 /** Workspace fields the executor and the template context rely on. */
 interface WorkspaceLike {
@@ -108,6 +111,20 @@ export async function executeCommand(
      */
     activeTurnBehavior?: ActiveTurnBehavior;
     /**
+     * Quiet run (0.13.0, Paseo 0.16.0): create the agent as a background agent —
+     * hidden from tabs, default lists and attention, still addressable by id.
+     * Ignored for existing-agent and shell targets.
+     */
+    background?: boolean;
+    /** Provider option values for the created agent (0.13.0). */
+    providerOptions?: ProviderOptions;
+    /**
+     * Workflow step (0.13.0): wait for the created agent's turn to finish and use
+     * its real result instead of "dispatched". Shell and existing-agent targets
+     * ignore it.
+     */
+    waitForOutcome?: { timeoutMs: number };
+    /**
      * Internal: a workflow step runs through the same dispatch path but the
      * workflow records one history entry for the whole chain, not one per step.
      */
@@ -119,6 +136,16 @@ export async function executeCommand(
   const now = deps.now ?? (() => new Date());
   const provider = input.provider?.trim() || command.provider?.trim() || "";
   const batchId = input.batchId ?? null;
+  const providerOptions = input.providerOptions ?? command.providerOptions;
+  // One id per dispatch, written into the agent's metadata so the history entry
+  // points at the agent it created (0.13.0).
+  const runId = `r_${now().getTime()}_${Math.random().toString(36).slice(2, 8)}`;
+  const metadata = runStamp({
+    commandId: command.id,
+    commandName: command.name,
+    runId,
+    at: now().toISOString(),
+  });
 
   try {
     if (command.type === "workflow") {
@@ -153,6 +180,14 @@ export async function executeCommand(
         batchId,
       };
       if (input.recordHistory !== false) appendHistory(loadHistory(), entry);
+      if (input.recordHistory !== false) {
+        publishCommandEvent({
+          kind: "run",
+          title: command.name,
+          detail: `terminal · ${workspace.name ?? workspace.id}`,
+          ok: true,
+        });
+      }
       return {
         ok: true,
         kind: "terminal",
@@ -218,6 +253,12 @@ export async function executeCommand(
           now,
           { provider, values: input.values, batchId },
         );
+        publishCommandEvent({
+          kind: "run",
+          title: command.name,
+          detail: `existing agent ${input.agentId}`,
+          ok: true,
+        });
       }
       return {
         ok: true,
@@ -230,21 +271,54 @@ export async function executeCommand(
       };
     }
 
+    // Shared create options (0.13.0): the run stamp in `metadata`, the quiet-run
+    // `background` flag, and the provider options the command or run dialog pinned.
+    const createOptions = {
+      prompt: rendered,
+      title: commandTitle(command),
+      labels: { source: "command-center" },
+      metadata,
+      ...(input.background ? { background: true } : {}),
+      ...(providerOptions && Object.keys(providerOptions).length > 0
+        ? { options: providerOptions }
+        : {}),
+    };
     const created = input.newWorktree && workspace
       ? await paseo.workspaces.ref(workspace.id).agents.create({
+          ...createOptions,
           config: { provider, mcpServers: command.mcpServers },
-          prompt: rendered,
           worktree: { mode: "branch-off", newBranch: worktreeBranchName(command) },
-          title: commandTitle(command),
-          labels: { source: "command-center" },
         })
       : await paseo.agents.create({
+          ...createOptions,
           config: { provider, mcpServers: command.mcpServers },
           cwd: contextWorkspace?.workspaceDirectory ?? contextWorkspace?.projectRootPath ?? process.cwd(),
-          prompt: rendered,
-          title: commandTitle(command),
-          labels: { source: "command-center" },
         });
+
+    // Workflow step outcome (0.13.0): a created agent's turn is otherwise only
+    // "dispatched". `waitForFinish` turns the step's result into the agent's real
+    // one, so `on-success` / `on-failure` gate on what actually happened.
+    let outcomeError: string | null = null;
+    if (input.waitForOutcome) {
+      const timeoutMs = input.waitForOutcome.timeoutMs;
+      const outcome = await paseo.agents
+        .ref(created.id)
+        .waitForFinish(timeoutMs)
+        .catch((cause: unknown) => ({
+          status: "error" as const,
+          error: cause instanceof Error ? cause.message : String(cause),
+          final: null,
+          lastMessage: null,
+        }));
+      if (outcome.status === "timeout") {
+        outcomeError = `The step's agent did not finish within ${Math.round(timeoutMs / 1000)}s.`;
+      } else if (outcome.status === "error") {
+        outcomeError = outcome.error ?? "The step's agent ended with an error.";
+      } else if (outcome.status === "permission") {
+        outcomeError = "The step's agent stopped for a permission decision.";
+      }
+    }
+    const ok = outcomeError === null;
 
     if (input.recordHistory !== false) {
       recordHistory(
@@ -253,23 +327,32 @@ export async function executeCommand(
         "new-agent",
         input.newWorktree ? (workspace?.id ?? null) : (contextWorkspace?.id ?? null),
         created.id,
-        true,
-        null,
+        ok,
+        outcomeError,
         now,
         { provider, values: input.values, batchId },
       );
+      publishCommandEvent({
+        kind: "run",
+        title: command.name,
+        detail: `agent ${created.id}${input.background ? " · background" : ""}`,
+        ok,
+      });
     }
     return {
-      ok: true,
+      ok,
       kind: "new-agent",
       workspaceId: input.newWorktree ? (workspace?.id ?? null) : (contextWorkspace?.id ?? null),
       agentId: created.id,
       terminalId: null,
       title: commandTitle(command),
-      error: null,
+      error: outcomeError,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (input.recordHistory !== false) {
+      publishCommandEvent({ kind: "run", title: command.name, detail: message, ok: false });
+    }
     return failure(command.type === "shell" ? "terminal" : "new-agent", message);
   }
 }
@@ -300,6 +383,10 @@ async function executeWorkflow(
     newWorktree: boolean;
     activeTurnBehavior?: ActiveTurnBehavior;
     batchId?: string | null;
+    background?: boolean;
+    providerOptions?: ProviderOptions;
+    /** Wait for each created step agent's turn (0.13.0). */
+    waitForOutcome?: { timeoutMs: number };
   },
   deps: RunDeps,
 ): Promise<RunResult> {
@@ -310,6 +397,18 @@ async function executeWorkflow(
   const batchId = input.batchId ?? null;
 
   const finish = (ok: boolean, error: string | null, summary: WorkflowStepSummary[], last: RunResult | null): RunResult => {
+    publishCommandEvent({
+      kind: "run",
+      title: command.name,
+      detail:
+        summary.length === 0
+          ? error ?? "no steps ran"
+          : summary
+              .filter((step) => !step.skipped)
+              .map((step) => `${step.ok ? "✓" : "✗"} ${step.commandName}`)
+              .join(" · "),
+      ok,
+    });
     appendHistory(loadHistory(), {
       id: `h_${now().getTime()}_${Math.random().toString(36).slice(2, 8)}`,
       commandId: command.id,
@@ -396,6 +495,9 @@ async function executeWorkflow(
         newWorktree: false,
         activeTurnBehavior: input.activeTurnBehavior,
         batchId,
+        background: input.background,
+        providerOptions: input.providerOptions,
+        waitForOutcome: input.waitForOutcome,
         recordHistory: false,
       },
       deps,
@@ -440,6 +542,10 @@ export async function executeBatch(
     values: Record<string, string>;
     targets: RunTarget[];
     batchId?: string | null;
+    /** Run-time provider option overrides for every target (0.13.0). */
+    providerOptions?: Record<string, string | number | boolean | null>;
+    /** Workflow fan-out: wait for each created agent's turn (0.13.0). */
+    waitForOutcome?: { timeoutMs: number };
   },
   deps: RunDeps,
 ): Promise<RunResult[]> {
@@ -458,6 +564,9 @@ export async function executeBatch(
           provider: target.provider,
           batchId,
           activeTurnBehavior: target.activeTurnBehavior,
+          background: target.background,
+          providerOptions: input.providerOptions,
+          waitForOutcome: input.waitForOutcome,
         },
         deps,
       ),

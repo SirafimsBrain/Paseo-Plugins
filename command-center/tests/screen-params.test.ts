@@ -3,8 +3,18 @@ import { parseScreenParams, screenParams, toOpenScreenParams } from "../shared/s
 
 describe("screen params deep links", () => {
   it("defaults to the library view with no focus", () => {
-    expect(parseScreenParams(undefined)).toEqual({ view: "library", commandId: null, scheduleId: null });
-    expect(parseScreenParams({})).toEqual({ view: "library", commandId: null, scheduleId: null });
+    expect(parseScreenParams(undefined)).toEqual({
+      view: "library",
+      commandId: null,
+      scheduleId: null,
+      runCommandId: null,
+    });
+    expect(parseScreenParams({})).toEqual({
+      view: "library",
+      commandId: null,
+      scheduleId: null,
+      runCommandId: null,
+    });
   });
 
   it("accepts every known view and rejects unknown ones", () => {
@@ -25,6 +35,7 @@ describe("screen params deep links", () => {
       view: "schedules",
       commandId: null,
       scheduleId: null,
+      runCommandId: null,
     });
   });
 
@@ -33,6 +44,13 @@ describe("screen params deep links", () => {
     const payload = toOpenScreenParams(original);
     expect(payload).toEqual({ view: "schedules", schedule: "sch_1" });
     expect(parseScreenParams(payload)).toEqual(original);
+  });
+
+  it("round-trips a run link", () => {
+    const original = screenParams("library", { runCommandId: "cmd_9" });
+    const payload = toOpenScreenParams(original);
+    expect(payload).toEqual({ view: "library", run: "cmd_9" });
+    expect(parseScreenParams(payload).runCommandId).toBe("cmd_9");
   });
 
   it("omits empty focus ids from the payload", () => {

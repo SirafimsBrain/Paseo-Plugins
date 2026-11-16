@@ -20,6 +20,8 @@ export interface BatchTarget {
    * `steer` delivers the prompt into the running turn.
    */
   activeTurnBehavior?: ActiveTurnBehavior;
+  /** Create the new agent as a background agent (0.13.0, Paseo 0.16.0). */
+  background?: boolean;
 }
 
 /** A selected existing agent and the workspace key it lives in (when known). */
@@ -51,6 +53,8 @@ export function planTargets(input: {
   newWorktree: boolean;
   workflow: boolean;
   activeTurnBehavior?: ActiveTurnBehavior;
+  /** Quiet run (0.13.0): created agents are background agents. */
+  background?: boolean;
 }): BatchTarget[] {
   const covered = new Set(
     input.selectedAgents
@@ -63,6 +67,7 @@ export function planTargets(input: {
       workspaceKey,
       provider: input.provider,
       newWorktree: input.workflow ? false : input.newWorktree,
+      background: input.background,
     })),
     ...input.selectedAgents.map((agent) => ({
       workspaceKey: agent.workspaceKey,
@@ -78,6 +83,7 @@ export function planTargets(input: {
       workspaceKey: null,
       provider: input.provider,
       newWorktree: input.workflow ? false : input.newWorktree,
+      background: input.background,
     });
   }
   return targets;

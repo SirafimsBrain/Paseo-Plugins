@@ -17,6 +17,8 @@ import { declarationsForTemplate } from "../shared/variables";
 import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } from "./use-host-typography";
 import { commandCenterSettings } from "../shared/settings";
 import { ProviderModelPicker } from "./provider-model-picker";
+import { ProviderControls } from "./provider-controls";
+import type { ProviderOptions } from "../shared/commands";
 
 export interface CommandFormResult {
   name: string;
@@ -32,6 +34,8 @@ export interface CommandFormResult {
   category: string | null;
   /** Declared inputs with their kinds (0.10.0); empty for workflows. */
   variables: CommandVariable[];
+  /** Provider-declared option pins (0.13.0); null = run with provider defaults. */
+  providerOptions: ProviderOptions | null;
 }
 
 const INPUT_KINDS: { label: string; value: CommandVariableKind }[] = [
@@ -84,6 +88,10 @@ export function CommandForm({
   const [template, setTemplate] = useState(initial?.template ?? "");
   const [steps, setSteps] = useState<WorkflowStep[]>(initial?.steps ?? []);
   const [provider, setProvider] = useState(initial?.provider ?? defaultProviderFromSettings);
+  /** Pinned provider options (0.13.0): saved with the command, applied on every run. */
+  const [optionValues, setOptionValues] = useState<ProviderOptions>(() => ({
+    ...(initial?.providerOptions ?? {}),
+  }));
   const [terminalName, setTerminalName] = useState(initial?.terminalName ?? "");
   const [scope, setScope] = useState<"global" | "workspace">(initial?.scope ?? "global");
   const [category, setCategory] = useState(initial?.category ?? "");
@@ -176,6 +184,13 @@ export function CommandForm({
               Stored value “{provider.trim()}” is not a full reference — pick a model above to migrate it.
             </Text>
           ) : null}
+          <ProviderControls
+            theme={theme}
+            provider={isFullModelRef(provider) ? provider.trim() : null}
+            values={optionValues}
+            onChange={setOptionValues}
+            title="Provider options (saved with the command)"
+          />
         </>
       ) : (
         <>
@@ -458,6 +473,8 @@ export function CommandForm({
                 type === "workflow"
                   ? []
                   : declarationsForTemplate(template, initial?.variables ?? [], kinds),
+              providerOptions:
+                type === "prompt" && Object.keys(optionValues).length > 0 ? optionValues : null,
             })
           }
         >
