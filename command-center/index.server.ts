@@ -33,6 +33,7 @@ import {
   listSchedules,
   scheduleAction,
   updateSchedule,
+  type ScheduleView,
 } from "./shared/schedules";
 import {
   appendHistory as appendHistoryEntry,
@@ -510,8 +511,14 @@ export default function contribute(server: PluginServerContext) {
     return { ok: true, id: entry.id };
   });
 
-  server.handle(listSchedules, () =>
-    fetchScheduleViews().then((schedules) => ({ schedules })),
+  // Annotated return type: 0.16.0's `handle` is overloaded for RPC and
+  // subscription contracts, and an unannotated `.then(...)` chain no longer
+  // resolves against the RPC overload (the inferred type loses the output type).
+  server.handle(
+    listSchedules,
+    async (): Promise<{ schedules: ScheduleView[] }> => ({
+      schedules: await fetchScheduleViews(),
+    }),
   );
 
   server.handle(createSchedule, async (input, { paseo }) => {

@@ -1,8 +1,51 @@
 # Compatibility — command-center
 
-Current: plugin **0.7.0**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.3`, `@getpaseo/client ^0.15.3`.
+Current: plugin **0.12.2**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.16.0`, `@getpaseo/client ^0.16.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Paseo 0.16.0 compatibility (0.12.2, 2026-11-16)
+
+Verified against the **stable Paseo 0.16.0** release (2026-11-16). Full evidence:
+[`__doc.md`](./__doc.md) §20.
+
+**Compatible; no API migration.** Nothing the plugin registers is deprecated in
+0.16.0, and 0.16.0 removes nothing the plugin uses. Two typing-only changes
+were needed against the new SDK:
+
+| Change in 0.16.0 | What it did to this plugin |
+| --- | --- |
+| `agent.turn.after` no longer carries `timeline` (it is removed, not just empty) | nothing — the automation hook reads `event.outcome` only |
+| `PluginHookAgent` gains required `background` + `metadata` | the agent-tool test fixture gained both |
+| `server.handle` is overloaded for RPC **and** subscription, RPC output typed via `PluginWireInput` | the single non-`async` handler (`listSchedules`) was rewritten as an annotated `async` handler; behaviour identical |
+
+**The scheduler bridge is unaffected:** all nine `schedule*` methods on
+`@getpaseo/client` keep byte-identical signatures and payloads between 0.15.3
+and 0.16.0. `featureValues` is newly `@deprecated` on send/create options (use
+`options`); the plugin never passed it.
+
+`requirements.paseo` stays **`>=0.15.0`** — the code needs no 0.16.0 API — while
+both dev pins move to `^0.16.0` because that is what the entries are compiled and
+tested against.
+
+**Verification:** `tsc --noEmit` clean and vitest **19 suites / 194 tests** green
+against both 0.16.0 SDKs; a **live isolated 0.16.0 daemon** (scratch home, own
+loopback port, `pluginsEnabled: true`, production `~/.paseo` untouched) shows the
+plugin `running` with `[paseo] Plugin ready`, a clean reload, and the RPC surface
+answering over the daemon websocket — including `command-center.schedules` and
+`command-center.schedule-runs`, which exercised the plugin's own `DaemonClient`
+against 0.16.0's `schedule/list` and `schedule/logs` RPCs.
+
+**Recommendations recorded by the pass** (§20.5): live schedule/history updates
+via `addSubscription`, `metadata` markers on created agents and bootstrapped
+workspaces, background fan-out, a “save as command” composer item, richer deep
+links and screen titles, provider controls in the run dialog, and waiting for
+the real outcome of a dispatched prompt. All are features, not compatibility
+needs — 0.12.2 runs on 0.16.0 as it is.
+
+**Not exercised live:** UI rendering, a real prompt/shell dispatch, the agent
+tool call and streamed schedule output; they are covered by the hermetic suites
+and were not touched by this pass.
 
 ## Summary (former root README row)
 

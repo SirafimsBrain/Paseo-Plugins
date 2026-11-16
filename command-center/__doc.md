@@ -1061,3 +1061,139 @@ arguments.
 | `npx tsc --noEmit` | **exit 0** |
 | `npx vitest run` | **19 suites / 194 tests pass** — `tests/dashboard.test.ts` now covers `dashboardSummary` (counts, summed runs, recent failures, independent caps, empty store, negative limits) and the `view=dashboard` deep link, instead of the removed HTTP server |
 | UI | The new tab was not rendered in the app in this pass; it is a read-only consumer of the tested summary helper and the existing `list`/`history` RPCs |
+
+## 20. Paseo 0.16.0 — compatibility pass (2026-11-16)
+
+Checked against the **stable Paseo 0.16.0** release and the SDKs it ships
+(`@getpaseo/plugin@0.16.0`, `@getpaseo/client@0.16.0`, both unpacked from npm and
+diffed against 0.15.4 / 0.15.3). Shipped as **command-center 0.12.2** — a patch
+release: two typing fixes, no behaviour change, no new capability.
+
+### 20.1 The SDK diff, as it reaches this plugin
+
+`@getpaseo/plugin` 0.15.4 → 0.16.0:
+
+| Change | Effect here |
+| --- | --- |
+| `agent.turn.after` payload: the always-empty `timeline` is **removed**, `outcome` stays | none — the automation hook reads `event.outcome` only (`index.server.ts:129`), no `timeline` reference exists in the plugin |
+| `PluginHookAgent` gains required `background` and `metadata` | type-only: the agent-tool test fixture had to gain both fields |
+| `PluginSessionOpenRequest` gains `background` and `metadata`; the hook may return an object without them | none — the hook returns the request it was given plus `tools`/`mcpServers` |
+| `server.handle` becomes overloaded: RPC **and** subscription contracts, and the RPC handler is typed against `PluginWireInput<ZodInput<OutputSchema>>` | the one `.then(...)` handler (`listSchedules`) stopped resolving against the RPC overload; rewritten as an annotated `async` handler. Every other handler was already an `async` function with a plain object return |
+| New `PluginSubscriptionContext`, `defineSubscription` | unused (see §20.3) |
+| `defineAgentTool`, `addHook`, settings, `registerProvider`, `registerUsageSource` | unchanged |
+
+`@getpaseo/client` 0.15.3 → 0.16.0 — everything this plugin calls is either
+unchanged or additive:
+
+- **The scheduler bridge is untouched:** all nine `schedule*` methods
+  (`scheduleList`, `scheduleCreate`, `scheduleInspect`, `scheduleLogs`,
+  `schedulePause`, `scheduleResume`, `scheduleDelete`, `scheduleRunOnce`,
+  `scheduleUpdate`) keep byte-identical signatures, and `InspectScheduleOptions`,
+  `CreateScheduleOptions`, `UpdateScheduleOptions` and their payloads are
+  unchanged.
+- `PaseoApi` additions the plugin may use later: `CreateAgentRequestOptions.metadata`,
+  `WorkspaceCreateRequest.metadata`, `PaseoWorkspaceHandle.setMetadata`/`setPinned`/`setLabel`/`setBaseBranch`,
+  `agent.background_work.list`, provider **controls** listing, `DiffCompare`/`DiffState`.
+- `featureValues` on `sendMessage`/agent-create options is now `@deprecated`
+  (“put these in `options`”) but still accepted — the plugin does not pass it,
+  `providerOptions` is what the model picker sets.
+- `PaseoProviderFeaturesInput` was reshaped (draft-config type follow-up); the
+  provider/model picker keeps working against 0.16.0's typings unchanged.
+
+Nothing the plugin registers is deprecated in 0.16.0, and 0.16.0 removes nothing
+this plugin uses. `requirements.paseo` stays `>=0.15.0` — no new host API is
+required by the code — and both dev pins moved to `^0.16.0` because that is what
+the entries are compiled and tested against.
+
+### 20.2 Code changes (typing only)
+
+1. `index.server.ts` — `listSchedules`:
+   ```ts
+   server.handle(listSchedules, async (): Promise<{ schedules: ScheduleView[] }> => ({
+     schedules: await fetchScheduleViews(),
+   }));
+   ```
+   The previous `.then(...)` chain type-checked against 0.15.x's single `handle`
+   signature but not against 0.16.0's overloaded one: with the subscription
+   overload in the candidate set, the inferred handler type lost the contract's
+   output type. The annotation resolves the overload; the handler's behaviour is
+   identical.
+2. `tests/agent-tool.test.ts` — the fixture `agent` object gained
+   `background: false` and `metadata: {}` (new required fields on
+   `PluginHookAgent`).
+
+No runtime behaviour, storage format, RPC contract or UI changed.
+
+### 20.3 Deliberately not adopted in this pass
+
+0.16.0 gives this plugin four capabilities it does not use yet — each is a
+feature, not a compatibility need, so they are recorded as recommendations in
+§20.5 rather than smuggled into a patch release: subscriptions, composer items,
+hook/entity `metadata`, and `request.background`.
+
+### 20.4 Verification (2026-11-16, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) against the 0.16.0 SDKs | exit 0 |
+| `npm test` (19 hermetic suites) | 194 tests passed |
+| Deprecated calls in the plugin | none (`server.addHook` ×4, `server.handle`, `registerSettings`, agent tool) |
+| Live daemon | **isolated Paseo 0.16.0 daemon** — scratch home `/tmp`, `daemon.listen 127.0.0.1:6799`, `pluginsEnabled: true`, production `~/.paseo` untouched; plugin installed from the working tree, `running`, `[paseo] Plugin ready`, `paseo plugin reload` → stop → load → ready with no `Unknown lifecycle hook` or contribution errors |
+| Live RPC surface | invoked over the daemon websocket as an external client: `command-center.list` → `{commands: []}`, `command-center.categories` → `{categories: []}`, `command-center.history` → `{entries: []}`, `command-center.export` → a valid `command-center/commands` bundle |
+| Live scheduler bridge | `command-center.schedules` → `{schedules: []}` and `command-center.schedule-runs` → the daemon's own `Schedule not found` answer. Both prove the plugin's own `DaemonClient` connection reached 0.16.0's `schedule/list` and `schedule/logs` RPCs — the bridge is not a stub |
+| Not exercised live | UI rendering (no client was driven), a real prompt/shell dispatch into an agent, the agent tool call, and streamed schedule run output; those are covered by the hermetic suites and unchanged by this pass |
+
+### 20.5 Recommendations for improvement (recorded, not implemented)
+
+1. **Live schedule and history updates through `addSubscription` (0.16.0).**
+   Today the Schedules and History tabs read on mount and on action. A
+   `command-center.events` subscription could push “run finished”, “schedule
+   fired”, “schedule changed” — the executor knows when a dispatch starts, and
+   the bridge already talks to the daemon. Value: a long fan-out shows progress
+   in the dashboard without a manual refresh, and a failed scheduled run is
+   visible immediately instead of on the next visit.
+2. **Mark what the plugin created in `metadata` (0.16.0).**
+   `CreateAgentRequestOptions.metadata` lets a prompt run stamp the new agent
+   with `command-center: { commandId, runId, at }`; the session-open hook can
+   also record how it provisioned it (`mcp` / `tool` / `skipped`) as
+   bunny-search 0.7.5 now does. Value: the history entry links to the agent it
+   created, “repeat this run” can offer the same agent, the repair action can
+   list agents that only got the tool, and the hook can skip the capability
+   probe for agents it already provisioned.
+3. **`workspace.metadata` for the bootstrap automation.**
+   The “run a command for every new workspace” hook currently has to remember
+   what it bootstrapped in the plugin’s own store. Writing
+   `command-center: { bootstrappedAt, commandId }` onto the workspace makes the
+   automation idempotent across store loss and visible to other plugins, and
+   `setMetadata` lets the screen show it.
+4. **Background fan-out (0.16.0 `background`).**
+   A ten-workspace run creates ten agents; `CreateAgentRequestOptions.background`
+   would keep them out of tabs, default lists and attention, with a per-run
+   toggle (“quiet run”). In the other direction the session-open hook can apply a
+   different policy to `request.background` (for example never inject the MCP
+   registry into helpers).
+5. **A composer control (0.16.0 `addComposerItem`).**
+   “Save as command” in the composer: take `useComposer().prompt`, derive
+   `{{input:…}}` variables, open the editor prefilled (or save directly into a
+   chosen category). This is the shortest path from “I just typed a good prompt”
+   to “it is a reusable command”, and it reuses the existing save RPC.
+6. **Richer deep links and titles.** The screen already takes `view` /
+   `command` / `schedule`; add `run=<commandId>` (open the run dialog prefilled
+   instead of the editor), and make `PluginScreenTitle` a function of the params
+   so a deep-linked history or schedule reads “History — nightly build” rather
+   than the generic title.
+7. **Provider controls in the run dialog (0.16.0 `ProviderControlsListResponse`).**
+   The picker chooses provider/model; the daemon now also publishes
+   provider-declared controls (the same ones the native composer shows). Showing
+   them would let a command pin “thinking: high” as part of its saved shape
+   instead of relying on provider defaults.
+8. **Record the real outcome of a dispatched prompt.**
+   `command_center_run` and the workflow executor report “dispatched”, not
+   “finished”, so a workflow's `on success` / `on failure` sees only dispatch
+   errors. 0.16.0 documents the supported read — `timeline.refetch({ direction:
+   "tail", limit: 1, wholeTurns: true })` plus `waitForFinish` on the client —
+   which would let a step wait for the agent turn and gate the next step on its
+   actual result.
+
+None of these is a compatibility issue: 0.12.2 runs correctly on 0.16.0 as it
+is. They are listed in the order of value to a user of the plugin.

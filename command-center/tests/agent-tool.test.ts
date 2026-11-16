@@ -71,6 +71,9 @@ const toolContext = (paseo: unknown) => ({
     provider: "claude/opus-4.6",
     cwd: "/disk/plugins",
     title: "Caller",
+    // PluginHookAgent gained these in 0.16.0.
+    background: false,
+    metadata: {},
   },
   paseo: paseo as never,
   signal: new AbortController().signal,

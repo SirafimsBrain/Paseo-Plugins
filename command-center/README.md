@@ -167,6 +167,6 @@ methods** in an isolated 0.14.0 daemon.
 
 ## Compatibility
 
-Paseo **0.15.0 (2026-11-09)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.3` + `@getpaseo/client ^0.15.3` — compatible after the `addHook` migration; 0.14.0 surface stays in use. Current plugin version: **0.12.1**.
+Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.16.0` + `@getpaseo/client ^0.16.0` — compatible with no API migration (0.16.0's removed `agent.turn.after.timeline` is unused, and the nine `schedule*` methods the scheduler bridge calls are unchanged); the only changes were two typings. Current plugin version: **0.12.2**.
 
-Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
+Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) §20.
