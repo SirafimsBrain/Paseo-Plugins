@@ -55,7 +55,7 @@ the patch release `0.6.5` records — no behaviour changed, so no feature bump.
 | --- | --- |
 | `npm run typecheck` (`tsc -b`, three projects) against `@getpaseo/plugin@0.16.0` | **exit 0** |
 | `npm test` (`pretest` rebuilds `dist/mcp-server.js`) | **11 suites / 156 tests pass**, 1 suite / 2 tests skipped (the live-search suite without `BUNNY_LIVE=1`) |
-| Live daemon | **0.16.0**, isolated scratch home on its own loopback port with `pluginsEnabled: true`, production home untouched: plugin `running`, `[paseo] Plugin ready`, settings mirror written, six RPC methods registered, no `Unknown lifecycle hook`, boundary or contribution errors |
+| Live daemon | **0.16.0**, isolated scratch home on its own loopback port with `pluginsEnabled: true`, production home untouched: plugin `running`, `[paseo] Plugin ready`, settings mirror written, four RPC methods plus the three settings methods registered, no `Unknown lifecycle hook`, boundary or contribution errors |
 | Host rule re-read, not assumed | `requiresDedicatedV2Server` and the refusal message read out of the installed 0.16.0 `app.asar` |
 
 **Not verified in this pass:** the two hooks were not fired on a live agent in

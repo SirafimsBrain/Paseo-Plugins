@@ -978,7 +978,7 @@ on 0.16.0 the tool-only mode is more reliable than it was on 0.15.0.
 | `npm run typecheck` (`tsc -b`: server / client / tests projects) against `@getpaseo/plugin@0.16.0` | **exit 0** |
 | `npm test` (`pretest` rebuilds `dist/mcp-server.js` with esbuild) | **11 suites / 156 tests pass**, 1.09 s; `tests/live-ddgs.test.ts` skipped without `BUNNY_LIVE=1` (1 suite / 2 tests) |
 | Deprecated API scan | `grep` for `server.on(`, `server.before(`, `addSurface`, `addSidebarItem`, `openSurface`, `client/react-native` over the plugin: **no matches** |
-| Live 0.16.0 daemon | isolated scratch home on its own loopback port, `pluginsEnabled: true`, installed from the published Git tag `bunny-search@0.6.5` (so the manifest `npm ci` + `npm run bundle` ran as on a real install): status `running`, `[paseo] Plugin ready`, settings mirror written, six RPC methods registered, no plugin/contribution errors |
+| Live 0.16.0 daemon | isolated scratch home on its own loopback port, `pluginsEnabled: true`, installed from the published Git tag `bunny-search@0.6.5` (so the manifest `npm ci` + `npm run bundle` ran as on a real install): status `running`, `[paseo] Plugin ready`, settings mirror written, four RPC methods plus the three settings methods registered (seven in total), no plugin/contribution errors |
 | Host rule | `requiresDedicatedV2Server` + the refusal message read from `/opt/Paseo/resources/app.asar` (0.16.0) |
 
 Not verified: the hooks were not fired on a live agent inside the isolated
