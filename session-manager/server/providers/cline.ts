@@ -10,10 +10,11 @@ import {
   listDirectories,
   pathSize,
   readJson,
+  sqliteSize,
   toIso,
 } from "../util";
 import { createCliProvider } from "./cli";
-import type { ProviderListResult, ProviderSession } from "./types";
+import type { ProviderListResult, ProviderSession, SqliteStore } from "./types";
 
 /** Cline keeps per-session directories next to a SQLite history database. */
 export function clineDataDir(): string {
@@ -27,9 +28,34 @@ export function clineSessionsDir(): string {
   return path.join(clineDataDir(), "sessions");
 }
 
-/** Store size covers the session directories and the history databases. */
+/**
+ * The two databases that belong to the session store: `sessions.db` holds the
+ * session rows `cline history` prints, `session-search.db` the full-text index
+ * of their transcripts. Everything else in `db/` (`hub-events-*`, `hub-runs-*`,
+ * `cron.db`, `tasks.db`, `teams.db`, `connectors.db`) belongs to other Cline
+ * features, not to sessions.
+ */
+export function clineSqliteStores(): SqliteStore[] {
+  const dbDir = path.join(clineDataDir(), "db");
+  return [
+    { path: path.join(dbDir, "sessions.db"), label: "sessions.db" },
+    { path: path.join(dbDir, "session-search.db"), label: "session-search.db" },
+  ];
+}
+
+/**
+ * Store size covers the session directories and the two session databases.
+ *
+ * It deliberately does not cover the whole `~/.cline/data`: that directory also
+ * holds the hub telemetry databases (`hub-events-hub-production.db` plus a
+ * WAL that can be tens of megabytes), and counting them made the panel report
+ * a session store several times its real size.
+ */
 export function clineStoreBytes(): number | null {
-  return pathSize(clineDataDir());
+  const parts = [pathSize(clineSessionsDir())];
+  for (const store of clineSqliteStores()) parts.push(sqliteSize(store.path));
+  const known = parts.filter((value): value is number => value !== null);
+  return known.length === 0 ? null : known.reduce((total, value) => total + value, 0);
 }
 
 function titleFromPrompt(prompt: unknown, metadata: Record<string, unknown> | null): string | null {
@@ -114,4 +140,5 @@ export const clineProvider = createCliProvider({
     extension: "html",
     args: (id, outPath) => ["history", "export", id, "--output", outPath],
   },
+  sqliteStores: clineSqliteStores,
 });

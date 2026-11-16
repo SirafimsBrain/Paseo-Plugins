@@ -8,6 +8,7 @@ import type {
   ProviderExportResult,
   ProviderListResult,
   ProviderSession,
+  SqliteStore,
 } from "./types";
 
 /**
@@ -38,6 +39,8 @@ export interface CliProviderConfig {
   enrich?: (session: ProviderSession) => Promise<ProviderSession> | ProviderSession;
   /** Optional transcript dump used by the "export before delete" flow. */
   export?: CliExportConfig;
+  /** SQLite databases of the store, for the compaction button. */
+  sqliteStores?: () => SqliteStore[];
   listLimit?: number;
   timeoutMs?: number;
 }
@@ -179,6 +182,7 @@ export function createCliProvider(config: CliProviderConfig): ProviderAdapter {
   }
 
   const adapter: ProviderAdapter = { id: config.id, label: config.label, list, delete: deleteMany };
+  if (config.sqliteStores) adapter.sqliteStores = config.sqliteStores;
   if (config.export) {
     adapter.exportSession = exportSession;
     adapter.exportExtension = config.export.extension;

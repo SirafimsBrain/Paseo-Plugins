@@ -1,12 +1,58 @@
 # Compatibility — session-manager
 
-Current: plugin **0.5.0**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.0`.
+Current: plugin **0.6.0**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.16.0`.
+Verified against **Paseo 0.16.0 (2026-11-16)** — compatible, no API migration
+needed; see *Plugin 0.6.0 — Paseo 0.16.0 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
 ## Summary (former root README row)
 
 | [session-manager](./README.md) | **0.15.0 (2026-11-03)** ⁵, **0.14.0 (2026-10-30)** ² | `@getpaseo/plugin@^0.15.0` (pin `^0.15.0`, `requirements.paseo >=0.15.0`) | **0.15.0: compatible after a mandatory migration — shipped as 0.3.4** (patch bump, tag `session-manager@0.3.4`): the plugin's single lifecycle hook moved from the `@deprecated` `server.on("agent.closed")` to `server.addHook("agent.close.after")` — same payload, same body, the handler only became `async` because `HookHandlers` is typed to return a `Promise`; the floor followed the API (`addHook` does not exist on 0.14.0) and `dist/client/` is byte-identical 0.14.0 → 0.15.0, so the panel, settings screen, four Command Center items and `useTabState` filters are untouched. It is unaffected by the OpenCode shared-service finding (it injects no MCP). Evidence: typecheck + vitest **9 suites / 74 tests** against SDK 0.15.0, no `server.on(` / `server.before(` left in the plugin, `running` in an isolated 0.15.0 daemon with `[paseo] Plugin ready`, zero `Unknown lifecycle hook` errors, and the hook proven to fire on a real agent stop and delete (`[session-manager] agent closed (<id>): listing cache invalidated`). **0.3.5** implements the first [§19.3](./__doc.md#193-recommendations-for-improvement) recommendation — the listing cache is dropped on `agent.archive.after` and `workspace.archive.after` as well, so an archived agent cannot linger with stale "still running" / "due for cleanup" hints until the 30 s TTL ages out (patch bump, tag `session-manager@0.3.5`; vitest 9 suites / 77 tests, both archive hooks observed firing on an isolated 0.15.0 daemon); the remaining recommendations stay recorded. **0.14.0: compatible, and both deprecations Paseo left in it are now migrated — shipped as 0.2.3, with §18.3's recommendations implemented the same day as 0.3.3.** The panel imports `ScrollView` / `useToast` from `@getpaseo/plugin/client/ui` instead of the `client/react-native` entry that goes away on 2027-04-20, and `addWorkspacePanel` no longer passes the `@deprecated` `context: "workspace"` field — the shipped renderer accepts `undefined` and normalises it to `"workspace"`, so behaviour is identical (verified by reading the 0.14.0 bundle, not assumed); the `context` fields on the four `addCommandCenterItem` calls stay, because there it is a required union discriminant. The floor follows the API actually used: `requirements.paseo` moved off `>=0.8.0` to the first host release whose `client/ui` exports those two symbols; the real 0.14.0 host rejects the manifest for a 0.12.0 daemon and accepts 0.14.0. Evidence: typecheck + vitest **8 suites / 70 tests** against SDK 0.14.0, both entries built by the real 0.14.0 host compiler (`compileDirectoryPlugin`) with zero deprecated calls — plus a negative control that *does* find the old specifier — and `running` in an isolated 0.14.0 daemon with `[paseo] Plugin ready` and seven RPC methods registered. **0.3.3** implements three of the four §18.3 recommendations — the listing cache is dropped on the new `agent.closed` event instead of ageing out after 30 s, a `context: "agent"` Command Center action reopens the session through the new `agents.ref(id).reload()` and rescans with a cold cache, and the panel's three filters moved to `useTabState` so they survive a reload. The fourth ("stop runtime, keep the session") was investigated and **cannot be built from a plugin**: `session.can_stop_runtime` is answered inside the provider protocol and consumed by the host's own idle-runtime cleanup, and `PaseoApi` exposes no stop/close/release call — evidence in [§18.5](./__doc.md#185-implementation-of-183-2026-10-30-shipped-as-033). Because `reload()` does not exist in the client of the release before it, the floor moved to `>=0.14.0` (the real host rejects the manifest for an older daemon and accepts 0.14.0); evidence for 0.3.3: typecheck + vitest **9 suites / 74 tests** and both entries built by the real 0.14.0 host compiler with `deprecatedHits: []`. No install-time build step. Details: [Compatibility](./__doc.md#compatibility), [§18](./__doc.md#18-paseo-0140--compatibility-pass-2026-10-30). |
+
+## Plugin 0.6.0 — Paseo 0.16.0 pass (2026-11-16)
+
+Verified against the **stable Paseo 0.16.0** release
+(<https://github.com/getpaseo/paseo/releases/tag/v0.16.0>). Full evidence:
+[`__doc.md`](./__doc.md) §22.
+
+**The one 0.16.0 breaking change does not reach this plugin.** 0.16.0 removed
+the deprecated `agent.turn.after.timeline` SDK field (#9573), which always
+returned an empty list. This plugin registers no turn hook at all: its three
+hooks are `agent.close.after`, `agent.archive.after` and
+`workspace.archive.after`, and their payloads (`{ agent }`, `{ agent,
+archivedAt }`, `{ workspace }`) are unchanged. `addHook` itself is untouched and
+`server.on` / `server.before` still carry only the 0.15.0 deprecation mark
+(removal after 2027-04-30).
+
+**SDK diff `0.15.4 → 0.16.0` — everything this plugin uses is untouched:**
+
+| Area | Change | Impact here |
+| --- | --- | --- |
+| `agent.turn.after` payload | `timeline` removed, `outcome` documented as the turn's only content | none — no turn hook |
+| Hook payloads | `PluginHookAgent` / `PluginHookWorkspace` / `PluginSessionOpenRequest` gain `metadata` (`Record<string, JsonValue>`) and a `background` flag; `agent.create.before` may return `metadata` | additive; the hook bodies here read only `agent.id` / `workspace.id` |
+| `PluginSessionOpenRequest` result | `agent.open.before` may now return a partial object (`background` / `metadata` optional) | none — this plugin registers no `agent.open.before` |
+| Server | new `PluginSubscriptionContext` export, `addSubscription` | not adopted (a subscription would stream `list` events; the panel polls on demand today) |
+| Settings | `SettingsDefinition.scope` widened `"host"` → `"host" \| "device"` | additive; `session-manager` stays `scope: "host"` — its values describe the daemon's disk, not the device reading them |
+| Client | new `useComposer`, `useNewWorkspace`, `useSubscription`, `useWorkspaces` / `useAgents` / `useTerminals`, `Add*` refs, `Toggle` / `Select` / `Action` / `Combobox` UI, sidebar views, workspace row badges | additive; no deprecation added. `addWorkspacePanel`, `addSettingsScreen`, `addSidebarFooterItem`, `addCommandCenterItem`, `ScrollView`, `useToast`, `SidebarRow`, `useTabState` are unchanged and still non-deprecated |
+
+The plugin's own 0.6.0 work needs no host API at all (SQLite compaction runs on
+the daemon host with `sqlite3` or `node:sqlite`), so `requirements.paseo` stays
+`>=0.15.0` and only the development pin moved to `^0.16.0`.
+
+**Verification.**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) against `@getpaseo/plugin@0.16.0` | **exit 0** |
+| `npm test` | **13 suites / 106 tests pass** (11/94 before the 0.6.0 work) |
+| Live daemon | **0.16.0**, isolated scratch home on its own loopback port with `pluginsEnabled: true`, production home untouched: plugin `running`, `[paseo] Plugin ready`, no `Unknown lifecycle hook` and no boundary or contribution errors, **nine methods** registered — `session-manager.list/delete/delete-batch/export/refresh/**compact**` plus the three settings methods |
+| Real database | `compactAgentStores({ provider: "kilo" })` against a **consistent `.backup` copy of the machine's 42 MB `kilo.db`**: `ok: true`, 41 959 424 → 41 062 400 bytes, 897 024 bytes freed |
+
+**Not verified in this pass:** the compaction button was not clicked in a
+running Paseo window (it is checked against the 0.16.0 typings and the live
+daemon's RPC registration only), and no live store was compacted — the real-database
+run used a copy.
 
 ## Plugin 0.4.0 and 0.5.0 (2026-11-09) — no Paseo API change
 

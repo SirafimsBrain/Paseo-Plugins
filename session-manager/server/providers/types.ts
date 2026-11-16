@@ -42,6 +42,21 @@ export type ProviderExportResult =
   | { ok: true; bytes: number }
   | { ok: false; error: string };
 
+/**
+ * One SQLite database that belongs to a provider's session store.
+ *
+ * Only stores that keep their sessions in SQLite declare these: the panel turns
+ * them into the "Compact database" button, and `server/compact.ts` runs the
+ * database's own `VACUUM` on each of them. Adapters whose sessions are plain
+ * files (Qwen Code, Kimi Code, acpx) declare nothing.
+ */
+export interface SqliteStore {
+  /** Absolute path of the main database file, without `-wal` / `-shm`. */
+  path: string;
+  /** File name shown in the compaction result. */
+  label: string;
+}
+
 export interface ProviderAdapter {
   /** Stable store id, matches the Paseo provider id where one exists. */
   id: string;
@@ -55,4 +70,6 @@ export interface ProviderAdapter {
   exportSession?(input: { id: string; outPath: string }): Promise<ProviderExportResult>;
   /** File name extension of the dump produced by `exportSession`. */
   exportExtension?: string;
+  /** SQLite databases of this store, compactable with `VACUUM`. */
+  sqliteStores?: () => SqliteStore[];
 }

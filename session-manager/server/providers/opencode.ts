@@ -54,4 +54,7 @@ export const opencodeProvider = createCliProvider({
     extension: "json",
     args: (id) => ["export", id],
   },
+  // The transcript lives in this one database, so `VACUUM` is what returns the
+  // space a deleted session left behind as free pages and WAL frames.
+  sqliteStores: () => [{ path: opencodeDatabasePath(), label: "opencode.db" }],
 });

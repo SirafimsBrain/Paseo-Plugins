@@ -24,7 +24,15 @@ usage in the panel styles; when unset, no `fontFamily` is forced so the host's
 
 ## Compatibility
 
-Current: **verified against Paseo `0.15.0` (2026-11-03, SDK
+Current: **verified against Paseo `0.16.0` (2026-11-16, SDK
+`@getpaseo/plugin@^0.16.0`)** — compatible with **no API migration**: the one
+breaking 0.16.0 change (`agent.turn.after.timeline` removed) does not reach a
+plugin that registers no turn hook, and every registration, hook name and UI
+import this plugin uses is unchanged and non-deprecated. Only the development
+pin moved (`^0.15.0` → `^0.16.0`); `requirements.paseo` stays `>=0.15.0`
+because 0.6.0 adopts no newer host API (§22).
+
+Earlier, **verified against Paseo `0.15.0` (2026-11-03, SDK
 `@getpaseo/plugin@^0.15.0`)** — compatible after a mandatory migration: the
 only lifecycle hook this plugin registers moved from the deprecated
 `server.on("agent.closed")` to `server.addHook("agent.close.after")`, shipped
@@ -912,3 +920,140 @@ never touch the real home stores is now true.
 | `npm test` | **11 suites / 94 tests pass**, 560 ms — `hooks.test.ts` back to 7 fast tests, plus the new `tests/summary.test.ts` (9 tests: `formatBytes`, `isOldEnough`, `needsForce`, `summarizeSessions` incl. `cleanupDays: 0` and unknown sizes) |
 | Version files | `package.json` and `package-lock.json` both `0.5.0` (the lockfile still said `0.3.5`, a leftover from the 0.4.0 bump, now corrected) |
 | Footer row on a live daemon | **not exercised in this pass** — it is a client contribution; typecheck proves the `addSidebarFooterItem` / `SidebarRow` / `PluginPopoverProps` usage against the 0.15.0 typings, and the host's own sidebar renderer was not started. Open the sidebar footer once against a real daemon to confirm the row and the popover. |
+
+## 22. Paseo 0.16.0 — compatibility pass, store audit and SQLite compaction (2026-11-16)
+
+Scope of this pass: verify the plugin against Paseo 0.16.0, re-check that each
+adapter manages its store correctly, and add a standard SQLite compaction for the
+database-backed stores. New functionality → second digit: `0.5.0` → `0.6.0`,
+annotated tag `session-manager@0.6.0`.
+
+### 22.1 SDK diff 0.15.4 → 0.16.0 and why nothing had to migrate
+
+The tarballs of `@getpaseo/plugin@0.15.4` and `@0.16.0` were unpacked and
+diffed (`diff -rq`). For this plugin the whole diff is additive or irrelevant:
+
+* **Breaking: `agent.turn.after.timeline` removed (#9573).** The plugin
+  registers no `agent.turn.*` hook, so the removal cannot reach it. Its three
+  hooks — `agent.close.after`, `agent.archive.after`, `workspace.archive.after`
+  — keep their payloads; `PluginHookAgent` gained `background` and `metadata`,
+  which the hook bodies do not read (they use `agent.id` / `workspace.id` only).
+* **`PluginSessionOpenRequest` may now return a partial result** (optional
+  `background` / `metadata`). This plugin registers no `agent.open.before`.
+* **New `PluginSubscriptionContext` / `addSubscription`.** Deliberately not
+  adopted in this release — see §22.5 recommendation 1.
+* **`SettingsDefinition.scope` widened to `"host" | "device"`.** Additive; the
+  plugin keeps `scope: "host"`, because its values describe the daemon's disk,
+  not the device the panel is rendered on.
+* **Client additions only** (`useComposer`, `useNewWorkspace`, `useSubscription`,
+  reference API, sidebar views, workspace row badges, composer controls). No new
+  `@deprecated` mark, and every symbol the plugin imports —
+  `addWorkspacePanel`, `addSettingsScreen`, `addSidebarFooterItem`,
+  `addCommandCenterItem`, `ScrollView`, `useToast`, `useRpc`, `useSettings`,
+  `useTabState`, `SidebarRow` — is unchanged.
+
+The plugin adopts none of the new API, so the floor stays `>=0.15.0`; only the
+development pin moved to `^0.16.0`.
+
+### 22.2 Store-management audit (read-only, this machine, 2026-11-16)
+
+Every adapter's data source was compared with the store it reports, without
+deleting anything:
+
+| Store | Observation | Verdict |
+| --- | --- | --- |
+| Cline | `~/.cline/data/sessions/` holds 6 directories, `db/sessions.db` 6 rows in the `sessions` table, `cline history --json` 6 entries | consistent — the CLI, the database and the directories agree, so a listing row is always deletable through `cline history delete` |
+| Cline | `~/.cline/data` is 245 MB, of which **204 MB are `hub-events-hub-production.db` plus its WAL** — hub telemetry, not sessions | **fixed**: `clineStoreBytes()` now counts the session directories plus `db/sessions.db` and `db/session-search.db` only (27.5 MB here instead of 233 MB) |
+| OpenCode | `opencode.db` 744 MB, `-wal` 70 KB; `session list --max-count 500` returns 12 sessions | database is the single source of truth; nothing else needed — the size is what the compaction button is for |
+| Kilo | `kilo.db` 42 MB, `session list` returns 50 sessions, each row carries `status: { type: "idle" }` | **fixed**: `running` was hard-coded `false`, so a busy Kilo session could be deleted. `status.type !== "idle"` now means running (missing status keeps `false`) |
+| Qwen Code | `~/.qwen/projects/*/chats/*.jsonl` plus `plans/`, `todos/`, `file-history/` sidecars; `~/.qwen/sessions/<pid>.json` is a runtime registry | unchanged; the registry entry is never deleted (§4) |
+| Kimi Code | `sessions/<workDirKey>/<id>/` + `session_index.jsonl`; lock directories mark occupancy | unchanged |
+| acpx | `index.json` + `<id>.json` + `<id>.stream.ndjson` | unchanged |
+
+One limit is recorded rather than changed: the CLI-backed adapters ask for at
+most 500 sessions (`listLimit`). A store with more sessions than that hides the
+older ones from both the panel and the delete guard (§22.5 recommendation 4).
+
+### 22.3 SQLite compaction — design
+
+* **Capability on the adapter, not a provider list in the UI.** `ProviderAdapter`
+  gained an optional `sqliteStores?: () => SqliteStore[]`; only Cline
+  (`db/sessions.db`, `db/session-search.db`), OpenCode (`opencode.db`) and Kilo
+  (`kilo.db`) declare it. `listSessions()` reports it as
+  `providers[].compactable`, and the panel renders the button only there — Qwen
+  Code, Kimi Code and acpx keep their sessions as files and have nothing to
+  vacuum.
+* **The operation is SQLite's own.** `server/compact.ts` runs
+  `VACUUM; PRAGMA wal_checkpoint(TRUNCATE);`. `VACUUM` rebuilds the file from
+  its live pages, so no row is created, changed or removed: the whole point is
+  to return the space a deleted transcript left as free pages. The checkpoint
+  then folds the WAL back in and truncates it, which is why the reported "after"
+  size is the real size on disk (`before`/`after` come from `sqliteSize()`, i.e.
+  `db` + `-wal` + `-shm`).
+* **Two execution paths.** The `sqlite3` CLI when `resolveBinary("sqlite3")`
+  finds it (600 s timeout — VACUUM rewrites a multi-hundred-megabyte file),
+  otherwise `node:sqlite` resolved through `createRequire(process.execPath)` so a
+  bundler never has to know a builtin that only exists from Node 22.5. When
+  neither is available the RPC answers with an instruction instead of failing
+  silently.
+* **RPC `session-manager.compact`** (`{ provider }` →
+  `{ ok, before, after, freed, databases[], error }`). `databases[]` reports per
+  file: `path`, `label`, `before`, `after`, `freed`, `error`, so a Cline store
+  whose `session-search.db` is locked still reports the successful
+  `sessions.db`. A missing database is **skipped** (an agent that never ran has
+  no file); a store where no database exists answers “has not written a session
+  database on this host”.
+* **Cache coherence.** The handler drops the provider's listing entry after the
+  run, because the store size in it just changed; the panel also sets its
+  `forceRefresh` flag and invalidates the react-query key, so the Stores section
+  shows the new numbers immediately.
+* **Failure surface.** A locked database (the agent is writing) comes back as
+  `ok: false` with `"database is locked"` and the file label; the panel shows a
+  toast error and does not pretend anything was freed. Nothing is retried
+  automatically.
+
+### 22.4 Verification (2026-11-16, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) against `@getpaseo/plugin@0.16.0` | **exit 0** |
+| `npm test` | **13 suites / 106 tests pass**, 644 ms — new `tests/compact.test.ts` (10 tests: unknown provider, non-SQLite store, freed-byte math incl. WAL, both Cline databases, hub telemetry untouched, missing database, never-written store, locked database, partial failure) and `tests/kilo.test.ts` (3 tests: idle / busy / no status) |
+| Exact SQLite invocation | `sqlite3 test.db "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);"` on a 10.2 MB database with 4 990 of 5 000 rows deleted → 28 KB, exit 0 (the `PRAGMA` prints `0|-1|-1` to stdout, which the runner ignores) |
+| Real store end to end | `compactAgentStores({ provider: "kilo" })` with the default vacuum against a consistent `.backup` copy of the machine's `kilo.db`: `ok: true`, 41 959 424 → 41 062 400 bytes, **897 024 bytes freed** |
+| Live 0.16.0 daemon | isolated scratch home on its own loopback port, `pluginsEnabled: true`, production home untouched, installed from the working tree: status `running`, `[paseo] Plugin ready`, **nine methods** registered (`session-manager.list/delete/delete-batch/export/refresh/compact` + three settings methods), **zero** `Unknown lifecycle hook`, boundary or contribution errors; the three lifecycle hooks registered without complaint |
+| Cline size correction | recomputed on the live store: 27.5 MB instead of the 233 MB the panel used to report, the difference being the hub telemetry databases |
+
+Not verified in this pass: the compaction button and the corrected Stores
+section were not clicked through in a running Paseo window (they are covered by
+typecheck against the 0.16.0 typings and by the live daemon's method
+registration), and no live store was compacted — the real-database run used a
+copy, so the user's own `opencode.db`/`kilo.db` are untouched.
+
+### 22.5 Recommendations for improvement (recorded, not implemented)
+
+1. **Live store changes through `addSubscription` (new in 0.16.0).** The
+   listing cache (30 s TTL, dropped on close/archive) and the manual Rescan
+   exist because the plugin can only pull. A daemon-side subscription that
+   invalidates the listing when an agent session is created or closed would
+   remove the rescan button and the stale-window entirely.
+2. **Compact after a batch delete, as one step.** Deleting 5 000 OpenCode
+   sessions returns nothing to the filesystem until a VACUUM runs, and today
+   that is a second, separate click. A confirm-block option (“compact the store
+   after delete”) would make one gesture free the space it reports.
+3. **Per-session sizes for SQLite stores.** OpenCode and Kilo report
+   `sizeBytes: null`, so “freed space” is estimated per provider. A read-only
+   `SELECT length(...)` aggregate per session (or `dbstat`) would give real
+   numbers, at the cost of coupling to the schema this plugin deliberately
+   avoids; worth doing behind a setting, not by default.
+4. **Lift the 500-session listing limit.** `--max-count 500` hides older
+   sessions from the panel *and* from the delete guard, which then answers
+   “Session not found”. Paginating, or raising the limit with a per-provider
+   setting, closes that gap.
+5. **Parallel deletes in the CLI adapters.** `createCliProvider.deleteMany()`
+   spawns one process per session sequentially (~0.5–2 s each on this machine),
+   which is why the panel chunks batches. A small concurrency limit (2–4) would
+   cut a large cleanup proportionally without changing any behaviour.
+6. **Auto-compaction reminder.** The Stores section shows the sizes but not the
+   share held by free pages. A cheap `PRAGMA freelist_count` (read-only) would
+   let the panel mark a store as “N% free pages” and suggest compaction only
+   when it is worth the rewrite.

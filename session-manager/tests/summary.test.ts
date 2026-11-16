@@ -42,6 +42,7 @@ function provider(overrides: Partial<ProviderStatus> = {}): ProviderStatus {
     detail: "/tmp/store",
     count: 0,
     storeBytes: 4096,
+    compactable: false,
     error: null,
     ...overrides,
   };

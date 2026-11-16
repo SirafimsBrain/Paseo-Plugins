@@ -26,6 +26,14 @@ connected to Paseo, so old transcripts stop filling the disk.
   confirmation block.
 - **Safety guards** — running sessions and sessions referenced by an open Paseo
   agent are refused unless you explicitly confirm the force delete.
+- **SQLite compaction** — a **"Compact database (VACUUM)"** button next to every
+  store that keeps its sessions in SQLite (Cline, OpenCode, Kilo). It runs the
+  database's own `VACUUM` plus `wal_checkpoint(TRUNCATE)` and reports the
+  before/after store size and the freed bytes. `VACUUM` rebuilds the file from
+  its live pages, so it changes no session — it only returns the space that
+  deleted transcripts left behind as free pages and WAL frames, which can be a
+  large share of a multi-hundred-megabyte store. Stores with plain-file
+  sessions (Qwen Code, Kimi Code, acpx) do not show the button.
 - **Cleanup hints and shortcuts** — host-scoped settings drive a "due for
   cleanup" hint, default order, and export defaults; Command Center items open
   the panel pre-filtered ("older than 30 days", archived sessions, settings).
@@ -54,9 +62,10 @@ plugin never has to understand private database schemas. When a CLI cannot be
 found the provider is reported as unavailable for deletion instead of the plugin
 editing the store directly.
 
-The server exposes five RPCs (`session-manager.list`,
+The server exposes six RPCs (`session-manager.list`,
 `session-manager.delete`, `session-manager.delete-batch`,
-`session-manager.export`, `session-manager.refresh`) implemented in `server/`
+`session-manager.export`, `session-manager.refresh`, `session-manager.compact`)
+implemented in `server/`
 and consumed by the client panel and the sidebar status row. The row adds no
 RPC of its own: it reads `session-manager.list` and derives its counts with
 `shared/session-summary.ts`, the same module the panel's cleanup hint uses.
@@ -81,11 +90,12 @@ installation. Updates: `paseo plugin update session-manager`.
   panel imports `ScrollView` / `useToast` from `@getpaseo/plugin/client/ui`.
   The real host enforces it (a manifest with a higher floor is rejected by
   `assertPluginCompatibility` before the plugin loads).
-- Verified against Paseo `0.15.0` (2026-11-03, SDK `@getpaseo/plugin@^0.15.0`,
+- Verified against Paseo `0.16.0` (2026-11-16, SDK `@getpaseo/plugin@^0.16.0`,
   installed with `npm install` so the lockfile carries it): the plugin is
-  `running` in an isolated 0.15.0 daemon and the `agent.close.after` hook fires
-  on the real daemon. As of 0.5.0 (2026-11-09) `npm run typecheck` and
-  `npm test` (11 suites / 94 tests) pass. Earlier: Paseo `0.12.0` /
+  `running` in an isolated 0.16.0 daemon with `[paseo] Plugin ready` and all
+  nine methods registered, including `session-manager.compact`. As of 0.6.0
+  (2026-11-16) `npm run typecheck` and `npm test` (13 suites / 106 tests) pass.
+  Earlier: Paseo `0.15.0` / SDK 0.15.0 (2026-11-03), Paseo `0.12.0` /
   SDK 0.12.0 (2026-10-21), Paseo `0.10.3` / SDK 0.10.1. See
   [__compatibility.md](./__compatibility.md).
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
@@ -99,6 +109,6 @@ installation. Updates: `paseo plugin update session-manager`.
 
 ## Compatibility
 
-Paseo **0.15.0 (2026-11-03)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.15.0` — compatible after migration to `server.addHook("agent.close.after")` (0.3.4). Current plugin version: **0.5.0** (Kimi Code provider since 0.4.0; sidebar status row since 0.5.0).
+Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.16.0` — compatible with no API migration (`agent.turn.after.timeline`, removed in 0.16.0, is not used by this plugin). Current plugin version: **0.6.0** (SQLite compaction since 0.6.0; sidebar status row since 0.5.0; Kimi Code provider since 0.4.0).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

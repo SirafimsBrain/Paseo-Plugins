@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { asString, firstLine, homeDir, sqliteSize, toIso } from "../util";
+import { asRecord, asString, firstLine, homeDir, sqliteSize, toIso } from "../util";
 import { createCliProvider } from "./cli";
 import type { ProviderSession } from "./types";
 
@@ -21,6 +21,18 @@ export function kiloDatabasePath(): string {
   return path.join(kiloDataDir(), "kilo.db");
 }
 
+/**
+ * Kilo prints a per-session `status` object (`{"type":"idle"}` on a finished
+ * session). Anything other than `idle` means the session still has a live
+ * runtime, so the delete guard must treat it as running; a missing `status`
+ * keeps the old `false`, because guessing would block every delete.
+ */
+function runningFromStatus(row: Record<string, unknown>): boolean {
+  const status = asRecord(row["status"]);
+  const type = asString(status?.["type"]);
+  return type !== null && type !== "idle";
+}
+
 function parseRow(row: Record<string, unknown>): ProviderSession | null {
   const id = asString(row["id"]);
   if (!id) return null;
@@ -32,7 +44,7 @@ function parseRow(row: Record<string, unknown>): ProviderSession | null {
     createdAt: toIso(row["created"]),
     updatedAt: toIso(row["updated"] ?? row["created"]),
     sizeBytes: null,
-    running: false,
+    running: runningFromStatus(row),
   };
 }
 
@@ -50,4 +62,5 @@ export const kiloProvider = createCliProvider({
     extension: "json",
     args: (id) => ["export", id],
   },
+  sqliteStores: () => [{ path: kiloDatabasePath(), label: "kilo.db" }],
 });

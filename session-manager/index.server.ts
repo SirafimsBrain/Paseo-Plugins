@@ -5,6 +5,7 @@ import {
   deleteSessions,
   exportSession,
   refreshSession,
+  compactStore,
 } from "./shared/session-manager";
 import { sessionManagerSettings } from "./shared/settings";
 import {
@@ -14,6 +15,7 @@ import {
   deleteAgentSessionsBatch,
 } from "./server/session-manager";
 import { exportAgentSession } from "./server/exports";
+import { compactAgentStores } from "./server/compact";
 
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(sessionManagerSettings);
@@ -21,6 +23,20 @@ export default function contribute(server: PluginServerContext) {
   server.handle(deleteSession, deleteAgentSession);
   server.handle(deleteSessions, deleteAgentSessionsBatch);
   server.handle(exportSession, exportAgentSession);
+
+  // Standard SQLite compaction of a provider's session store (`VACUUM`). The
+  // store size in the cached listing changes with it, so the entry is dropped
+  // and the panel's next read reports the post-compaction numbers.
+  server.handle(compactStore, async (input) => {
+    const result = await compactAgentStores(input);
+    invalidateListing(input.provider);
+    console.log(
+      `[session-manager] compacted ${input.provider}: ${
+        result.ok ? `${result.before ?? 0} -> ${result.after ?? 0} bytes` : result.error
+      }`,
+    );
+    return result;
+  });
 
   // The listing cache (30 s, see server/session-manager.ts) also carries the
   // "still running" and "due for cleanup" hints. Paseo 0.14.0 releases idle agent

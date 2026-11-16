@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { z } from "zod";
 import type { AgentSession, SessionTarget } from "../shared/session-manager";
-import { deleteSessions, exportSession, listSessions } from "../shared/session-manager";
+import { compactStore, deleteSessions, exportSession, listSessions } from "../shared/session-manager";
 import { DEFAULT_SETTINGS, sessionManagerSettings } from "../shared/settings";
 import { formatBytes, isOldEnough, needsForce } from "../shared/session-summary";
 import {
@@ -145,6 +145,7 @@ export function SessionManagerPanel({
   const listRpc = useRpc(listSessions);
   const deleteBatchRpc = useRpc(deleteSessions);
   const exportRpc = useRpc(exportSession);
+  const compactRpc = useRpc(compactStore);
   const toast = useToast();
   const queryClient = useQueryClient();
 
@@ -367,6 +368,34 @@ export function SessionManagerPanel({
     },
   });
 
+  // Standard SQLite compaction of one provider's store (`VACUUM`). The RPC
+  // invalidates the server-side listing cache, so a rescan reports the new
+  // store size instead of the one cached before the rewrite.
+  const compactMutation = useMutation({
+    mutationFn: (provider: string) => compactRpc({ provider }),
+    onSuccess: (result, provider) => {
+      const label = labelOf.get(provider) ?? provider;
+      if (!result.ok) {
+        toast.error(`${label}: ${result.error ?? "compaction failed"}`);
+      } else {
+        const before = formatBytes(result.before);
+        const after = formatBytes(result.after);
+        const freed = formatBytes(result.freed);
+        toast.show(
+          freed && before && after
+            ? `${label}: freed ${freed} (${before} → ${after})`
+            : `${label}: the database was already compact`,
+          { variant: "success" },
+        );
+      }
+      forceRefresh.current = true;
+      queryClient.invalidateQueries({ queryKey: ["session-manager", "sessions"] });
+    },
+    onError: (mutationError) => {
+      toast.error(errorMessage(mutationError, "Failed to compact the database"));
+    },
+  });
+
   const styles = useMemo(
     () => {
       // The host-fonts read goes through `client/web.ts`: that module owns
@@ -551,6 +580,7 @@ export function SessionManagerPanel({
         label: status.label,
         count: status.count,
         size: size ? `${size} store` : "store size unknown",
+        compactable: status.compactable,
       };
     });
 
@@ -854,10 +884,31 @@ export function SessionManagerPanel({
           <View style={{ marginTop: 16 }}>
             <Text style={styles.title}>Stores</Text>
             {storeSummaries.map((store) => (
-              <Text key={store.id} style={styles.muted} numberOfLines={2}>
-                {store.label}: {store.count} session(s) · {store.size}
-              </Text>
+              <View key={store.id}>
+                <Text style={styles.muted} numberOfLines={2}>
+                  {store.label}: {store.count} session(s) · {store.size}
+                </Text>
+                {store.compactable ? (
+                  <View style={styles.actions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={compactMutation.isPending}
+                      onPress={() => compactMutation.mutate(store.id)}
+                    >
+                      <Text style={styles.muted}>
+                        {compactMutation.isPending && compactMutation.variables === store.id
+                          ? "Compacting..."
+                          : "Compact database (VACUUM)"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
             ))}
+            <Text style={[styles.muted, { marginTop: 8 }]}>
+              SQLite stores keep deleted transcripts as free pages; compaction rewrites the file
+              from its live rows and leaves no session changed.
+            </Text>
           </View>
         ) : null}
 

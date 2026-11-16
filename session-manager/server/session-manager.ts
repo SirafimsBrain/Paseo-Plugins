@@ -58,6 +58,7 @@ interface ProviderSnapshot {
   detected: boolean;
   detail: string;
   deletable: boolean;
+  compactable: boolean;
   storeBytes: number | null;
   error: string | null;
 }
@@ -74,6 +75,9 @@ async function collect(options: { refresh?: boolean } = {}): Promise<ProviderSna
           detected: result.detected,
           detail: result.detail,
           deletable: result.deletable,
+          // Compaction is a property of the adapter, not of the listing: a
+          // CLI-backed provider can still be compactable while its CLI is down.
+          compactable: adapter.sqliteStores !== undefined,
           storeBytes: result.storeBytes,
           error: result.error,
         };
@@ -85,6 +89,7 @@ async function collect(options: { refresh?: boolean } = {}): Promise<ProviderSna
           detected: false,
           detail: adapter.id,
           deletable: false,
+          compactable: adapter.sqliteStores !== undefined,
           storeBytes: null,
           error: error instanceof Error ? error.message : String(error),
         };
@@ -122,6 +127,7 @@ export async function listAgentSessions(input: { refresh?: boolean } = {}) {
       label: snapshot.label,
       detected: snapshot.detected,
       deletable: snapshot.deletable,
+      compactable: snapshot.compactable,
       detail: snapshot.detail,
       count: snapshot.sessions.length,
       storeBytes: snapshot.storeBytes,

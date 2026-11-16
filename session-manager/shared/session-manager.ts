@@ -45,6 +45,11 @@ export const providerStatusSchema = z.object({
    * shows instead.
    */
   storeBytes: z.number().nullable(),
+  /**
+   * The store keeps its sessions in SQLite, so it can be compacted with the
+   * database's own `VACUUM` (`session-manager.compact`).
+   */
+  compactable: z.boolean(),
   error: z.string().nullable(),
 });
 
@@ -132,6 +137,41 @@ export const exportSession = defineRpc({
     /** Absolute path of the written export, on the daemon host. */
     path: z.string().nullable(),
     bytes: z.number().nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const sqliteDatabaseSchema = z.object({
+  path: z.string(),
+  label: z.string(),
+  before: z.number().nullable(),
+  after: z.number().nullable(),
+  freed: z.number().nullable(),
+  error: z.string().nullable(),
+});
+
+export type SqliteDatabaseOutcome = z.infer<typeof sqliteDatabaseSchema>;
+
+/**
+ * Standard SQLite compaction (`VACUUM` + `wal_checkpoint(TRUNCATE)`) of a
+ * provider's session database.
+ *
+ * It rewrites the file from its live pages — no row changes — which is the only
+ * supported way to return the space a deleted session left as free pages. A
+ * provider that keeps its sessions as files reports `compactable: false`, and
+ * the panel hides the button for it.
+ */
+export const compactStore = defineRpc({
+  name: "session-manager.compact",
+  input: z.object({ provider: z.string() }),
+  output: z.object({
+    /** True only when every database of the store was compacted. */
+    ok: z.boolean(),
+    /** Totals over the databases that exist on the host. */
+    before: z.number().nullable(),
+    after: z.number().nullable(),
+    freed: z.number().nullable(),
+    databases: z.array(sqliteDatabaseSchema),
     error: z.string().nullable(),
   }),
 });
