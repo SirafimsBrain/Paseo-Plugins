@@ -1293,3 +1293,32 @@ malformed values, workspace stamp); `tests/screen-params.test.ts` extended for
 `run=`. `npm run typecheck` is clean and `npm test` reports **21 suites / 208
 tests**.
 
+
+## 22. Version 0.13.3 — the session-open hook may not return `metadata` (2026-11-16)
+
+Patch release: a bug fix, no new functionality.
+
+**Symptom.** With the plugin enabled, every prompt failed with `Plugin
+command-center agent.open.before failed: agent.open.before hooks can only change
+env, tools, and mcpServers`; the prompt never reached the provider, for new and
+existing agents alike.
+
+**Cause.** §21.2 made the session-open hook return `{ ...request, tools,
+metadata }` (or the MCP variant with `mcpServers`) carrying the
+`command-center.provisioning` marker. Paseo 0.16.0 allows `agent.open.before` to
+change only `env`, `tools` and `mcpServers`; a result whose read-only `metadata`
+differs from the request's is rejected, and a rejected hook fails the open.
+`agent.create.before` (the run stamp) and `workspace.create.after` (the bootstrap
+stamp, already `setMetadata`) were never affected.
+
+**Fix.** The hook no longer returns `metadata`; it persists the marker with
+`paseo.agents.ref(request.agentId).setMetadata({ "command-center.provisioning":
+marker })`, fire-and-forget, only when the decision changed (`known?.mode !==
+mode`) and never for `purpose: "history"`. The write is deliberately not awaited:
+a hook that awaits a write to the agent being opened deadlocks that open.
+Read-back and the capability-probe shortcut are unchanged.
+
+**Verification.** `npm run typecheck` exit 0 and `npm test` — **21 suites / 209
+tests** green, including the updated session-open tests (the marker reaches
+`setMetadata`, and no `metadata` key appears in the hook result). The failing path
+is host-side, so no live daemon run is claimed for this patch.

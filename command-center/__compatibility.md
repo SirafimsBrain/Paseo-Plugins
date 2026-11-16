@@ -1,8 +1,20 @@
 # Compatibility — command-center
 
-Current: plugin **0.12.2**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.16.0`, `@getpaseo/client ^0.16.0`.
+Current: plugin **0.13.3**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.16.0`, `@getpaseo/client ^0.16.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.13.3 — `agent.open.before` metadata fix (2026-11-16)
+
+Patch release (0.13.2 → 0.13.3): a bug fix, no new functionality. Paseo 0.16.0
+allows `agent.open.before` to change only `env`, `tools` and `mcpServers`; 0.13.x
+also returned `metadata` there, so every session open — and with it every prompt —
+failed with `Plugin command-center agent.open.before failed: agent.open.before
+hooks can only change env, tools, and mcpServers`. The provisioning marker is now
+written through `paseo.agents.ref(id).setMetadata(…)` (fire-and-forget) instead of
+the hook result; the type-level permission for `metadata` in that result is not
+honoured by the 0.16.0 daemon. Pin, floor and the compatibility verdict are
+unchanged. Detail: [`__doc.md`](./__doc.md) §22.
 
 ## Paseo 0.16.0 compatibility (0.12.2, 2026-11-16)
 

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import contribute from "../index.server";
 import { rememberAgentMcp } from "../server/agent-mcp";
@@ -328,6 +328,7 @@ describe("0.6.0: session-open hook and the agent-reload RPC", () => {
         ref: () => ({
           refresh: async () => ({ agent: { capabilities: { supportsMcpServers } } }),
           reload: async () => ({ agent: { title: "Refurbed" } }),
+          setMetadata: async (_patch: Record<string, unknown>) => {},
         }),
       },
     };
@@ -379,6 +380,27 @@ describe("0.6.0: session-open hook and the agent-reload RPC", () => {
     const result = await runHook(sessionOpenRequest(), hookPaseo());
     expect(result.tools.map((tool) => tool.name)).toEqual(["command_center_run"]);
     expect(result.mcpServers).toEqual({});
+    // 0.13.3: the provisioning marker must not ride in the hook result — the
+    // 0.16.0 host lets this hook change only env, tools and mcpServers.
+    expect("metadata" in result).toBe(false);
+  });
+
+  it("persists the provisioning marker through setMetadata", async () => {
+    const setMetadata = vi.fn(async (_patch: Record<string, unknown>) => {});
+    const paseo = {
+      agents: {
+        ref: () => ({
+          refresh: async () => ({ agent: { capabilities: { supportsMcpServers: true } } }),
+          setMetadata,
+        }),
+      },
+    };
+    const result = await runHook(sessionOpenRequest(), paseo);
+    expect("metadata" in result).toBe(false);
+    expect(setMetadata).toHaveBeenCalledTimes(1);
+    expect(setMetadata.mock.calls[0]?.[0]).toMatchObject({
+      "command-center.provisioning": { mode: "tool" },
+    });
   });
 
   it("adds no tool and no servers for purpose history", async () => {

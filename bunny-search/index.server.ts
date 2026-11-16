@@ -26,6 +26,7 @@ import {
 } from "./server/providers";
 import {
   notifyStatusChange,
+  PROVISIONING_METADATA_KEY,
   provisioningMarker,
   readProvisioningMarker,
   recentProvisioning,
@@ -36,7 +37,12 @@ import {
   type MetadataValue,
   type ProvisioningMode,
 } from "./server/provisioning";
-import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
+import {
+  INJECTED_SERVER_NAME,
+  mcpServerCommand,
+  resolveBundledEntry,
+} from "./server/mcp-launch";
+import { ensureStableEntry, healStaleSavedEntries } from "./server/mcp-stable";
 import { createWebSearchTool } from "./server/agent-tools";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideSessionOpen, needsCapabilityProbe, providerExcluded } from "./server/session-open";
@@ -145,6 +151,25 @@ export default function contribute(server: PluginServerContext) {
       void mirrorSettings();
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Stable MCP entry (0.7.6)
+  //
+  // The create hook writes an absolute path into the agent's saved config, and a
+  // plugin reinstall moves the checkout that path points into. One stable copy
+  // (plus a repair of the paths older versions already saved) keeps those agents
+  // launchable — see server/mcp-stable.ts.
+  // -------------------------------------------------------------------------
+
+  const stableEntry = ensureStableEntry(resolveBundledEntry());
+  if (stableEntry !== null) {
+    const healed = healStaleSavedEntries(stableEntry, INJECTED_SERVER_NAME);
+    if (healed.length > 0) {
+      console.log(
+        `[bunny-search] restored the saved MCP entry of ${healed.length} agent(s): ${healed.join(", ")}`,
+      );
+    }
+  }
 
   // -------------------------------------------------------------------------
   // MCP injection (the plugin's reason to exist: agents get web search)
@@ -319,12 +344,33 @@ export default function contribute(server: PluginServerContext) {
         background,
         at: new Date().toISOString(),
       });
-      const metadata = withProvisioningMarker(
-        request.metadata,
-        provisioningMarker(mode, decision.why),
-      );
+      // 0.7.6: the marker is NOT returned in the hook result. Paseo 0.16.0 lets
+      // `agent.open.before` change only `env`, `tools` and `mcpServers`; a result that
+      // also changes `metadata` fails the whole open with "agent.open.before hooks can
+      // only change env, tools, and mcpServers", and every prompt to that agent fails
+      // with it. The marker goes through the SDK instead — fire-and-forget, because a
+      // hook that awaits a write to the agent being opened deadlocks the open.
+      const marker = provisioningMarker(mode, decision.why);
+      if (request.purpose !== "history" && known?.mode !== mode) {
+        void paseo.agents
+          .ref(request.agentId)
+          .setMetadata({
+            [PROVISIONING_METADATA_KEY]: {
+              mode: marker.mode,
+              reason: marker.reason,
+              at: marker.at,
+            },
+          })
+          .catch((cause: unknown) => {
+            console.warn(
+              `[bunny-search] could not record the provisioning marker: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }`,
+            );
+          });
+      }
 
-      if (!decision.injectMcp && !decision.attachTool) return { ...request, metadata };
+      if (!decision.injectMcp && !decision.attachTool) return request;
 
       const tools = decision.attachTool ? [...request.tools, webSearchTool] : request.tools;
       let mcpServers = request.mcpServers;
@@ -340,7 +386,7 @@ export default function contribute(server: PluginServerContext) {
         console.log(`[bunny-search] session_open MCP injected: ${command} ${args.join(" ")}`);
       }
 
-      return { ...request, tools, mcpServers, metadata };
+      return { ...request, tools, mcpServers };
     },
   );
 

@@ -1078,9 +1078,13 @@ inserted text is editable text, not an attachment.
 - `agent.create.before` writes it on every branch it decides (injected, provider
   excluded, shared-OpenCode block, background excluded) and leaves it untouched
   while it defers to the label gate.
-- `agent.open.before` writes it on every open, and appends the same decision to
-  the event log the status stream reads. `reason` is the decision text the log
-  already prints, so the marker explains itself.
+- `agent.open.before` appends the same decision to the event log the status
+  stream reads (`reason` is the decision text the log already prints, so the
+  marker explains itself) and, since 0.7.6, writes the marker with
+  `paseo.agents.ref(id).setMetadata(…)` instead of returning it in the hook
+  result — the 0.16.0 host rejects a change to anything but `env`, `tools` and
+  `mcpServers` there and fails the open (§20). The write is fire-and-forget and
+  only happens when the mode changes, never for `purpose: "history"`.
 - The read-back is used for one thing only: when the marker says `mcp`, the
   session-open hook skips the daemon capability probe and treats the provider as
   MCP-capable for this agent — the answer cannot have changed for an agent the
@@ -1185,6 +1189,74 @@ probe is a diagnostic rather than a runtime dependency — so this stays a prosp
 | New provisioning tests | marker round-trip, foreign shapes, LRU ring, listeners |
 | New hook tests | background gate on/off, marker written on open, probe skipped when the marker says `mcp` |
 | Live daemon | not repeated for this patch: the hooks, RPCs and subscription use the same registration path verified for 0.6.5 against a real 0.16.0 daemon; the subscription handler and composer item are exercised by the host at runtime, so a live `addSubscription`/`addComposerItem` round trip is the one thing this build does not prove on its own |
+
+## 20. Plugin 0.7.6 — the session-open hook may not return `metadata` (2026-11-16)
+
+**Symptom.** Every prompt to an agent failed with `Plugin bunny-search
+agent.open.before failed: agent.open.before hooks can only change env, tools, and
+mcpServers`; the prompt never reached the provider. It hit existing agents too
+(any session reopen — resume, reload, prompt after a plugin reload), for every
+provider.
+
+**Cause.** 0.7.5 made the session-open hook return `{ ...request, tools,
+  mcpServers, metadata }`, carrying the `bunny-search` provisioning marker in
+`metadata`. The SDK types accept an optional `metadata` there
+(`PluginHookRequestResults["agent.open.before"]` is
+`Omit<PluginSessionOpenRequest, "metadata" | "background"> & { background?;
+  metadata? }`), but the 0.16.0 daemon enforces the documented contract —
+`agent.open.before` may change only `env`, `tools` and `mcpServers`, every other
+field is read-only — and rejects a result whose `metadata` differs from the
+request's. A rejected hook fails the open, and an open is what a prompt needs, so
+the rejection surfaced as a failed prompt. The `agent.create.before` marker was
+never affected: that hook may change `metadata`.
+
+**Fix.** The session-open hook returns `request` (unchanged) or `{ ...request,
+  tools, mcpServers }`; the marker is written through the SDK instead —
+`paseo.agents.ref(request.agentId).setMetadata({ "bunny-search": marker })`, not
+awaited, with a logged rejection (the hooks reference is explicit that awaiting a
+write to the agent being opened deadlocks the open). The write is skipped when the
+stored mode already matches the new one and for `purpose: "history"`, so an
+idle-runtime resume does not republish the same marker. Read-back is unchanged: a
+stored `mcp` marker still suppresses the capability probe.
+
+**Verification.** `npm run typecheck` (three-project `tsc -b`) exit 0; `npm test`
+— 13 passed / 1 skipped suites, 183 passed / 2 skipped tests, including the
+updated hook tests (the marker reaches `setMetadata`, never the returned request)
+and the new `tests/mcp-stable.test.ts`. The failing path itself is host-side: no
+live daemon run is claimed for this patch.
+
+### 20.1 Stable MCP entry and repair of older saved configs
+
+The same release closes a second failure that showed up right after the first:
+
+```text
+OpenCode MCP server bunny-search failed to connect: … MCP server process exited
+with code 1 … Cannot find module
+'…/plugins/bunny-search/4b1a20f3-…/checkout/bunny-search/dist/mcp-server.js'
+```
+
+`agent.create.before` writes an absolute path into the agent's *saved* config, and
+Paseo installs a plugin under
+`$PASEO_HOME/plugins/<id>/<install-uuid>/checkout/<id>/`, so a reinstall or an
+update moves the bundle while every already-created agent keeps launching the old
+checkout path. The session-open hook cannot replace that entry — the name collides
+with the saved configuration and the host fails the open — so `server/mcp-stable.ts`
+makes the entry survive instead:
+
+1. **One stable copy.** On every plugin start the bundle is copied to
+   `$PASEO_HOME/plugins/bunny-search/mcp-server.js` (the directory that already
+   holds the settings mirror and survives reinstalls), and `resolveMcpEntry()`
+   injects and probes *that* path. `resolveBundledEntry()` remains the source of
+   the copy and the fallback when the copy fails; a copy is only preferred when
+   this run actually made it, so a stale copy from an older version is never used.
+2. **Healing agents created by an older version.** Their saved entry still names
+   a file inside the old checkout, so the same start restores the missing file at
+   exactly that path. Only paths under `$PASEO_HOME/plugins/bunny-search/` are
+   written, only the `bunny-search` entry is inspected, and an existing file is
+   left untouched; anything else is logged and skipped.
+
+Both steps are best-effort: a failure leaves the previous behaviour in place and is
+visible in `paseo plugin logs bunny-search`.
 
 The composer pill, the subscription push and the metadata marker are all
 host-visible behaviour: `paseo plugin logs bunny-search` shows the

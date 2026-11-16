@@ -3,6 +3,7 @@ import * as process from "node:process";
 import { fileURLToPath } from "node:url";
 import { statSync as fsStatSync, readFileSync } from "node:fs";
 import { paseoHome } from "./paths";
+import { currentStableMcpEntry } from "./mcp-stable";
 
 /**
  * Launch configuration for the bundled stdio MCP server.
@@ -67,6 +68,17 @@ export function isExecutableFile(candidate: string): boolean {
 }
 
 /**
+ * The entry injected into agents and probed by the connection test.
+ *
+ * Since 0.7.6 this is the stable copy (`server/mcp-stable.ts`) when this run made
+ * one: a saved entry must keep working after the plugin is updated into a new
+ * checkout directory. The bundled file is the fallback.
+ */
+export function resolveMcpEntry(): string {
+  return currentStableMcpEntry() ?? resolveBundledEntry();
+}
+
+/**
  * Locates the bundled stdio MCP server (`dist/mcp-server.js`).
  *
  * The plugin host bundles this module somewhere internal, so `__dirname`
@@ -75,7 +87,7 @@ export function isExecutableFile(candidate: string): boolean {
  * `$PASEO_HOME/config.json`; a few fallbacks cover other install
  * layouts. The first existing candidate wins.
  */
-export function resolveMcpEntry(): string {
+export function resolveBundledEntry(): string {
   const candidates: string[] = [];
   const configured = configuredPluginPath();
   if (configured) {

@@ -60,10 +60,10 @@ import {
   subscribeCommandEvents,
 } from "./server/event-bus";
 import {
+  PROVISIONING_METADATA_KEY,
   provisioningMarker,
   readProvisioningMarker,
   readWorkspaceStamp,
-  withProvisioningMarker,
   workspaceStamp,
   type ProvisioningMode,
 } from "./server/metadata";
@@ -260,6 +260,7 @@ export default function contribute(server: PluginServerContext) {
     console.log(
       `[command-center] session_open ${request.agentId} (${request.reason}/${request.purpose}${background ? "/background" : ""}) [${mode}]: ${decision.why}`,
     );
+    const marker = provisioningMarker(mode, decision.why);
     // Only a changed decision reaches the live feed: idle-runtime resumes reopen
     // agents constantly, and repeating the same line would drown the runs.
     if (known?.mode !== mode) {
@@ -269,15 +270,36 @@ export default function contribute(server: PluginServerContext) {
         detail: decision.why,
         ok: mode !== "skipped",
       });
+      // 0.13.3: the marker is persisted through the SDK instead of being returned
+      // in the hook result. Paseo 0.16.0 lets `agent.open.before` change only
+      // `env`, `tools` and `mcpServers`; a result that also changes `metadata`
+      // fails the open — and every prompt that needs it — with "agent.open.before
+      // hooks can only change env, tools, and mcpServers". The write is not
+      // awaited on purpose: a hook that awaits a write to the agent being opened
+      // deadlocks that open.
+      if (request.purpose !== "history") {
+        void paseo.agents
+          .ref(request.agentId)
+          .setMetadata({
+            [PROVISIONING_METADATA_KEY]: {
+              mode: marker.mode,
+              reason: marker.reason,
+              at: marker.at,
+            },
+          })
+          .catch((cause: unknown) => {
+            console.warn(
+              `[command-center] could not record the provisioning marker: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }`,
+            );
+          });
+      }
     }
-    const metadata = withProvisioningMarker(
-      request.metadata,
-      provisioningMarker(mode, decision.why),
-    );
 
     const tools = attachTool ? [...request.tools, commandCenterTool] : request.tools;
     if (decision.contribute.length === 0) {
-      return { ...request, tools, metadata };
+      return { ...request, tools };
     }
 
     const contributed = Object.fromEntries(
@@ -290,7 +312,6 @@ export default function contribute(server: PluginServerContext) {
       ...request,
       tools,
       mcpServers: { ...request.mcpServers, ...contributed } as typeof request.mcpServers,
-      metadata,
     };
   });
 

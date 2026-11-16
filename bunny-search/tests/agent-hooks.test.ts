@@ -355,6 +355,7 @@ function fakeContext(supportsMcpServers: boolean | null = true) {
               ? null
               : { agent: { id: agentId, capabilities: { supportsMcpServers } } },
           reload: async () => (supportsMcpServers === null ? null : { agent: { id: agentId } }),
+          setMetadata: async () => {},
         }),
       },
     },
@@ -859,15 +860,35 @@ describe("background agents and known provisioning", () => {
     expect(needsCapabilityProbe(input({ knownMode: "skipped" }))).toBe(true);
   });
 
-  it("writes the marker on the session open and records the decision", async () => {
+  it("writes the marker through the SDK and records the decision", async () => {
     writeAgentRecord(AGENT, { provider: "opencode" });
     clearProvisioningLog();
+    const setMetadata = vi.fn(async (_patch: Record<string, unknown>) => {});
+    const context = {
+      paseo: {
+        agents: {
+          ref: () => ({
+            refresh: async () => ({
+              agent: { id: AGENT, capabilities: { supportsMcpServers: true } },
+            }),
+            setMetadata,
+          }),
+        },
+      },
+      signal: new AbortController().signal,
+    };
     const server = createFakeServer(defaults());
     const cleanup = contribute(server);
 
-    const request = await server.runSessionOpenHook(openRequest());
-    const metadata = request.metadata as Record<string, { mode: string; reason: string }>;
-    expect(metadata[PROVISIONING_METADATA_KEY]?.mode).toBe("mcp");
+    const request = await server.runSessionOpenHook(openRequest(), context);
+    // 0.7.6: the marker never travels in the hook result — the host rejects any
+    // change beyond env/tools/mcpServers and fails the session open.
+    expect(request.metadata).toBeUndefined();
+    expect(setMetadata).toHaveBeenCalledTimes(1);
+    expect(setMetadata.mock.calls[0]?.[0]).toMatchObject({
+      [PROVISIONING_METADATA_KEY]: { mode: "mcp" },
+    });
+    expect(Object.keys(request.mcpServers as Record<string, unknown>)).toEqual(["bunny-search"]);
     expect(recentProvisioning()[0]).toMatchObject({
       agentId: AGENT,
       provider: "opencode",
@@ -882,10 +903,16 @@ describe("background agents and known provisioning", () => {
     const refresh = vi.fn(async () => ({
       agent: { id: AGENT, capabilities: { supportsMcpServers: false } },
     }));
+    // The marker already says `mcp`, so nothing changes and no write is needed.
+    const setMetadata = vi.fn(async (_patch: Record<string, unknown>) => {});
     const context = {
       paseo: {
         agents: {
-          ref: () => ({ refresh, reload: async () => ({ agent: { id: AGENT } }) }),
+          ref: () => ({
+            refresh,
+            reload: async () => ({ agent: { id: AGENT } }),
+            setMetadata,
+          }),
         },
       },
       signal: new AbortController().signal,
@@ -906,6 +933,7 @@ describe("background agents and known provisioning", () => {
       context,
     );
     expect(refresh).not.toHaveBeenCalled();
+    expect(setMetadata).not.toHaveBeenCalled();
     expect(Object.keys(request.mcpServers as Record<string, unknown>)).toEqual(["bunny-search"]);
     cleanup();
   });

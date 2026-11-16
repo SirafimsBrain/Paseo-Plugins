@@ -1,15 +1,27 @@
 # Compatibility — bunny-search
 
-Current: plugin **0.7.5**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.16.0`.
+Current: plugin **0.7.6**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.16.0`.
 Verified against **Paseo 0.16.0 (2026-11-16)** — compatible, no API migration
-needed; see *Plugin 0.7.5 — 0.16.0 capabilities adopted* and *Plugin 0.6.5 —
-Paseo 0.16.0 pass* below.
+needed; see *Plugin 0.7.6 — `agent.open.before` metadata fix*, *Plugin 0.7.5 —
+0.16.0 capabilities adopted* and *Plugin 0.6.5 — Paseo 0.16.0 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
 ## Summary (former root README row)
 
 | [bunny-search](./README.md) | **0.15.0 (2026-11-03)** ⁵, **0.14.0 (2026-10-30)** ² | `@getpaseo/plugin@^0.15.0` (pin `^0.15.0`, `requirements.paseo >=0.15.0`) | **0.15.0: compatible after a mandatory migration — shipped as 0.5.3** (patch bump: a deprecated-API replacement, no new capability, tag `bunny-search@0.5.3`). `server.before("agent.create")` and `server.before("agent.session_open")` are `@deprecated` on 0.15.0 (removal after 2027-04-30) and moved to `server.addHook("agent.create.before")` / `server.addHook("agent.open.before")` — payload, return value and hook bodies unchanged, so only the registration and the names moved; the floor followed the API (`addHook` does not exist on 0.14.0) and the SDK diff left `dist/client/` byte-identical, so nothing client-side could move. **One host-side finding, recorded with a proposed fix:** 0.15.0's #7435 makes the OpenCode provider reuse a running v2 service, and an agent carrying custom MCP servers is then rejected (`Custom OpenCode MCP servers … require an isolated server …`) whenever a local OpenCode service is registered — every agent this plugin injects into, `opencode` provider only; reproduced and controlled in the isolated 0.15.0 daemon, mechanism and fix in [§16.3](./__doc.md#163-compatibility-finding-injected-mcp-vs-opencodes-shared-service-0150). Evidence: typecheck + vitest **10 suites / 133 tests** against SDK 0.15.0, no `server.before(` / `server.on(` left in the plugin, `running` in an isolated 0.15.0 daemon with `[paseo] Plugin ready`, the settings mirror written, zero `Unknown lifecycle hook` errors, and both hooks proven to fire on a real agent creation and a real `paseo send` (`[bunny-search] MCP injected: …`). Recommendations recorded by the pass: [§16.4](./__doc.md#164-recommendations-for-improvement-recorded-not-implemented) — item 1 shipped in **0.6.3**, the rest stay open. **0.14.0: compatible, no code change and no deprecated API in it** — it stayed **0.4.2** through the pass, with no bump and no tag, because the pass touched only documentation; the same day's implementation release is **0.5.2**. 0.14.0 adds no new `@deprecated` marks (byte-identical to the previous release) and its `dist/client/` did not move, and `server.before("agent.create")` — the plugin's only hook — is still the supported spelling: `server.addHook` is claimed by the deployed hooks page but exists neither in `@getpaseo/plugin@0.14.0` nor in the installed host. Evidence: typecheck + vitest **9 suites / 95 tests** (2 live-search tests skipped by default) against SDK 0.14.0, both entries built by the real 0.14.0 host compiler with zero deprecated calls, the manifest accepted with its `>=0.11.0` floor (rejected for a 0.10.0 daemon), `running` in an isolated 0.14.0 daemon with `[paseo] Plugin ready` and the settings mirror written. **0.5.2 implements all five recommendations of [§15.2](./__doc.md#152-recommendations-for-improvement-recorded-during-the-pass-implemented-in-052)** — recorded by the pass, built when it was asked for; what was built is in [§15.4](./__doc.md#154-implementation-of-152-2026-10-30-shipped-as-052): MCP injection in `before("agent.session_open")` re-derived on every open (so it reaches agents created before `injectIntoAgents` was switched on and survives the idle-runtime release), collision-safe because the agent's saved `mcpServers` are read from the daemon record and every unreadable state fails safe to *skip*; a native `bunny_web_search` tool via `defineAgentTool` for providers without MCP support; a "repair search tools" Command Center action on `agents.ref(id).reload()`; per-agent gating by label (`labelGateKey`) and provider (`skipProviders`); and MCP `instructions` in `initialize`. Because those APIs are 0.14.0's, the pin became `^0.14.0` and the floor `>=0.11.0` → `>=0.14.0`. Evidence for 0.5.2: typecheck + vitest **10 suites / 133 tests** (2 live-search tests skipped), both entries built by the real 0.14.0 host compiler with `deprecatedHits: []`, manifest rejected for an older daemon and accepted for 0.14.0. Details: [Compatibility](./__doc.md#7-compatibility), [§15](./__doc.md#15-paseo-0140--compatibility-pass-2026-10-30). |
+
+## Plugin 0.7.6 — `agent.open.before` metadata fix (2026-11-16)
+
+Patch release (0.7.5 → 0.7.6): a bug fix, no new functionality, no API or floor
+change. Paseo 0.16.0 allows `agent.open.before` to change only `env`, `tools` and
+`mcpServers`; 0.7.5 also returned `metadata` there, so every session open — and
+with it every prompt — failed with `Plugin bunny-search agent.open.before failed:
+agent.open.before hooks can only change env, tools, and mcpServers`. The
+provisioning marker is now written through `paseo.agents.ref(id).setMetadata(…)`
+(fire-and-forget) instead of the hook result; the type-level permission for
+`metadata` in that result is not honoured by the 0.16.0 daemon. Detail and
+verification: [§20](./__doc.md).
 
 ## Plugin 0.7.5 — 0.16.0 capabilities adopted (2026-11-16)
 
