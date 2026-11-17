@@ -1279,7 +1279,7 @@ Evidence: `npm run typecheck` exit 0; `npm test` **18 suites / 223 tests** pass
 deletion, content refresh on a new revision, and repair of a legacy dangling
 symlink).
 
-## 21. Paseo 0.16.0 surface adopted (2026-11-17, 0.13.6)
+## 21. Paseo 0.16.0 surface adopted (2026-11-17, 0.13.6; provenance fix in 0.13.7)
 
 The 0.16.0 compatibility pass (§20) needed no code. This release goes the other
 way and *uses* the new plugin surface. Because the client bundle now imports
@@ -1344,6 +1344,20 @@ request). Session opens refresh it with `agents.ref(id).setMetadata()`, which is
 also what reaches agents created before this release. A host without
 `entityMetadata` rejects that call, so it is fire-and-forget.
 
+0.13.7 fixed the case the first live run exposed: the key was written only when
+the open contributed something, so exactly the agents that had *no* memory tools
+carried no explanation. The reason is now part of the key on every open — live
+record from the 0.16.1 host:
+
+```json
+"memory-flash": {
+  "injected": false,
+  "tool": false,
+  "reason": "skipped: config-file registration covers the provider (0.8.2)",
+  "at": "2026-11-17T11:27:26.055Z"
+}
+```
+
 **Stable project default.** `server/workspace-map.ts`:
 
 1. `MEMORY_FLASH_PROJECT` — explicit override (tests, unusual setups);
@@ -1365,9 +1379,15 @@ comes from.
   a failing push, the store's monotonic sequence across trimming, the map file
   and all three project fallbacks.
 - Live host 0.16.1: plugin updated and `running`; the MCP entry handshake still
-  returns the nine tools; an agent session open after the update logged
-  `session_open …` and wrote `workspaces.json`; a `memory_save` with no project
-  from that agent landed under the workspace name in `memories.project`.
-- Not exercised live: the subscription event itself (it fires when the screen is
-  open), the composer control's rendering, and a background child creation (it
-  needs a provider that accepts a provider-only config on this host).
+  returns the nine tools.
+- **Workspace map live:** reloading a closed agent ran `agent.session_open` and
+  wrote `$PASEO_HOME/plugins/memory-flash/workspaces.json` with the real names
+  (`main`, `Create SessionManager plugin for deleting old sessions`, …).
+- **Project default live:** the shipped MCP bundle, given that map and
+  `PASEO_WORKSPACE_ID=wks_034e6bcd9674b7a3`, stored a `memory_save` without a
+  project as `project: "main"` (isolated `PASEO_HOME`, so no real row changed).
+- **Provenance live:** the agent record carried the `memory-flash` key with
+  `injected: false` and the skip reason quoted above.
+- Not exercised live: the subscription event itself (it fires while the screen
+  is open), the composer control's rendering, and a background child creation
+  (it needs a provider that accepts a provider-only config on this host).

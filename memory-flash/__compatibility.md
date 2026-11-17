@@ -1,8 +1,8 @@
 # Compatibility — memory-flash
 
-Current: plugin **0.13.6**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.16.1`.
+Current: plugin **0.13.7**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.16.1`.
 
-## Plugin 0.13.6 — the 0.16.0 surface adopted (2026-11-17)
+## Plugin 0.13.6/0.13.7 — the 0.16.0 surface adopted (2026-11-17)
 
 Feature release: the compatibility pass of 0.12.5 found no breakage, and this one
 uses the release instead of merely tolerating it. `requirements.paseo` moves from
@@ -14,13 +14,16 @@ uses the release instead of merely tolerating it. `requirements.paseo` moves fro
 | Live screen updates | `memory-flash.changes` subscription (server: `server/changes.ts`, store change log) + `useSubscription` in the memory surface |
 | Composer controls | `addComposerItem` → `client/composer-item.tsx`: *Remember* the draft, *Cite* the best memory match |
 | Background maintenance | `memory-flash.delegate` gained `background`; the server creates a hidden child agent and reports the path, falling back to `send()` when refused |
-| Agent provenance | one `memory-flash` metadata key written in `agent.create` (hook payload) and refreshed with `ref().setMetadata()` on session open |
+| Agent provenance | one `memory-flash` metadata key written in `agent.create` (hook payload) and refreshed with `ref().setMetadata()` on session open; 0.13.7 records the skip reason too |
 | Stable project default | `PASEO_WORKSPACE_ID` → workspace name from a map the plugin writes (`server/workspace-map.ts`); cwd name only as a fallback |
 
 Verification: `npm run typecheck` exit 0; `npm test` **19 suites / 230 tests** pass
 (new `tests/change-feed.test.ts` covers the feed's first/next/abort events, a
-failing push, the store's monotonic sequence and the project fallbacks). The live
-host 0.16.1 update is recorded in [__doc.md](./__doc.md) §21.4.
+failing push, the store's monotonic sequence and the project fallbacks). On the
+live 0.16.1 host the plugin runs, the workspace map was written on a real session
+open, a provider-only `memory_save` landed under the workspace name, and the
+agent record carried the provenance key with its skip reason. Evidence:
+[__doc.md](./__doc.md) §21.4.
 
 ## Earlier history
 

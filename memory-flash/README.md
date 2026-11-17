@@ -111,6 +111,6 @@ Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
 
 ## Compatibility
 
-Paseo **0.16.0+** required, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin ^0.16.1`; verified on the stable **0.16.1** (2026-11-17). 0.13.6 *uses* the 0.16.0 plugin surface: a change subscription keeps the screen current when an agent writes through MCP, composer controls remember a draft or cite a memory, delegated maintenance runs in a hidden background agent, agent metadata records how memory was wired in, and an unlabelled memory is filed under the agent's workspace instead of its cwd. 0.12.6 also fixes a defect the live update exposed: the stable MCP entry is a copy now, not a symlink into the revision directory the updater deletes.
+Paseo **0.16.0+** required, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin ^0.16.1`; verified on the stable **0.16.1** (2026-11-17). 0.13.6 *uses* the 0.16.0 plugin surface: a change subscription keeps the screen current when an agent writes through MCP, composer controls remember a draft or cite a memory, delegated maintenance runs in a hidden background agent, agent metadata records how memory was wired in (including why it was skipped, 0.13.7), and an unlabelled memory is filed under the agent's workspace instead of its cwd. 0.12.6 also fixes a defect the live update exposed: the stable MCP entry is a copy now, not a symlink into the revision directory the updater deletes.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
