@@ -1,6 +1,14 @@
 # luck-planner — technical documentation
 
-> **Development status: version in development (`0.34.1`).** Stages **E4** (settings
+> **⚠ Development status: FROZEN — code freeze.** Development of `luck-planner` is
+> **stopped**. The reason is the **high complexity of maintaining the code and
+> developing further functionality**. No new features, fixes or changes are planned
+> here. The plugin's functionality is being **migrated to
+> [obsidian-bridge](../obsidian-bridge/README.md)**; new work should go there.
+> Everything below is a historical record of the implementation as it stood at the
+> freeze — the roadmap in §7 is no longer being pursued.
+>
+> **Historical status (no longer current): version in development (`0.34.1`).** Stages **E4** (settings
 > screen), **F1** (read-only dashboard HTTP server), **F2** ("Open dashboard"),
 > **G1** (dashboard web-app scaffold), **G2** (data adapter + layout), **G3**
 > (custom nodes and edges), **G4** (interaction: click → details, selection
@@ -21,9 +29,9 @@
 > Cursor, Qwen Code, Codex CLI) and **D5** (the structural tools an agent needs to shape
 > a project: create/rename, move and archive any node) are done and all
 > tests are green.
-> Stages A1–I4, J1, J2, D4 and D5 are complete. Nothing in
-> this document is a released API: the roadmap in §7 describes work that is still
-> ahead.
+> Stages A1–I4, J1, J2, D4 and D5 were complete. Nothing in
+> this document is a released API: the roadmap in §7 describes work that was ahead
+> at the time, but it is no longer being pursued (see the freeze notice above).
 
 This file documents the internal design, decisions, and roadmap of the `luck-planner` plugin.
 User-facing description: [README.md](./README.md).

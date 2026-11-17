@@ -4,6 +4,8 @@ Project planning tree for coding agents on [Paseo](https://paseo.sh/): a tech-st
 
 Coding agents keep their plan in their own context window, and a chat log is a poor place to look up *what do we already know about this module*. Luck Planner gives a project one durable tree: the agents write it through MCP tools, a human reviews the tree in the panel and approves goals in the dashboard, and every write is audited.
 
+> **⚠ Development status: FROZEN — code freeze.** Development of `luck-planner` is **stopped**. The reason is the **high complexity of maintaining the code and developing further functionality**. No new features, fixes or changes are planned here. The plugin's functionality is being **migrated to [obsidian-bridge](../obsidian-bridge/README.md)**; new work should go there. The documentation below describes the plugin as it stands at the freeze — it is kept for reference, not as a roadmap.
+
 ## What it does
 
 - **The tree** — five levels: the tech-stack **root**, the **trunks** (platforms), the **branches** (modules), the **side branches** and the **leaves** (the facts: a planned or confirmed piece of work). Every leaf carries a status (`draft → ready → claimed → in_progress → done`, plus `blocked`, `deferred`, `cancelled`, `superseded`), a version, a revision and an append-only history. `deferred` is the owner's "not now": a decision about the schedule, where `blocked` is a fact about the work. The store refuses a status transition the state machine does not allow, so an agent cannot skip a step by accident.

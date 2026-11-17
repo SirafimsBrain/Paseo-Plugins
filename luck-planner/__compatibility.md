@@ -1,5 +1,7 @@
 # Compatibility — luck-planner
 
+> **⚠ Development status: FROZEN — code freeze.** Development of `luck-planner` is **stopped** because of the **high complexity of maintaining the code and developing further functionality**. Its functionality is being **migrated to [obsidian-bridge](../obsidian-bridge/README.md)**. The compatibility information below is kept as a historical record of the plugin at the freeze.
+
 Current: plugin **0.52.2**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.15.0`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).

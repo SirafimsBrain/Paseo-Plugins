@@ -1,3 +1,5 @@
+> **⚠ Development status: FROZEN — code freeze.** Development of `luck-planner` is **stopped** because of the **high complexity of maintaining the code and developing further functionality**. No new features, fixes or changes are planned. Its functionality is being **migrated to [obsidian-bridge](../obsidian-bridge/README.md)**. This overview describes the plugin as it stands at the freeze.
+
 Luck Planner gives a project a durable planning tree that coding agents maintain
 while they work, and gives the human a place to see it.
 
