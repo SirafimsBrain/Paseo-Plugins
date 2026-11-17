@@ -104,6 +104,6 @@ Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
 
 ## Compatibility
 
-Paseo **0.16.1 (2026-11-17)** verified, `requirements.paseo >=0.14.0`, SDK `@getpaseo/plugin ^0.16.1` — compatible, and no plugin API change was needed: the only 0.16.0 breaking removal (`agent.turn.after.timeline`) is not used, and the one compile break was a test fixture that had to gain the new `background`/`metadata` fields. 0.14.0 surface stays in use (0.9.4); no 0.16.0 feature is used yet — subscriptions, composer items, background agents and agent metadata are evaluated in [__doc.md](./__doc.md) §20.3.
+Paseo **0.16.1 (2026-11-17)** verified, `requirements.paseo >=0.14.0`, SDK `@getpaseo/plugin ^0.16.1` — compatible, and no plugin API change was needed: the only 0.16.0 breaking removal (`agent.turn.after.timeline`) is not used, and the one compile break was a test fixture that had to gain the new `background`/`metadata` fields. 0.14.0 surface stays in use (0.9.4); no 0.16.0 feature is used yet — subscriptions, composer items, background agents and agent metadata are evaluated in [__doc.md](./__doc.md) §20.3. 0.12.6 also fixes a defect the live update exposed: the stable MCP entry is now a copy instead of a symlink into the revision directory the updater deletes, so an update cannot leave agents with a dead entry.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

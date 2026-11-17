@@ -5,10 +5,8 @@ import {
   statSync as fsStatSync,
   readFileSync,
   mkdirSync,
-  symlinkSync,
   renameSync,
   unlinkSync,
-  realpathSync,
   copyFileSync,
 } from "node:fs";
 import { paseoHome } from "./store";
@@ -128,40 +126,53 @@ function resolveBundleSource(): string {
 }
 
 /**
- * Points the published path at `source`, atomically.
+ * Copies the bundle to `target`, atomically.
  *
- * The swap goes through a temporary name plus `rename`, so a server spawned
- * by an agent mid-update reads either the old or the new target and never a
- * missing file. Falls back to a copy where symlinks are unavailable; returns
- * `null` when the data directory cannot be written at all.
+ * The published path must own its bytes rather than point at the install
+ * directory: this plugin used a symlink at first, and `paseo plugin update`
+ * deletes the revision directory *after* the new plugin instance has already
+ * republished, so the stable path was left dangling and every agent holding it
+ * failed to spawn the server (`MCP error -32000: Connection closed`) until the
+ * plugin happened to restart again. A copy survives the deletion, and the
+ * temporary-name-plus-`rename` swap means an agent spawning mid-update reads
+ * either the old or the new bundle, never a partial file. A legacy symlink at
+ * the target is replaced by the `rename`.
+ *
+ * Returns `null` when the data directory cannot be written at all.
  */
 function publishMcpEntry(source: string): string | null {
   const target = publishedMcpEntry();
-  if (sameFile(target, source)) return target;
+  if (isPublishedCopyOf(target, source)) return target;
   const staging = `${target}.${process.pid}.tmp`;
   try {
     mkdirSync(path.dirname(target), { recursive: true });
     removeQuietly(staging);
-    symlinkSync(source, staging);
+    copyFileSync(source, staging);
     renameSync(staging, target);
     return target;
   } catch {
     removeQuietly(staging);
-  }
-  try {
-    copyFileSync(source, target);
-    return target;
-  } catch {
     return null;
   }
 }
 
-/** True when both paths resolve to the same existing file. */
-function sameFile(left: string, right: string): boolean {
+/**
+ * True when `target` is already a regular file holding the current bundle.
+ *
+ * The copy is written after the source, so a published file with the same size
+ * and a not-older mtime came from this build. A symlink (or a dangling one) is
+ * never "current": it has to be replaced by a copy.
+ */
+function isPublishedCopyOf(target: string, source: string): boolean {
   try {
-    return realpathSync(left) === realpathSync(right);
+    const published = fsStatSync(target);
+    const original = fsStatSync(source);
+    return (
+      published.isFile() &&
+      published.size === original.size &&
+      published.mtimeMs >= original.mtimeMs
+    );
   } catch {
-    // A dangling or missing link still needs to be replaced.
     return false;
   }
 }

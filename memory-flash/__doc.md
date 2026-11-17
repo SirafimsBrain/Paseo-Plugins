@@ -1255,3 +1255,26 @@ version bump; none is required for 0.16.0 compatibility.
 
 Not recommended: binary RPC/event payloads (nothing here is binary) and
 concurrent plugin startup (host-side behaviour that needs no plugin change).
+
+### 20.4 Update-path defect found during live verification (0.12.6)
+
+Updating the plugin on the live 0.16.1 host exposed a real bug unrelated to the
+SDK: the stable MCP path (`$PASEO_HOME/plugins/memory-flash/mcp-server.js`) was a
+**symlink** into `plugins/memory-flash/<revision>/checkout/memory-flash/dist/`.
+The update starts the new plugin instance — which republishes the link — and then
+deletes the old revision directory, so the link ended up pointing at nothing.
+Every agent whose saved config holds that path then failed to spawn the server
+(`MCP error -32000: Connection closed`) until the plugin restarted again. On this
+machine the link was dangling right after `paseo plugin update`.
+
+Since 0.12.6 the published path is a **copy**: staging file + `rename` (an agent
+spawning mid-update sees the old or the new bundle, never a partial one), skipped
+when the target is already a regular file with the current size and a not-older
+mtime, and a legacy symlink or dangling link is replaced on the next start. The
+regression test deletes the revision directory and asserts the published file
+still exists and still contains the old bundle before any republish.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **18 suites / 223 tests** pass
+(`tests/mcp-launch.test.ts` now asserts a regular file, survival of the revision
+deletion, content refresh on a new revision, and repair of a legacy dangling
+symlink).

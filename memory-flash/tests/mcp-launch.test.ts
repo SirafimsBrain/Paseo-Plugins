@@ -1,5 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, existsSync, readdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  lstatSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import {
@@ -59,7 +69,10 @@ describe("mcp-launch entry resolution", () => {
       // every agent.create and every registration into an agent config file.
       expect(resolveMcpEntry()).toBe(entry);
       expect(existsSync(entry)).toBe(true);
-      expect(realpathSync(entry)).toBe(realpathSync(path.join(install, "dist", "mcp-server.js")));
+      // A copy, not a link into the revision directory that updates delete.
+      expect(lstatSync(entry).isFile()).toBe(true);
+      expect(readFileSync(entry, "utf8")).toBe(BUNDLE);
+      expect(install).not.toBe(entry);
       // No staging leftovers.
       const dataDir = path.join(home, "plugins", "memory-flash");
       expect(readdirSync(dataDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
@@ -76,9 +89,8 @@ describe("mcp-launch entry resolution", () => {
       const entry = resolveMcpEntry();
       expect(entry).toBe(publishedMcpEntry());
       expect(entry).toBe(path.join(home, "plugins", "memory-flash", "mcp-server.js"));
-      expect(realpathSync(entry)).toBe(
-        realpathSync(path.join(install, "dist", "mcp-server.js")),
-      );
+      expect(readFileSync(entry, "utf8")).toBe(BUNDLE);
+      expect(existsSync(path.join(install, "dist", "mcp-server.js"))).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -93,41 +105,45 @@ describe("mcp-launch entry resolution", () => {
       const entry = mcpServerCommand().args[0]!;
       expect(existsSync(entry)).toBe(true);
 
-      // The daemon deletes the old revision and installs a new one.
+      // The daemon deletes the old revision and installs a new one. The
+      // published copy must survive on its own, before any republish happens.
       rmSync(path.join(home, "plugins", "memory-flash", "rev-a"), {
         recursive: true,
         force: true,
       });
+      expect(existsSync(entry)).toBe(true);
+      expect(readFileSync(entry, "utf8")).toBe(BUNDLE);
+
       const install = installRevision(home, "rev-b", "// memory-flash bundle v2\n");
 
       const refreshed = mcpServerCommand().args[0]!;
       // Same path the old agent already holds — so its config stays valid.
       expect(refreshed).toBe(entry);
-      expect(existsSync(refreshed)).toBe(true);
-      expect(realpathSync(refreshed)).toBe(
-        realpathSync(path.join(install, "dist", "mcp-server.js")),
-      );
+      expect(readFileSync(refreshed, "utf8")).toBe("// memory-flash bundle v2\n");
+      expect(existsSync(path.join(install, "dist", "mcp-server.js"))).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it("republishes over a dangling entry left by a removed install", () => {
+  it("replaces a legacy dangling symlink left by an older release", () => {
     const home = makeHome();
     process.env.PASEO_HOME = home;
     try {
-      installRevision(home, "rev-a");
-      resolveMcpEntry();
-      rmSync(path.join(home, "plugins", "memory-flash", "rev-a"), {
-        recursive: true,
-        force: true,
-      });
-      // A dangling link must not be mistaken for a usable entry.
+      // Releases before 0.12.6 published a symlink into the revision
+      // directory; an update deleted the target and left it dangling.
+      const dataDir = path.join(home, "plugins", "memory-flash");
+      mkdirSync(dataDir, { recursive: true });
+      symlinkSync(
+        path.join(dataDir, "gone-rev", "checkout", "memory-flash", "dist", "mcp-server.js"),
+        publishedMcpEntry(),
+      );
       expect(existsSync(publishedMcpEntry())).toBe(false);
 
       installRevision(home, "rev-b");
       expect(resolveMcpEntry()).toBe(publishedMcpEntry());
-      expect(existsSync(publishedMcpEntry())).toBe(true);
+      expect(lstatSync(publishedMcpEntry()).isFile()).toBe(true);
+      expect(readFileSync(publishedMcpEntry(), "utf8")).toBe(BUNDLE);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

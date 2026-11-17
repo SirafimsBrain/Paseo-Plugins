@@ -19,6 +19,13 @@ releases. Verdict: **compatible, source unchanged**. `requirements.paseo` stays
 | `vitest` | **18 suites / 223 tests** pass; MCP bundle rebuilt by the real scripts |
 | Live host 0.16.1 | plugin updated, `running`; `MCP entry`/`session_open` log lines unchanged |
 
+**Update-path defect found live (fixed in 0.12.6).** The stable MCP path was a
+symlink into the revision directory, and the update deletes that directory after
+the new instance republishes — leaving a dangling entry that every agent holding
+it cannot spawn (`MCP error -32000: Connection closed`). The path is now a copy
+with an atomic swap, and a legacy dangling link is repaired on start. See
+[__doc.md](./__doc.md) §20.4.
+
 No 0.16.0 feature is adopted yet. The candidates, with cost and value, are in
 [__doc.md](./__doc.md) §20.3: subscriptions for a self-refreshing screen,
 composer items, background agents for delegated maintenance, agent metadata as a
