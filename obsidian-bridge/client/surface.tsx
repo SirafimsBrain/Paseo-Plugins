@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
+import { useRpc, useSubscription } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   openInObsidian,
   readNote,
   reindexVault,
   searchVaultRpc,
+  statusStream,
   vaultStatus,
   type NotePreview,
   type SearchHit,
@@ -60,6 +61,11 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
   useEffect(() => {
     refreshStatus();
   }, [refreshStatus]);
+
+  // Live updates (0.16.0 subscription): the indexer pushes a fresh snapshot after
+  // a scan, a watched-note flush, a reconcile or a settings change. The one-shot
+  // read above stays as the first paint and for a host without subscriptions.
+  useSubscription(statusStream, {}, (event) => setStatus(event.status));
 
   const runSearch = useCallback(async () => {
     const trimmed = query.trim();

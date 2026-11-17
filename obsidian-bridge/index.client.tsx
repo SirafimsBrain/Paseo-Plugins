@@ -4,6 +4,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { KnowledgeSurface } from "./client/surface";
+import { ObsidianCiteComposerItem } from "./client/composer-item";
 import { KnowledgeWorkspacePanel } from "./client/workspace-panel";
 import { ObsidianBridgeSettingsScreen } from "./client/settings-screen";
 import { notesAttachmentSource } from "./shared/attachments";
@@ -48,6 +49,12 @@ export default function contribute(client: PluginClientContext) {
 
   // Attach one note to a prompt as an explicit text snapshot.
   client.addAttachmentSource(notesAttachmentSource);
+
+  // The smaller gesture: turn the draft into citations without attaching a note.
+  client.addComposerItem({
+    id: "obsidian-cite",
+    Component: ObsidianCiteComposerItem,
+  });
 
   client.addSettingsScreen({
     id: "obsidian-bridge-settings",

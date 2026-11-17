@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.8.11**.
+Version covered: **0.9.11**.
 
 ## 1. Purpose and scope
 
@@ -32,6 +32,7 @@ obsidian-bridge/
 │   ├── settings.ts          # defineSettings schema + runtime subset
 │   ├── contracts.ts         # zod value types + plugin RPC contracts (defineRpc)
 │   ├── attachments.ts       # composer attachment source + search RPC (0.4.0)
+│   ├── citations.ts         # `[[note#heading|title]]` text for the composer control (0.9.11)
 │   └── host-fonts.ts        # host Appearance settings parsing (client-safe, copied from memory-flash)
 ├── server/
 │   ├── paths.ts             # $PASEO_HOME, plugin data dir, per-vault index path
@@ -53,6 +54,8 @@ obsidian-bridge/
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
+│   ├── mcp-stable.ts        # stable bundle copy + healing older saved entries (0.9.11)
+│   ├── injection.ts         # per-agent injection marker in agent metadata (0.9.11)
 │   ├── settings-file.ts     # settings reader for the spawned server (file + env, no zod)
 │   ├── settings-mirror.ts   # atomic write of the mirror file
 │   ├── agent-record.ts      # best-effort read of an agent's saved mcpServers
@@ -61,6 +64,7 @@ obsidian-bridge/
 ├── client/
 │   ├── surface.tsx          # knowledge-base screen
 │   ├── workspace-panel.tsx  # compact tab: status, search, preview, open in Obsidian
+│   ├── composer-item.tsx    # "insert note links for this prompt" control (0.9.11)
 │   ├── settings-screen.tsx  # every setting, validated in place
 │   ├── use-host-typography.ts, web.ts
 └── scripts/bundle-mcp-server.mjs
@@ -341,6 +345,7 @@ and the panel says so.
 | 0.8.9 (shipped) | `migrate` hook on the settings definition, so a document from an older install opens instead of failing with "Settings version 2 requires a migration". |
 | 0.8.10 (shipped) | The `initialize` instructions carry the full tool index, so a truncated tool catalogue cannot make an agent guess names. |
 | 0.8.11 (shipped) | Paseo 0.16.0 compatibility pass: SDK pin `^0.16.0`, typecheck and 123 tests on SDK 0.16.0, live check on a 0.16.1 host, `agent.open.before` return contract confirmed; no code change. |
+| 0.9.11 (shipped) | The four 0.16.0 recommendations: stable MCP bundle path with healing of older saved entries, live `status-stream` subscription in the panels, a composer control that inserts note citations, and a per-agent injection marker in agent metadata. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -399,7 +404,78 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11)
+
+### 0.9.11 — the four 0.16.0 recommendations, implemented
+
+Feature release (0.8.11 → 0.9.11, second digit +1, third preserved). Every item
+uses a capability the 0.16.0 SDK already ships; nothing existing changed shape.
+
+#### A stable MCP path, and healing of older saved entries (`server/mcp-stable.ts`)
+
+The failure it closes: `agent.create.before` writes an absolute path into the
+agent's *saved* configuration, and `paseo plugin update` replaces the versioned
+checkout (`$PASEO_HOME/plugins/obsidian-bridge/<install-uuid>/checkout/…`), so an
+agent created before the update keeps launching a file that no longer exists.
+The open hook cannot repair it — the saved name collides, so it stands down.
+
+- On every start `ensureStableEntry()` copies the installed
+  `dist/mcp-server.js` to `$PASEO_HOME/plugins/obsidian-bridge/mcp-server.js`
+  (the directory that already holds the settings mirror and the model cache), and
+  `resolveMcpEntry()` prefers *that* path. Only a copy made by the current run is
+  preferred, so a stale copy from an older version is never used.
+- `healStaleSavedEntries()` walks `$PASEO_HOME/agents/*/*.json`, inspects only
+  the `obsidian-bridge` entry, and restores the bundle at a missing path **only**
+  when it lives under this plugin's directory; anything else is logged and left
+  alone. Config-file registrations (OpenCode, Kilo, Cline) pick the stable path up
+  by the existing refresh on load and on the five-minute timer.
+
+Sketch of the single remaining gap: an agent whose saved entry names a checkout
+path outside `$PASEO_HOME/plugins/obsidian-bridge/` is reported, not rewritten.
+
+#### Live status stream (`obsidian-bridge.status-stream`)
+
+- `defineSubscription` in `shared/contracts.ts`; the event is `{ at, status }`
+  carrying the complete `VaultStatus`, so a missed event cannot leave a panel stale.
+- `VaultIndexer.subscribeStatus()` publishes on `scanNow`, on a watched-note flush
+  that changed something, on a reconcile, and on every `reconfigure` (which is
+  what a settings change and the start-up scan call).
+- The handler pushes once on subscribe and unsubscribes on `context.signal.abort`.
+- The screen and the workspace tab use `useSubscription`; the one-shot `vaultStatus`
+  read stays for the first paint and for a host older than 0.16.0.
+
+#### Composer control: insert note links for the prompt
+
+`client/composer-item.tsx` registers a host `Action` through
+`client.addComposerItem`. It searches `useComposer().prompt` (capped at 512
+characters) through the same `obsidian-bridge.search` RPC the panels use, and
+inserts one `- [[path#heading|title]]` line per hit at the cursor through
+`composer.insertText`. The exact link form lives in `shared/citations.ts` so it
+is unit-tested without a React host. No hit is an error (the host shows it as a
+toast); nothing is written to the vault.
+
+#### Per-agent injection marker (`server/injection.ts`)
+
+The marker `{ mode, reason, at }` is stored under the plugin's own metadata key,
+`obsidian-bridge`:
+
+| Hook | Where the marker goes | Modes it can write |
+| --- | --- | --- |
+| `agent.create.before` | the hook's returned `metadata`, persisted with the agent | `mcp`, `config`, `skipped` |
+| `agent.open.before` | `paseo.agents.ref(id).setMetadata(…)`, fire-and-forget, only when the mode changed and never for `purpose: "history"` | `mcp`, `tool`, `config`, `skipped` |
+
+The open hook must not return `metadata` — 0.16.0 allows only `env`, `tools` and
+`mcpServers` there and fails the open otherwise (the `bunny-search` 0.7.5 bug). A
+recorded `mcp` marker also suppresses the capability probe: the provider already
+accepted a server for that agent, so the answer cannot have changed. Read-back is
+fail-safe — a missing, foreign or malformed value claims nothing.
+
+**Verification.** `npm run typecheck` (`tsc -b`, three projects) exit 0;
+`npm test` **17 suites / 138 tests** pass, including new suites for the stable
+copy and healing (5), the marker and citation text (8) and two new session-open
+cases (marker `mcp` skips the probe; `tool`/`config` still probe). The live host
+behaviour — a real `addSubscription` push and a rendered composer control — is
+host-side and is exercised at runtime, not by this build.
 
 ### 0.8.11 — Paseo 0.16.0 compatibility pass
 

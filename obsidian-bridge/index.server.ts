@@ -7,6 +7,7 @@ import {
   readNote,
   reindexVault,
   searchVaultRpc,
+  statusStream,
   testEnrichment,
   vaultStatus,
   verifyVault,
@@ -20,7 +21,16 @@ import { embedQuery } from "./server/embed/query";
 import { fuzzySearch } from "./server/enrichment";
 import { VaultIndexer } from "./server/indexer";
 import { createObsidianApi, ObsidianApi } from "./server/obsidian-api";
-import { INJECTED_SERVER_NAME, mcpServerCommand } from "./server/mcp-launch";
+import { INJECTED_SERVER_NAME, mcpServerCommand, resolveInstalledMcpEntry } from "./server/mcp-launch";
+import { ensureStableEntry, healStaleSavedEntries } from "./server/mcp-stable";
+import {
+  INJECTION_METADATA_KEY,
+  injectionMarker,
+  readInjectionMarker,
+  withInjectionMarker,
+  type AgentMetadata,
+  type InjectionMode,
+} from "./server/injection";
 import {
   agentSkillStatus,
   installAgentSkill,
@@ -89,6 +99,25 @@ export default function contribute(server: PluginServerContext) {
 
   // Write once so the first agent already sees the user's configuration.
   void mirrorSettings();
+
+  /**
+   * The bundled server lives inside the versioned checkout, which
+   * `paseo plugin update` replaces. An absolute path saved into an agent's
+   * configuration (or into an OpenCode/Kilo/Cline config file) would then point
+   * at a file that no longer exists, so every start publishes one stable copy
+   * under the plugin's data directory and restores the files agents created by
+   * an older version still name (0.9.11).
+   */
+  const installedBundle = resolveInstalledMcpEntry();
+  ensureStableEntry(installedBundle);
+  const healedEntries = healStaleSavedEntries(installedBundle, INJECTED_SERVER_NAME);
+  if (healedEntries.length > 0) {
+    console.log(
+      `[obsidian-bridge] restored ${healedEntries.length} saved MCP entr${
+        healedEntries.length === 1 ? "y" : "ies"
+      } from an older checkout`,
+    );
+  }
 
   /**
    * Keeps the agent config-file registrations in step with the switch.
@@ -219,12 +248,35 @@ export default function contribute(server: PluginServerContext) {
    * launch-only path degraded to attached tools that OpenCode and Cline never
    * surface (fixed in 0.4.3).
    */
+  /** This plugin's marker for a hook result, merged into the agent metadata. */
+  function markedMetadata(
+    metadata: AgentMetadata | null | undefined,
+    mode: InjectionMode,
+    reason: string,
+  ) {
+    return withInjectionMarker(metadata, injectionMarker(mode, reason));
+  }
+
   const removeCreateHook = server.addHook("agent.create.before", async ({ request }) => {
     const state = await settings.read().catch(() => null);
-    if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
+    if (state?.status !== "ready" || !state.values.injectIntoAgents) {
+      return {
+        ...request,
+        metadata: markedMetadata(request.metadata, "skipped", "injectIntoAgents is off"),
+      };
+    }
     // A saved server on an OpenCode agent makes Paseo refuse the session when
     // the shared service is in use; the config-file registration covers it.
-    if (agentConfigCoversProvider(request.config.provider).covered) return request;
+    if (agentConfigCoversProvider(request.config.provider).covered) {
+      return {
+        ...request,
+        metadata: markedMetadata(
+          request.metadata,
+          "config",
+          "the provider's config file already carries the server",
+        ),
+      };
+    }
     const { command, args } = mcpServerCommand();
     request.config.mcpServers = {
       ...(request.config.mcpServers ?? {}),
@@ -233,13 +285,22 @@ export default function contribute(server: PluginServerContext) {
     console.log(
       `[obsidian-bridge] MCP saved for the new agent: ${command} ${args.join(" ")}`,
     );
-    return request;
+    // `agent.create.before` may return metadata, so the marker travels with the
+    // agent Paseo persists. The open hook cannot do this in its result (0.16.0).
+    return {
+      ...request,
+      metadata: markedMetadata(request.metadata, "mcp", "saved the MCP server for the new agent"),
+    };
   });
 
   const agentTools = createObsidianTools(readRuntimeSettings);
 
   const removeOpenHook = server.addHook("agent.open.before", async ({ request }, { paseo }) => {
     const values = await readRuntimeSettings().catch(() => null);
+    // How an earlier open provisioned this agent (0.9.11). A recorded `mcp` mode
+    // makes the capability probe unnecessary: the provider already accepted a
+    // server for this agent, and that answer cannot have changed.
+    const known = readInjectionMarker(request.metadata);
     const base = {
       reason: request.reason,
       purpose: request.purpose,
@@ -249,6 +310,7 @@ export default function contribute(server: PluginServerContext) {
       lookup: readSavedMcpServers(request.agentId),
       configCovered: agentConfigCoversProvider(request.provider).covered,
       supportsMcpServers: null as boolean | null,
+      knownMode: known?.mode ?? null,
     };
     if (values === null) return request;
 
@@ -266,6 +328,38 @@ export default function contribute(server: PluginServerContext) {
     console.log(
       `[obsidian-bridge] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
     );
+    // The marker is written through the SDK, never returned: 0.16.0 lets this
+    // hook change only `env`, `tools` and `mcpServers`, and a result that also
+    // changes `metadata` fails the open (and every prompt after it).
+    // Fire-and-forget, because awaiting a write to the agent being opened
+    // deadlocks the open.
+    const mode: InjectionMode = decision.injectMcp
+      ? "mcp"
+      : decision.attachTool
+        ? "tool"
+        : base.configCovered
+          ? "config"
+          : "skipped";
+    if (request.purpose !== "history" && known?.mode !== mode) {
+      const marker = injectionMarker(mode, decision.why);
+      void paseo.agents
+        .ref(request.agentId)
+        .setMetadata({
+          [INJECTION_METADATA_KEY]: {
+            mode: marker.mode,
+            reason: marker.reason,
+            at: marker.at,
+          },
+        })
+        .catch((cause: unknown) => {
+          console.warn(
+            `[obsidian-bridge] could not record the injection marker: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+          );
+        });
+    }
+
     if (!decision.injectMcp && !decision.attachTool) return request;
 
     const tools = decision.attachTool
@@ -287,6 +381,34 @@ export default function contribute(server: PluginServerContext) {
   // -------------------------------------------------------------------------
 
   server.handle(vaultStatus, async () => indexer.status());
+
+  // Live status stream (0.9.11, Paseo 0.16.0 `addSubscription`): a complete
+  // snapshot on subscribe, then one per indexer change — a scan, a watched-note
+  // flush, a reconcile or a settings edit — so the screen and the workspace tab
+  // no longer poll and a finished reindex shows up on its own.
+  server.handle(statusStream, async (_input, context) => {
+    let closed = false;
+    const emit = () => {
+      if (closed) return;
+      void context
+        .push({ at: new Date().toISOString(), status: indexer.status() })
+        .catch((cause: unknown) => {
+          console.warn(
+            `[obsidian-bridge] status stream push failed: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+          );
+        });
+    };
+    emit();
+    const unsubscribe = indexer.subscribeStatus(emit);
+    const stop = () => {
+      closed = true;
+      unsubscribe();
+    };
+    if (context.signal.aborted) stop();
+    else context.signal.addEventListener("abort", stop, { once: true });
+  });
 
   // "Is the plugin actually installed for my agents?" — the settings screen
   // asks this directly instead of leaving the user to inspect config files.

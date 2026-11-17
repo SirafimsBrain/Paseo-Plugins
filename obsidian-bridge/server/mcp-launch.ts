@@ -3,6 +3,7 @@ import * as process from "node:process";
 import { readFileSync, statSync as fsStatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { paseoHome } from "./paths";
+import { currentStableMcpEntry } from "./mcp-stable";
 
 /**
  * Launch configuration for the bundled stdio MCP server.
@@ -47,8 +48,25 @@ export function isExecutableFile(candidate: string): boolean {
  * The plugin host bundles this module internally, so `__dirname` does not point
  * at the plugin source directory. The authoritative location for a Git/npm
  * installation is `plugins.<id>.path` in `$PASEO_HOME/config.json`.
+ *
+ * Since 0.9.11 the stable copy under `$PASEO_HOME/plugins/obsidian-bridge/` is
+ * preferred, because an absolute path saved into an agent's configuration has to
+ * survive a plugin update — but only the copy this process made (see
+ * `server/mcp-stable.ts`), never a stale one from an older version.
  */
 export function resolveMcpEntry(): string {
+  const stable = currentStableMcpEntry();
+  if (stable !== null && isExecutableFile(stable)) return stable;
+  return resolveBundledEntry("mcp-server.js");
+}
+
+/**
+ * The server inside the installed checkout, ignoring the stable copy.
+ *
+ * Used once per start to refresh the stable copy from the code that is actually
+ * installed, and to heal saved configurations that point at an older checkout.
+ */
+export function resolveInstalledMcpEntry(): string {
   return resolveBundledEntry("mcp-server.js");
 }
 
@@ -70,7 +88,6 @@ function resolveBundledEntry(file: string): string {
   } catch {
     // Not an ES module context — ignore.
   }
-  candidates.push(path.join(paseoHome(), "plugins", "obsidian-bridge", file));
   for (const candidate of candidates) {
     if (isExecutableFile(candidate)) return candidate;
   }

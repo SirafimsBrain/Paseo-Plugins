@@ -41,6 +41,12 @@ export interface SessionOpenInput {
   configCovered?: boolean;
   /** `capabilities.supportsMcpServers`, or `null` when unknown. */
   supportsMcpServers: boolean | null;
+  /**
+   * Mode this plugin recorded for the agent on an earlier open (0.9.11 marker).
+   * A recorded `mcp` mode means the provider accepted a server for this agent,
+   * so the capability probe is unnecessary and cannot change the answer.
+   */
+  knownMode?: "mcp" | "tool" | "config" | "skipped" | null;
 }
 
 export interface SessionOpenDecision {
@@ -55,6 +61,7 @@ export function needsCapabilityProbe(input: SessionOpenInput): boolean {
   if (input.purpose === "history") return false;
   if (input.configCovered === true) return false;
   if (input.reason === "create") return false;
+  if (input.knownMode === "mcp") return false;
   if (savedServersInclude(input.lookup, input.serverName)) return false;
   return true;
 }
@@ -101,6 +108,16 @@ export function decideSessionOpen(input: SessionOpenInput): SessionOpenDecision 
 
   if (input.supportsMcpServers === false) {
     return { injectMcp: false, attachTool: true, why: "attaching tools: provider has no MCP support" };
+  }
+  // A marker written by an earlier open of this same agent (0.9.11): the provider
+  // already accepted a launch-only server, so the probe would only repeat an answer
+  // that cannot have changed for it.
+  if (input.knownMode === "mcp") {
+    return {
+      injectMcp: true,
+      attachTool: false,
+      why: `injecting '${input.serverName}': an earlier open recorded mcp mode`,
+    };
   }
   // A freshly created agent has no saved record yet: Paseo writes it after the
   // session opens, so `missing` on `create` means "nothing saved that could

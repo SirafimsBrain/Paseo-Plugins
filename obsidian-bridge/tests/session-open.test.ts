@@ -52,6 +52,17 @@ describe("decideSessionOpen", () => {
     });
   });
 
+  it("trusts an mcp marker from an earlier open and skips the probe", () => {
+    const withMarker = input({ knownMode: "mcp", supportsMcpServers: null });
+    expect(needsCapabilityProbe(withMarker)).toBe(false);
+    expect(decideSessionOpen(withMarker)).toMatchObject({ injectMcp: true, attachTool: false });
+  });
+
+  it("still asks the daemon when the marker says tool or config", () => {
+    expect(needsCapabilityProbe(input({ knownMode: "tool", supportsMcpServers: null }))).toBe(true);
+    expect(needsCapabilityProbe(input({ knownMode: "config", supportsMcpServers: null }))).toBe(true);
+  });
+
   it("skips when the provider's config file already carries the server", () => {
     expect(decideSessionOpen(input({ configCovered: true }))).toMatchObject({
       injectMcp: false,

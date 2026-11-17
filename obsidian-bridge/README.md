@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.8.11)
+## What it does (0.9.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -57,6 +57,20 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   a note in the app. Off or unavailable leaves everything else unchanged.
 - **Composer attachment and workspace tab.** Attach a note to a prompt as a text snapshot from the composer's attachment
   picker, and search/preview the vault in a workspace tab beside agents and terminals.
+- **Stable MCP path (0.9.11).** Every start publishes one copy of the bundled server at
+  `$PASEO_HOME/plugins/obsidian-bridge/mcp-server.js` and injects/registers that path, so a `paseo plugin update`
+  (which replaces the versioned checkout) no longer leaves already-created agents launching a file that is gone. The same
+  start restores a missing bundle at the path such an agent still names, only inside the plugin's own directory.
+- **Live status (0.9.11).** The screen and the workspace tab subscribe to `obsidian-bridge.status-stream` (Paseo 0.16.0
+  `addSubscription`): the plugin pushes a complete snapshot on subscribe and after a scan, a watched-note flush, a
+  reconcile or a settings change, so counts, freshness, semantic coverage and a finished reindex update without polling.
+- **Citations from the composer (0.9.11).** An `Insert Obsidian note links` control searches the prompt you already typed
+  and inserts one `[[note#heading|title]]` line per hit at the cursor — the lighter gesture next to attaching a whole note.
+  Nothing is read or written in the vault, and the inserted links are ordinary editable text.
+- **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
+  (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
+  via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only
+  `env`, `tools` and `mcpServers`. An agent whose marker says `mcp` also skips the capability probe on later opens.
 - **Everything configured in Paseo.** Settings → Plugins → Obsidian Bridge. There is no separate HTTP configuration server.
 - **Knowledge-base screen.** Status and index freshness, the role map, the same search engine the agents use, note preview
   with backlinks, and a reindex button.

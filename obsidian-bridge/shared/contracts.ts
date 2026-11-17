@@ -1,4 +1,4 @@
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc, defineSubscription } from "@getpaseo/plugin";
 import { z } from "zod";
 
 /**
@@ -242,6 +242,23 @@ export const openInObsidian = defineRpc({
   name: "obsidian-bridge.open-in-obsidian",
   input: z.object({ path: z.string().trim().min(1).max(1024) }),
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+/**
+ * Live status stream (0.9.11, Paseo 0.16.0 `addSubscription`).
+ *
+ * The screen and the workspace tab no longer poll: the plugin pushes a complete
+ * snapshot on subscribe and again whenever the indexer changes something (a scan,
+ * a watched-note flush, a reconcile, a settings change). Every event carries the
+ * whole status, so a subscriber that missed one is still correct after the next.
+ */
+export const statusStream = defineSubscription({
+  name: "obsidian-bridge.status-stream",
+  input: z.object({}),
+  event: z.object({
+    at: z.string(),
+    status: vaultStatusSchema,
+  }),
 });
 
 /** Fresh probe of the Local REST API, used by the settings screen. */

@@ -2,6 +2,29 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.9.11 — the 0.16.0 recommendations implemented (2026-11-17)
+
+Feature release (0.8.11 → 0.9.11). It adopts four capabilities the same 0.16.0 SDK
+already ships; the host floor stays `>=0.15.0` and the old surface is unchanged.
+
+| Capability | Used for | Contract |
+| --- | --- | --- |
+| stable bundle copy + saved-entry healing | an injected/registered MCP path that survives `paseo plugin update` | `$PASEO_HOME/plugins/obsidian-bridge/mcp-server.js`, only this plugin's saved key touched |
+| `defineSubscription` + `useSubscription` | live index status in the screen and the workspace tab | `obsidian-bridge.status-stream` (`{ at, status }`, full snapshot) |
+| `addComposerItem` + `useComposer()` | *Insert Obsidian note links* control | host `Action`, `composer.insertText`, no vault write |
+| hook `metadata` (`agent.create.before` result; `agent.open.before` through `setMetadata`) | per-agent `obsidian-bridge: { mode, reason, at }` marker; a recorded `mcp` mode skips the capability probe | own metadata key only |
+
+Degradation on an older host is unchanged and safe: `addComposerItem`,
+`useSubscription` and hook `metadata` simply do not exist before 0.16.0, so the
+control and the stream never render and the panels keep their one-shot status
+read; the stable copy works on every host.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **17 suites / 138 tests** pass
+(new: `tests/mcp-stable.test.ts` 5, `tests/injection.test.ts` 8 including the
+citation text, `tests/session-open.test.ts` 13). Not proven by this build on its
+own: a live `addSubscription` push and a rendered composer control inside a real
+daemon — both are host-rendered behaviour.
+
 ## Paseo 0.16.0 pass (2026-11-17, 0.8.11)
 
 Patch release: a verified compatibility pass, no behaviour change, no new

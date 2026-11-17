@@ -56,7 +56,31 @@ export class VaultIndexer {
     watching: false,
   };
 
+  private readonly statusListeners = new Set<() => void>();
+
   constructor(private readonly readSettings: () => Promise<RuntimeSettings>) {}
+
+  /**
+   * Subscribes to status changes (0.9.11): a scan, a watched-note flush, a
+   * reconcile, or a settings change. The plugin's `status-stream` subscription
+   * pushes a fresh snapshot on every notification.
+   */
+  subscribeStatus(listener: () => void): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  private notifyStatus(): void {
+    for (const listener of this.statusListeners) {
+      try {
+        listener();
+      } catch {
+        // A broken subscriber must never take indexing down with it.
+      }
+    }
+  }
 
   /** Starts (or restarts) the indexer from the current settings. */
   async start(): Promise<void> {
@@ -73,6 +97,15 @@ export class VaultIndexer {
    * tokenizer closes and reopens the index, then a scan runs.
    */
   async reconfigure(): Promise<void> {
+    try {
+      await this.applySettings();
+    } finally {
+      this.notifyStatus();
+    }
+  }
+
+  /** Applies settings; `reconfigure` publishes the resulting status. */
+  private async applySettings(): Promise<void> {
     const settings = await this.readSettings();
     this.settings = settings;
     const wantedRoot = settings.vaultPath.trim();
@@ -163,6 +196,7 @@ export class VaultIndexer {
     } finally {
       this.scanning = false;
       this.state.indexRunning = false;
+      this.notifyStatus();
     }
   }
 
@@ -325,6 +359,7 @@ export class VaultIndexer {
     } finally {
       this.scanning = false;
       this.state.indexRunning = false;
+      this.notifyStatus();
     }
   }
 
@@ -386,6 +421,7 @@ export class VaultIndexer {
           cause instanceof Error ? cause.message : String(cause)
         }`;
       }
+      this.notifyStatus();
     }
   }
 

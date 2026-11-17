@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
+import { useRpc, useSubscription } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   openInObsidian,
   readNote,
   searchVaultRpc,
+  statusStream,
   vaultStatus,
   type SearchHit,
   type VaultStatus,
@@ -42,6 +43,10 @@ export function KnowledgeWorkspacePanel({ theme, layout }: PluginWorkspacePanelP
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Live status (0.16.0 subscription): the tab no longer polls. The one-shot
+  // read above stays as the first paint and for a host without subscriptions.
+  useSubscription(statusStream, {}, (event) => setStatus(event.status));
 
   const runSearch = useCallback(async () => {
     const trimmed = query.trim();
