@@ -384,10 +384,10 @@ export default function contribute(server: PluginServerContext) {
         `[memory-flash] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
       );
 
-      if (!decision.injectMcp && !decision.attachTool) return request;
-
       // Provenance on already-created agents: the create hook only runs once,
-      // but a resumed agent can gain the tool or lose the server. Failures are
+      // but a resumed agent can gain the tool or lose the server. The skip
+      // reasons are recorded too — "why does this agent have no memory tools"
+      // is exactly the question the repair action has to answer. Failures are
       // expected on hosts without `entityMetadata` and are not errors here.
       void paseo.agents
         .ref(request.agentId)
@@ -395,10 +395,13 @@ export default function contribute(server: PluginServerContext) {
           "memory-flash": {
             injected: decision.injectMcp,
             tool: decision.attachTool,
+            reason: decision.why.slice(0, 120),
             at: new Date().toISOString(),
           },
         })
         .catch(() => {});
+
+      if (!decision.injectMcp && !decision.attachTool) return request;
 
       const tools = decision.attachTool ? [...request.tools, memoryRecallTool] : request.tools;
       let mcpServers = request.mcpServers;
