@@ -30,6 +30,9 @@ The bridge is a directory on disk plus a local index. Obsidian itself does not h
    counts and freshness), `obsidian_index` (rebuild after external changes).
 6. When search looks wrong, `obsidian_diagnose` measures recall@k over cases you supply instead of
    guessing whether semantic search helps.
+7. A hit may carry `callout` (the section answered from `> [!warning]`, `> [!tip]`, …), and
+   `obsidian_outline` returns Dataview inline fields (`key:: value`) as `inlineFields` — read those
+   as fields, not as prose.
 
 ## Writing
 
@@ -49,13 +52,48 @@ Call `obsidian_directories` first if you do not know the role map. Roles decide 
 - **Change an existing note anywhere** — `obsidian_edit` with `path`, `old_text`, `new_text`. This is the
   only tool that writes outside the three roles. `old_text` must occur **exactly once**: include enough
   surrounding text to make it unique, otherwise the tool refuses and tells you how many matches there are.
-  Everything outside the matched span is preserved byte for byte. An empty `new_text` deletes the
-  fragment. It never creates a note.
+  A refusal is actionable: it lists `suggestions` — the closest text with line numbers (or the places an
+  ambiguous fragment occurs) — so copy the exact wording from there instead of retyping from memory.
+  When only wrapping or indentation differs, retry with `ignore_whitespace: true`; the exactly-once rule
+  still applies. Everything outside the matched span is preserved byte for byte. An empty `new_text`
+  deletes the fragment. It never creates a note.
 - Nothing moves, renames or deletes a note, and `.obsidian/` is never addressable.
 - `readOnly` (reported by `obsidian_directories`) switches every write off; `maxWriteChars` limits one
   body/fragment, and 4 MiB limits the whole note. Split large documents instead of pushing past a limit.
 - After a write, say which note you touched. Search reflects the change once the plugin's indexer sees the
   file.
+
+## Few-shot examples
+
+**"What did we decide about the queue, and where is it written down?"**
+
+1. `obsidian_search {"query": "queue decision", "budget_chars": 4000}`
+2. Pick the hit whose path and heading answer the question. Long note? `obsidian_outline {"path": …}`
+   first, then read one section.
+3. `obsidian_read {"path": "Projects/orion/Plan.md", "heading": "Decision"}`
+4. Answer and cite `Projects/orion/Plan.md § Decision`.
+
+Do not `glob`, `grep`, guess a path, or read every hit: one search plus one read is the intended cost.
+
+**"Append the timeout change to the risks section of the plan."**
+
+1. `obsidian_outline {"path": "Projects/orion/Plan.md"}` to find the heading, then
+   `obsidian_read {"path": …, "heading": "Risks"}` to get the current text.
+2. `obsidian_edit {"path": …, "old_text": "<two or three exact lines>", "new_text": "<the new text>"}`.
+3. If it refuses `not found`: the result's `suggestions` name the closest line — copy that wording.
+   If only line wrapping differs: retry with `"ignore_whitespace": true`. If it reports several
+   matches: add one neighbouring line from the suggestions to make the fragment unique.
+   Never retype the fragment from memory and never rewrite the whole note.
+
+**"Write the recommendation we just produced into Obsidian."**
+
+1. `obsidian_directories {}` → the role map and whether writes are enabled.
+2. `obsidian_write_document {"name": "guides/timeouts", "title": "Timeout policy", "body": …}` → the
+   note lands in `out` and gains a dated section; no `create` flag is needed for a new document.
+3. Report the note path. Search sees it after the indexer picks up the file.
+
+**When Obsidian is closed** every read and write above still works — the index is on disk. Only the
+Obsidian fuzzy signal, authoritative backlinks, live events and "Open in Obsidian" need the app.
 
 ## Obsidian Flavored Markdown
 

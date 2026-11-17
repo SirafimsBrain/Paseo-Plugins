@@ -167,7 +167,9 @@ export function KnowledgeWorkspacePanel({ theme, layout }: PluginWorkspacePanelP
             style={{ color: theme.colors.foregroundMuted, fontSize: font(10) }}
             numberOfLines={1}
           >
-            {hit.role} · {hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path}
+            {hit.role}
+            {hit.callout ? ` · [!${hit.callout}]` : ""} ·{" "}
+            {hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path}
           </Text>
           <Text
             style={{ color: theme.colors.foregroundMuted, fontSize: font(11) }}

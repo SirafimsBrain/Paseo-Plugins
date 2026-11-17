@@ -224,7 +224,8 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       `${CONTRACT_SENTENCE} Replaces one exact fragment in an existing note addressed by its vault ` +
       "path — the tool that reaches notes outside the inbox/out/raw roles. The fragment must occur " +
       "exactly once (include surrounding context to make it unique); everything else in the note is " +
-      "kept byte for byte. It never creates a note.",
+      "kept byte for byte. It never creates a note. A refusal lists the closest text with line " +
+      "numbers, and `ignore_whitespace: true` matches a re-wrapped fragment.",
     inputSchema: {
       type: "object",
       properties: {
@@ -237,6 +238,12 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         new_text: {
           type: "string",
           description: "Replacement text; an empty string removes the fragment.",
+        },
+        ignore_whitespace: {
+          type: "boolean",
+          description:
+            "Compare with every whitespace run collapsed to one space, for a fragment that was " +
+            "re-wrapped or re-indented. Still requires exactly one match. Default false.",
         },
       },
       required: ["path", "old_text", "new_text"],
@@ -682,14 +689,30 @@ export async function dispatchTool(
         }
         const relPath = typeof input.path === "string" ? input.path.trim() : "";
         if (relPath.length === 0) return fail("path is required.");
+        const ignoreWhitespace = input.ignore_whitespace === true;
         const outcome = replaceInNote({
           root: runtime.root,
           relPath,
           oldText: typeof input.old_text === "string" ? input.old_text : "",
           newText: typeof input.new_text === "string" ? input.new_text : "",
           maxWriteChars: settings.maxWriteChars,
+          ignoreWhitespace,
         });
-        if ("error" in outcome) return fail(outcome.error);
+        if ("error" in outcome) {
+          // The structured part carries the near misses, so an agent that reads
+          // only `structuredContent` still receives them.
+          return {
+            text: outcome.error,
+            isError: true,
+            structuredContent: {
+              ok: false,
+              path: relPath,
+              error: outcome.error,
+              occurrences: outcome.occurrences ?? 0,
+              suggestions: outcome.suggestions ?? [],
+            },
+          };
+        }
         return json({
           path: outcome.path,
           role: roleOfPath(outcome.path, runtime.dirs),
@@ -700,6 +723,7 @@ export async function dispatchTool(
           bytesBefore: outcome.bytesBefore,
           bytesAfter: outcome.bytesAfter,
           normalizedLineEndings: outcome.normalizedLineEndings,
+          ignoreWhitespace: outcome.ignoreWhitespace,
           note: "Search reflects the change once the plugin's indexer sees the file.",
         });
       }
@@ -720,6 +744,8 @@ export async function dispatchTool(
           headings: note.parsed.headings,
           frontmatterKeys: Object.keys(note.parsed.frontmatter),
           tags: note.parsed.tags,
+          /** Dataview inline fields (`key:: value`) from the note body (0.10.11). */
+          inlineFields: note.parsed.inlineFields,
           links: runtime.store.outgoingLinks(relPath),
           backlinks: authority?.links?.backlinks ?? runtime.store.backlinksOf(relPath),
           unresolvedLinks: authority?.links?.unresolvedLinks ?? null,

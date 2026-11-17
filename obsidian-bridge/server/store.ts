@@ -17,7 +17,8 @@ import { parseYamlSubset, type ParsedNote } from "./parse";
  * change wipes the derived tables so the next scan rebuilds them.
  */
 
-export const SCHEMA_VERSION = 2;
+/** 3 (0.10.11): `chunks.callout`. */
+export const SCHEMA_VERSION = 3;
 
 export const TOKENIZE_PLAIN = "unicode61 remove_diacritics 2";
 export const TOKENIZE_STEMMED = "porter unicode61 remove_diacritics 2";
@@ -34,6 +35,8 @@ export interface ChunkRow {
   path: string;
   heading: string;
   text: string;
+  /** Callout type of the chunk (`warning`, `note`, …), or `null`. */
+  callout: string | null;
   score: number;
 }
 
@@ -129,7 +132,8 @@ export class BridgeStore {
         path TEXT NOT NULL,
         ordinal INTEGER NOT NULL,
         heading TEXT NOT NULL,
-        text TEXT NOT NULL
+        text TEXT NOT NULL,
+        callout TEXT
       );
       CREATE INDEX IF NOT EXISTS chunks_path ON chunks(path);
       CREATE TABLE IF NOT EXISTS tags (
@@ -171,6 +175,21 @@ export class BridgeStore {
       CREATE INDEX IF NOT EXISTS embeddings_model ON embeddings(model_id);
       CREATE INDEX IF NOT EXISTS embeddings_path ON embeddings(path);
     `);
+
+    // `CREATE TABLE IF NOT EXISTS` does not touch an existing table, so an index
+    // built before `chunks.callout` (0.10.11) gains the column here. Rows from an
+    // older scan stay NULL until their note is read again — no wipe, no forced
+    // reindex of a large vault for a display-only field.
+    try {
+      const columns = this.db.prepare("PRAGMA table_info(chunks)").all() as unknown as Array<{
+        name: string;
+      }>;
+      if (!columns.some((column) => column.name === "callout")) {
+        this.db.exec("ALTER TABLE chunks ADD COLUMN callout TEXT");
+      }
+    } catch {
+      // A freshly created table already carries the column; nothing to migrate.
+    }
 
     const recorded = this.getMeta("tokenize");
     if (recorded === null) {
@@ -281,13 +300,19 @@ export class BridgeStore {
       }
 
       const insertChunk = this.db.prepare(
-        "INSERT INTO chunks (path, ordinal, heading, text) VALUES (?, ?, ?, ?)",
+        "INSERT INTO chunks (path, ordinal, heading, text, callout) VALUES (?, ?, ?, ?, ?)",
       );
       const insertChunkFts = this.db.prepare(
         "INSERT INTO chunks_fts (rowid, text, heading, path) VALUES (?, ?, ?, ?)",
       );
       parsed.chunks.forEach((chunk, ordinal) => {
-        const result = insertChunk.run(relPath, ordinal, chunk.heading, chunk.text);
+        const result = insertChunk.run(
+          relPath,
+          ordinal,
+          chunk.heading,
+          chunk.text,
+          chunk.callout ?? null,
+        );
         const id = Number(result.lastInsertRowid);
         insertChunkFts.run(id, chunk.text, chunk.heading, relPath);
         const vectors = carried.get(chunkTextHash(chunk.text));
@@ -439,7 +464,7 @@ export class BridgeStore {
     if (match.length === 0) return [];
     const rows = this.db
       .prepare(
-        `SELECT c.id AS id, c.path AS path, c.heading AS heading,
+        `SELECT c.id AS id, c.path AS path, c.heading AS heading, c.callout AS callout,
                 snippet(chunks_fts, 0, '', '', ' … ', 24) AS snippet,
                 bm25(chunks_fts) AS rank
          FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
@@ -450,6 +475,7 @@ export class BridgeStore {
       id: number;
       path: string;
       heading: string;
+      callout: string | null;
       snippet: string;
       rank: number;
     }>;
@@ -458,6 +484,7 @@ export class BridgeStore {
       path: row.path,
       heading: row.heading,
       text: row.snippet,
+      callout: row.callout ?? null,
       score: -row.rank,
     }));
   }
@@ -504,16 +531,16 @@ export class BridgeStore {
       .all(trimmed, `${trimmed}/%`, limit) as unknown as NoteMetaRow[];
   }
 
-  chunksOf(relPath: string): Array<{ heading: string; text: string }> {
+  chunksOf(relPath: string): Array<{ heading: string; text: string; callout: string | null }> {
     return this.db
-      .prepare("SELECT heading, text FROM chunks WHERE path = ? ORDER BY ordinal")
-      .all(relPath) as unknown as Array<{ heading: string; text: string }>;
+      .prepare("SELECT heading, text, callout FROM chunks WHERE path = ? ORDER BY ordinal")
+      .all(relPath) as unknown as Array<{ heading: string; text: string; callout: string | null }>;
   }
 
-  firstChunk(relPath: string): { heading: string; text: string } | null {
+  firstChunk(relPath: string): { heading: string; text: string; callout: string | null } | null {
     const row = this.db
-      .prepare("SELECT heading, text FROM chunks WHERE path = ? ORDER BY ordinal LIMIT 1")
-      .get(relPath) as { heading: string; text: string } | undefined;
+      .prepare("SELECT heading, text, callout FROM chunks WHERE path = ? ORDER BY ordinal LIMIT 1")
+      .get(relPath) as { heading: string; text: string; callout: string | null } | undefined;
     return row ?? null;
   }
 

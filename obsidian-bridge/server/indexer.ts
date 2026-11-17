@@ -28,10 +28,23 @@ import { isExcluded, isIncluded, isMarkdownPath, looksLikeVault } from "./vault"
 export interface IndexerState {
   lastScanAt: string | null;
   lastChangeAt: string | null;
+  /** Summary of the last scan (0.10.11), so status can report what it skipped. */
+  lastScan: ScanOutcome | null;
+  lastFullScanAt: string | null;
   error: string | null;
   indexRunning: boolean;
   watching: boolean;
 }
+
+/**
+ * Quiet period before embedding starts after watched-note changes (0.10.11).
+ *
+ * A Git pull or a Syncthing burst delivers dozens of file events in seconds; the
+ * index flush is already debounced, but starting the embedding child on the
+ * first flush meant several consecutive model loads. One short pause after the
+ * last change turns a burst into one job.
+ */
+export const EMBEDDING_QUIET_MS = 12_000;
 
 export class VaultIndexer {
   private store: BridgeStore | null = null;
@@ -51,14 +64,29 @@ export class VaultIndexer {
   private state: IndexerState = {
     lastScanAt: null,
     lastChangeAt: null,
+    lastScan: null,
+    lastFullScanAt: null,
     error: null,
     indexRunning: false,
     watching: false,
   };
 
   private readonly statusListeners = new Set<() => void>();
+  private embedTimer: NodeJS.Timeout | null = null;
+  private embedNotifyTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly readSettings: () => Promise<RuntimeSettings>) {}
+  constructor(private readonly readSettings: () => Promise<RuntimeSettings>) {
+    // Embedding progress is a status change like any other: push it, throttled so
+    // one progress line per chunk cannot flood a subscriber.
+    this.embedJob.setListener(() => {
+      if (this.embedNotifyTimer) return;
+      this.embedNotifyTimer = setTimeout(() => {
+        this.embedNotifyTimer = null;
+        this.notifyStatus();
+      }, 750);
+      this.embedNotifyTimer.unref?.();
+    });
+  }
 
   /**
    * Subscribes to status changes (0.9.11): a scan, a watched-note flush, a
@@ -187,6 +215,8 @@ export class VaultIndexer {
       });
       this.state.lastScanAt = new Date().toISOString();
       this.state.error = null;
+      this.state.lastScan = outcome;
+      if (outcome.full) this.state.lastFullScanAt = this.state.lastScanAt;
       this.ensureEmbeddings();
       return outcome;
     } catch (cause) {
@@ -235,6 +265,9 @@ export class VaultIndexer {
     const lastScanMs = this.store
       ? attempt(() => this.store!.getMeta("last_scan_ms"), null)
       : null;
+    const lastFullScanMs = this.store
+      ? attempt(() => this.store!.getMeta("last_full_scan_ms"), null)
+      : null;
     const exists = this.root !== null;
     return {
       vaultPath: settings?.vaultPath ?? "",
@@ -251,6 +284,20 @@ export class VaultIndexer {
         this.state.lastScanAt ??
         (lastScanMs ? new Date(Number(lastScanMs)).toISOString() : null),
       lastChangeAt: this.state.lastChangeAt,
+      scan: {
+        full: this.state.lastScan?.full ?? false,
+        at:
+          this.state.lastScanAt ??
+          (lastScanMs ? new Date(Number(lastScanMs)).toISOString() : null),
+        tookMs: this.state.lastScan?.tookMs ?? 0,
+        scanned: this.state.lastScan?.scanned ?? 0,
+        removed: this.state.lastScan?.removed ?? 0,
+        skipped: this.state.lastScan?.skipped ?? 0,
+        unreadable: this.state.lastScan?.unreadable ?? 0,
+      },
+      lastFullScanAt:
+        this.state.lastFullScanAt ??
+        (lastFullScanMs ? new Date(Number(lastFullScanMs)).toISOString() : null),
       watching: this.state.watching,
       indexRunning: this.state.indexRunning,
       readOnly: settings?.readOnly ?? true,
@@ -345,7 +392,7 @@ export class VaultIndexer {
     this.scanning = true;
     this.state.indexRunning = true;
     try {
-      scanVault({
+      const outcome = scanVault({
         root: this.root,
         store: this.store,
         settings: this.settings,
@@ -353,6 +400,7 @@ export class VaultIndexer {
       });
       this.state.lastScanAt = new Date().toISOString();
       this.state.error = null;
+      this.state.lastScan = outcome;
       this.ensureEmbeddings();
     } catch (cause) {
       this.state.error = `Reconcile failed: ${cause instanceof Error ? cause.message : String(cause)}`;
@@ -415,7 +463,9 @@ export class VaultIndexer {
         this.store.resolveLinks();
         this.state.lastChangeAt = new Date().toISOString();
         this.store.setMeta("last_scan_ms", String(Date.now()));
-        this.ensureEmbeddings();
+        // 0.10.11: a burst of watched changes waits for a quiet period, so one
+        // batch becomes one embedding job instead of several model loads.
+        this.scheduleEmbeddings();
       } catch (cause) {
         this.state.error = `Link resolution failed: ${
           cause instanceof Error ? cause.message : String(cause)
@@ -423,6 +473,16 @@ export class VaultIndexer {
       }
       this.notifyStatus();
     }
+  }
+
+  /** Debounces the embedding job behind a burst of watched changes. */
+  private scheduleEmbeddings(): void {
+    if (this.embedTimer) clearTimeout(this.embedTimer);
+    this.embedTimer = setTimeout(() => {
+      this.embedTimer = null;
+      this.ensureEmbeddings();
+    }, EMBEDDING_QUIET_MS);
+    this.embedTimer.unref?.();
   }
 
   /**
@@ -484,6 +544,14 @@ export class VaultIndexer {
   }
 
   private closeResources(): void {
+    if (this.embedTimer) {
+      clearTimeout(this.embedTimer);
+      this.embedTimer = null;
+    }
+    if (this.embedNotifyTimer) {
+      clearTimeout(this.embedNotifyTimer);
+      this.embedNotifyTimer = null;
+    }
     this.embedJob.stop();
     this.enrichment.stop();
     this.stopWatching();

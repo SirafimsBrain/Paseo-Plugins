@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.9.11)
+## What it does (0.10.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -67,6 +67,17 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Citations from the composer (0.9.11).** An `Insert Obsidian note links` control searches the prompt you already typed
   and inserts one `[[note#heading|title]]` line per hit at the cursor — the lighter gesture next to attaching a whole note.
   Nothing is read or written in the vault, and the inserted links are ordinary editable text.
+- **Actionable edit refusals (0.10.11).** When `obsidian_edit` cannot match a fragment, the refusal carries the
+  closest text from that note with line numbers (or the places an ambiguous fragment occurs), so an agent corrects its
+  fragment instead of re-reading the whole file. `ignore_whitespace: true` matches a re-wrapped or re-indented fragment,
+  still under the exactly-once rule.
+- **Callouts and Dataview fields (0.10.11).** Every chunk records the callout type it starts with (`> [!warning]` →
+  `warning`), search hits show it (`[!warning]`) and the panels print it, and `obsidian_outline` returns Dataview inline
+  fields (`key:: value`) as `inlineFields`.
+- **Scan metrics and a quiet embedding period (0.10.11).** `obsidian_status` and the screen report the last scan (what it
+  updated, skipped and could not read, and how long it took) and the time of the last full sync; embedding now waits for
+  a short quiet period after watched-note changes, so a Git pull or a Syncthing burst becomes one job instead of several
+  model loads.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only
@@ -99,9 +110,11 @@ are local, and no note text leaves the machine. Hiding secrets is the vault owne
 encryption plugin such as [Inline Secret Block](https://github.com/vnrtmnv/obsidian-inline-secret-block), a `secret`
 fence is stored as `secret-lock` plus AES-256-GCM ciphertext, so the bridge chunks, indexes and embeds only ciphertext —
 the plaintext never reaches the index, a snippet, an agent or a vector. There is deliberately no secret detection and no
-frontmatter redaction: a heuristic that misses one note would be worse than a clear rule. Notes that must not be indexed
-at all belong outside `vaultPath`/`includeFolders`, or under an `excludeGlobs` pattern; the next scan drops them from the
-index together with their chunks and vectors. Details: [__doc.md](./__doc.md) §12.
+frontmatter redaction: a heuristic that misses one note would be worse than a clear rule. Notes that must not be indexed at
+all belong outside `vaultPath`/`includeFolders`, or under an `excludeGlobs` pattern (`**/secrets.md`, `**/*.key`,
+`Private/**` — the same glob dialect as `*`/`**`); the next scan drops them from the index together with their chunks and
+vectors. `excludeGlobs` is the plugin's only exclusion mechanism — there is no separate secret scanner to configure or
+trust. Details: [__doc.md](./__doc.md) §12.
 
 ## Obsidian enrichment (optional)
 
@@ -196,6 +209,21 @@ A runtime that only scans skills at startup needs a restart to pick it up.
 The official Obsidian skills are a separate upstream project, kept as the reference for the formats this plugin does not
 cover — [github.com/obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills) (`obsidian-markdown`,
 `obsidian-bases`, `json-canvas`, `obsidian-cli`, `knap`).
+
+## Roadmap
+
+| Stage | Work |
+| --- | --- |
+| Next | **Obsidian Canvas.** Index `.canvas` files (node text, note/file nodes, edges between them) so an agent can read
+  and — once the writing side exists — draw a canvas instead of only reading Markdown. Design and requirements land in
+  `__doc.md` §14 before any code; the parser, the read path and the watcher all have to learn the format. |
+| Later | **Windows and macOS.** Path handling is already platform-neutral; the audit that remains is file locking on
+  Windows (`rename` over a note held by Obsidian, retried and explained since 0.10.11), `node.exe` discovery (also
+  0.10.11) and a verification pass on each platform. ONNX runs on CPU there; Metal/CoreML acceleration is not claimed. |
+| Deferred | **Link-graph visualization.** An interactive graph of the vault's `[[wikilinks]]` in Paseo's screen is documented
+  as a prospect in `__doc.md` §14 but deliberately not scheduled: the screen is a React Native surface with no SVG/DOM
+  dependency, so it needs a bundled renderer, and the practical need (find isolated notes) is cheaper to serve from the
+  index. |
 
 ## Notes and limits
 

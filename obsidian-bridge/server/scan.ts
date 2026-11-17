@@ -18,10 +18,17 @@ import { MAX_NOTE_BYTES, walkMarkdown } from "./vault";
 export interface ScanOutcome {
   notes: number;
   chunks: number;
+  /** Notes re-parsed because their content changed. */
   scanned: number;
   removed: number;
+  /** Notes skipped without reading (over the 4 MiB limit, or not a regular file). */
+  skipped: number;
+  /** Notes the process could not read (permissions, I/O, a vanished file). */
+  unreadable: number;
   tookMs: number;
   capped: boolean;
+  /** `true` for a scan that re-read every file (0.10.11 `obsidian_status`). */
+  full: boolean;
 }
 
 export function scanVault(input: {
@@ -39,6 +46,8 @@ export function scanVault(input: {
   });
   const seen = new Set<string>();
   let scanned = 0;
+  let skipped = 0;
+  let unreadable = 0;
 
   for (const relPath of walk.files) {
     const absolute = path.join(root, relPath);
@@ -46,9 +55,13 @@ export function scanVault(input: {
     try {
       stat = fs.statSync(absolute);
     } catch {
+      unreadable += 1;
       continue;
     }
-    if (!stat.isFile() || stat.size > MAX_NOTE_BYTES) continue;
+    if (!stat.isFile() || stat.size > MAX_NOTE_BYTES) {
+      skipped += 1;
+      continue;
+    }
     seen.add(relPath);
 
     if (!input.force) {
@@ -62,6 +75,7 @@ export function scanVault(input: {
     try {
       text = fs.readFileSync(absolute, "utf-8");
     } catch (cause) {
+      unreadable += 1;
       input.log?.(
         `unreadable note ${relPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
       );
@@ -89,13 +103,17 @@ export function scanVault(input: {
 
   store.resolveLinks();
   store.setMeta("last_scan_ms", String(Date.now()));
+  if (input.force) store.setMeta("last_full_scan_ms", String(Date.now()));
   const counts = store.counts();
   return {
     notes: counts.notes,
     chunks: counts.chunks,
     scanned,
     removed,
+    skipped,
+    unreadable,
     tookMs: Date.now() - startedAt,
     capped: walk.capped,
+    full: input.force === true,
   };
 }

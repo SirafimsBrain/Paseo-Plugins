@@ -20,6 +20,12 @@ export interface ParsedChunk {
   /** Heading path, `"Section › Subsection"`; `""` for the introduction. */
   heading: string;
   text: string;
+  /**
+   * Callout type of this chunk (`> [!warning]` → `"warning"`), or `null`. The
+   * marker is already visible inside the chunk text; storing its type is what
+   * lets a search hit say *what kind* of block answered.
+   */
+  callout?: string | null;
 }
 
 export interface ParsedNote {
@@ -32,6 +38,8 @@ export interface ParsedNote {
   aliases: string[];
   links: ParsedLink[];
   chunks: ParsedChunk[];
+  /** Dataview inline fields (`key:: value`), by key (0.10.11). */
+  inlineFields: Record<string, string[]>;
   wordCount: number;
 }
 
@@ -42,6 +50,9 @@ const FENCE = /^\s*(```|~~~)/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const TAG = /(^|[\s([{,;:'"“])#([\p{L}\p{N}_/-]{1,64})/gu;
 const WIKILINK = /(!?)\[\[([^\]|#]*)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]/g;
+const CALLOUT = /^\s{0,3}(?:>\s*)+\[!([\p{L}\p{N}_-]+)\]/u;
+/** `key:: value`, and Dataview's bracketed form `[key with spaces:: value]`. */
+const INLINE_FIELD = /^\s*(?:\[([^\]]+?)\]|([\p{L}\p{N}_-]+))::\s*(.+?)\s*$/u;
 
 /** Splits a note into frontmatter, its parsed keys and the body. */
 export function splitFrontmatter(text: string): {
@@ -214,6 +225,48 @@ export function extractAliases(frontmatter: Record<string, unknown>): string[] {
  * heading path so a result can cite `note.md § Section`. Oversized sections are
  * split on blank lines.
  */
+/** First callout type in a chunk, lower-cased (`"warning"`), or `null`. */
+export function extractCallout(text: string): string | null {
+  let inFence = false;
+  for (const line of text.split("\n")) {
+    if (FENCE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const match = CALLOUT.exec(line);
+    if (match) return match[1].toLowerCase();
+  }
+  return null;
+}
+
+/**
+ * Dataview inline fields (`key:: value`), collected per key.
+ *
+ * They are ordinary body text, so indexing already keeps them searchable; this
+ * extraction is what makes them *readable as fields* by `obsidian_outline`.
+ * Fenced code is skipped, and anything that is not a `key:: value` line is left
+ * untouched.
+ */
+export function extractInlineFields(body: string): Record<string, string[]> {
+  const fields: Record<string, string[]> = {};
+  let inFence = false;
+  for (const line of body.split("\n")) {
+    if (FENCE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const match = INLINE_FIELD.exec(line);
+    if (!match) continue;
+    const key = (match[1] ?? match[2] ?? "").trim();
+    const value = match[3].trim();
+    if (key.length === 0 || value.length === 0) continue;
+    (fields[key] ??= []).push(value);
+  }
+  return fields;
+}
+
 export function chunkNote(body: string): ParsedChunk[] {
   const lines = body.split("\n");
   const sections: Array<{ stack: string[]; lines: string[] }> = [{ stack: [], lines: [] }];
@@ -239,7 +292,7 @@ export function chunkNote(body: string): ParsedChunk[] {
     if (text.length === 0) continue;
     const heading = section.stack.filter((entry) => entry !== undefined).join(" › ");
     for (const part of splitLongText(text)) {
-      chunks.push({ heading, text: part });
+      chunks.push({ heading, text: part, callout: extractCallout(part) });
     }
   }
   return chunks;
@@ -301,6 +354,7 @@ export function parseNote(text: string, relPath: string): ParsedNote {
     aliases: extractAliases(data),
     links: extractLinks(body),
     chunks: chunkNote(body),
+    inlineFields: extractInlineFields(body),
     wordCount: countWords(body),
   };
 }

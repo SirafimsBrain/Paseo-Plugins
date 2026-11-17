@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { findFragment, type FragmentSuggestion } from "./fragment-match";
 import { MAX_NOTE_BYTES, resolveInsideVault } from "./vault";
 
 /**
@@ -29,16 +30,51 @@ export interface EditOutcome {
   charsAfter: number;
   /** The note uses CRLF and the fragment was matched after converting its line breaks. */
   normalizedLineEndings: boolean;
+  /** The match came from the whitespace-insensitive comparison. */
+  ignoreWhitespace: boolean;
 }
 
-function countOccurrences(haystack: string, needle: string): number {
-  let count = 0;
-  let index = haystack.indexOf(needle);
-  while (index !== -1) {
-    count += 1;
-    index = haystack.indexOf(needle, index + needle.length);
+/**
+ * A refused edit. `suggestions` is the actionable part: the closest text from
+ * this note (or the places an ambiguous fragment occurs), with line numbers, so
+ * the caller can correct the fragment without re-reading the file (0.10.11).
+ */
+export interface EditFailure {
+  error: string;
+  /** Number of exact occurrences, set for an ambiguous fragment. */
+  occurrences?: number;
+  suggestions?: FragmentSuggestion[];
+}
+
+/**
+ * Synchronous pause without a dependency or an event-loop turn.
+ *
+ * The edit path is deliberately synchronous (read, verify, replace in one go), so
+ * the retry below cannot await.
+ */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Renames `temp` over `target`, retrying the transient lock errors a Windows
+ * editor, sync client or antivirus produces (0.10.11 port audit). On POSIX the
+ * first attempt succeeds; anything that is not a lock error is rethrown at once.
+ */
+function replaceFile(temp: string, target: string, attempts: number = 5): void {
+  let last: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      fs.renameSync(temp, target);
+      return;
+    } catch (cause) {
+      last = cause;
+      const code = (cause as NodeJS.ErrnoException).code ?? "";
+      if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") break;
+      sleepSync(20 * (attempt + 1));
+    }
   }
-  return count;
+  throw last instanceof Error ? last : new Error(String(last));
 }
 
 function insideRoot(realRoot: string, realTarget: string): boolean {
@@ -52,7 +88,9 @@ export function replaceInNote(input: {
   oldText: string;
   newText: string;
   maxWriteChars: number;
-}): EditOutcome | { error: string } {
+  /** Compare after collapsing whitespace runs (0.10.11). Default off. */
+  ignoreWhitespace?: boolean;
+}): EditOutcome | EditFailure {
   const relPath = input.relPath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
   if (relPath.length === 0) return { error: "path is required." };
   const absolute = resolveInsideVault(input.root, relPath);
@@ -113,37 +151,34 @@ export function replaceInNote(input: {
     return { error: cause instanceof Error ? cause.message : String(cause) };
   }
 
-  let needle = oldText;
-  let normalizedLineEndings = false;
-  let count = countOccurrences(text, needle);
-  if (count === 0 && text.includes("\r\n")) {
-    // Obsidian on Windows writes CRLF; an agent usually passes LF.
-    const crlf = oldText.replace(/\r?\n/g, "\r\n");
-    const crlfCount = countOccurrences(text, crlf);
-    if (crlfCount > 0) {
-      needle = crlf;
-      count = crlfCount;
-      normalizedLineEndings = true;
-    }
-  }
-  if (count === 0) {
+  // Exact match first, then the note's line endings, then (opt-in) whitespace.
+  // Every step keeps "exactly once": `fragment-match.ts` owns the rules, and a
+  // refusal carries the closest text so the caller can fix its fragment.
+  const found = findFragment(text, oldText, { ignoreWhitespace: input.ignoreWhitespace === true });
+  if (found.status === "ambiguous") {
     return {
       error:
-        `The fragment was not found in '${relPath}'. Pass the exact text, including ` +
-        "whitespace and line breaks, or read the note first.",
+        `The fragment occurs ${found.occurrences} times in '${relPath}'. Include surrounding context ` +
+        "so it matches exactly once.",
+      occurrences: found.occurrences,
+      suggestions: found.suggestions,
     };
   }
-  if (count > 1) {
+  if (found.status === "not-found") {
+    const hint =
+      input.ignoreWhitespace === true
+        ? "Whitespace was already ignored for this match, so the text differs in more than spacing."
+        : "Pass the exact text, including whitespace and line breaks, set ignore_whitespace: true " +
+          "for a re-wrapped fragment, or read the note first.";
     return {
-      error:
-        `The fragment occurs ${count} times in '${relPath}'. Include surrounding context ` +
-        "so it matches exactly once.",
+      error: `The fragment was not found in '${relPath}'. ${hint} Closest text is in suggestions.`,
+      suggestions: found.suggestions,
     };
   }
 
+  const normalizedLineEndings = found.normalizedLineEndings;
   const replacement = normalizedLineEndings ? input.newText.replace(/\r?\n/g, "\r\n") : input.newText;
-  const start = text.indexOf(needle);
-  const next = `${text.slice(0, start)}${replacement}${text.slice(start + needle.length)}`;
+  const next = `${text.slice(0, found.start)}${replacement}${text.slice(found.end)}`;
   const bytesAfter = Buffer.byteLength(next);
   if (bytesAfter > MAX_NOTE_BYTES) {
     return {
@@ -164,9 +199,17 @@ export function replaceInNote(input: {
       };
     }
     fs.writeFileSync(temp, next, { encoding: "utf-8", mode: stat.mode & 0o777 });
-    fs.renameSync(temp, absolute);
+    replaceFile(temp, absolute);
   } catch (cause) {
     fs.rmSync(temp, { force: true });
+    const code = (cause as NodeJS.ErrnoException).code ?? "";
+    if (code === "EPERM" || code === "EBUSY" || code === "EACCES") {
+      return {
+        error:
+          `Could not replace '${relPath}': the file is locked by another program ` +
+          "(Obsidian, a sync client, or antivirus). Close the note and retry.",
+      };
+    }
     return { error: cause instanceof Error ? cause.message : String(cause) };
   }
 
@@ -177,5 +220,6 @@ export function replaceInNote(input: {
     charsBefore: text.length,
     charsAfter: next.length,
     normalizedLineEndings,
+    ignoreWhitespace: found.ignoreWhitespace,
   };
 }

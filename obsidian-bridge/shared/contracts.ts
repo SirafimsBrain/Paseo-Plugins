@@ -21,6 +21,8 @@ export const searchHitSchema = z.object({
   backlinks: z.number().int(),
   /** Directory role the note lives in (`workspace` when outside every role). */
   role: z.enum(["workspace", "inbox", "out", "raw"]),
+  /** Callout type when the hit answered from a callout block (`warning`), else null. */
+  callout: z.string().nullable(),
 });
 
 export type SearchHit = z.infer<typeof searchHitSchema>;
@@ -75,6 +77,18 @@ export const vaultStatusSchema = z.object({
   indexBytes: z.number().int(),
   lastScanAt: z.string().nullable(),
   lastChangeAt: z.string().nullable(),
+  /** Last scan summary (0.10.11): what it did, how long it took and what it skipped. */
+  scan: z.object({
+    full: z.boolean(),
+    at: z.string().nullable(),
+    tookMs: z.number().int(),
+    scanned: z.number().int(),
+    removed: z.number().int(),
+    skipped: z.number().int(),
+    unreadable: z.number().int(),
+  }),
+  /** Timestamp of the last full (forced) scan, persisted in the index. */
+  lastFullScanAt: z.string().nullable(),
   watching: z.boolean(),
   indexRunning: z.boolean(),
   readOnly: z.boolean(),

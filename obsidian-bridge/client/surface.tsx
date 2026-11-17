@@ -159,6 +159,16 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
             Watching for changes · {status.readOnly ? "writes refused" : "append-only writes"}
           </Text>
         ) : null}
+        {status ? (
+          <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }} numberOfLines={2}>
+            last scan: {status.scan.tookMs} ms · {status.scan.scanned} updated
+            {status.scan.skipped > 0 ? ` · ${status.scan.skipped} skipped` : ""}
+            {status.scan.unreadable > 0 ? ` · ${status.scan.unreadable} unreadable` : ""}
+            {status.lastFullScanAt
+              ? ` · full sync ${new Date(status.lastFullScanAt).toLocaleString()}`
+              : ""}
+          </Text>
+        ) : null}
         {status?.error ? (
           <Text style={{ color: danger, fontSize: font(11), ...uiFontStyle }} numberOfLines={4}>
             {status.error}
@@ -293,7 +303,9 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
                 {hit.title}
               </Text>
               <Text style={{ color: fgMuted, fontSize: font(10), ...monoFontStyle }} numberOfLines={1}>
-                {hit.role} · {hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path}
+                {hit.role}
+                {hit.callout ? ` · [!${hit.callout}]` : ""} ·{" "}
+                {hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path}
               </Text>
               <Text style={{ color: fgMuted, fontSize: font(11), ...uiFontStyle }} numberOfLines={3}>
                 {hit.snippet}

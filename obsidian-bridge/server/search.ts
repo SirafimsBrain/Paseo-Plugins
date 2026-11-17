@@ -54,6 +54,8 @@ interface Candidate {
   path: string;
   heading: string;
   snippet: string;
+  /** Callout type when the chunk is a callout block (0.10.11). */
+  callout?: string | null;
   score: number;
 }
 
@@ -76,6 +78,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     if (existing) {
       existing.score += candidate.score;
       if (candidate.snippet.length > existing.snippet.length) existing.snippet = candidate.snippet;
+      if (!existing.callout && candidate.callout) existing.callout = candidate.callout;
       return;
     }
     scores.set(key, { ...candidate });
@@ -89,6 +92,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         path: note.path,
         heading: chunk?.heading ?? "",
         snippet: (chunk?.text ?? "").slice(0, snippetChars),
+        callout: chunk?.callout ?? null,
         score: WEIGHT_RECENT / (RRF_K + index + 1),
       });
     });
@@ -103,6 +107,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         path: row.path,
         heading: row.heading,
         snippet: row.text,
+        callout: row.callout,
         score: WEIGHT_CHUNKS / (RRF_K + index + 1),
       });
     });
@@ -115,6 +120,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         path: row.path,
         heading: chunk?.heading ?? "",
         snippet: chunk?.text ?? "",
+        callout: chunk?.callout ?? null,
         score: WEIGHT_TITLES / (RRF_K + index + 1),
       });
     });
@@ -128,6 +134,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         path: neighbour.path,
         heading: chunk?.heading ?? "",
         snippet: chunk?.text ?? "",
+        callout: chunk?.callout ?? null,
         score: WEIGHT_GRAPH / (RRF_K + index + 1),
       });
     });
@@ -171,6 +178,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         path: hit.path,
         heading: chunk?.heading ?? "",
         snippet: hit.snippet.length > 0 ? hit.snippet : (chunk?.text ?? ""),
+        callout: chunk?.callout ?? null,
         score: WEIGHT_OBSIDIAN / (RRF_K + index + 1),
       });
       added = true;
@@ -208,6 +216,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
       score: Number(candidate.score.toFixed(6)),
       backlinks: backlinks.get(candidate.path) ?? 0,
       role: roleOfPath(candidate.path, dirs),
+      callout: candidate.callout ?? null,
     };
   });
 
@@ -258,7 +267,8 @@ export function packHits(hits: SearchHit[], budgetChars: number): string {
   let used = 0;
   for (const [index, hit] of hits.entries()) {
     const location = hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path;
-    const header = `[${index + 1}] ${location} (backlinks: ${hit.backlinks})`;
+    const marker = hit.callout ? ` [!${hit.callout}]` : "";
+    const header = `[${index + 1}] ${location}${marker} (backlinks: ${hit.backlinks})`;
     const body = hit.snippet;
     const block = `${header}\n${body}\n`;
     if (used + block.length > budgetChars && lines.length > 0) break;

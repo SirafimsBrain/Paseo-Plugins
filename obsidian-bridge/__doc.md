@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.9.11**.
+Version covered: **0.10.11**.
 
 ## 1. Purpose and scope
 
@@ -97,7 +97,7 @@ Schema (SQLite, WAL, `busy_timeout = 5000` so the plugin and agent processes can
 | Table | Contents |
 | --- | --- |
 | `notes` | path, title, folder, mtime, size, hash, frontmatter JSON, word count, indexed_at |
-| `chunks` | note path, ordinal, heading path, text |
+| `chunks` | note path, ordinal, heading path, text, callout type (`SCHEMA_VERSION` 3, 0.10.11) |
 | `chunks_fts` | FTS5 over chunk text + heading, `rowid` = `chunks.id` |
 | `notes_fts` | FTS5 over title + aliases, `rowid` = `notes.rowid` |
 | `tags` | (path, tag, source) |
@@ -214,6 +214,11 @@ for "append a line to this report". It takes `path`, `old_text`, `new_text` and:
 - writes through a temp file and `renameSync`, after re-checking size and mtime against the initial read: if Obsidian saved
   the note meanwhile the edit is refused with "changed on disk while it was being edited" rather than overwriting the new
   content.
+
+Since 0.10.11 a refusal is actionable: `suggestions` lists the closest text with line
+numbers (or the occurrences of an ambiguous fragment), and `ignoreWhitespace` compares
+after collapsing whitespace runs while keeping the exactly-once rule
+(`server/fragment-match.ts`, §11).
 
 Search reflects an edit once the plugin's indexer sees the file (the same path every other write takes); the MCP process
 never writes the index itself.
@@ -346,6 +351,8 @@ and the panel says so.
 | 0.8.10 (shipped) | The `initialize` instructions carry the full tool index, so a truncated tool catalogue cannot make an agent guess names. |
 | 0.8.11 (shipped) | Paseo 0.16.0 compatibility pass: SDK pin `^0.16.0`, typecheck and 123 tests on SDK 0.16.0, live check on a 0.16.1 host, `agent.open.before` return contract confirmed; no code change. |
 | 0.9.11 (shipped) | The four 0.16.0 recommendations: stable MCP bundle path with healing of older saved entries, live `status-stream` subscription in the panels, a composer control that inserts note citations, and a per-agent injection marker in agent metadata. |
+| 0.10.11 (shipped) | Actionable `obsidian_edit` refusals (closest text with line numbers) and `ignore_whitespace`; callout types and Dataview inline fields; scan metrics in status; a quiet period before embedding; the Windows lock/`node.exe` half of the port audit. |
+| next stage | **Obsidian Canvas** (§14): index `.canvas` node text and edges, teach the read path and the watcher the format, then a writing side so an agent can draw a canvas. Requirements and design are being collected; no code yet. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -404,7 +411,79 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11)
+
+### 0.10.11 — edit recovery, Obsidian formats, scan truth, port audit
+
+Feature release (0.9.11 → 0.10.11). The scope was agreed after a review of proposed
+improvements; the two items that were **not** built are recorded at the end.
+
+#### Actionable `obsidian_edit` refusals (`server/fragment-match.ts`)
+
+`fragment-match.ts` owns the matching rules and `edit.ts` only writes:
+
+- exact match first; then the same fragment with the note's CRLF endings; then, with
+  `ignore_whitespace: true`, a comparison where every whitespace run collapses to one
+  space. Each step still requires **exactly one** occurrence, and the whitespace step
+  maps normalized offsets back through an offset table, so it cannot drift into a
+  neighbouring line;
+- a miss returns `suggestions`: the closest windows of the note (token Sørensen–Dice,
+  windows of the fragment's line count ±1, equal overlap prefers the tighter window),
+  each with a 1-based line number. An ambiguous fragment returns the lines where it
+  occurs. The MCP result carries the same data in `structuredContent` (0.5.6's lesson:
+  some clients render only that);
+- nothing is ever applied from a suggestion. A refusal is information.
+
+#### Callout types and Dataview inline fields (`parse.ts`, `store.ts`)
+
+- `extractCallout()` records the first `> [!type]` in a chunk; `chunks.callout` stores
+  it (`SCHEMA_VERSION` 3) and `obsidian_search` renders ` [!warning]` in the packed
+  answer with a `callout` field per hit. Existing indexes gain the column through
+  `ALTER TABLE`; their rows stay NULL until each note is read again — no wipe and no
+  forced reindex for a display-only field.
+- `extractInlineFields()` collects `key:: value` and `[key with spaces]:: value` outside
+  code fences; `obsidian_outline` returns them as `inlineFields`. They were already
+  searchable as body text; this makes them readable as fields.
+- Retrieval weights are unchanged: no callout boost was added, because it cannot be
+  justified without a measurement (`obsidian_diagnose` is the tool for that).
+
+#### Scan truth in status (`scan.ts`, `indexer.ts`)
+
+`ScanOutcome` now reports `skipped` (over 4 MiB / not a regular file), `unreadable`
+(permissions, I/O, a vanished file) and `full`. The indexer keeps the last outcome and
+the last full-sync timestamp (also persisted as `last_full_scan_ms`), and `VaultStatus`
+exposes both as `scan` and `lastFullScanAt`; the screen prints them. Before this, those
+counts existed only in a log line.
+
+#### One embedding job per burst (`indexer.ts`, `embed/job.ts`)
+
+Watched-note flushes no longer call `ensureEmbeddings()` directly: they schedule it
+`EMBEDDING_QUIET_MS` (12 s) after the last change, so a Git pull or a Syncthing burst
+is embedded once. `EmbedJob` gained a change listener, and the indexer throttles it to a
+status push every 750 ms — progress and completion now reach a subscribed panel.
+
+#### Windows half of the port audit (`edit.ts`, `mcp-launch.ts`)
+
+- `replaceFile()` retries `EPERM`/`EBUSY`/`EACCES` five times with a short sync pause
+  (the edit path is synchronous by design) and then reports a lock-specific message
+  naming Obsidian, a sync client and antivirus, instead of a raw errno.
+- `nodeBinaryNames()` probes `node.exe` as well as `node` on Windows, and the PATH scan
+  uses the same list.
+
+Linux remains the primary platform; macOS and Windows are still "future work" — this is
+the audit, not a support claim.
+
+#### Not built (agreed)
+
+- **Obsidian Canvas** is the declared next stage; requirements are being collected.
+- **Link-graph visualization** is deferred: the screen is React Native with no
+  SVG/DOM renderer (a bundled dependency and layout cost), and the useful half —
+  isolated notes, hubs, unresolved links — is data the index already holds and can be
+  surfaced as a cheap panel card first. Recorded in §14.
+
+**Verification.** `npm run typecheck` exit 0; `npm test` **22 suites / 164 tests** pass,
+including `fragment-match` (8), edit refusals and `ignore_whitespace` (4), callouts and
+inline fields (8), scan metrics (2) and the Node binary names (2).
 
 ### 0.9.11 — the four 0.16.0 recommendations, implemented
 
@@ -778,3 +857,50 @@ generates its own CA; a non-loopback URL is validated normally.
 attachment source (`defineAttachmentSource`) attaches one note to a prompt as a text snapshot (capped at 40 000 characters,
 with an explicit truncation marker). Writes still go through the append-only filesystem tools; the REST API is never used
 to modify notes.
+
+## 14. Future work: Canvas next, link graph deferred
+
+Both items came out of the improvement review recorded in §11; neither is scheduled
+yet, and the difference between them is deliberate.
+
+### 14.1 Obsidian Canvas — the next stage
+
+`.canvas` is JSON: nodes (`text`, `file`, `link`, `group`) and the edges between them.
+Today the vault walk only accepts `.md` (`isMarkdownPath`), so a canvas is invisible to
+the index, to `obsidian_list` and to the watcher.
+
+Planned shape, in dependency order:
+
+1. **Parse.** A `server/canvas.ts` that turns a canvas into the same `ParsedNote` the
+   Markdown parser produces — one chunk per text node (heading = node id or its first
+   line), `file` nodes contributing links, group names as context. Malformed JSON must
+   degrade to "not indexed, reported", never to a crash.
+2. **Index.** `walkMarkdown` (renamed) accepts `.md` and `.canvas`; `notes` gains a kind
+   column or infers it from the extension; link resolution treats a `file` node like a
+   wikilink, so the graph works across both formats.
+3. **Read.** `obsidian_read` on a `.canvas` returns a textual rendering (node list plus
+   edges) and `obsidian_outline` lists nodes; `parseNote` must not be asked to parse
+   JSON as Markdown.
+4. **Watch and exclude.** The watcher filter, `includeFolders`/`excludeGlobs` and the
+   attachment source all need the new extension; a canvas that stops matching leaves
+   the index like any other note.
+5. **Write (later).** Creating or editing a canvas is a separate design: JSON positions,
+   node ids and Obsidian's own layout rules. That is where "an agent can draw" belongs,
+   and it will not be part of the read-only index release.
+
+### 14.2 Link-graph visualization — deferred
+
+A visual graph of the vault's wikilinks would show how the agent sees the vault and
+expose isolated notes. It is documented, not scheduled, for concrete reasons:
+
+- the screen is a React Native surface (`View`/`ScrollView` in `client/surface.tsx`), so
+  D3 in a DOM does not apply; a renderer (`react-native-svg` or similar) would have to
+  be bundled and declared as a non-host dependency, and the layout itself has to be
+  computed for every render;
+- the useful question — "which notes will an agent never find?" — is already answered by
+  data in the index (`links`, `unresolvedLinks`, `backlinks`). A small panel card
+  (orphans, top hubs, unresolved count) delivers the insight at a fraction of the cost
+  and without a dependency.
+
+If visualization is picked up later, the cheap card comes first, and the graph only
+after a concrete use case that the card does not serve.

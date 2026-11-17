@@ -20,16 +20,30 @@ export function mcpServerCommand(): { command: string; args: string[] } {
   return { command: resolveNodeCommand(), args: [resolveMcpEntry()] };
 }
 
+/**
+ * Executable names for the Node binary on a platform (0.10.11 port audit).
+ *
+ * On Windows the installed binary is `node.exe`; probing only `node` made the
+ * executable check fail there even though spawning `node` still worked through
+ * PATHEXT.
+ */
+export function nodeBinaryNames(platform: string = process.platform): string[] {
+  return platform === "win32" ? ["node.exe", "node"] : ["node"];
+}
+
 export function resolveNodeCommand(): string {
-  if (path.basename(process.execPath) === "node" || path.basename(process.execPath) === "node.exe") {
-    return process.execPath;
+  const names = nodeBinaryNames();
+  if (names.includes(path.basename(process.execPath))) return process.execPath;
+  for (const name of names) {
+    const sibling = path.join(path.dirname(process.execPath), name);
+    if (isExecutableFile(sibling)) return sibling;
   }
-  const sibling = path.join(path.dirname(process.execPath), "node");
-  if (isExecutableFile(sibling)) return sibling;
   for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
     if (!dir) continue;
-    const candidate = path.join(dir, "node");
-    if (isExecutableFile(candidate)) return candidate;
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      if (isExecutableFile(candidate)) return candidate;
+    }
   }
   return "node";
 }

@@ -2,6 +2,27 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.10.11 — edit recovery, Obsidian formats, scan truth (2026-11-17)
+
+Feature release (0.9.11 → 0.10.11), independent of the host version: no Paseo API
+changed, the SDK stays `@getpaseo/plugin ^0.16.0` and the floor `>=0.15.0`.
+
+| Change | Behaviour |
+| --- | --- |
+| `obsidian_edit` `ignore_whitespace` | matches a re-wrapped fragment; still exactly one occurrence |
+| `obsidian_edit` refusals | `suggestions` with line numbers (closest text, or the places an ambiguous fragment occurs), in text and `structuredContent` |
+| `chunks.callout` | callout type stored per chunk, shown on hits as `[!warning]`; `SCHEMA_VERSION` 3, `ALTER TABLE` migration, no forced reindex |
+| `obsidian_outline.inlineFields` | Dataview `key:: value` pairs as fields |
+| `VaultStatus.scan` / `lastFullScanAt` | what the last scan updated, skipped and could not read, its duration and the last full sync |
+| embedding quiet period | 12 s after the last watched change, so a burst is one job; job progress pushes status |
+| Windows lock retry, `node.exe` lookup | `rename` retried on `EPERM`/`EBUSY`/`EACCES` with a readable message; Node discovered as `node.exe` first on Windows |
+
+Explicitly not built, by decision: Obsidian Canvas (declared the next stage, §14.1)
+and link-graph visualization (deferred, §14.2).
+
+Evidence: `npm run typecheck` exit 0; `npm test` **22 suites / 164 tests** pass. The
+live host check for this release is the same plugin start path verified for 0.9.11.
+
 ## Plugin 0.9.11 — the 0.16.0 recommendations implemented (2026-11-17)
 
 Feature release (0.8.11 → 0.9.11). It adopts four capabilities the same 0.16.0 SDK

@@ -43,6 +43,20 @@ export class EmbedJob {
   private child: ChildProcess | null = null;
   private buffer = "";
   private current: EmbedJobState = { ...IDLE };
+  /** Called on every state change, so a live status stream can push it. */
+  private listener: (() => void) | null = null;
+
+  setListener(listener: (() => void) | null): void {
+    this.listener = listener;
+  }
+
+  private publish(): void {
+    try {
+      this.listener?.();
+    } catch {
+      // A broken listener must not break embedding.
+    }
+  }
 
   get running(): boolean {
     return this.child !== null;
@@ -64,6 +78,7 @@ export class EmbedJob {
       finishedAt: null,
     };
     this.buffer = "";
+    this.publish();
 
     let child: ChildProcess;
     try {
@@ -85,6 +100,7 @@ export class EmbedJob {
         error: cause instanceof Error ? cause.message : String(cause),
         finishedAt: new Date().toISOString(),
       };
+      this.publish();
       return false;
     }
 
@@ -104,6 +120,7 @@ export class EmbedJob {
         finishedAt: new Date().toISOString(),
       };
       this.child = null;
+      this.publish();
     });
     child.once("exit", (code) => {
       this.child = null;
@@ -119,6 +136,7 @@ export class EmbedJob {
           finishedAt: finished,
         };
       }
+      this.publish();
     });
     return true;
   }
@@ -149,6 +167,7 @@ export class EmbedJob {
           error: typeof message.error === "string" ? message.error : "Embedding failed.",
           finishedAt: new Date().toISOString(),
         };
+        this.publish();
         continue;
       }
       this.current = {
@@ -159,6 +178,7 @@ export class EmbedJob {
         rssMb: typeof message.rssMb === "number" ? message.rssMb : this.current.rssMb,
         error: state === "done" ? null : this.current.error,
       };
+      this.publish();
     }
   }
 }
