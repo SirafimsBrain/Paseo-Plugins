@@ -2,6 +2,46 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Paseo 0.16.0 pass (2026-11-17, 0.8.11)
+
+Patch release: a verified compatibility pass, no behaviour change, no new
+functionality. `requirements.paseo` stays `>=0.15.0` because no 0.16.0-only API
+is used; the dev pin moved from `^0.15.0` to `^0.16.0` so typecheck and tests run
+against the current SDK.
+
+| Check | Result |
+| --- | --- |
+| Release notes | [Paseo v0.16.0](https://github.com/getpaseo/paseo/releases/tag/v0.16.0) reviewed for plugin-facing changes |
+| SDK | `@getpaseo/plugin` `0.16.0` installed for the pass (the range `^0.16.0` resolves to `0.16.1`, also typechecked) |
+| `npm run typecheck` | exit 0 (three-project `tsc -b`) against SDK 0.16.0 |
+| `npm test` | **15 suites / 123 tests pass**, `pretest` rebuilt `dist/mcp-server.js` |
+| Live host | Paseo **0.16.1** on this machine, the installed 0.8.10 `running`: `[paseo] Plugin ready`, settings mirror written, agent skill verified over 8 roots, `session_open … (resume/interactive): skipped: the provider's config file already carries the server`, and no host error |
+| Host errors | no `agent.open.before hooks can only change env, tools, and mcpServers`, no collision or refusal in the plugin log |
+
+### 0.16.0 plugin changes and their impact here
+
+| 0.16.0 change | Impact |
+| --- | --- |
+| **Breaking:** `agent.turn.after.timeline` removed (#9573) | none — the plugin registers only `agent.create.before` and `agent.open.before` |
+| Hook payloads gain `metadata` and `background`; the `agent.open.before` result may change only `env`, `tools` and `mcpServers` | compliant — the hook returns either `request` unchanged or `{ ...request, tools, mcpServers }`; it never returns a changed `metadata`, which is the shape that failed `bunny-search` 0.7.5/`command-center` 0.13.2 on this host |
+| Plugin RPCs with transform schemas fixed (#8550) | works in the plugin's favour — every RPC input uses `z.string().trim()`, a transform |
+| OpenCode v2 session-scoped plugin tool discovery fixed (#9426) | works in the plugin's favour where the attached-tool fallback is used; the OpenCode/Kilo config-file registration remains the primary path |
+| Plugin subscriptions, composer controls, sidebar views, badges, binary RPC payloads | not used; additive opportunities only (see §11, 0.8.11 recommendations) |
+| Settings → Plugins opens a plugin's settings from a cog with a tab per screen | presentational; `addSettingsScreen` still registers one screen, no API change |
+
+**The OpenCode shared-service guard is still required.** Paseo 0.16.x still
+refuses an OpenCode agent whose config carries custom MCP servers when the local
+OpenCode service is shared, so `agentConfigCoversProvider` and the config-file
+registration stay exactly as they are.
+
+### Not verified in this pass
+
+- The MCP-injection branch of `agent.open.before` and of `agent.create.before` on
+a live agent: the only live session open on this host took the config-covered
+path (OpenCode). The decision matrix stays covered by `tests/session-open.test.ts`.
+- Cline and Kilo live registration, and the Obsidian Local REST API enrichment
+  (last verified live on 0.15.4, 2026-11-14).
+
 ## Verified (2026-11-14, 0.8.8)
 
 | Component | Version | Notes |

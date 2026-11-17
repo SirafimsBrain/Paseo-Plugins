@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.8.10)
+## What it does (0.8.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -102,7 +102,8 @@ the normal lexical + graph + semantic path and is reported in the panel and `obs
 
 ## Requirements
 
-- Paseo `>= 0.15.0`.
+- Paseo `>= 0.15.0`; verified against the 0.16.0 release (0.16.1 host) — see
+  [__compatibility.md](./__compatibility.md).
 - Node.js `>= 22.5` on the daemon host (the index uses the built-in `node:sqlite` with FTS5; verified on Node 24).
 - Semantic search downloads a model once (~118 MB for the default q8 e5-small) into
   `$PASEO_HOME/plugins/obsidian-bridge/models`, then runs offline. ~0.5 GB RAM while the model is loaded; up to 2 GB is

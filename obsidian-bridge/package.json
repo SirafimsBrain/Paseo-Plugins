@@ -1,7 +1,7 @@
 {
   "name": "obsidian-bridge",
   "private": true,
-  "version": "0.8.10",
+  "version": "0.8.11",
   "scripts": {
     "bundle": "node scripts/bundle-mcp-server.mjs",
     "pretest": "node scripts/bundle-mcp-server.mjs",
@@ -13,7 +13,7 @@
     "@huggingface/transformers": "^3.8.1"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "^0.15.0",
+    "@getpaseo/plugin": "^0.16.0",
     "@types/node": "^24.0.0",
     "@types/react": "~19.2.0",
     "esbuild": "^0.25.12",

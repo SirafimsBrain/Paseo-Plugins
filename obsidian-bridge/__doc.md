@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.8.10**.
+Version covered: **0.8.11**.
 
 ## 1. Purpose and scope
 
@@ -340,6 +340,7 @@ and the panel says so.
 | 0.8.8 (shipped) | Registrations are checked for an existing target and refreshed on the timer, so an update cannot leave a dead path. |
 | 0.8.9 (shipped) | `migrate` hook on the settings definition, so a document from an older install opens instead of failing with "Settings version 2 requires a migration". |
 | 0.8.10 (shipped) | The `initialize` instructions carry the full tool index, so a truncated tool catalogue cannot make an agent guess names. |
+| 0.8.11 (shipped) | Paseo 0.16.0 compatibility pass: SDK pin `^0.16.0`, typecheck and 123 tests on SDK 0.16.0, live check on a 0.16.1 host, `agent.open.before` return contract confirmed; no code change. |
 | 0.5.0 | Fallback hardening with Obsidian closed (conflict recovery, degraded status), per `__research.md` §7. |
 | after 1.0 | Stronger local models (fp32 / larger multilingual encoders) and external RAG providers behind explicit settings; only when the Paseo/Node base genuinely cannot meet a requirement (`__research.md` §12.4). |
 
@@ -398,7 +399,44 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11)
+
+### 0.8.11 — Paseo 0.16.0 compatibility pass
+
+Documentation and pin only; no runtime code changed, so the patch version moved
+0.8.10 → 0.8.11 (the SDK dev pin moved `^0.15.0` → `^0.16.0`, the floor stayed
+`>=0.15.0`). Evidence and the change-by-change table live in
+[`__compatibility.md`](./__compatibility.md); the short version:
+
+- 0.16.0's one breaking change, the removal of `agent.turn.after.timeline`, is
+  unused: the plugin registers `agent.create.before` and `agent.open.before` only.
+- The 0.16.0 daemon allows `agent.open.before` to change only `env`, `tools` and
+  `mcpServers`, and fails the open on anything else (that is what broke
+  `bunny-search` 0.7.5 and `command-center` 0.13.2 in this repository). The hook
+  here already returns `request` unchanged or `{ ...request, tools, mcpServers }`
+  and never returns a changed `metadata`, so it complies without a change.
+- 0.16.0's fix for plugin RPCs whose input/output schema uses a transform works in
+  the plugin's favour: every RPC input uses `z.string().trim()`.
+- The OpenCode shared-service restriction is unchanged, so the config-file
+  registration path stays the primary one for OpenCode and Kilo.
+
+The pass's open recommendations (not implemented):
+
+1. **A stable MCP bundle path.** `agent.create.before` saves an absolute path into
+   the agent's configuration, and a plugin update replaces the checkout, so an
+   agent created before the update keeps launching a missing file while the open
+   hook stands down because the saved name exists. `bunny-search` 0.7.6 solved
+   the same failure with a copy under `$PASEO_HOME/plugins/<id>/`; the resolution
+   here already lists that path last, nothing writes it.
+2. **Subscriptions.** `addSubscription` (0.16.0) would replace the panels' polling
+   with pushed status/scan-progress events, the same pattern `bunny-search` 0.7.5
+   uses.
+3. **A composer control.** The attachment source attaches a whole note; a composer
+   action that inserts `[[note]]` or a citation at the cursor is the smaller,
+   more precise gesture.
+4. **A per-agent injection marker.** `agent.create.before` may return `metadata`;
+   the open hook would have to write it through `setMetadata` instead of the
+   result, which turns "which agents actually got the tools" into daemon data.
 
 ### 0.8.10
 
