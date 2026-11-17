@@ -1,6 +1,27 @@
 # Compatibility — memory-flash-client
 
-Current: plugin **0.5.3**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
+Current: plugin **0.6.3**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.16.1`.
+
+## Plugin 0.6.3 — Paseo 0.16.0/0.16.1 verification (2026-11-17)
+
+Verified against **0.16.0** (2026-11-16) and **0.16.1** (2026-11-17). Verdict:
+**compatible, no code change**. `requirements.paseo` stays `>=0.14.0`; the SDK pin
+moves to `^0.16.1`.
+
+| Check | Result |
+| --- | --- |
+| 0.16.0 breaking removal — `agent.turn.after.timeline` | not used |
+| `agent.open.before` mutation restriction | not used (`agent.create` writes saved config, `agent.session_open` contributes launch-only servers) |
+| `PluginHookAgent` new required fields | not constructed by this plugin; no fixture needed the fields |
+| Deprecated client API | none used |
+| `typecheck` / `vitest` | exit 0 / **7 suites, 84 tests** pass |
+| Live host 0.16.1 | plugin remains installed and `disabled` on this machine, so the update path was not exercised live; the host compiles its client entry at install time only |
+
+Improvement candidates are in [__doc.md](./__doc.md) §19.3: composer items that
+insert a remote-memory citation, agent metadata recording which host an agent was
+connected to, and per-workspace server naming driven by `PASEO_WORKSPACE_ID`.
+
+## Earlier history
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 

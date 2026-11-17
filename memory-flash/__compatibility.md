@@ -1,6 +1,30 @@
 # Compatibility — memory-flash
 
-Current: plugin **0.11.5**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.14.0`.
+Current: plugin **0.12.5**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.16.1`.
+
+## Plugin 0.12.5 — Paseo 0.16.0/0.16.1 verification (2026-11-17)
+
+Verified against the stable **0.16.0** (2026-11-16) and **0.16.1** (2026-11-17)
+releases. Verdict: **compatible, source unchanged**. `requirements.paseo` stays
+`>=0.14.0` (the API this plugin relies on is unchanged), the SDK pin moves from
+`^0.14.0` to `^0.16.1`.
+
+| Check | Result |
+| --- | --- |
+| 0.16.0 breaking removal — `agent.turn.after.timeline` | not used (zero references); nothing to migrate |
+| `agent.open.before` mutation restriction (env/tools/mcpServers only) | not used; the plugin writes MCP servers in `agent.create` and contributes tools/servers in `agent.session_open` |
+| `PluginHookAgent` gained required `background` and `metadata` | one compile error, in the test fixture `tests/agent-hooks.test.ts`; fixture updated, plugin source untouched |
+| Deprecated client API (`addSurface`, `addSidebarItem`, `openSurface`, panel `context`, `SettingsGroup`, `react-native` entry) | none used |
+| `typecheck` | exit 0 (after the fixture fix) |
+| `vitest` | **18 suites / 223 tests** pass; MCP bundle rebuilt by the real scripts |
+| Live host 0.16.1 | plugin updated, `running`; `MCP entry`/`session_open` log lines unchanged |
+
+No 0.16.0 feature is adopted yet. The candidates, with cost and value, are in
+[__doc.md](./__doc.md) §20.3: subscriptions for a self-refreshing screen,
+composer items, background agents for delegated maintenance, agent metadata as a
+provenance marker, and `PASEO_WORKSPACE_ID` as the project default.
+
+## Earlier history
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 

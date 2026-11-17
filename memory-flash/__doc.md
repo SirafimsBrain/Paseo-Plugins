@@ -1160,3 +1160,98 @@ annotated tag `memory-flash@0.11.4`.
 `agents.providers.opencode.env` from `$PASEO_HOME/config.json` and overlays it on
 `process.env` exactly as `V2Runtime` does, so a URL or `XDG_STATE_HOME` set in
 the Paseo UI is honoured (patch bump, tag `memory-flash@0.11.5`).
+
+## 20. Paseo 0.16.0 / 0.16.1 — compatibility pass (2026-11-17, 0.12.5)
+
+Verified against the stable **0.16.0** (2026-11-16) and **0.16.1** (2026-11-17)
+releases. Source is unchanged; only the SDK pin moved (`^0.14.0` → `^0.16.1`) and
+one test fixture had to follow a widened type.
+
+### 20.1 What the two releases change for plugins
+
+- **Breaking:** `agent.turn.after.timeline` is removed (it always returned an
+  empty list). The replacement is
+  `timeline.refetch({ direction: "tail", limit: 1, wholeTurns: true })` plus
+  filtering by `event.turnId`. This plugin has **zero** references to the field —
+  it reads agent records and the store, never the turn timeline — so nothing was
+  migrated.
+- **`agent.open.before` is stricter:** a hook may change only `env`, `tools` and
+  `mcpServers`; metadata and the new `background` flag travel in dedicated return
+  fields. The plugin does not use that hook: it writes *saved* MCP config in
+  `agent.create` and contributes launch-only servers plus the recall tool in
+  `agent.session_open`.
+- **`PluginHookAgent` grew required `background: boolean` and
+  `metadata: Record<string, JsonValue>`.** This was the single compile break in
+  the repository: `tests/agent-hooks.test.ts` builds a fake `AgentToolContext`
+  agent, and the literal had to gain both fields. No production type or runtime
+  path was affected.
+- **New surface (unused so far):** plugin subscriptions (live server → panel
+  events, binary frames included), composer controls (prompt/attachments/model/
+  metadata), background agents with `backgroundWork` in snapshots and the
+  `background` hook flag, agent and workspace metadata, concurrent plugin
+  startup, and `PASEO_WORKSPACE_ID` in every agent's environment.
+- **0.16.1** is a fixes-only release (Claude bypass approvals, touch sizing, a
+  Claude token-refresh race, OpenCode question dismissal, plugin installs through
+  npm registry mirrors). Nothing in it touches this plugin; it is verified because
+  it is what the host runs.
+
+### 20.2 Verification
+
+| Check | Result |
+| --- | --- |
+| SDK installed at `^0.16.1` in both plugin directories | `npm install` exit 0 |
+| `npm run typecheck` | originally `TS2739` in one test fixture; exit 0 after adding the two fields. Plugin sources compiled untouched |
+| `npm test` (rebuilds the MCP bundle first) | **18 suites / 223 tests** pass |
+| Deprecated SDK surface (`addSurface`, `addSidebarItem`, `openSurface`, panel `context`, `SettingsGroup`, `react-native` entry, `useRevealedText`) | none used |
+| `legacy` / removed symbols from the 0.16.0 notes | none used |
+| Live host 0.16.1 | updated, `running`; `MCP entry: …`, `session_open …` and injection lines unchanged |
+
+The declared floor stays `requirements.paseo >=0.14.0`: everything the plugin
+calls at runtime is 0.14.0 API, and the SDK is a dev-only dependency — its types
+are erased from the shipped client/server entries.
+
+### 20.3 Recommended next steps (not implemented)
+
+Ordered by value per unit of work. Each one is a separate change with its own
+version bump; none is required for 0.16.0 compatibility.
+
+1. **Subscriptions for a self-refreshing screen (highest value).**
+   Today `client/memory-surface.tsx` loads once on mount and after an explicit
+   action: a memory written by an agent through MCP, or by another window, leaves
+   the visible list stale until the user reopens the screen. A
+   `memory-flash.changes` subscription (0.16.0) with a monotonic revision from
+   the store — bumped in `create`/`update`/`delete`/`restore` — would let the
+   surface refetch on an event, with no polling and no new dependency. Server:
+   one `handle()` with a push on store change and cleanup on `signal`; client: a
+   hook that bumps `reloadKey`. Cost: small; needs a test for event ordering and
+   for the abort path.
+2. **Composer item: "Save as memory" and "Insert memory".**
+   `addComposerItem` (0.16.0) puts a control inside the composer with access to
+   `composer.prompt` and `insertText`. Two actions fit naturally: save the
+   current draft as a `note`/`procedure` memory (with the workspace as project),
+   and search memory and insert `#id title` as a citation. This is the shortest
+   path from "the agent learned something" to "it is remembered" without leaving
+   the composer. Cost: medium (one component plus two RPC calls that already
+   exist).
+3. **Background agents for delegated maintenance.**
+   `delegateTask` sends a prompt to an existing visible agent, so a maintenance
+   run occupies a tab and is easy to confuse with real work. 0.16.0 can create an
+   agent with `background: true`, which keeps it out of tabs, lists and
+   notifications; `backgroundWork.count` then gives the screen a truthful "N
+   maintenance agents running" line. Cost: medium; needs a fallback for hosts
+   without background agents (`capabilities.backgroundAgents`).
+4. **Agent metadata as a provenance marker.**
+   0.16.0 stores plugin metadata on agents (`agent.open.before` return value or
+   create request). Writing `memory-flash.lastHandoffId` / `memoryCount` at
+   session open would let the repair action and a future sidebar badge show which
+   agent last handed off, without another table. Cost: small, but it must respect
+   the 0.16.0 rule that hooks may not return the whole request.
+5. **`PASEO_WORKSPACE_ID` as the project default.**
+   The MCP server currently derives a project from the agent's cwd path. 0.16.0
+   passes the workspace id in the environment, which is stable across worktrees
+   and renames; using it as the default (still overridable per call) removes a
+   class of duplicate-project memories. Cost: small; needs a migration note
+   because existing rows keep the path-derived project.
+
+Not recommended: binary RPC/event payloads (nothing here is binary) and
+concurrent plugin startup (host-side behaviour that needs no plugin change).

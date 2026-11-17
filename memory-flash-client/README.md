@@ -89,6 +89,6 @@ Requires Paseo ≥ 0.14.0 (the `agent.session_open` hook and `agents.ref().reloa
 
 ## Compatibility
 
-Paseo **0.14.0 (2026-10-29)** verified, `requirements.paseo >=0.14.0`, SDK `@getpaseo/plugin ^0.14.0` — compatible; 0.14.0 surface in use (0.3.2).
+Paseo **0.16.1 (2026-11-17)** verified, `requirements.paseo >=0.14.0`, SDK `@getpaseo/plugin ^0.16.1` — compatible with no code change: the 0.16.0 breaking removal (`agent.turn.after.timeline`) and the `agent.open.before` mutation restrictions do not apply here. 0.14.0 surface stays in use (0.3.2); 0.16.0 features are evaluated in [__doc.md](./__doc.md) §19.3.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

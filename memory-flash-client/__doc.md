@@ -578,3 +578,53 @@ annotated tag `memory-flash-client@0.5.2`.
 `agents.providers.opencode.env` from `$PASEO_HOME/config.json` and overlays it on
 `process.env` exactly as `V2Runtime` does (patch bump, tag
 `memory-flash-client@0.5.3`).
+
+## 19. Paseo 0.16.0 / 0.16.1 — compatibility pass (2026-11-17, 0.6.3)
+
+Verified against stable **0.16.0** (2026-11-16) and **0.16.1** (2026-11-17).
+**No code change was needed** — neither in the server entry, the client entry nor
+the tests. Only the SDK pin moved (`^0.14.0` → `^0.16.1`).
+
+### 19.1 What was checked
+
+- The single 0.16.0 breaking removal, `agent.turn.after.timeline`: not used.
+- The stricter `agent.open.before` hook (env/tools/mcpServers only): not used.
+  This plugin writes saved MCP config in `agent.create` and contributes
+  launch-only servers in `agent.session_open`.
+- `PluginHookAgent` gained `background` and `metadata`: this plugin never builds
+  an agent literal, so nothing broke.
+- Deprecated client API (`addSurface`, `addSidebarItem`, `openSurface`, panel
+  `context`, `SettingsGroup`, `react-native` entry): none used.
+- `typecheck` exit 0; `vitest` **7 suites / 84 tests** pass.
+- Live coverage is limited by the machine: the plugin is installed but
+  `disabled`, so `paseo plugin update` and a live session-open were not
+  exercised for this release. Its server imports are all host-supplied, so the
+  risk of a stale bundle is lower than for memory-flash, but this is not the same
+  as a live run.
+
+### 19.2 What 0.16.1 changes
+
+Fixes only: Claude bypass approvals, touch-target sizing, a Claude token-refresh
+race, an OpenCode question that could not be dismissed, plugin installs through
+an npm registry mirror, and related UI/Git repairs. Nothing touches MCP
+injection, agent hooks or plugin settings, which is the whole surface this plugin
+uses.
+
+### 19.3 Recommended next steps (not implemented)
+
+1. **Composer items for remote memory (highest value).**
+   0.16.0's `addComposerItem` gives a control the prompt and `insertText`. The
+   natural pair for a remote base is "search this host" (insert `#id title` as a
+   citation) and "save this draft to the remote host". Today the remote base is
+   only reachable by the agent through MCP; the human has no path from the
+   composer. Cost: medium — the probe/RPC plumbing already exists.
+2. **Agent metadata recording the connected host.**
+   Write `memory-flash-client.host` (connection id, not the key) at session open.
+   The coexistence check and the repair action could then say *which* base an
+   agent was wired to, and a sidebar badge could show it. Requires the 0.16.0
+   metadata return field, never a full request echo.
+3. **Per-workspace server names from `PASEO_WORKSPACE_ID`.**
+   With several workspaces the current names (`memory-flash`, `memory-flash-<id>`)
+   are identical across workspaces, which makes logs and agent records ambiguous.
+   Including a short workspace key keeps them unique and stable. Cost: small, but
+   it changes injected names and needs a migration note.

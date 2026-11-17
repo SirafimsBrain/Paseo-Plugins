@@ -704,6 +704,9 @@ function fakeContextWithAgent(): AgentToolContext {
       provider: "opencode",
       cwd: "/tmp",
       title: null,
+      // Paseo 0.16.0 added these to PluginHookAgent.
+      background: false,
+      metadata: {},
     },
     paseo: {} as never,
     signal: new AbortController().signal,
