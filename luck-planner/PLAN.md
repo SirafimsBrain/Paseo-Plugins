@@ -1,8 +1,8 @@
 # luck-planner — план разработки (атомарные этапы)
 
-> **⚠ Статус: ЗАМОРОЗКА КОДА (code freeze).** Разработка `luck-planner` **остановлена** по причине **высокого уровня сложности сопровождения кода и развития функциональности**. Новые функции, исправления и изменения не планируются. Функциональность плагина **мигрирует в [obsidian-bridge](../obsidian-bridge/README.md)**; всю новую работу следует вести там. Ниже приведён исторический план этапов в том виде, в каком он был на момент заморозки.
+> **⚠ Development status: FROZEN — code freeze.** Development of `luck-planner` is **stopped** because of the **high complexity of maintaining the code and developing further functionality**. No new features, fixes or changes are planned. Its functionality is being **migrated to [obsidian-bridge](../obsidian-bridge/README.md)**; new work should go there. The stage plan below is kept as a historical record of the state at the freeze.
 
-> **Исторический статус (более не актуален): версия в разработке (`0.34.1`).** Этапы **E4** (settings screen +
+> **Historical status (no longer current): version in development (`0.34.1`).** Stages **E4** (settings screen +
 > retention), **F1** (HTTP-сервер дашборда), **F2** («Открыть дашборд»), **G1**
 > (каркас веб-приложения дашборда), **G2** (данные + раскладка), **G3**
 > (кастомные ноды и рёбра), **G4** (интерактив), **G5** (темпы роста на
