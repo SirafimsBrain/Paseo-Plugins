@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useSubscription } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
+  memoryChanges,
   deleteMemory,
   delegateTask,
   getMemory,
@@ -65,6 +66,11 @@ export function MemorySurface({ theme }: PluginScreenProps) {
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((key) => key + 1), []);
 
+  // Live updates (Paseo 0.16.0): a memory saved by an agent's MCP server — a
+  // different process — reaches this screen as soon as the change log moves.
+  // The event carries only a sequence number; the existing effects refetch.
+  const changes = useSubscription(memoryChanges, {}, () => reload());
+
   // --- memories tab state ---
   const [query, setQuery] = useState("");
   const [activeKind, setActiveKind] = useState<MemoryKind | null>(null);
@@ -92,6 +98,9 @@ export function MemorySurface({ theme }: PluginScreenProps) {
   const [delegateAgent, setDelegateAgent] = useState("");
   const [delegateInstruction, setDelegateInstruction] = useState("");
   const [delegateMessage, setDelegateMessage] = useState<string | null>(null);
+  // 0.13.5: run maintenance in a hidden agent by default, so a cleanup does not
+  // occupy a tab or wait behind the user's own turn.
+  const [delegateBackground, setDelegateBackground] = useState(true);
   const [agentOptions, setAgentOptions] = useState<Array<{ id: string; label: string }>>([]);
 
   // Live agent list from Paseo (requirement 9: deep integration) — fills the
@@ -266,8 +275,15 @@ export function MemorySurface({ theme }: PluginScreenProps) {
       agentId: delegateAgent.trim(),
       instruction: delegateInstruction.trim(),
       memoryIds: viewingId !== null ? [viewingId] : [],
+      background: delegateBackground,
     }).catch((cause: unknown) => null);
-    setDelegateMessage(result?.ok ? "Task sent to the agent." : (result?.error ?? "Delegation failed."));
+    setDelegateMessage(
+      result?.ok
+        ? result.background
+          ? "Task sent to a background agent."
+          : "Task sent to the agent."
+        : (result?.error ?? "Delegation failed."),
+    );
     if (result?.ok) setDelegateInstruction("");
   };
 
@@ -418,7 +434,7 @@ export function MemorySurface({ theme }: PluginScreenProps) {
           <StatsView stats={stats} fg={fg} fgMuted={fgMuted} font={font} uiFontStyle={uiFontStyle} />
           <Text style={[styles.sectionTitle, { color: fg, fontSize: font(15), marginTop: 16 }, uiFontStyle]}>Delegate a maintenance task</Text>
           <Text style={{ color: fgMuted, fontSize: font(12), ...uiFontStyle }}>
-            Give a running agent a task to clean up or reorganize memories through its MCP tools (e.g. "merge duplicate auth notes, delete outdated ones").
+            Give an agent a task to clean up or reorganize memories through its MCP tools (e.g. "merge duplicate auth notes, delete outdated ones"). The task runs in a hidden background agent when the host supports it.
           </Text>
           {agentOptions.length > 0 ? (
             <View style={styles.chipRow}>
@@ -451,6 +467,17 @@ export function MemorySurface({ theme }: PluginScreenProps) {
             multiline
             style={[styles.input, styles.multiline, { borderColor: border, color: fg, fontSize: font(13) }, uiFontStyle]}
           />
+          <View style={styles.chipRow}>
+            <Chip
+              label={delegateBackground ? "Background agent: on" : "Background agent: off"}
+              active={delegateBackground}
+              onPress={() => setDelegateBackground((value) => !value)}
+              color={accent}
+              fg={fg}
+              font={font}
+              uiFontStyle={uiFontStyle}
+            />
+          </View>
           <Pressable onPress={() => void sendDelegation()} style={[styles.primaryButton, { backgroundColor: accent }]}>
             <Text style={{ color: theme.colors.accentForeground, fontSize: font(13), ...uiFontStyle }}>Send task to agent</Text>
           </Pressable>

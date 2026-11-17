@@ -1,6 +1,8 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PaseoApi } from "@getpaseo/client";
 import { memoryFlashSettings, type MemoryFlashSettings } from "./shared/settings";
 import {
+  memoryChanges,
   clearHistory,
   delegateTask,
   deleteMemory,
@@ -83,6 +85,8 @@ import {
   agentConfigCoversProvider,
 } from "./server/opencode-mcp";
 import { withLiveSpawn } from "./server/mcp-probe";
+import { startChangeFeed } from "./server/changes";
+import { saveWorkspaceNameMap } from "./server/workspace-map";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideSessionOpen } from "./server/session-open";
 import { sharedOpenCodeMcpBlockFor } from "./server/opencode-service";
@@ -155,6 +159,50 @@ export default function contribute(server: PluginServerContext) {
   });
 
   // -------------------------------------------------------------------------
+  // Live change feed (Paseo 0.16.0 subscriptions, 0.13.5)
+  //
+  // The screen refetches through its own RPCs when this fires; the event only
+  // says "something changed". Writes made by an agent's MCP server happen in
+  // another process, which is why the signal comes from the shared SQLite
+  // change log rather than from an in-memory emitter.
+  // -------------------------------------------------------------------------
+
+  server.handle(memoryChanges, (_input, context) => {
+    const stop = startChangeFeed(store, (event) => context.push(event), context.signal);
+    context.signal.addEventListener("abort", stop, { once: true });
+    console.log(`[memory-flash] changes subscription opened`);
+  });
+
+  // -------------------------------------------------------------------------
+  // Workspace names for the default project (0.13.5)
+  //
+  // The MCP server sees `PASEO_WORKSPACE_ID` but cannot ask Paseo for a name,
+  // so the plugin writes the id → name map it can build from the API. Refreshed
+  // at most every few minutes from session opens, which is when new workspaces
+  // first matter.
+  // -------------------------------------------------------------------------
+
+  let lastWorkspaceRefresh = 0;
+  const WORKSPACE_REFRESH_MS = 5 * 60 * 1000;
+
+  const refreshWorkspaceNames = async (paseo: PaseoApi): Promise<void> => {
+    if (Date.now() - lastWorkspaceRefresh < WORKSPACE_REFRESH_MS) return;
+    lastWorkspaceRefresh = Date.now();
+    try {
+      const result = await paseo.workspaces.list();
+      saveWorkspaceNameMap(
+        result.entries.map((entry) => ({
+          id: entry.id,
+          name: entry.name ?? entry.projectDisplayName ?? null,
+          directory: entry.workspaceDirectory ?? null,
+        })),
+      );
+    } catch {
+      // No workspace list on this host: the MCP server falls back to the cwd.
+    }
+  };
+
+  // -------------------------------------------------------------------------
   // MCP injection (requirement: all agents share one memory through MCP)
   // -------------------------------------------------------------------------
 
@@ -171,11 +219,30 @@ export default function contribute(server: PluginServerContext) {
     );
   }
 
+  /**
+   * Records how memory was wired into an agent (Paseo 0.16.0 agent metadata).
+   *
+   * One key, replaced wholesale on every open: it is provenance for the repair
+   * action and a future sidebar badge, never a copy of the agent's config.
+   */
+  const markAgent = (
+    request: { metadata?: Record<string, unknown> },
+    patch: Record<string, string | boolean>,
+  ): void => {
+    request.metadata = {
+      ...(request.metadata ?? {}),
+      "memory-flash": { ...patch, at: new Date().toISOString() },
+    };
+  };
+
   const removeCreateHook = server.before("agent.create", async ({ request }) => {
     // Async hooks are awaited by the host before the request proceeds, so the
     // mutation below is guaranteed to be applied to agent creation.
     const state = await settings.read().catch(() => null);
-    if (state?.status !== "ready" || !state.values.injectIntoAgents) return request;
+    if (state?.status !== "ready" || !state.values.injectIntoAgents) {
+      markAgent(request, { injected: false, reason: "injection off" });
+      return request;
+    }
     // 0.8.1: for OpenCode/Kilo the config-file registration is strictly
     // better than the session-level entry injected here — after an idle
     // location eviction the session-level entry dies and shadows the live
@@ -188,6 +255,11 @@ export default function contribute(server: PluginServerContext) {
         `[memory-flash] agent.create injection skipped for ${request.config.provider}: ` +
           `config-file registration active at ${cover.path}`,
       );
+      markAgent(request, {
+        injected: false,
+        reason: "config-file registration",
+        server: "memory-flash",
+      });
       return request;
     }
     // 0.11.4: a *shared* OpenCode v2 service (Paseo 0.15.0, #7435) refuses every
@@ -200,6 +272,7 @@ export default function contribute(server: PluginServerContext) {
       console.log(
         `[memory-flash] agent.create injection skipped for ${request.config.provider}: ${openCodeBlock}`,
       );
+      markAgent(request, { injected: false, reason: openCodeBlock, server: "memory-flash" });
       return request;
     }
     const { command, args } = mcpServerCommand();
@@ -226,6 +299,7 @@ export default function contribute(server: PluginServerContext) {
         `(${isExecutableFile(entry) ? "entry exists" : "entry MISSING"}; ` +
         `stable path ${publishedMcpEntry()})`,
     );
+    markAgent(request, { injected: true, server: "memory-flash" });
     return request;
   });
 
@@ -292,6 +366,9 @@ export default function contribute(server: PluginServerContext) {
         supportsMcpServers = snapshot?.agent.capabilities.supportsMcpServers ?? null;
       }
 
+      // 0.13.5: keep the workspace id → name map current for the default project.
+      void refreshWorkspaceNames(paseo);
+
       const decision = decideSessionOpen({
         reason: request.reason,
         purpose: request.purpose,
@@ -308,6 +385,20 @@ export default function contribute(server: PluginServerContext) {
       );
 
       if (!decision.injectMcp && !decision.attachTool) return request;
+
+      // Provenance on already-created agents: the create hook only runs once,
+      // but a resumed agent can gain the tool or lose the server. Failures are
+      // expected on hosts without `entityMetadata` and are not errors here.
+      void paseo.agents
+        .ref(request.agentId)
+        .setMetadata({
+          "memory-flash": {
+            injected: decision.injectMcp,
+            tool: decision.attachTool,
+            at: new Date().toISOString(),
+          },
+        })
+        .catch(() => {});
 
       const tools = decision.attachTool ? [...request.tools, memoryRecallTool] : request.tools;
       let mcpServers = request.mcpServers;
@@ -436,10 +527,15 @@ export default function contribute(server: PluginServerContext) {
       );
       const open = (target as unknown as { archivedAt?: string | null } | undefined)?.archivedAt == null;
       if (!target) {
-        return { ok: false, error: `Agent ${input.agentId} not found.` };
+        return { ok: false, error: `Agent ${input.agentId} not found.`, agentId: null, background: false };
       }
       if (!open) {
-        return { ok: false, error: `Agent ${input.agentId} is archived or closed.` };
+        return {
+          ok: false,
+          error: `Agent ${input.agentId} is archived or closed.`,
+          agentId: null,
+          background: false,
+        };
       }
       const references =
         input.memoryIds.length > 0
@@ -452,10 +548,45 @@ export default function contribute(server: PluginServerContext) {
         "memories, list them first (memory_search / memory_list_by_tag) and keep " +
         "the changes minimal. Report what you changed.";
       const agentId = (target as unknown as { id?: string }).id ?? input.agentId;
+
+      // Hidden maintenance child (Paseo 0.16.0, 0.13.5): the task no longer
+      // occupies a visible tab. It needs the target's provider and directory;
+      // if the host refuses the creation, the task falls back to the chosen
+      // agent instead of being lost.
+      if (input.background) {
+        const snapshot = await paseo.agents.ref(agentId).refresh().catch(() => null);
+        const provider = snapshot?.agent.provider;
+        const cwd = snapshot?.agent.cwd;
+        if (provider && cwd) {
+          try {
+            const created = await paseo.agents.create({
+              config: { provider },
+              cwd,
+              background: true,
+              title: "Memory maintenance",
+              prompt,
+            });
+            console.log(
+              `[memory-flash] delegated maintenance to background agent ${created.id} (from ${agentId})`,
+            );
+            return { ok: true, error: null, agentId: created.id, background: true };
+          } catch (cause) {
+            console.log(
+              `[memory-flash] background delegation refused (${cause instanceof Error ? cause.message : String(cause)}); falling back to ${agentId}`,
+            );
+          }
+        }
+      }
+
       await paseo.agents.ref(agentId).send(prompt);
-      return { ok: true, error: null };
+      return { ok: true, error: null, agentId, background: false };
     } catch (cause) {
-      return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+      return {
+        ok: false,
+        error: cause instanceof Error ? cause.message : String(cause),
+        agentId: null,
+        background: false,
+      };
     }
   });
 

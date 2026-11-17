@@ -28,6 +28,13 @@ Paseo orchestrates agents and passes prompts, but it does not provide durable sh
   - *Compression* — one shared choice for both paths: **Fast** `zstd -3` (~23× smaller, ms), **Balanced** `zstd -9` (~25×, recommended), **Maximum** `zstd -19` (~28×, seconds). Compression is streamed, so memory stays flat regardless of database size.
 - **SQLite everywhere** — single-file database at `$PASEO_HOME/plugins/memory-flash/memory.db` (respects `PASEO_HOME`), WAL mode, FTS5 with porter/unicode61 tokenization, triggers keeping the index in sync, per-memory revision history, atomic settings/hosts files. Safe for parallel writers: a 5 s busy timeout plus automatic write retry, so concurrent agent processes no longer lose writes to `database is locked`.
 
+## Live updates and composer controls (0.13.6)
+
+- **The screen updates itself.** Writes made by an agent's MCP server happen in another process; a `memory-flash.changes` subscription (Paseo 0.16.0) carries a sequence number from the shared SQLite change log, so the list refreshes instead of waiting for a manual reload.
+- **Composer controls.** Two small buttons in every composer: `Remember` saves the current draft as a `note` memory, `Cite` searches memory with the draft and inserts `#id title`. Neither changes the prompt on its own.
+- **Background maintenance.** A delegated cleanup runs in a hidden background agent (Paseo 0.16.0) by default, so it does not take a tab or wait behind your own turn; toggle it off in the delegate panel to send the task to the chosen agent itself.
+- **Provenance and project defaults.** Each agent records one `memory-flash` metadata key (`injected`, `tool`, `reason`, `at`) so the repair action can show how memory reached it, and `memory_save` without a `project` is filed under `PASEO_WORKSPACE_ID`'s workspace name (stable across worktrees), falling back to the directory name.
+
 ## Remote access (HTTP + API key)
 
 Memory Flash can serve the very same MCP tools over HTTP so that agents on other machines use the same memory database. The trust model is deliberately simple for a private network or a VPN: **the key is generated here and carried to the client by the user**, with no automatic enrollment and no OAuth.
@@ -104,6 +111,6 @@ Skill folder (`SKILL.md`) is copied into each agent family's skills directory.
 
 ## Compatibility
 
-Paseo **0.16.1 (2026-11-17)** verified, `requirements.paseo >=0.14.0`, SDK `@getpaseo/plugin ^0.16.1` — compatible, and no plugin API change was needed: the only 0.16.0 breaking removal (`agent.turn.after.timeline`) is not used, and the one compile break was a test fixture that had to gain the new `background`/`metadata` fields. 0.14.0 surface stays in use (0.9.4); no 0.16.0 feature is used yet — subscriptions, composer items, background agents and agent metadata are evaluated in [__doc.md](./__doc.md) §20.3. 0.12.6 also fixes a defect the live update exposed: the stable MCP entry is now a copy instead of a symlink into the revision directory the updater deletes, so an update cannot leave agents with a dead entry.
+Paseo **0.16.0+** required, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin ^0.16.1`; verified on the stable **0.16.1** (2026-11-17). 0.13.6 *uses* the 0.16.0 plugin surface: a change subscription keeps the screen current when an agent writes through MCP, composer controls remember a draft or cite a memory, delegated maintenance runs in a hidden background agent, agent metadata records how memory was wired in, and an unlabelled memory is filed under the agent's workspace instead of its cwd. 0.12.6 also fixes a defect the live update exposed: the stable MCP entry is a copy now, not a symlink into the revision directory the updater deletes.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

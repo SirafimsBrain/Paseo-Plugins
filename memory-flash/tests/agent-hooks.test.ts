@@ -230,7 +230,13 @@ function fakeContext(supportsMcpServers: boolean | null = true) {
               ? null
               : { agent: { id: agentId, capabilities: { supportsMcpServers } } },
           reload: async () => (supportsMcpServers === null ? null : { agent: { id: agentId } }),
+          // 0.13.5 provenance marker; a host without `entityMetadata` rejects.
+          setMetadata: async () => {},
         }),
+      },
+      // 0.13.5 workspace name map for the default project.
+      workspaces: {
+        list: async () => ({ entries: [] }),
       },
     },
     signal: new AbortController().signal,

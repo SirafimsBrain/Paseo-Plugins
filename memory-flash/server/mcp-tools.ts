@@ -72,7 +72,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         title: str("Short unique title (max 200 chars)."),
         content: str("Full memory body. Include file paths, commands and reasoning."),
         tags: strArray("Lowercase topic tags, e.g. ['auth', 'login-flow', project]."),
-        project: str("Project or repository name, if known."),
+        project: str("Project or repository name; defaults to the current workspace."),
         agentId: str("Your agent id (e.g. 'opencode', 'cline'). Auto-set when omitted."),
       },
       required: ["title", "content"],
@@ -235,6 +235,11 @@ export interface McpDispatchContext {
   store: MemoryStore;
   /** Falls back into memory_save / memory_update when the client omits it. */
   defaultAgentId?: string;
+  /**
+   * Project used when a tool call names none (0.13.5): the agent's workspace
+   * name from `PASEO_WORKSPACE_ID`, else the current directory.
+   */
+  defaultProject?: string | null;
 }
 
 export function dispatchMcpTool(name: string, args: unknown, context: McpDispatchContext): ToolResult {
@@ -250,7 +255,10 @@ export function dispatchMcpTool(name: string, args: unknown, context: McpDispatc
       if (!parsed.success) return error(`Invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
       const value: McpSaveInput = parsed.data;
       const agentId = value.agentId ?? (context.defaultAgentId || null);
-      const memory = store.create({ ...value, agentId }, agentId ?? "mcp");
+      // 0.13.5: an agent that names no project is filed under its workspace
+      // (stable across worktrees) instead of creating a second project bucket.
+      const project = value.project ?? context.defaultProject ?? null;
+      const memory = store.create({ ...value, project, agentId }, agentId ?? "mcp");
       return text({ saved: true, id: memory.id, kind: memory.kind, title: memory.title });
     }
 
@@ -362,7 +370,10 @@ export function dispatchMcpTool(name: string, args: unknown, context: McpDispatc
           title,
           content,
           tags,
-          project: typeof input.project === "string" && input.project.trim() ? input.project.trim() : null,
+          project:
+            typeof input.project === "string" && input.project.trim()
+              ? input.project.trim()
+              : context.defaultProject ?? null,
           agentId,
         },
         agentId ?? "mcp",

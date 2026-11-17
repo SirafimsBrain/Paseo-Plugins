@@ -1,6 +1,7 @@
 import { MemoryStore } from "./store";
 import type { McpDispatchContext } from "./mcp-tools";
 import { parseSettingsFile } from "./settings-file";
+import { defaultProject } from "./workspace-map";
 import {
   handleJsonRpcRequest,
   SERVER_VERSION,
@@ -29,6 +30,8 @@ function main(): void {
   const context: McpDispatchContext = {
     store,
     defaultAgentId: settings.defaultAgentId || process.env.MEMORY_FLASH_AGENT_ID || undefined,
+    // 0.13.5: file unlabelled memories under the workspace, not the cwd path.
+    defaultProject: defaultProject(),
   };
 
   const serverInfo = { name: settings.mcpServerName, version: SERVER_VERSION };

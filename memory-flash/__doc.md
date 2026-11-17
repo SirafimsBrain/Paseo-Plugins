@@ -1278,3 +1278,96 @@ Evidence: `npm run typecheck` exit 0; `npm test` **18 suites / 223 tests** pass
 (`tests/mcp-launch.test.ts` now asserts a regular file, survival of the revision
 deletion, content refresh on a new revision, and repair of a legacy dangling
 symlink).
+
+## 21. Paseo 0.16.0 surface adopted (2026-11-17, 0.13.6)
+
+The 0.16.0 compatibility pass (§20) needed no code. This release goes the other
+way and *uses* the new plugin surface. Because the client bundle now imports
+`useSubscription` and calls `addComposerItem`, `requirements.paseo` moves from
+`>=0.14.0` to **`>=0.16.0`** — an older host lacks those exports and the screen
+would fail to mount. On the server side the 0.14.0 hooks (`agent.create`,
+`agent.session_open`, `agents.ref().reload()`) remain the base.
+
+### 21.1 Live screen updates — a cross-process change feed
+
+The screen used to load on mount and after an explicit action. The case that
+mattered is the one an in-memory emitter cannot see: an agent writes a memory
+through its **standalone MCP server**, a different process sharing the same
+SQLite file. So the signal lives in the database.
+
+- `memory_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT, kind, memory_id, at)`
+  gains one row per mutation (`create`/`update`/`delete`/`reset`; bulk purge
+  goes through `delete`). Rows are trimmed to the last 500 every 50 writes — the
+  table is a signal, not an audit trail (`memory_history` is that).
+- `changesSeq()` is a single indexed `MAX(seq)`. `AUTOINCREMENT` keeps it
+  monotonic even after trimming, so a subscriber comparing numbers can never see
+  it move backwards.
+- `server/changes.ts` (`startChangeFeed`) pushes the current sequence at once,
+  then polls every second, stops on `signal` abort, and stops itself if a push
+  rejects (a gone subscriber must not accumulate rejected promises).
+- The RPC contract `memory-flash.changes` carries only `{ seq }`; the client
+  refetches through its normal list/search RPCs, so a filter or a tab cannot go
+  stale, and the payload is one integer.
+- A failed change-log write never fails the memory write: notification is best
+  effort by design.
+
+### 21.2 Composer controls
+
+`addComposerItem` gives a component the `PluginComposer` (prompt, attachments,
+model, metadata). `client/composer-item.tsx` implements two actions, both
+non-destructive:
+
+- **Remember** — saves the trimmed prompt as a `note` (title from its first
+  line, capped at 120 chars) through the existing `memory-flash.save` RPC.
+- **Cite** — searches with the draft as the query and inserts `#id title` for
+  the best hit via `composer.insertText()`. The agent gets a pointer to the
+  stored memory rather than a copy of it.
+
+Both are disabled on an empty prompt and report the outcome in a one-line status
+(`Saved #42`, `Cited #7`, `No memory found`).
+
+### 21.3 Delegation, provenance, project defaults
+
+**Background maintenance.** `memory-flash.delegate` gained `background`
+(default `false` in the RPC, `true` in the surface). When set, the server reads
+the target's provider and directory from a refreshed snapshot and creates a
+hidden agent (`background: true`, title `Memory maintenance`, prompt in the
+create request). A rejected creation is logged and the task falls back to
+`send()` on the chosen agent, with the result's `background` field telling the
+caller which path ran; the surface toggles this with one chip.
+
+**Provenance metadata.** One key, replaced wholesale: `memory-flash` =
+`{ injected, reason?, server, tool?, at }`. The create hook writes it through
+the hook payload's `metadata` field (0.16.0: `agent.create.before` carries
+metadata and returns it changed; `agent.open.before` may not return the whole
+request). Session opens refresh it with `agents.ref(id).setMetadata()`, which is
+also what reaches agents created before this release. A host without
+`entityMetadata` rejects that call, so it is fire-and-forget.
+
+**Stable project default.** `server/workspace-map.ts`:
+
+1. `MEMORY_FLASH_PROJECT` — explicit override (tests, unusual setups);
+2. `PASEO_WORKSPACE_ID` → workspace name from
+   `$PASEO_HOME/plugins/memory-flash/workspaces.json`, which the plugin writes
+   from `paseo.workspaces.list()` at most every five minutes (the MCP server has
+   the env var but no API); unknown ids use `workspace-<first 8>`;
+3. the current directory's name — the previous behaviour, for agents started
+   outside a Paseo workspace.
+
+`memory_save` and `memory_handoff` apply it only when the call names no project,
+so explicit values always win and the tool description says where the default
+comes from.
+
+### 21.4 Verification
+
+- `npm run typecheck` exit 0; `npm test` **19 suites / 230 tests** pass.
+  `tests/change-feed.test.ts` covers the first event, a change, silence, abort,
+  a failing push, the store's monotonic sequence across trimming, the map file
+  and all three project fallbacks.
+- Live host 0.16.1: plugin updated and `running`; the MCP entry handshake still
+  returns the nine tools; an agent session open after the update logged
+  `session_open …` and wrote `workspaces.json`; a `memory_save` with no project
+  from that agent landed under the workspace name in `memories.project`.
+- Not exercised live: the subscription event itself (it fires when the screen is
+  open), the composer control's rendering, and a background child creation (it
+  needs a provider that accepts a provider-only config on this host).

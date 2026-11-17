@@ -123,6 +123,10 @@ const DB_BUSY_TIMEOUT_MS = 5000;
 const WRITE_ATTEMPTS = 3;
 /** Backoff before the first write retry; doubles per attempt. */
 const WRITE_RETRY_DELAY_MS = 25;
+/** Change-log rows kept; older ones are trimmed (the log is a signal, not an audit trail). */
+const CHANGE_LOG_KEEP = 500;
+/** Writes between trims of the change log. */
+const CHANGE_LOG_TRIM_EVERY = 50;
 
 function normalizeTag(raw: string): string {
   return raw.trim().toLowerCase().slice(0, 64);
@@ -174,6 +178,11 @@ export class MemoryStore {
   private stmtApiKeyDelete!: StatementSync;
   private stmtApiKeyTouch!: StatementSync;
   private stmtApiKeyCount!: StatementSync;
+  private stmtChangeInsert!: StatementSync;
+  private stmtChangesSeq!: StatementSync;
+  private stmtChangesTrim!: StatementSync;
+  /** Writes since the last change-log trim (see {@link notifyChange}). */
+  private changeWrites = 0;
 
   constructor(options: StoreOptions = {}) {
     this.dbPath = options.dbPath ?? memoryDbPath();
@@ -239,6 +248,13 @@ export class MemoryStore {
       CREATE TABLE IF NOT EXISTS meta (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_changes (
+        seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind      TEXT NOT NULL,
+        memory_id INTEGER,
+        at        TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS api_keys (
@@ -351,6 +367,15 @@ export class MemoryStore {
     this.stmtApiKeyDelete = this.db.prepare("DELETE FROM api_keys WHERE id = ?");
     this.stmtApiKeyTouch = this.db.prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?");
     this.stmtApiKeyCount = this.db.prepare("SELECT COUNT(*) AS c FROM api_keys WHERE revoked_at IS NULL");
+    this.stmtChangeInsert = this.db.prepare(
+      "INSERT INTO memory_changes (kind, memory_id, at) VALUES (?, ?, ?)",
+    );
+    this.stmtChangesSeq = this.db.prepare(
+      "SELECT COALESCE(MAX(seq), 0) AS seq FROM memory_changes",
+    );
+    this.stmtChangesTrim = this.db.prepare(
+      "DELETE FROM memory_changes WHERE seq <= (SELECT COALESCE(MAX(seq), 0) - ? FROM memory_changes)",
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -432,6 +457,7 @@ export class MemoryStore {
       const id = Number(result.lastInsertRowid);
       for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
       this.recordHistory(id, 1, "create", changedBy, now);
+      this.notifyChange("create", id, now);
       return this.getById(id) as Memory;
     });
   }
@@ -463,6 +489,7 @@ export class MemoryStore {
       for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
       const nextRevision = Number(existing.revision) + 1;
       this.recordHistory(id, nextRevision, "update", author, now);
+      this.notifyChange("update", id, now);
       return this.getById(id) as Memory;
     });
   }
@@ -487,6 +514,7 @@ export class MemoryStore {
       );
       this.stmtDelete.run(id);
       this.stmtTagsDelete.run(id);
+      this.notifyChange("delete", id, now);
       return true;
     });
   }
@@ -590,6 +618,38 @@ export class MemoryStore {
       changedAt: String(row.changed_at),
       changeKind: row.change_kind as "create" | "update" | "delete",
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Change log (0.13.5)
+  //
+  // Panel subscriptions have to see writes made by *another process*: the MCP
+  // server that agents spawn writes to this same SQLite file, so an in-memory
+  // event emitter inside the plugin could never report it. Every mutation
+  // appends one row here and a subscriber polls {@link changesSeq} — a single
+  // indexed read, no notifications, no new dependency.
+  // -------------------------------------------------------------------------
+
+  /** Appends one change row and keeps the log bounded. Never fails a write. */
+  private notifyChange(kind: "create" | "update" | "delete" | "reset", memoryId: number | null, at: string): void {
+    try {
+      this.stmtChangeInsert.run(kind, memoryId, at);
+      this.changeWrites += 1;
+      // The log exists to signal "something changed", not to be an audit trail
+      // (memory_history is). Trimming keeps the file from growing forever.
+      if (this.changeWrites >= CHANGE_LOG_TRIM_EVERY) {
+        this.changeWrites = 0;
+        this.stmtChangesTrim.run(CHANGE_LOG_KEEP);
+      }
+    } catch {
+      // A failed notification must not roll back or fail the memory write.
+    }
+  }
+
+  /** Highest change-log sequence number; 0 on a database without changes. */
+  changesSeq(): number {
+    const row = this.stmtChangesSeq.get() as { seq: number } | undefined;
+    return Number(row?.seq ?? 0);
   }
 
   /** Restores a past revision as a new update (never destroys history). */
@@ -1040,6 +1100,7 @@ export class MemoryStore {
       this.db.exec("DELETE FROM memory_tags;");
       this.db.exec("DELETE FROM memory_history;");
       this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');");
+      this.notifyChange("reset", null, new Date().toISOString());
       return count;
     });
   }

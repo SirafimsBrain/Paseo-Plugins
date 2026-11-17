@@ -828,10 +828,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path3) {
-  if (!path3)
+function getElementAtPath(obj, path4) {
+  if (!path4)
     return obj;
-  return path3.reduce((acc, key) => acc?.[key], obj);
+  return path4.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1171,11 +1171,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path3, issues) {
+function prefixIssues(path4, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path3);
+    iss.path.unshift(path4);
     return iss;
   });
 }
@@ -1625,16 +1625,16 @@ function flattenError(error63, mapper = (issue2) => issue2.message) {
 }
 function formatError(error63, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error64, path3 = []) => {
+  const processError = (error64, path4 = []) => {
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path3, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else {
-        const fullpath = [...path3, ...issue2.path];
+        const fullpath = [...path4, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1673,17 +1673,17 @@ function formatError(error63, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error63, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error64, path3 = []) => {
+  const processError = (error64, path4 = []) => {
     var _a3;
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path3, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else {
-        const fullpath = [...path3, ...issue2.path];
+        const fullpath = [...path4, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1722,8 +1722,8 @@ function treeifyError(error63, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path3 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path3) {
+  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path4) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18825,13 +18825,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path3 = ref.slice(1).split("/").filter(Boolean);
-  if (path3.length === 0) {
+  const path4 = ref.slice(1).split("/").filter(Boolean);
+  if (path4.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path3[0] === defsKey) {
-    const key = path3[1] === void 0 ? void 0 : decodeJSONPointerSegment(path3[1]);
+  if (path4[0] === defsKey) {
+    const key = path4[1] === void 0 ? void 0 : decodeJSONPointerSegment(path4[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -19688,6 +19688,12 @@ function defineRpc(definition) {
     throw new Error(`Invalid plugin RPC method: ${definition.name}`);
   return { ...definition, name };
 }
+function defineSubscription(definition) {
+  const name = definition.name.trim();
+  if (!RPC_NAME.test(name))
+    throw new Error(`Invalid plugin subscription: ${definition.name}`);
+  return { ...definition, name };
+}
 
 // node_modules/@getpaseo/plugin/dist/settings.js
 var SettingsReadResultSchema = external_exports.discriminatedUnion("status", [
@@ -19811,6 +19817,11 @@ var searchMemories = defineRpc({
   input: searchOptionsSchema,
   output: external_exports.object({ results: external_exports.array(searchResultSchema) })
 });
+var memoryChanges = defineSubscription({
+  name: "memory-flash.changes",
+  input: external_exports.object({}),
+  event: external_exports.object({ seq: external_exports.number().int().min(0) })
+});
 var controlQuerySchema = external_exports.object({
   /** The free-text query exactly as an agent would send it. */
   query: external_exports.string().min(1),
@@ -19913,11 +19924,20 @@ var delegateTask = defineRpc({
     /** What to do with memories, in natural language. */
     instruction: external_exports.string().trim().min(1).max(4e3),
     /** Memory ids to reference in the prompt (optional context). */
-    memoryIds: external_exports.array(external_exports.number().int().positive()).max(50).default([])
+    memoryIds: external_exports.array(external_exports.number().int().positive()).max(50).default([]),
+    /**
+     * Run the task in a hidden background agent (Paseo 0.16.0) instead of the
+     * chosen agent's own tab. Falls back to `send()` when the host cannot.
+     */
+    background: external_exports.boolean().default(false)
   }),
   output: external_exports.object({
     ok: external_exports.boolean(),
-    error: external_exports.string().nullable()
+    error: external_exports.string().nullable(),
+    /** Agent that received the task: the chosen one or the background child. */
+    agentId: external_exports.string().nullable(),
+    /** Whether a background agent was actually used. */
+    background: external_exports.boolean()
   })
 });
 var skillTargetSchema = external_exports.object({
@@ -20245,6 +20265,8 @@ function randomBase64Url(bytes) {
 var DB_BUSY_TIMEOUT_MS = 5e3;
 var WRITE_ATTEMPTS = 3;
 var WRITE_RETRY_DELAY_MS = 25;
+var CHANGE_LOG_KEEP = 500;
+var CHANGE_LOG_TRIM_EVERY = 50;
 function normalizeTag(raw) {
   return raw.trim().toLowerCase().slice(0, 64);
 }
@@ -20262,6 +20284,8 @@ function effectiveTags(tags, project) {
 }
 var MemoryStore = class {
   constructor(options = {}) {
+    /** Writes since the last change-log trim (see {@link notifyChange}). */
+    this.changeWrites = 0;
     this.dbPath = options.dbPath ?? memoryDbPath();
     this.historyPerMemory = options.historyPerMemory ?? 50;
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
@@ -20318,6 +20342,13 @@ var MemoryStore = class {
       CREATE TABLE IF NOT EXISTS meta (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_changes (
+        seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind      TEXT NOT NULL,
+        memory_id INTEGER,
+        at        TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS api_keys (
@@ -20419,6 +20450,15 @@ var MemoryStore = class {
     this.stmtApiKeyDelete = this.db.prepare("DELETE FROM api_keys WHERE id = ?");
     this.stmtApiKeyTouch = this.db.prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?");
     this.stmtApiKeyCount = this.db.prepare("SELECT COUNT(*) AS c FROM api_keys WHERE revoked_at IS NULL");
+    this.stmtChangeInsert = this.db.prepare(
+      "INSERT INTO memory_changes (kind, memory_id, at) VALUES (?, ?, ?)"
+    );
+    this.stmtChangesSeq = this.db.prepare(
+      "SELECT COALESCE(MAX(seq), 0) AS seq FROM memory_changes"
+    );
+    this.stmtChangesTrim = this.db.prepare(
+      "DELETE FROM memory_changes WHERE seq <= (SELECT COALESCE(MAX(seq), 0) - ? FROM memory_changes)"
+    );
   }
   // -------------------------------------------------------------------------
   // Row mapping
@@ -20492,6 +20532,7 @@ var MemoryStore = class {
       const id = Number(result.lastInsertRowid);
       for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
       this.recordHistory(id, 1, "create", changedBy, now);
+      this.notifyChange("create", id, now);
       return this.getById(id);
     });
   }
@@ -20520,6 +20561,7 @@ var MemoryStore = class {
       for (const tag of effectiveTags(value.tags, value.project)) this.stmtAddTag.run(id, tag);
       const nextRevision = Number(existing.revision) + 1;
       this.recordHistory(id, nextRevision, "update", author, now);
+      this.notifyChange("update", id, now);
       return this.getById(id);
     });
   }
@@ -20542,6 +20584,7 @@ var MemoryStore = class {
       );
       this.stmtDelete.run(id);
       this.stmtTagsDelete.run(id);
+      this.notifyChange("delete", id, now);
       return true;
     });
   }
@@ -20617,6 +20660,32 @@ var MemoryStore = class {
       changedAt: String(row.changed_at),
       changeKind: row.change_kind
     };
+  }
+  // -------------------------------------------------------------------------
+  // Change log (0.13.5)
+  //
+  // Panel subscriptions have to see writes made by *another process*: the MCP
+  // server that agents spawn writes to this same SQLite file, so an in-memory
+  // event emitter inside the plugin could never report it. Every mutation
+  // appends one row here and a subscriber polls {@link changesSeq} — a single
+  // indexed read, no notifications, no new dependency.
+  // -------------------------------------------------------------------------
+  /** Appends one change row and keeps the log bounded. Never fails a write. */
+  notifyChange(kind, memoryId, at) {
+    try {
+      this.stmtChangeInsert.run(kind, memoryId, at);
+      this.changeWrites += 1;
+      if (this.changeWrites >= CHANGE_LOG_TRIM_EVERY) {
+        this.changeWrites = 0;
+        this.stmtChangesTrim.run(CHANGE_LOG_KEEP);
+      }
+    } catch {
+    }
+  }
+  /** Highest change-log sequence number; 0 on a database without changes. */
+  changesSeq() {
+    const row = this.stmtChangesSeq.get();
+    return Number(row?.seq ?? 0);
   }
   /** Restores a past revision as a new update (never destroys history). */
   restoreRevision(revisionId, changedBy = null) {
@@ -20991,6 +21060,7 @@ var MemoryStore = class {
       this.db.exec("DELETE FROM memory_tags;");
       this.db.exec("DELETE FROM memory_history;");
       this.db.exec("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');");
+      this.notifyChange("reset", null, (/* @__PURE__ */ new Date()).toISOString());
       return count;
     });
   }
@@ -21263,6 +21333,42 @@ function parseSettingsFile(filePath = settingsFilePath()) {
   }
 }
 
+// server/workspace-map.ts
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import * as path3 from "node:path";
+function workspaceMapPath() {
+  return path3.join(paseoHome(), "plugins", "memory-flash", "workspaces.json");
+}
+function readWorkspaceNameMap() {
+  try {
+    const raw = JSON.parse(readFileSync2(workspaceMapPath(), "utf8"));
+    if (!raw || typeof raw !== "object") return {};
+    const map2 = {};
+    for (const [id, name] of Object.entries(raw)) {
+      if (typeof name === "string" && name.trim().length > 0) map2[id] = name.trim();
+    }
+    return map2;
+  } catch {
+    return {};
+  }
+}
+function defaultProject(env = process.env, cwd = process.cwd()) {
+  const explicit = env.MEMORY_FLASH_PROJECT?.trim();
+  if (explicit) return explicit;
+  const workspaceId = env.PASEO_WORKSPACE_ID?.trim();
+  if (workspaceId) {
+    const name = readWorkspaceNameMap()[workspaceId];
+    if (name) return name;
+    return `workspace-${workspaceId.slice(0, 8)}`;
+  }
+  return basename2(cwd);
+}
+function basename2(directory) {
+  if (!directory) return null;
+  const name = path3.basename(directory);
+  return name && name !== path3.sep ? name : null;
+}
+
 // server/diagnose.ts
 var DEFAULT_CUTOFFS = [1, 5, 10, 50];
 function diagnose(store, control, options = {}) {
@@ -21351,7 +21457,7 @@ var MCP_TOOLS = [
         title: str("Short unique title (max 200 chars)."),
         content: str("Full memory body. Include file paths, commands and reasoning."),
         tags: strArray("Lowercase topic tags, e.g. ['auth', 'login-flow', project]."),
-        project: str("Project or repository name, if known."),
+        project: str("Project or repository name; defaults to the current workspace."),
         agentId: str("Your agent id (e.g. 'opencode', 'cline'). Auto-set when omitted.")
       },
       required: ["title", "content"]
@@ -21484,7 +21590,8 @@ function dispatchMcpTool(name, args, context) {
       if (!parsed.success) return error62(`Invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
       const value = parsed.data;
       const agentId = value.agentId ?? (context.defaultAgentId || null);
-      const memory = store.create({ ...value, agentId }, agentId ?? "mcp");
+      const project = value.project ?? context.defaultProject ?? null;
+      const memory = store.create({ ...value, project, agentId }, agentId ?? "mcp");
       return text({ saved: true, id: memory.id, kind: memory.kind, title: memory.title });
     }
     case "memory_search": {
@@ -21590,7 +21697,7 @@ function dispatchMcpTool(name, args, context) {
           title,
           content,
           tags,
-          project: typeof input2.project === "string" && input2.project.trim() ? input2.project.trim() : null,
+          project: typeof input2.project === "string" && input2.project.trim() ? input2.project.trim() : context.defaultProject ?? null,
           agentId
         },
         agentId ?? "mcp"
@@ -21695,7 +21802,9 @@ function main() {
   const store = new MemoryStore({ historyPerMemory: settings.historyPerMemory });
   const context = {
     store,
-    defaultAgentId: settings.defaultAgentId || process.env.MEMORY_FLASH_AGENT_ID || void 0
+    defaultAgentId: settings.defaultAgentId || process.env.MEMORY_FLASH_AGENT_ID || void 0,
+    // 0.13.5: file unlabelled memories under the workspace, not the cwd path.
+    defaultProject: defaultProject()
   };
   const serverInfo = { name: settings.mcpServerName, version: SERVER_VERSION };
   process.stderr.write(

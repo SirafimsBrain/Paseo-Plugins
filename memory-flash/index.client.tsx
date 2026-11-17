@@ -4,6 +4,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { MemorySurface } from "./client/memory-surface";
+import { MemoryComposerItem } from "./client/composer-item";
 import { MemoryFlashSettingsScreen } from "./client/settings-screen";
 import { agentReload } from "./shared/memories";
 
@@ -61,6 +62,13 @@ export default function contribute(client: PluginClientContext) {
     onSelect({ openScreen }) {
       openScreen({ screenId: SCREEN_ID });
     },
+  });
+
+  // Composer controls (Paseo 0.16.0, 0.13.5): remember the current draft, or
+  // cite a stored memory into it without leaving the composer.
+  client.addComposerItem({
+    id: "memory-flash",
+    Component: MemoryComposerItem,
   });
 
   client.addSettingsScreen({

@@ -1,4 +1,4 @@
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc, defineSubscription } from "@getpaseo/plugin";
 import { z } from "zod";
 
 /**
@@ -152,6 +152,18 @@ export const searchMemories = defineRpc({
   output: z.object({ results: z.array(searchResultSchema) }),
 });
 
+/**
+ * Live change signal for the surface (Paseo 0.16.0 subscriptions, 0.13.5).
+ *
+ * Events carry only a sequence number: the client refetches through its normal
+ * RPCs, so the payload stays tiny and cannot go stale against a filter.
+ */
+export const memoryChanges = defineSubscription({
+  name: "memory-flash.changes",
+  input: z.object({}),
+  event: z.object({ seq: z.number().int().min(0) }),
+});
+
 // ---------------------------------------------------------------------------
 // Search diagnostics (since 0.7.0)
 //
@@ -285,10 +297,19 @@ export const delegateTask = defineRpc({
     instruction: z.string().trim().min(1).max(4000),
     /** Memory ids to reference in the prompt (optional context). */
     memoryIds: z.array(z.number().int().positive()).max(50).default([]),
+    /**
+     * Run the task in a hidden background agent (Paseo 0.16.0) instead of the
+     * chosen agent's own tab. Falls back to `send()` when the host cannot.
+     */
+    background: z.boolean().default(false),
   }),
   output: z.object({
     ok: z.boolean(),
     error: z.string().nullable(),
+    /** Agent that received the task: the chosen one or the background child. */
+    agentId: z.string().nullable(),
+    /** Whether a background agent was actually used. */
+    background: z.boolean(),
   }),
 });
 
