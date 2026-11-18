@@ -37,8 +37,8 @@ import { writeRefusal } from "./write-gate";
  * This is a **reference** tool for the user's Obsidian knowledge base. It is
  * injected so an agent *can* answer an explicit request; nothing here makes an
  * agent consult the vault on its own. An agent's own memory belongs to
- * `memory-flash`, project planning belongs to `luck-planner`. Writes are append
- * only and confined to the configured roles.
+ * `memory-flash`, project planning belongs to the `plan_*` tools in this server.
+ * Writes are append only and confined to the configured roles.
  *
  * ## Directory roles
  *
@@ -70,8 +70,8 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "Obsidian Bridge gives access to the user's Obsidian knowledge base: notes, plans, " +
     "recommendations and research. Use it only when the user asks about those documents, and " +
     "cite the note path (and heading) you took the answer from. It does not store agent " +
-    "memory — memory-flash does — and it does not plan work — luck-planner does. Results are " +
-    "snippets: read the note before quoting it.\n\n" +
+    "memory — memory-flash does — and project planning is handled by the `plan_*` tools in " +
+    "this server. Results are snippets: read the note before quoting it.\n\n" +
     directoryGuide(dirs) +
     "\n\nTo find a document the user names, call `obsidian_search` with words from its title " +
     "(no path needed); read it with `obsidian_read`, and a long one by heading after " +

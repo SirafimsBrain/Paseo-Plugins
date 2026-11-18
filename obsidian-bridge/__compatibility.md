@@ -2,6 +2,22 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.17.12 — agent-facing descriptions (2026-11-18)
+
+Patch release (0.17.11 → 0.17.12). SDK, host floor and the 30-tool catalogue are unchanged; only descriptions change.
+
+| Change | Behaviour |
+| --- | --- |
+| `initialize` block and `CONTRACT_SENTENCE` comment | project planning is attributed to the `plan_*` tools in this server, not to the retired planning plugin |
+| `skills/obsidian-bridge/SKILL.md` | same wording in the read → cite → write skill |
+| `skills/planning-create/SKILL.md` | frontmatter and the import section describe a legacy archive, without naming the retired plugin |
+| `README.md` | introduction points planning to `plan_*`; the change is listed under "What it does" |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **42 suites / 348 tests** pass. `agent-skill.test.ts` now isolates
+`PASEO_HOME` alongside `HOME`, so a daemon config pointing at an older installed checkout cannot supply stale skill text
+during a repair assertion. No new tool, schema or host requirement. Linux remains the primary target; macOS and Windows
+remain future work.
+
 ## Plugin 0.17.11 — four agent skills, three of them for planning (2026-11-18)
 
 Feature release (0.16.11 → 0.17.11), stage 8 of the migration. The SDK, host floor and tool catalogue (30 tools) are

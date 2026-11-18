@@ -30,17 +30,23 @@ function skillFile(name: string): string {
 }
 let home = "";
 const previousHome = process.env.HOME;
+const previousPaseoHome = process.env.PASEO_HOME;
 const previousXdg = process.env.XDG_CONFIG_HOME;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "obb-skill-"));
   // `os.homedir()` follows $HOME on POSIX, which is what the module uses.
   process.env.HOME = home;
+  // The daemon config may point at an older installed checkout; sources must
+  // come from this checkout so a hand-edited copy is repaired from current text.
+  process.env.PASEO_HOME = home;
 });
 
 afterEach(() => {
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
+  if (previousPaseoHome === undefined) delete process.env.PASEO_HOME;
+  else process.env.PASEO_HOME = previousPaseoHome;
   if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = previousXdg;
   fs.rmSync(home, { recursive: true, force: true });

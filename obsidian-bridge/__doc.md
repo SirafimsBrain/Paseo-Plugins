@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.17.11**.
+Version covered: **0.17.12**.
 
 ## 1. Purpose and scope
 
@@ -17,7 +17,7 @@ The operating contract (`__research.md` §2) is the specification this implement
 2. every vault access is request-scoped — a turn that does not ask touches nothing;
 3. the bridge is a reference for every agent and every workspace, with no per-agent identity or state;
 4. writes need an explicitly named target and stay inside one of the configured roles;
-5. `memory-flash` and `luck-planner` keep their current behaviour and data;
+5. `memory-flash` keeps its current behaviour and data, and project planning lives in this plugin's `plan_*` tools;
 6. no skill is installed automatically; the contract lives in tool descriptions;
 7. injection is cheap and inert — no probe, no scan, no env, no cwd change in the open path;
 8. read-only is the default posture.
@@ -434,7 +434,20 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12)
+
+### 0.17.12 — descriptions point to the `plan_*` tools
+
+Patch release (0.17.11 → 0.17.12). No tool, schema, host floor or runtime behaviour changes: the edit is confined to agent-
+and user-facing descriptions. `CONTRACT_SENTENCE` already named `plan_*` as the planning destination; the `initialize`
+block, the `mcp-tools.ts` contract comment, the README introduction and the `obsidian-bridge` / `planning-create` skills
+now agree with it. A legacy archive remains importable through `plan_import`; the `luck-planner-export` format identifier
+is a compatibility literal, not a live dependency.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **42 suites / 348 tests** pass. `agent-skill.test.ts` now overrides
+`PASEO_HOME` in its fixture: `resolveSkillSource()` prefers the daemon-configured plugin path, which may be an older
+installed checkout, and that made a repair assertion compare current text against stale source. Isolating it alongside
+`HOME` keeps the test about this checkout. Linux is the primary target; macOS and Windows remain future work.
 
 ### 0.17.11 — the three planning skills, and a skill list instead of one skill
 

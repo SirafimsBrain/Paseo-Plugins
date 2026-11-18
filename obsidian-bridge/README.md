@@ -6,13 +6,13 @@ document they were asked for into the right folder.
 
 **It is a reference library, not an agent's memory.** The tools are available to every agent so that an agent *can* answer
 a request, but nothing here makes an agent consult the vault on its own, and nothing is read or written unless the prompt
-asks for it. An agent's own working memory belongs to [`memory-flash`](../memory-flash/README.md); project planning
-belongs to [`luck-planner`](../luck-planner/README.md).
+asks for it. An agent's own working memory belongs to [`memory-flash`](../memory-flash/README.md); project planning is
+handled by the `plan_*` tools in this plugin.
 
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.17.11)
+## What it does (0.17.12)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -99,6 +99,9 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   `blocked_by:` in sync on both sides while only `open`/`investigating` incidents block, `plan_goal` authors a goal
   (`create`, `update`, `propose`) for a human to approve, and `plan_growth` upserts the progress record of a node or
   goal, merging steps by title. Each write snapshots the previous state first and journals the change.
+- **Agent-facing descriptions (0.17.12).** The tool contract, the `initialize` instructions and the shipped skills now
+  point to this plugin's `plan_*` tools as the place for project planning; they no longer name the retired planning
+  plugin. The behaviour of every tool is unchanged.
 - **Four agent skills, three of them for planning (0.17.11).** `skills/planning-create`, `skills/planning-execute` and
   `skills/planning-review` teach an agent to grow a plan tree, carry it through the work and review plan against fact;
   `obsidian-bridge` keeps the read → cite → write workflow. `server/agent-skill.ts` installs, verifies and removes a

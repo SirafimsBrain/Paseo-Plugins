@@ -1,6 +1,6 @@
 ---
 name: planning-create
-description: Grow a project plan as a tree of Markdown documents with the `plan_*` tools — `plan_scope` finds the planning root, `plan_read`/`plan_search` read it, `plan_create_node` adds a root, trunk, branch, sub-branch or leaf, `plan_goal` records a goal with its steps, `plan_growth` tracks how a node or goal grew, and `plan_import` brings a luck-planner project in. Use when the user asks you to start or extend a plan, break work into branches and leaves, or turn a goal or an existing plan into a tree.
+description: Grow a project plan as a tree of Markdown documents with the `plan_*` tools — `plan_scope` finds the planning root, `plan_read`/`plan_search` read it, `plan_create_node` adds a root, trunk, branch, sub-branch or leaf, `plan_goal` records a goal with its steps, `plan_growth` tracks how a node or goal grew, and `plan_import` imports a legacy project archive. Use when the user asks you to start or extend a plan, break work into branches and leaves, or turn a goal or an existing plan into a tree.
 ---
 
 # Planning: creating a plan
@@ -57,7 +57,7 @@ a trunk with one leaf per step, so do not create that branch by hand as well.
 
 ## Importing instead of retyping
 
-To bring a project across from luck-planner: `plan_import { path: "<archive>.json.zip" }` — a dry run by default. Read
+To bring a project in from a legacy archive: `plan_import { path: "<archive>.json.zip" }` — a dry run by default. Read
 its `counts`, `warnings` and `files`, then repeat with `dry_run: false`. Import into an empty project; the original row
 id is kept as `legacy_id`, so importing the same file twice answers `unchanged` rather than duplicating the tree.
 

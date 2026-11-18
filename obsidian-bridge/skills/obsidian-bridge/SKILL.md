@@ -7,7 +7,7 @@ description: Read and write the user's Obsidian vault through the obsidian-bridg
 
 The vault is a **reference library**, not your memory: nothing here is read or written unless the user
 explicitly asks about their Obsidian documents or asks for a document. Agent memory belongs to
-`memory-flash`; project planning belongs to `luck-planner`.
+`memory-flash`; project planning belongs to the `plan_*` tools in this plugin.
 
 The bridge is a directory on disk plus a local index. Obsidian itself does not have to be running.
 
