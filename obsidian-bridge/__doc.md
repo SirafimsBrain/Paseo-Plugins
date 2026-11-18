@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.11.12**.
+Version covered: **0.12.11**.
 
 ## 1. Purpose and scope
 
@@ -58,7 +58,9 @@ obsidian-bridge/
 │   │   ├── model.ts         # kinds, statuses, transitions, key order (0.11.12)
 │   │   ├── frontmatter.ts   # YAML read/write with key order preserved (0.11.12)
 │   │   ├── sections.ts      # generated body sections, kept `## Заметки` (0.11.12)
-│   │   └── snapshot.ts      # `<slug>.v<v>.r<r>.md` names and snapshot frontmatter (0.11.12)
+│   │   ├── snapshot.ts      # `<slug>.v<v>.r<r>.md` names and snapshot frontmatter (0.11.12)
+│   │   ├── read.ts          # `plan_read`: tree in memory, overview, node context, beeCycle (0.12.11)
+│   │   └── search.ts        # `plan_search`: index narrowed to planRoot + frontmatter filters (0.12.11)
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
@@ -421,7 +423,28 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11)
+
+### 0.12.11 — reading a plan: overview, node context, search
+
+Feature release (0.11.12 → 0.12.11), stage 3 of the migration: the plan becomes readable. Two tools are added and the
+catalogue grows to 16; no write exists yet.
+
+| Tool / module | Behaviour |
+| --- | --- |
+| `plan_read` (no path) | project overview: every first-level project with its root node, its trunks, `counts.byKind`, open incidents (`open`/`investigating`) and proposed goals; non-plan files under the root are listed in `skipped` |
+| `plan_read` (path) | node context: `node`, `parent`, `ancestors` (root → parent), `children` (frontmatter plus reverse `parent` edges), `siblings`, `influences`, `influencedBy` (the reverse edge Obsidian shows as a backlink), `blockedBy` with a `blocking` flag, `blocks`, `goal`, `growth`, `unresolved`, and `beeCycle` |
+| path forms | `centurion`, `centurion/backend/auth`, `centurion/backend/auth/auth.md` all reach the node; an unknown path returns up to five `suggestions` |
+| refusals | a path outside the root, `__history`/`_archive` (pointing at `plan_history`), or an unconfigured/missing root |
+| `plan_search` | `searchIndex` over the vault index with `folder = planRoot`, then a hard prefix check, `__history`/`_archive` refusal, `kind`/`status`/`project` filters from frontmatter, one row per note, `limit` 1–50, and counts of `skipped` non-plan hits |
+
+A cycle is reported, not forbidden: only `active`/`watching` influences count, so the answer is the list of plan paths
+from the node back to itself. A resolved influence is a historical fact and cannot order work.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **30 suites / 262 tests** pass, including the A→B→C→A cycle, the
+pair loop in the fixture, negative search cases (a note outside the root, a snapshot, an archived node, a non-plan file
+inside the root) and the refusals. Not done yet, by design: writing nodes and snapshots (stage 4), links, goals,
+incidents, growth, operations, validation and import.
 
 ### 0.11.12 — the plan file format and snapshots
 
@@ -1034,3 +1057,29 @@ Four modules turn the boundary into a file model, and nothing calls them from a 
 The only new dependency is `yaml` (^2.9.1). It parses with the core schema, so timestamps stay the strings their author
 wrote, and it refuses duplicate keys instead of silently keeping the last one — both are properties a hand-written parser
 tends to get wrong.
+
+### 15.5 Reading a plan (0.12.11)
+
+`read.ts` builds the whole tree for one call: `walkMarkdown` under `planRoot` (which already skips `__history` and
+`_archive`), `parsePlanDocument` per file, and a map keyed by vault path. A file without frontmatter, without a known
+`kind`, or marked `is_snapshot` is counted in `skipped`, never treated as a node. Nothing is cached between calls: the
+server is a short-lived child process, and a cache would only hide a hand edit made in Obsidian.
+
+Without a `path` the answer is a project overview: each first-level project with its root node (the `kind: root`
+document, else the parentless node), its trunks, `counts.byKind`, the incidents that block (`open`/`investigating`) and
+the goals still `proposed`. With a `path` the answer is one node in context:
+
+- `ancestors` walks `parent` links up to the root; `children` merges the frontmatter list with reverse `parent` edges,
+  so a file added by hand still shows up under its parent;
+- `influences` resolves `influences[].target`, and `influencedBy` is the same scan in reverse — the computed equivalent
+  of the backlink Obsidian draws;
+- `blockedBy` resolves `blocked_by` to incident documents and marks `blocking` only for `open`/`investigating`;
+- `beeCycle` follows `active`/`watching` influences and returns the path from the node back to itself, or `null`. A loop
+  is reported rather than rejected: a cycle has no honest execution order, and the plan owner decides what to cut;
+- a path may name the folder (`centurion/backend/auth`), the file, or the project; a miss lists up to five real nodes.
+
+`search.ts` is a thin wrapper on purpose. It opens the same `BridgeStore` index, calls `searchIndex` with
+`folder = planRoot`, then re-checks every hit: prefix, no `_archive`/`__history`, parseable plan frontmatter. Filters run
+on parsed YAML, not on text — asking for `status: done` must not return a node whose description says "done". A node hit
+through several headings collapses to one row, `limit` is 1–50, and the answer reports how many hits were `filtered` by
+frontmatter and how many were `skipped` because they are not plans.

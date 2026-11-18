@@ -38,6 +38,8 @@ describe("tool catalogue", () => {
       "obsidian_diagnose",
       "obsidian_status",
       "plan_scope",
+      "plan_read",
+      "plan_search",
     ]);
     for (const tool of MCP_TOOLS) {
       expect(

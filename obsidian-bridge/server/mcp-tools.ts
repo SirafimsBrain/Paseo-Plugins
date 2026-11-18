@@ -588,7 +588,7 @@ export async function dispatchTool(
   // vault index is opened: `plan_scope` must report a missing or empty root
   // without creating a database or a directory.
   if (name.startsWith("plan_")) {
-    const planned = dispatchPlanTool(name, settings);
+    const planned = await dispatchPlanTool(name, input, settings);
     if (planned) return planned;
   }
 

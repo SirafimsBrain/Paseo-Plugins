@@ -2,6 +2,22 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.12.11 — reading a plan: overview, node context, search (2026-11-18)
+
+Feature release (0.11.12 → 0.12.11), stage 3 of the `luck-planner` migration. The SDK, host floor and every existing
+setting/tool are unchanged; the MCP catalogue grows from 14 to 16 tools.
+
+| Change | Behaviour |
+| --- | --- |
+| tool `plan_read` | without `path`: project overview (root, trunks, counts, open incidents, proposed goals); with `path`: node, ancestors, children, siblings, influences, reverse influences, blocking incidents, goal, growth, `beeCycle` |
+| path forms | folder (`centurion/backend/auth`), file (`…/auth.md`) or project (`centurion`); unknown paths return `suggestions` |
+| tool `plan_search` | vault index restricted to `planRoot`; `kind`/`status`/`project` filters from frontmatter; one row per note; empty index reported instead of an empty answer |
+| boundary | `plan_read` and `plan_search` refuse `__history`/`_archive` and anything outside `planRoot`; search also re-checks the prefix after ranking |
+| `beeCycle` | influence loops over `active`/`watching` edges, returned as plan-relative paths |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **30 suites / 262 tests** pass. Not deployed and not exercised against a
+live Paseo host; both tools were driven through `dispatchTool`, which is the same path the stdio server uses.
+
 ## Plugin 0.11.12 — plan file format and snapshots (2026-11-18)
 
 Patch release (0.11.11 → 0.11.12): internal migration stage 2, no tool or setting changed. The SDK, host floor and

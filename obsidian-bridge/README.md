@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.11.12)
+## What it does (0.12.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -82,8 +82,13 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   for planning tools, and `plan_scope` reports whether that tree exists, what it holds and whether writes are enabled —
   without opening the index, creating a folder or touching a note. Planning never leaves that directory, and its
   `__history` (revision snapshots) and `_archive` (archived subtrees) are excluded from indexing, search and listings and
-  refused by the reading tools, so history cannot mix with the live tree. The plan tools themselves (`plan_read`,
-  `plan_create_node`, …) arrive in the next stages.
+  refused by the reading tools, so history cannot mix with the live tree.
+- **Reading a plan (0.12.11).** `plan_read` returns a project overview (root, trunks, counts, open incidents,
+  proposed goals) or one node in context — ancestors, children, siblings, influences in both directions, blocking
+  incidents, the goal and growth record, and `beeCycle` when influence edges close a loop. `plan_search` ranks plan
+  documents with the same index the vault uses, but only inside the planning directory and with `kind`/`status`/`project`
+  filters read from YAML frontmatter. Writing plan nodes, snapshots and the remaining `plan_*` tools arrive in the next
+  stages.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only
