@@ -2,6 +2,24 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.14.11 — links, incidents, goals and growth (2026-11-18)
+
+Feature release (0.13.11 → 0.14.11), stage 5 of the migration. The SDK and host floor are unchanged; the MCP catalogue
+grows from 20 to 24 tools. Existing plan files stay valid: no key, status or layout changed, and the new tools only write
+fields the schema already defined.
+
+| Change | Behaviour |
+| --- | --- |
+| tool `plan_link` | one bee per call: create/update/remove, leaf-to-leaf inside one project, self-loop refused, an illegal bee transition lists the allowed targets, `remove` on a missing edge is a no-op |
+| tool `plan_incident` | create or update `<project>/_incidents/<slug>`; `blocks:`/`blocked_by:` written on both sides; only `open`/`investigating` block; status moves go through `plan_set_status` |
+| tool `plan_goal` | `create`/`update`/`propose`; approval is not available here |
+| tool `plan_growth` | upsert `growth:` (status, summary, progress 0–100, steps) on a node or goal; steps merge by title, `replace: true` starts over |
+| shared write path | `loadWritableNode` and `commitNodeChange` are exported from `server/plan/write.ts`; every new write takes a snapshot first and bumps the revision once |
+| journal | each new tool appends one line (`plan_link`, `plan_incident`, `plan_goal`, `plan_growth`) |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **36 suites / 311 tests** pass. Not deployed and not exercised against a
+live Paseo host; the tools were driven through `dispatchTool`, the same path the stdio server uses.
+
 ## Plugin 0.13.11 — writing a plan: create, update, status, history (2026-11-18)
 
 Feature release (0.12.11 → 0.13.11), stage 4 of the migration. The SDK and host floor are unchanged; the MCP catalogue

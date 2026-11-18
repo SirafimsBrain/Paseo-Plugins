@@ -44,6 +44,10 @@ describe("tool catalogue", () => {
       "plan_update_node",
       "plan_set_status",
       "plan_history",
+      "plan_link",
+      "plan_incident",
+      "plan_goal",
+      "plan_growth",
     ]);
     for (const tool of MCP_TOOLS) {
       expect(

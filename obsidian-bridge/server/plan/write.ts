@@ -66,11 +66,11 @@ import { buildSnapshot, isSnapshotFrontmatter } from "./snapshot";
 
 const DEFAULT_ACTOR = "agent";
 
-function json(value: unknown): ToolOutcome {
+export function json(value: unknown): ToolOutcome {
   return { text: JSON.stringify(value, null, 2), structuredContent: value };
 }
 
-function fail(message: string, extra: Record<string, unknown> = {}): ToolOutcome {
+export function fail(message: string, extra: Record<string, unknown> = {}): ToolOutcome {
   return {
     text: message,
     isError: true,
@@ -78,11 +78,11 @@ function fail(message: string, extra: Record<string, unknown> = {}): ToolOutcome
   };
 }
 
-function nowIso(): string {
+export function nowIso(): string {
   return new Date().toISOString();
 }
 
-function actorOf(input: Record<string, unknown>): string {
+export function actorOf(input: Record<string, unknown>): string {
   return stringField(input.actor) ?? DEFAULT_ACTOR;
 }
 
@@ -93,13 +93,13 @@ export function wikilinkFor(vaultPath: string): string {
   return `[[${target}|${label}]]`;
 }
 
-interface StoredFile {
+export interface StoredFile {
   text: string;
   document: PlanDocument;
   stat: fs.Stats;
 }
 
-function readStored(root: PlanRoot, vaultPath: string): StoredFile | { error: string } {
+export function readStored(root: PlanRoot, vaultPath: string): StoredFile | { error: string } {
   const absolute = resolveInsideVault(root.vaultRoot, vaultPath);
   if (!absolute) return { error: `'${vaultPath}' resolves outside the configured vault.` };
   let stat: fs.Stats;
@@ -137,7 +137,7 @@ function readStored(root: PlanRoot, vaultPath: string): StoredFile | { error: st
  * then `rename`. The re-check is what turns a concurrent Obsidian save into a
  * refusal instead of a silent overwrite.
  */
-function writeStored(
+export function writeStored(
   root: PlanRoot,
   vaultPath: string,
   text: string,
@@ -225,12 +225,115 @@ function takeSnapshot(
   return { path: built.path };
 }
 
+export interface NodeChange {
+  /** Frontmatter after the change; counters and bookkeeping are set here. */
+  next: Record<string, unknown>;
+  /** `revision` for a refinement, `version` when the file starts describing something else. */
+  bump: "revision" | "version";
+  reason: SnapshotReason;
+  /** Replacement `## Заметки` text; omitted keeps the current sections. */
+  notes?: string;
+}
+
+export type NodeChangeResult =
+  | { version: number; revision: number; snapshot: string }
+  | { error: string };
+
+/**
+ * Applies one frontmatter change to an already-read node: snapshot first, then
+ * temp + rename, then the counters. Every stage-5 tool goes through this, so a
+ * link, an incident attachment and a goal proposal all take a snapshot and bump
+ * the revision the same way.
+ */
+export function commitNodeChange(
+  settings: RuntimeSettings,
+  root: PlanRoot,
+  node: PlanNode,
+  stored: StoredFile,
+  change: NodeChange,
+  actor: string,
+): NodeChangeResult {
+  const version = positiveInt(stored.document.frontmatter.version) ?? 1;
+  const revision = positiveInt(stored.document.frontmatter.revision) ?? 1;
+  const next: Record<string, unknown> = { ...change.next };
+  if (change.bump === "version") {
+    next.version = version + 1;
+    next.revision = 1;
+  } else {
+    next.version = version;
+    next.revision = revision + 1;
+  }
+  next.updated = nowIso();
+  next.updated_by = actor;
+
+  const body = renderPlanBody(
+    next,
+    change.notes === undefined ? stored.document.body : `## Заметки\n\n${change.notes}`,
+  );
+  const text = serializePlanDocument({ frontmatter: next, body });
+
+  const gate = refusalFor(settings, text.length);
+  if (gate) return { error: gate.text };
+
+  const snapshot = takeSnapshot(
+    root,
+    { ...node, frontmatter: stored.document.frontmatter, body: stored.document.body },
+    change.reason,
+  );
+  if ("error" in snapshot) return snapshot;
+
+  const written = writeStored(root, node.vaultPath, text, { expected: stored.stat });
+  if ("error" in written) return written;
+  return {
+    version: next.version as number,
+    revision: next.revision as number,
+    snapshot: snapshot.path,
+  };
+}
+
+/**
+ * Reads a live node and applies the standard refusals before any change: a
+ * stale `expected_revision`, a hand edit newer than `updated`, an unreadable
+ * frontmatter or a snapshot. Stage-5 tools never write a file they have not
+ * passed through this gate.
+ */
+export function loadWritableNode(
+  root: PlanRoot,
+  node: PlanNode,
+  input: Record<string, unknown>,
+): { stored: StoredFile } | { error: ToolOutcome } {
+  const stored = readStored(root, node.vaultPath);
+  if ("error" in stored) return { error: fail(stored.error) };
+
+  const expected =
+    typeof input.expected_revision === "number" && Number.isFinite(input.expected_revision)
+      ? Math.trunc(input.expected_revision)
+      : null;
+  const stale = revisionRefusal(node.vaultPath, stored.document.frontmatter, expected);
+  if (stale) {
+    return {
+      error: fail(stale, {
+        version: positiveInt(stored.document.frontmatter.version),
+        revision: positiveInt(stored.document.frontmatter.revision),
+      }),
+    };
+  }
+  const external = externalEditRefusal(
+    node.vaultPath,
+    stored.document.frontmatter,
+    stored.stat,
+    input.accept_external === true,
+  );
+  if (external) return { error: fail(external) };
+  return { stored };
+}
+
 /**
  * A hand edit in Obsidian is allowed; the tools treat it as external. The
  * frontmatter `updated` timestamp is the contract, so a file whose mtime is
  * newer than that needs an explicit `accept_external` before a write.
  */
-function externalEditRefusal(
+export function externalEditRefusal(
   vaultPath: string,
   frontmatter: Record<string, unknown>,
   stat: fs.Stats,
@@ -248,7 +351,7 @@ function externalEditRefusal(
   );
 }
 
-function revisionRefusal(
+export function revisionRefusal(
   vaultPath: string,
   frontmatter: Record<string, unknown>,
   expected: number | null,
@@ -271,11 +374,11 @@ function allowedTargets(kind: PlanKind, from: string): readonly string[] {
   return (LEAF_TRANSITIONS as Record<string, readonly string[]>)[from] ?? [];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function refusalFor(settings: RuntimeSettings, chars: number): ToolOutcome | null {
+export function refusalFor(settings: RuntimeSettings, chars: number): ToolOutcome | null {
   const refusal = writeRefusal(settings, chars);
   return refusal ? fail(refusal) : null;
 }
@@ -284,7 +387,7 @@ function refusalFor(settings: RuntimeSettings, chars: number): ToolOutcome | nul
  * `readOnly` is checked before anything else is inspected: a disabled write must
  * not depend on the file's state, its mtime or its size to be refused.
  */
-function readOnlyRefusal(settings: RuntimeSettings): ToolOutcome | null {
+export function readOnlyRefusal(settings: RuntimeSettings): ToolOutcome | null {
   return settings.readOnly ? fail(writeRefusal(settings, 0) as string) : null;
 }
 

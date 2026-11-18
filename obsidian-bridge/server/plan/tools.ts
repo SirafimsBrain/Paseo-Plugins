@@ -1,5 +1,9 @@
 import type { RuntimeSettings } from "../../shared/settings";
 import type { McpToolDefinition, ToolOutcome } from "../mcp-tools";
+import { planGoal } from "./goal";
+import { planGrowth } from "./growth";
+import { planIncident } from "./incident";
+import { planLink } from "./links";
 import { planReadTool } from "./read";
 import { planSearch } from "./search";
 import { planScopeTool } from "./scope";
@@ -226,6 +230,133 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
       required: ["path"],
     },
   },
+  {
+    name: "plan_link",
+    title: "Link two leaves with an influence",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Creates, updates or removes one influence (a bee) from ` +
+      "`source` onto `target`. Both ends must be leaves of the same project and cannot be the " +
+      "same leaf. Only the source stores the edge; Obsidian shows the reverse direction as a " +
+      "backlink, so the two sides cannot disagree. A cycle is allowed and reported by " +
+      "`plan_read` as `beeCycle`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "The influencing leaf (holds the edge)." },
+        target: { type: "string", description: "The influenced leaf." },
+        status: {
+          type: "string",
+          description: "active, watching, resolved, cancelled; default `active` when created.",
+        },
+        impact: { type: "string", description: "What the influence means for the target." },
+        remove: { type: "boolean", description: "Drop the edge instead of writing it." },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["source", "target"],
+    },
+  },
+  {
+    name: "plan_incident",
+    title: "Create or update an incident",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Creates an incident in '<project>/_incidents/<slug>' or updates ` +
+      "an existing one, and keeps `blocks:` (the incident) and `blocked_by:` (each leaf) in " +
+      "sync in both directions. Only `open` and `investigating` incidents block their leaves. " +
+      "The status itself moves through `plan_set_status`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "`<project>/_incidents/<slug>`; the file is created when it does not exist.",
+        },
+        name: { type: "string", description: "Incident title; required when creating." },
+        description: { type: "string", description: "What goes wrong, in one or two sentences." },
+        severity: { type: "string", description: "low, medium, high, critical; default `medium`." },
+        status: {
+          type: "string",
+          description: "Creation only: open, investigating, resolved, cancelled (default `open`).",
+        },
+        project: {
+          type: "string",
+          description: "Project root path or link; inferred from the path's first folder.",
+        },
+        blocks: { type: "array", description: "Leaf paths this incident blocks." },
+        unblock: { type: "array", description: "Leaf paths to detach from this incident." },
+        notes: { type: "string", description: "Replacement text for `## Заметки`." },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "plan_goal",
+    title: "Create, update or propose a goal",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Authors a goal in '<project>/_goals/<slug>': \`create\` writes ` +
+      "it as `draft` with its steps, `update` changes the formal text or the steps, `propose` " +
+      "moves a draft to `proposed` for a human to approve. Approval and materialisation are " +
+      "`plan_approve_goal`, never this tool.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["create", "update", "propose"],
+          description: "What to do with the goal; default `create`.",
+        },
+        path: { type: "string", description: "`<project>/_goals/<slug>` relative to the planning root." },
+        name: { type: "string", description: "Goal title; required when creating." },
+        formal_text: { type: "string", description: "The formal statement of the goal." },
+        plan: {
+          type: "array",
+          description: "Steps as objects `{id?, title, description?}` or plain titles; null clears them.",
+        },
+        project: {
+          type: "string",
+          description: "Project root path or link; inferred from the path's first folder.",
+        },
+        notes: { type: "string", description: "Replacement text for `## Заметки`." },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "plan_growth",
+    title: "Record progress on a node or goal",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Upserts the \`growth:\` record of one node or goal: status, ` +
+      "summary, progress and steps. Steps merge by title, so re-recording a step updates it " +
+      "instead of duplicating it; `replace: true` starts the list over. A snapshot of the " +
+      "previous state is written first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "The node or goal whose growth you record." },
+        status: { type: "string", description: "active, stalled, done, cancelled." },
+        summary: { type: "string", description: "One sentence about where the work stands." },
+        progress: { type: "number", description: "0–100, an integer percentage." },
+        steps: {
+          type: "array",
+          description:
+            "Steps as objects `{title, state?, note?, at?}` or titles; `state` is pending, " +
+            "in_progress, completed, skipped or failed.",
+        },
+        replace: { type: "boolean", description: "Replace the step list instead of merging by title." },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path"],
+    },
+  },
 ];
 
 type PlanHandler = (
@@ -241,6 +372,10 @@ const HANDLERS: Record<string, PlanHandler> = {
   plan_update_node: (settings, input) => planUpdateNode(settings, input),
   plan_set_status: (settings, input) => planSetStatus(settings, input),
   plan_history: (settings, input) => planHistory(settings, input),
+  plan_link: (settings, input) => planLink(settings, input),
+  plan_incident: (settings, input) => planIncident(settings, input),
+  plan_goal: (settings, input) => planGoal(settings, input),
+  plan_growth: (settings, input) => planGrowth(settings, input),
 };
 
 /**

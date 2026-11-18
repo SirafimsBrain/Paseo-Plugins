@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.13.11**.
+Version covered: **0.14.11**.
 
 ## 1. Purpose and scope
 
@@ -62,7 +62,11 @@ obsidian-bridge/
 │   │   ├── read.ts          # `plan_read`: tree in memory, overview, node context, beeCycle (0.12.11)
 │   │   ├── search.ts        # `plan_search`: index narrowed to planRoot + frontmatter filters (0.12.11)
 │   │   ├── write.ts         # create/update/status/history, snapshots, journal (0.13.11)
-│   │   └── journal.ts       # append-only `_journal.md` lines (0.13.11)
+│   │   ├── journal.ts       # append-only `_journal.md` lines (0.13.11)
+│   │   ├── links.ts         # `plan_link`: leaf-to-leaf influences (0.14.11)
+│   │   ├── incident.ts      # `plan_incident`: blocks/blocks_by in sync both ways (0.14.11)
+│   │   ├── goal.ts          # `plan_goal`: create/update/propose (0.14.11)
+│   │   └── growth.ts        # `plan_growth`: progress record on a node or goal (0.14.11)
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
@@ -426,7 +430,26 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11)
+
+### 0.14.11 — links, incidents, goals and growth
+
+Feature release (0.13.11 → 0.14.11), stage 5 of the migration. The catalogue grows to 24 tools; the four new ones write
+relations rather than tree files, and all of them reuse the stage-4 write path.
+
+| Tool / module | Behaviour |
+| --- | --- |
+| `plan_link` | creates, updates or removes one bee on the source's `influences:`; both ends must be leaves of the same project, a self-loop is refused, an illegal bee transition lists what is allowed, and `remove: true` drops the edge (a second removal is a no-op) |
+| `plan_incident` | creates `<project>/_incidents/<slug>.md` or updates it, and keeps `blocks:`/`blocked_by:` in sync on both sides; only `open`/`investigating` block, so resolving an incident unblocks its leaves without rewriting them; a status change is refused with a pointer to `plan_set_status` |
+| `plan_goal` | `create` (draft, steps with stable `s1…` ids), `update` (formal text, steps, notes, project) and `propose` (draft → proposed); approval stays with `plan_approve_goal` |
+| `plan_growth` | upserts `growth:` on a node or goal: status, summary, progress 0–100 and steps; steps merge by title, `replace: true` starts over; an incident is refused as a subject |
+| `server/plan/write.ts` | exports `loadWritableNode` (read + `expected_revision` + `accept_external`) and `commitNodeChange` (snapshot, counters, body, temp + rename), so every new write takes the same path |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **36 suites / 311 tests** pass, covering the edge read from both sides,
+self-loop and cross-project refusals, incident create/attach/detach, `blocking: false` after `resolved`, the goal
+draft → proposed flow with its snapshot, growth merge/replace, and the refusals that write nothing. Not done yet, by
+design: multi-file operations (`plan_move_node`, `plan_archive_node`, `plan_approve_goal`, `plan_restore`), validation,
+import and the SKILL files.
 
 ### 0.13.11 — writing a plan: create, update, status, history
 
@@ -1138,3 +1161,32 @@ or returns one snapshot's frontmatter and body. It never writes, so `readOnly` d
 Journal lines look like
 `2026-11-18T10:40:00Z · plan_set_status · [[Workspaces/centurion/backend/auth/session-store|session-store]] · v2 r4 → r5 · actor: codex · status: in_progress → blocked · reason: …`.
 `_journal.md` is created with a `# Journal` heading on the first write and is only ever appended to.
+
+### 15.7 Relations: links, incidents, goals and growth (0.14.11)
+
+Relations are stored where the relation lives, not in a second table: an influence is an entry in the source's
+`influences:`, a block is `blocks:` on the incident plus `blocked_by:` on the leaf, a goal is a file in `_goals/` with its
+steps in `plan:`, and growth is a `growth:` object inside its subject.
+
+`links.ts` writes the source only. The reverse direction is Obsidian's backlink, so the two halves cannot disagree, and a
+cycle cannot be forbidden by the schema — it is computed by `plan_read` (`beeCycle`) instead. Both ends must be leaves of
+the same project: an influence orders two pieces of work inside one plan, and a cross-project edge would claim a
+dependency the tree cannot express. Updating an existing edge checks `canTransitionBee`, records the target's current
+`v/r` in the entry, and bumps the source's revision with a `link_update` snapshot; removing an edge that does not exist
+returns `removed: false` without writing, so a retry is safe.
+
+`incident.ts` is the only writer of the two-sided block. Creating the incident writes the file first and then each leaf's
+`blocked_by:`; attaching and detaching leaves on update does the same in reverse, and every touched file gets its own
+snapshot. Only `open` and `investigating` are blocking (`BLOCKING_INCIDENT_STATUSES`), so `plan_set_status` to `resolved`
+unblocks the leaves without touching them — the status is the single source of truth and the links stay as history. A
+leaf from another project is refused before anything is written.
+
+`goal.ts` covers authoring, not approval. `create` writes `status: draft` with steps normalised to `{id, title,
+description?}` (ids `s1…sn` unless given, duplicates refused), `update` edits the formal text or the steps of a live goal,
+and `propose` performs the one `draft → proposed` transition. A goal that is `cancelled` or `superseded` is not edited:
+create a new one and keep the old history. `plan_approve_goal` (stage 6) is the only path from `proposed` to leaves, so
+an agent cannot author and approve the same plan in one tool.
+
+`growth.ts` upserts a single record: `status`, `summary`, `progress` 0–100, `steps`. Steps are keyed by title, so
+recording the same step again updates its state instead of appending a duplicate, and `replace: true` is the explicit way
+to start a new list. An incident is refused: a defect is resolved through its lifecycle, not described as progress.

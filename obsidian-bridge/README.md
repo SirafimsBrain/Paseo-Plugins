@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.13.11)
+## What it does (0.14.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -94,6 +94,11 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   the `__history` snapshots every write takes first. A stale `expected_revision`, a manual Obsidian edit, an illegal
   transition, or overriding a status the user set without a `reason` all refuse instead of overwriting, and every change
   appends one line to the project's `_journal.md`.
+- **Links, incidents, goals and growth (0.14.11).** `plan_link` creates, updates and removes an influence between two
+  leaves of one project (a self-loop and a cross-project edge are refused), `plan_incident` keeps `blocks:` and
+  `blocked_by:` in sync on both sides while only `open`/`investigating` incidents block, `plan_goal` authors a goal
+  (`create`, `update`, `propose`) for a human to approve, and `plan_growth` upserts the progress record of a node or
+  goal, merging steps by title. Each write snapshots the previous state first and journals the change.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only
