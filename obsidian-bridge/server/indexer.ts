@@ -14,7 +14,8 @@ import { parseNote } from "./parse";
 import { indexPathFor, modelsDir, resolveVaultRoot } from "./paths";
 import { scanVault, type ScanOutcome } from "./scan";
 import { BridgeStore } from "./store";
-import { isExcluded, isIncluded, isMarkdownPath, looksLikeVault } from "./vault";
+import { isExcluded, isIncluded, isMarkdownPath, isPlanSystemPath, looksLikeVault } from "./vault";
+import { DEFAULT_PLAN_ROOT, planRootSummary } from "./plan/paths";
 
 /**
  * Owns the vault index for the plugin process.
@@ -305,6 +306,9 @@ export class VaultIndexer {
       directories: settings
         ? resolveRoleDirs(settings)
         : { workspace: "", inbox: null, out: null, raw: null },
+      plan: settings
+        ? planRootSummary(settings)
+        : { root: DEFAULT_PLAN_ROOT, path: null, exists: false },
       dbPath: this.root ? indexPathFor(this.root) : null,
       error: this.state.error,
       embedding: {
@@ -337,6 +341,7 @@ export class VaultIndexer {
         if (!rel || !isMarkdownPath(rel)) return;
         const settings = this.settings;
         if (!settings) return;
+        if (isPlanSystemPath(rel)) return;
         if (!isIncluded(rel, settings.includeFolders)) return;
         if (isExcluded(rel, settings.excludeGlobs)) return;
         this.pending.add(rel);

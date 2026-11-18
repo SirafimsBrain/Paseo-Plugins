@@ -263,6 +263,21 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
 
       <SettingsCard>
         <SettingsSection
+          title="Planning"
+          info="Where the plan_* tools work. A directory inside the one above, never a second vault: nothing above the vault and nothing outside this folder can be addressed."
+        >
+          <SettingsInput
+            label="Planning directory"
+            hint="Vault-relative folder, e.g. Workspaces. Empty = planning is not configured and plan_scope says so. Its __history and _archive folders are never indexed."
+            initialValue={values.planRoot}
+            placeholder="Workspaces"
+            onChangeText={(text: string) => patch({ planRoot: text })}
+          />
+        </SettingsSection>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingsSection
           title="Indexing"
           info="Which notes are indexed, how often the index is reconciled, and how the full-text index tokenizes text."
         >

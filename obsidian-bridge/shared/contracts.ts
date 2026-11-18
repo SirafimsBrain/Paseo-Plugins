@@ -101,6 +101,15 @@ export const vaultStatusSchema = z.object({
     out: z.string().nullable(),
     raw: z.string().nullable(),
   }),
+  /**
+   * Planning root (0.11.11): where `plan_*` works. `path` is null and `exists`
+   * false when the configured directory does not exist yet.
+   */
+  plan: z.object({
+    root: z.string(),
+    path: z.string().nullable(),
+    exists: z.boolean(),
+  }),
   /** Optional Obsidian-side enrichment; `enabled: false` is a normal state. */
   enrichment: enrichmentStatusSchema,
   /** Semantic layer: model, vector coverage and background job. */

@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.10.11)
+## What it does (0.11.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -78,6 +78,12 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   updated, skipped and could not read, and how long it took) and the time of the last full sync; embedding now waits for
   a short quiet period after watched-note changes, so a Git pull or a Syncthing burst becomes one job instead of several
   model loads.
+- **Planning foundation (0.11.11).** A `planRoot` setting (default `Workspaces`) reserves a directory inside the vault
+  for planning tools, and `plan_scope` reports whether that tree exists, what it holds and whether writes are enabled —
+  without opening the index, creating a folder or touching a note. Planning never leaves that directory, and its
+  `__history` (revision snapshots) and `_archive` (archived subtrees) are excluded from indexing, search and listings and
+  refused by the reading tools, so history cannot mix with the live tree. The plan tools themselves (`plan_read`,
+  `plan_create_node`, …) arrive in the next stages.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only

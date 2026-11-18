@@ -2,6 +2,26 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.11.11 — planning root and its boundary (2026-11-18)
+
+Feature release (0.10.11 → 0.11.11), first stage of the `luck-planner` migration. No Paseo API change: the SDK stays
+`@getpaseo/plugin ^0.16.0` and the floor `>=0.15.0`.
+
+| Change | Behaviour |
+| --- | --- |
+| setting `planRoot` | vault-relative, default `Workspaces`; empty = planning not configured; `OBSIDIAN_PLAN_ROOT` overrides it for a standalone MCP process |
+| setting schema | stays version 4 — a key with a default validates an older stored document, so no migration is required |
+| `VaultStatus.plan` | `{ root, path, exists }` in `obsidian-bridge.status` and its stream; `plan` also appears in `obsidian_status` |
+| tool `plan_scope` | 14th tool; answered without opening or creating the index; `planning_available: false` with `reason` `not_configured`/`invalid`/`missing`/`empty` |
+| `__history` and `_archive` | never walked, watched, indexed, searched or listed; refused by `obsidian_read`, `obsidian_outline` and `obsidian_edit` |
+| path boundary | a `plan_*` argument is vault-relative to `planRoot`; absolute paths, `..`, `.obsidian` and symlinks out of the root are refused |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **24 suites / 195 tests** pass. Nothing was deployed or verified against a
+live Paseo host in this stage; the change is server-side plus one settings field.
+
+Explicitly not built yet (by plan): reading and writing plan nodes, snapshots, links, goals, incidents, growth,
+`plan_validate`, `plan_import`, the three planning skills and the dashboard.
+
 ## Plugin 0.10.11 — edit recovery, Obsidian formats, scan truth (2026-11-17)
 
 Feature release (0.9.11 → 0.10.11), independent of the host version: no Paseo API

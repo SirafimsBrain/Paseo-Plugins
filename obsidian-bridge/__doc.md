@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.10.11**.
+Version covered: **0.11.11**.
 
 ## 1. Purpose and scope
 
@@ -51,6 +51,10 @@ obsidian-bridge/
 │   ├── indexer.ts           # watch + reconcile timer + enrichment lifecycle + status
 │   ├── obsidian-api.ts      # optional Local REST API client: probe, fuzzy search, note JSON, open, SSE
 │   ├── enrichment.ts        # enrichment lifecycle + fuzzy signal with failure cache
+│   ├── plan/
+│   │   ├── paths.ts         # planning root + plan-relative path barrier (0.11.11)
+│   │   ├── scope.ts         # `plan_scope`: availability, projects, limits (0.11.11)
+│   │   └── tools.ts         # `plan_*` catalogue and dispatch (0.11.11)
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
@@ -296,6 +300,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `inboxDir` | `Inbox` | Vault-relative incoming-material role. Empty = role disabled. |
 | `outDir` | `Documentation` | Vault-relative authored-documents role. |
 | `rawDir` | `raw` | Vault-relative scratch role. |
+| `planRoot` | `Workspaces` | Vault-relative directory the `plan_*` tools are confined to (0.11.11). Resolved through `vaultPath`, so absolute paths, `..` and symlinks out of the vault are refused. Empty = planning not configured. |
 | `indexingEnabled` | `true` | Pause indexing without clearing the path. |
 | `includeFolders` | `""` | Comma-separated vault-relative folders. |
 | `excludeGlobs` | `.obsidian/**, .trash/**, .git/**, .smart-env/**` | Comma-separated globs, `*`/`**` supported. |
@@ -321,7 +326,8 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
 That choice is deliberate (19 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
 version is 4: role directories and `maxWriteChars` came in 0.2.0 (`readOnly` defaults to `false` since the write tools
-exist), 0.3.0 added the four semantic keys, and 0.4.0 added the three enrichment keys. If the setting
+exist), 0.3.0 added the four semantic keys, and 0.4.0 added the three enrichment keys. 0.11.11 added `planRoot`:
+a key with a default, so a stored document still validates and the schema version stays 4. If the setting
 count grows past what a form can hold (per-vault registries, credentials, index diagnostics), a loopback panel like
 `remote-control`'s console becomes the better home — the RPC layer already isolates that decision.
 
@@ -411,7 +417,27 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11)
+
+### 0.11.11 — the planning root and its boundary
+
+Feature release (0.10.11 → 0.11.11), the first stage of the `luck-planner` migration (§15). It adds one setting,
+one tool and one boundary, and changes nothing the document tools already answered.
+
+| Change | Behaviour |
+| --- | --- |
+| `planRoot` setting | vault-relative, default `Workspaces`; mirrored to the MCP settings file and read from `OBSIDIAN_PLAN_ROOT` when set; shown in the settings screen and as `plan` in `obsidian_status` |
+| `server/plan/paths.ts` | `resolvePlanRoot` (vault root → `normalizeRoleDir` → `resolveInsideVault` → `realpath` containment) and `resolvePlanPath` (same ladder for a plan-relative path, with the nearest existing ancestor resolved so a symlink out of the root is caught before a write) |
+| `plan_scope` | `planning_available`, `reason` (`not_configured`/`invalid`/`missing`/`empty`), resolved root and path, project list, document count, `writesEnabled`, limits, and the hidden system directories; answered before the index is opened and never creates a directory |
+| `__history` / `_archive` | skipped by `walkMarkdown` and by the watcher, so they never reach FTS, search, listings or counts; `obsidian_read`, `obsidian_outline` and `obsidian_edit` refuse a path inside them |
+
+The refusals are the point: a snapshot is history, not a note. If it were indexed, every revision would compete with
+the live node in search, and an agent could “fix” the past. The boundary is enforced in code, not in a skill.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **24 suites / 195 tests** pass, including `plan-paths`,
+`plan-scope` and the new history/archive case in `indexer`. Not done at this stage, by design: reading a plan node,
+writing one, snapshots, links, goals, incidents, growth, `plan_validate`, `plan_import`, the three planning skills and
+the dashboard (§15).
 
 ### 0.10.11 — edit recovery, Obsidian formats, scan truth, port audit
 
@@ -904,3 +930,60 @@ expose isolated notes. It is documented, not scheduled, for concrete reasons:
 
 If visualization is picked up later, the cheap card comes first, and the graph only
 after a concrete use case that the card does not serve.
+
+## 15. Planning foundation (0.11.11)
+
+The plugin is also becoming the home of project planning, taking over the core of the frozen `luck-planner` plugin.
+Planning is a **directory inside the vault**, not a second plugin, a second MCP server or a second database:
+`planRoot` (default `Workspaces`) is resolved against `vaultPath`, and the `plan_*` tools share this server, this
+settings file, this index and this limit gate. Stage 1 delivers the boundary only; the plan model follows in later
+stages (`plan_read`/`plan_search`, then writes and snapshots, links and goals, multi-file operations, validation and
+import, the three skills, and only after that a dashboard).
+
+### 15.1 The boundary
+
+```
+vaultPath/                      # the one directory available to Paseo
+└── planRoot/                   # default: Workspaces
+    ├── _index.md               # project registry (not a tree node)
+    ├── _schema.md              # field and status schema
+    └── <project>/
+        ├── <project>.md        # root node: its folder is its children
+        ├── _journal.md         # append-only operations log
+        ├── _goals/, _incidents/
+        ├── _archive/           # archived subtrees — never indexed
+        └── <trunk>/<trunk>.md, <trunk>/<branch>/<branch>.md, …
+            └── __history/      # revision snapshots — never indexed
+```
+
+A `plan_*` argument is a path **relative to `planRoot`**, so no tool accepts a vault path or an absolute path. Both
+boundaries are applied in order (`server/plan/paths.ts`): `normalizeRoleDir` refuses absolute paths, `..`, control
+characters and `.obsidian`; `resolveInsideVault` refuses anything above the vault; a `realpath` comparison against the
+planning root refuses a symlink that leads out of it. For a file that does not exist yet, the nearest existing ancestor
+is resolved, so a symlinked folder is caught before the write, not after.
+
+### 15.2 `plan_scope`
+
+The first call of every planning workflow answers a question that has no safe guess:
+
+| Field | Meaning |
+| --- | --- |
+| `planning_available` | `true` only when the directory exists and holds at least one plan document |
+| `reason` | `not_configured` (no `vaultPath` or empty `planRoot`), `invalid` (bad path/symlink), `missing`, `empty` |
+| `root`, `path` | configured vault-relative folder and its resolved absolute path |
+| `projects` | first-level folders that contain notes (`projectCount` is its size) |
+| `documents` | Markdown files under the root, excluding `__history` and `_archive` |
+| `registry`, `schema` | vault paths of `_index.md`/`_schema.md` when they exist |
+| `writesEnabled` | `false` when no directory resolves or `readOnly` is on |
+| `limits`, `systemDirs` | `maxWriteChars`, `maxNoteBytes`; the two hidden directories |
+
+It never creates anything: a missing `Workspaces` is reported, not materialised, and the tool is answered before the
+index is opened — so a scope check on a fresh install leaves no database behind.
+
+### 15.3 Hidden history and archive
+
+`__history` and `_archive` are skipped in `walkMarkdown` (which feeds the scan, the index, search, listings and the
+counts) and in the file watcher, and `obsidian_read`, `obsidian_outline` and `obsidian_edit` refuse a path inside them.
+A snapshot is a record of what a node was, not a note competing with it: indexing every revision would make search
+return the same plan many times and would let an agent edit the past. They become reachable through `plan_history`
+only, and `readOnly` still blocks every planning write (stage 4).

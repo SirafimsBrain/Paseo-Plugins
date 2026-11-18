@@ -17,10 +17,12 @@ import { fuzzySearch } from "./enrichment";
 import { createObsidianApi } from "./obsidian-api";
 import { memoryReport } from "./memory";
 import { indexPathFor, resolveVaultRoot } from "./paths";
+import { planRootSummary } from "./plan/paths";
+import { PLAN_TOOLS, dispatchPlanTool } from "./plan/tools";
 import { scanVault } from "./scan";
 import { searchIndex } from "./search";
 import { BridgeStore } from "./store";
-import { looksLikeVault, readVaultNote, splitList } from "./vault";
+import { isPlanSystemPath, looksLikeVault, readVaultNote, splitList } from "./vault";
 
 /**
  * Tool definitions and dispatch for the obsidian-bridge MCP server.
@@ -343,6 +345,9 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       "check that the bridge is connected before relying on it.",
     inputSchema: { type: "object", properties: {} },
   },
+  // Planning tools (0.11.11) share this server and settings; their boundary is
+  // the `planRoot` directory inside the vault, not the whole vault.
+  ...PLAN_TOOLS,
 ];
 
 export interface ToolOutcome {
@@ -579,6 +584,14 @@ export async function dispatchTool(
 ): Promise<ToolOutcome> {
   const input = (args ?? {}) as Record<string, unknown>;
 
+  // Planning tools own a narrower boundary (`planRoot`) and answer before the
+  // vault index is opened: `plan_scope` must report a missing or empty root
+  // without creating a database or a directory.
+  if (name.startsWith("plan_")) {
+    const planned = dispatchPlanTool(name, settings);
+    if (planned) return planned;
+  }
+
   // Pure configuration query: answered without opening (and creating) an index.
   if (name === "obsidian_directories") {
     const dirs = resolveRoleDirs(settings);
@@ -655,6 +668,13 @@ export async function dispatchTool(
       case "obsidian_read": {
         const relPath = typeof input.path === "string" ? input.path.trim() : "";
         if (relPath.length === 0) return fail("path is required.");
+        if (isPlanSystemPath(relPath)) {
+          return fail(
+            `'${relPath}' is planning history (__history) or the archive (_archive). ` +
+              "Read it with the planning tools (`plan_history`); the document tools hide it " +
+              "so snapshots and archived nodes do not mix with the live tree.",
+          );
+        }
         const heading = typeof input.heading === "string" ? input.heading : undefined;
         const note = readVaultNote(runtime.root, relPath, { heading });
         if ("error" in note) return fail(note.error);
@@ -689,6 +709,13 @@ export async function dispatchTool(
         }
         const relPath = typeof input.path === "string" ? input.path.trim() : "";
         if (relPath.length === 0) return fail("path is required.");
+        if (isPlanSystemPath(relPath)) {
+          return fail(
+            `'${relPath}' is planning history (__history) or the archive (_archive): snapshots ` +
+              "are immutable. Change the live node instead; the next revision writes a new " +
+              "snapshot.",
+          );
+        }
         const ignoreWhitespace = input.ignore_whitespace === true;
         const outcome = replaceInNote({
           root: runtime.root,
@@ -731,6 +758,12 @@ export async function dispatchTool(
       case "obsidian_outline": {
         const relPath = typeof input.path === "string" ? input.path.trim() : "";
         if (relPath.length === 0) return fail("path is required.");
+        if (isPlanSystemPath(relPath)) {
+          return fail(
+            `'${relPath}' is planning history (__history) or the archive (_archive); the ` +
+              "document tools do not outline it. Use the planning tools instead.",
+          );
+        }
         const note = readVaultNote(runtime.root, relPath, { maxBytes: 4 * 1024 * 1024 });
         if ("error" in note) return fail(note.error);
         // Obsidian's metadata cache is authoritative when the app answers;
@@ -846,6 +879,7 @@ export async function dispatchTool(
         return json({
           vaultPath: runtime.root,
           directories: runtime.dirs,
+          plan: planRootSummary(settings),
           notesByRole: byRole,
           isObsidianVault: looksLikeVault(runtime.root),
           notes: counts.notes,

@@ -67,6 +67,15 @@ export const obsidianBridgeSettings = defineSettings({
      */
     rawDir: z.string().trim().max(512).default("raw"),
     /**
+     * Vault-relative directory the planning tools (`plan_*`) are confined to.
+     * Default `Workspaces`, the folder right below the configured directory.
+     * It is not a second vault: everything is resolved against `vaultPath`
+     * first, so `..`, absolute paths and symlinks out of the vault are refused
+     * by the same code that guards the document tools. Empty = planning is not
+     * configured and `plan_scope` answers `planning_available: false`.
+     */
+    planRoot: z.string().trim().max(512).default("Workspaces"),
+    /**
      * Indexing starts automatically once `vaultPath` resolves to a real
      * directory — the user typing the path in the settings screen is the
      * consent for the first scan. This switch only exists so an operator can
@@ -170,6 +179,7 @@ export interface RuntimeSettings {
   inboxDir: string;
   outDir: string;
   rawDir: string;
+  planRoot: string;
   indexingEnabled: boolean;
   includeFolders: string;
   excludeGlobs: string;
@@ -195,6 +205,7 @@ export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettin
     inboxDir: values.inboxDir,
     outDir: values.outDir,
     rawDir: values.rawDir,
+    planRoot: values.planRoot,
     indexingEnabled: values.indexingEnabled,
     includeFolders: values.includeFolders,
     excludeGlobs: values.excludeGlobs,

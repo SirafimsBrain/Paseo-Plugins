@@ -37,9 +37,12 @@ describe("tool catalogue", () => {
       "obsidian_index",
       "obsidian_diagnose",
       "obsidian_status",
+      "plan_scope",
     ]);
     for (const tool of MCP_TOOLS) {
-      expect(tool.name.startsWith("obsidian_")).toBe(true);
+      expect(
+        tool.name.startsWith("obsidian_") || tool.name.startsWith("plan_"),
+      ).toBe(true);
     }
   });
 

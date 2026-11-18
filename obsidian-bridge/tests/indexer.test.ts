@@ -62,6 +62,23 @@ describe("VaultIndexer", () => {
     expect(status.error).toContain("not a readable directory");
   });
 
+  it("never indexes planning history or the archive", async () => {
+    const created = makeWorkspace({
+      "Workspaces/centurion/centurion.md": "# Centurion\n",
+      "Workspaces/centurion/__history/centurion.v1.r1.md": "# Snapshot\n",
+      "Workspaces/_archive/old/old.md": "# Archived\n",
+    });
+    workspaces.push(created);
+    const indexer = new VaultIndexer(async () => runtimeSettings(created.vault));
+    indexers.push(indexer);
+    await indexer.start();
+
+    expect(indexer.status().indexedNotes).toBe(1);
+    const outcome = await indexer.scanNow();
+    expect(outcome?.skipped).toBe(0);
+    expect(indexer.status().indexedNotes).toBe(1);
+  });
+
   it("respects include folders when scanning", async () => {
     const created = makeWorkspace({
       "Projects/one.md": "# One\n",

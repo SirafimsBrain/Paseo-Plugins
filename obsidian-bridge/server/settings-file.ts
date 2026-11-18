@@ -17,6 +17,7 @@ const DEFAULTS: RuntimeSettings = {
   inboxDir: "Inbox",
   outDir: "Documentation",
   rawDir: "raw",
+  planRoot: "Workspaces",
   indexingEnabled: true,
   includeFolders: "",
   excludeGlobs: ".obsidian/**, .trash/**, .git/**, .smart-env/**",
@@ -64,7 +65,7 @@ function parseFile(filePath: string): Partial<RuntimeSettings> {
     if (typeof values.vaultPath === "string") {
       parsed.vaultPath = values.vaultPath.trim().slice(0, 1024);
     }
-    for (const key of ["inboxDir", "outDir", "rawDir"] as const) {
+    for (const key of ["inboxDir", "outDir", "rawDir", "planRoot"] as const) {
       if (typeof values[key] === "string") parsed[key] = values[key].trim().slice(0, 512);
     }
     if (typeof values.indexingEnabled === "boolean") parsed.indexingEnabled = values.indexingEnabled;
@@ -123,6 +124,8 @@ function parseEnv(): Partial<RuntimeSettings> {
   if (outDir) parsed.outDir = outDir.slice(0, 512);
   const rawDir = optionalString(process.env.OBSIDIAN_RAW_DIR);
   if (rawDir) parsed.rawDir = rawDir.slice(0, 512);
+  const planRoot = optionalString(process.env.OBSIDIAN_PLAN_ROOT);
+  if (planRoot) parsed.planRoot = planRoot.slice(0, 512);
   const includeFolders = optionalString(process.env.OBSIDIAN_INCLUDE_FOLDERS);
   if (includeFolders) parsed.includeFolders = includeFolders;
   const excludeGlobs = optionalString(process.env.OBSIDIAN_EXCLUDE_GLOBS);

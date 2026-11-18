@@ -86,6 +86,25 @@ export function isMarkdownPath(relPath: string): boolean {
 }
 
 /**
+ * Planning system directories, hidden from the document tools everywhere.
+ *
+ * `__history` holds revision snapshots and `_archive` holds archived subtrees;
+ * both are planning bookkeeping, not knowledge. They are excluded from the
+ * walk (so they never reach FTS, search, listings or counts), the file watcher
+ * ignores changes inside them, and `obsidian_read` refuses such a path —
+ * snapshots are read only through the planning tools.
+ */
+export const PLAN_SYSTEM_DIRS = ["__history", "_archive"] as const;
+
+/** True when a vault-relative path has a planning system directory segment. */
+export function isPlanSystemPath(relPath: string): boolean {
+  const segments = relPath.replace(/\\/g, "/").split("/");
+  return segments.some((segment) =>
+    (PLAN_SYSTEM_DIRS as readonly string[]).includes(segment),
+  );
+}
+
+/**
  * Walks the vault and returns vault-relative Markdown paths that pass the
  * include/exclude rules. Bounded by `limit` so a misconfigured path cannot
  * hang a tool call.
@@ -111,6 +130,7 @@ export function walkMarkdown(
       const rel = relDir.length === 0 ? entry.name : `${relDir}/${entry.name}`;
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
+        if (isPlanSystemPath(rel)) continue;
         if (isExcluded(`${rel}/`, options.excludeGlobs)) continue;
         stack.push(rel);
         continue;

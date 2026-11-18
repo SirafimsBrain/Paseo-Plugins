@@ -52,6 +52,7 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     inboxDir: "Inbox",
     outDir: "Documentation",
     rawDir: "raw",
+    planRoot: "Workspaces",
     indexingEnabled: true,
     includeFolders: "",
     excludeGlobs: ".obsidian/**, .trash/**, .git/**, .smart-env/**",
@@ -76,6 +77,7 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     inboxDir: string;
     outDir: string;
     rawDir: string;
+    planRoot: string;
     indexingEnabled: boolean;
     includeFolders: string;
     excludeGlobs: string;
