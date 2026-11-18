@@ -2,6 +2,22 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.11.12 — plan file format and snapshots (2026-11-18)
+
+Patch release (0.11.11 → 0.11.12): internal migration stage 2, no tool or setting changed. The SDK, host floor and
+tool catalogue stay as in 0.11.11.
+
+| Change | Behaviour |
+| --- | --- |
+| dependency `yaml` (^2.9.1) | frontmatter parsed and written through one library instead of a hand-written parser; duplicate keys are an error |
+| `server/plan/model.ts` | kinds, status dictionaries, `ALLOWED_CHILD_KINDS`, leaf transitions, snapshot reasons, canonical key order |
+| `server/plan/frontmatter.ts` | parse/serialize a plan file, key order preserved, body untouched, unparsable files refused rather than rewritten |
+| `server/plan/sections.ts` | `## Влияния`, `## Блокировки`, `## Дети`, `## Журнал` rendered from frontmatter, `## Заметки` kept, `—` for an empty section |
+| `server/plan/snapshot.ts` | `<dir>/__history/<slug>.v<v>.r<r>.md`, snapshot frontmatter with the counters of the state being replaced, relation fields dropped |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **28 suites / 241 tests** pass. Nothing was deployed or checked against a
+live Paseo host; the new module surface is not reachable from any tool yet.
+
 ## Plugin 0.11.11 — planning root and its boundary (2026-11-18)
 
 Feature release (0.10.11 → 0.11.11), first stage of the `luck-planner` migration. No Paseo API change: the SDK stays

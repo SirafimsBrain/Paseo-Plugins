@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.11.11**.
+Version covered: **0.11.12**.
 
 ## 1. Purpose and scope
 
@@ -54,7 +54,11 @@ obsidian-bridge/
 │   ├── plan/
 │   │   ├── paths.ts         # planning root + plan-relative path barrier (0.11.11)
 │   │   ├── scope.ts         # `plan_scope`: availability, projects, limits (0.11.11)
-│   │   └── tools.ts         # `plan_*` catalogue and dispatch (0.11.11)
+│   │   ├── tools.ts         # `plan_*` catalogue and dispatch (0.11.11)
+│   │   ├── model.ts         # kinds, statuses, transitions, key order (0.11.12)
+│   │   ├── frontmatter.ts   # YAML read/write with key order preserved (0.11.12)
+│   │   ├── sections.ts      # generated body sections, kept `## Заметки` (0.11.12)
+│   │   └── snapshot.ts      # `<slug>.v<v>.r<r>.md` names and snapshot frontmatter (0.11.12)
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
@@ -417,7 +421,23 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12)
+
+### 0.11.12 — the plan file format and snapshots
+
+Internal stage 2 of the migration, released as a patch because no tool changed behaviour: the modules it adds are the
+ones `plan_read`, `plan_update_node` and `plan_history` will call.
+
+| Module | Contents |
+| --- | --- |
+| `model.ts` | `PLAN_KINDS`, `NODE_KINDS`, `ALLOWED_CHILD_KINDS`, `LEAF_STATUSES` + `LEAF_TRANSITIONS`, bee/incident/goal/growth dictionaries, `BLOCKING_INCIDENT_STATUSES`, `SNAPSHOT_REASONS`, `PLAN_KEY_ORDER`, `linkLabel` — ported from `luck-planner shared/tree.ts` without adding a status |
+| `frontmatter.ts` | `parsePlanDocument` / `serializePlanDocument` on the `yaml` package (new dependency); key order preserved, duplicate keys refused, a file that does not parse never rewritten |
+| `sections.ts` | `renderPlanBody` writes `## Влияния`, `## Блокировки`, `## Дети`, `## Журнал` from frontmatter, keeps `## Заметки`, writes `—` for an empty section; `bodyMatchesFrontmatter` is the divergence check `plan_validate` will use |
+| `snapshot.ts` | `snapshotFileName`/`parseSnapshotFileName`/`snapshotPathFor` (`<dir>/__history/<slug>.v<v>.r<r>.md`), `buildSnapshot` (state **before** the write, relation fields dropped), `isSnapshotFrontmatter` |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **28 suites / 241 tests** pass, including round-trip over every fixture
+document (same keys, same order, same body), status-change round-trip and the snapshot-naming matrix. Nothing is wired
+to a tool yet: `plan_scope` is still the only `plan_*` tool.
 
 ### 0.11.11 — the planning root and its boundary
 
@@ -987,3 +1007,30 @@ counts) and in the file watcher, and `obsidian_read`, `obsidian_outline` and `ob
 A snapshot is a record of what a node was, not a note competing with it: indexing every revision would make search
 return the same plan many times and would let an agent edit the past. They become reachable through `plan_history`
 only, and `readOnly` still blocks every planning write (stage 4).
+
+### 15.4 File format and snapshots (0.11.12)
+
+Four modules turn the boundary into a file model, and nothing calls them from a tool yet.
+
+- **`model.ts`** is the vocabulary, ported from `luck-planner shared/tree.ts` without inventing a status: node kinds,
+  `ALLOWED_CHILD_KINDS`, the nine leaf statuses with their transition table (a no-op is not a transition), the incident,
+  goal, bee and growth dictionaries, `BLOCKING_INCIDENT_STATUSES`, the seven snapshot reasons, the canonical key order
+  and `linkLabel`.
+- **`frontmatter.ts`** owns YAML. `parsePlanDocument` returns the mapping in document order or an actionable error (no
+  frontmatter, broken YAML, a sequence instead of a mapping, duplicate keys); `serializePlanDocument` writes the same
+  order back with `lineWidth: 0`, so a long description stays readable instead of collapsing into one escaped line.
+  A file that does not parse is never rewritten: the writer must surface the error. `withKey` changes or deletes one key
+  and keeps the rest untouched.
+- **`sections.ts`** renders the body as a view of the frontmatter: `## Влияния` (target — status — impact — `(vN rM)`),
+  `## Блокировки`, `## Дети`, `## Заметки` (carried through verbatim) and `## Журнал` (the `journal:` array). An empty
+  section is `—`, so a missing heading is a divergence rather than an empty section, and `bodyMatchesFrontmatter` is the
+  comparison `plan_validate` will report. Rendering is idempotent: rendering a rendered body changes nothing.
+- **`snapshot.ts`** names and describes a snapshot: `<dir>/__history/<slug>.v<v>.r<r>.md`, counters of the state being
+  **replaced**, `is_snapshot`/`snapshot_of`/`snapshot_reason`/`snapshot_op`, and the content fields (`name`,
+  `description`, `brief`, `payload`, `plan`, `growth`, …). Relations (`parent`, `children`, `influences`, `blocked_by`,
+  `blocks`, `goal`, `materialized`) and the per-file `journal` are dropped: a snapshot is a record of a document, not a
+  stale copy of the graph.
+
+The only new dependency is `yaml` (^2.9.1). It parses with the core schema, so timestamps stay the strings their author
+wrote, and it refuses duplicate keys instead of silently keeping the last one — both are properties a hand-written parser
+tends to get wrong.
