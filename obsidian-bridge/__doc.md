@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.12.11**.
+Version covered: **0.13.11**.
 
 ## 1. Purpose and scope
 
@@ -60,12 +60,15 @@ obsidian-bridge/
 │   │   ├── sections.ts      # generated body sections, kept `## Заметки` (0.11.12)
 │   │   ├── snapshot.ts      # `<slug>.v<v>.r<r>.md` names and snapshot frontmatter (0.11.12)
 │   │   ├── read.ts          # `plan_read`: tree in memory, overview, node context, beeCycle (0.12.11)
-│   │   └── search.ts        # `plan_search`: index narrowed to planRoot + frontmatter filters (0.12.11)
+│   │   ├── search.ts        # `plan_search`: index narrowed to planRoot + frontmatter filters (0.12.11)
+│   │   ├── write.ts         # create/update/status/history, snapshots, journal (0.13.11)
+│   │   └── journal.ts       # append-only `_journal.md` lines (0.13.11)
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
 │   ├── mcp-stable.ts        # stable bundle copy + healing older saved entries (0.9.11)
 │   ├── injection.ts         # per-agent injection marker in agent metadata (0.9.11)
+│   ├── write-gate.ts        # shared readOnly/maxWriteChars refusal (0.13.11)
 │   ├── settings-file.ts     # settings reader for the spawned server (file + env, no zod)
 │   ├── settings-mirror.ts   # atomic write of the mirror file
 │   ├── agent-record.ts      # best-effort read of an agent's saved mcpServers
@@ -423,7 +426,27 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11)
+
+### 0.13.11 — writing a plan: create, update, status, history
+
+Feature release (0.12.11 → 0.13.11), stage 4 of the migration. The catalogue grows to 20 tools; four of them write and
+one reads history, and the document tools now use the same write gate.
+
+| Tool / module | Behaviour |
+| --- | --- |
+| `plan_create_node` | one node file (`auth/auth.md`, a leaf in its parent's folder), `version: 1`/`revision: 1`, parent's `children` updated (its own revision bump and snapshot), journal line; refuses an existing file, an orphan and a child kind the parent forbids |
+| `plan_update_node` | description, name, brief, payload, `## Заметки`, kind; snapshot first; revision +1, or version +1 and revision 1 on a kind change; `expected_revision` and `accept_external` gates |
+| `plan_set_status` | one transition per call for nodes, incidents and goals; illegal and no-op moves refuse and list the allowed targets; a user-set status needs `reason`; snapshot `status_change` |
+| `plan_history` | lists snapshots (version, revision, reason, time, actor) or reads one by `version`/`revision`; the only reader of `__history` |
+| `server/write-gate.ts` | the `readOnly`/`maxWriteChars` refusal extracted from `mcp-tools.ts` and shared with the planning writes; `readOnly` is checked before the file is even read |
+| `server/plan/journal.ts` | append-only `_journal.md`: `at · tool · [[node]] · v1 r4 → r5 · actor · status · reason` |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **33 suites / 289 tests** pass, covering v1 r1 creation with the parent
+link and snapshot, the v1 r1 → snapshot v1 r1 → r2 update, the kind change to v2 r1, stale revision, external edit,
+illegal/no-op transitions, the user-override reason rule, `readOnly` on every write, and history listing/reading. Not
+done yet, by design: links, incidents, goals, growth, multi-file operations (`plan_move_node`, `plan_archive_node`,
+`plan_restore`), validation and import.
 
 ### 0.12.11 — reading a plan: overview, node context, search
 
@@ -1083,3 +1106,35 @@ the goals still `proposed`. With a `path` the answer is one node in context:
 on parsed YAML, not on text — asking for `status: done` must not return a node whose description says "done". A node hit
 through several headings collapses to one row, `limit` is 1–50, and the answer reports how many hits were `filtered` by
 frontmatter and how many were `skipped` because they are not plans.
+
+### 15.6 Writing a plan (0.13.11)
+
+`write.ts` owns the four write-shaped tools and one read-only one. The order inside every mutation is fixed, because the
+file on disk is the only copy:
+
+1. `readOnly` is checked before the file is even read (`server/write-gate.ts`, shared with the document tools);
+2. the target is resolved by path — `planRoot` boundary, no `..`, no absolute path, no symlink out;
+3. the file is read and the frontmatter parsed; a stale `expected_revision` refuses, and a file whose mtime is newer than
+   its `updated` timestamp (a manual Obsidian edit) needs `accept_external: true`;
+4. the previous state is snapshotted into `__history/` (`<slug>.v<v>.r<r>.md`); an existing snapshot for the same
+   counters is left alone, never rewritten;
+5. the new text goes through a temp file and `rename`, with size and mtime re-checked right before the rename;
+6. one line is appended to the project journal — after the write, so the journal never claims a change that failed.
+
+`plan_create_node` writes `v1 r1`, chooses the layout path (`auth/auth.md` for a node, `auth/session-store.md` for a
+leaf), refuses a missing parent, an existing file and a child kind the parent does not allow, then appends its link to
+the parent's `children` and bumps the parent's revision — with a snapshot of the parent taken first. Creating a node is
+a two-file operation; if the second file fails, the answer says so and marks `partial: true` instead of pretending
+atomicity (stage 6 adds the `op:start`/`op:done` journal markers for the operations that move files).
+
+`plan_update_node` changes description, name, brief, payload, `## Заметки` or kind. Content changes raise `revision` by
+one; a kind change raises `version` and resets `revision` to 1, and is refused when the parent would not accept the new
+kind or when a child would no longer fit under it. `plan_set_status` performs exactly one transition from the tables in
+`model.ts` (nodes, incidents, goals); the same-status move is not a transition, an illegal move lists what is allowed,
+and a status last set by `user` can be overridden by an agent only with `reason`, which is stored as `status_reason` and
+appears in the journal. `plan_history` is the read side: it lists `v/r/reason/time/actor` from the snapshot frontmatter,
+or returns one snapshot's frontmatter and body. It never writes, so `readOnly` does not block it.
+
+Journal lines look like
+`2026-11-18T10:40:00Z · plan_set_status · [[Workspaces/centurion/backend/auth/session-store|session-store]] · v2 r4 → r5 · actor: codex · status: in_progress → blocked · reason: …`.
+`_journal.md` is created with a `# Journal` heading on the first write and is only ever appended to.

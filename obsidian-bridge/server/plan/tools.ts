@@ -3,6 +3,7 @@ import type { McpToolDefinition, ToolOutcome } from "../mcp-tools";
 import { planReadTool } from "./read";
 import { planSearch } from "./search";
 import { planScopeTool } from "./scope";
+import { planCreateNode, planHistory, planSetStatus, planUpdateNode } from "./write";
 
 /**
  * `plan_*` tool catalogue and dispatch.
@@ -23,6 +24,23 @@ export const PLAN_CONTRACT_SENTENCE =
   "use it for plan nodes, incidents and goals — not to record agent memory (memory-flash) and " +
   "not as a general note search (obsidian_search). Paths are relative to `planRoot`; nothing " +
   "outside it, in `__history` or in `_archive` is reachable from here.";
+
+const EXPECTED_REVISION = {
+  type: "number",
+  description:
+    "Revision you read (`revision` from plan_read). A different revision on disk refuses the write.",
+} as const;
+
+const ACCEPT_EXTERNAL = {
+  type: "boolean",
+  description:
+    "Allow writing over a file changed outside the tools (a manual Obsidian edit). Without it such a write is refused.",
+} as const;
+
+const ACTOR = {
+  type: "string",
+  description: "Who performs the change: an agent id or `user`. Defaults to `agent`.",
+} as const;
 
 export const PLAN_TOOLS: McpToolDefinition[] = [
   {
@@ -89,6 +107,125 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
       required: ["query"],
     },
   },
+  {
+    name: "plan_create_node",
+    title: "Create a plan node",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Creates one node of the plan tree (root, trunk, branch, ` +
+      "subbranch or leaf) as its own note with `version: 1`, `revision: 1`, adds it to the " +
+      "parent's `children` and writes the journal. A node file lives in its own folder " +
+      "(`auth/auth.md`); a leaf lives in its parent's folder (`auth/session-store.md`). It " +
+      "never overwrites an existing file.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Node path relative to the planning root. A branch is its folder (`centurion/backend/auth`); " +
+            "a leaf is a name inside the parent's folder (`centurion/backend/auth/session-store`).",
+        },
+        kind: {
+          type: "string",
+          enum: ["root", "trunk", "branch", "subbranch", "leaf"],
+          description: "Node kind. The parent must allow it (root→trunk→branch→subbranch|leaf).",
+        },
+        name: { type: "string", description: "Human-readable name shown in the tree." },
+        description: { type: "string", description: "One or two sentences: what this node is." },
+        parent: {
+          type: "string",
+          description:
+            "Parent node path or wikilink. When omitted it is inferred from the path's folder; " +
+            "a root has no parent.",
+        },
+        status: { type: "string", description: "Initial status; default `draft`." },
+        brief: { type: "object", description: "Leaf brief (entryPoint, steps, files, acceptance, source)." },
+        payload: { type: "object", description: "Kind-specific data kept as YAML." },
+        stack: { type: "array", description: "Root only: the technology stack entries." },
+        notes: { type: "string", description: "Free text for the `## Заметки` section." },
+        aliases: { type: "array", description: "Additional aliases for Obsidian links." },
+        id: { type: "string", description: "Explicit id (used by import); a UUID is generated otherwise." },
+        project_key: { type: "string", description: "Root only: the canonical project path." },
+        actor: ACTOR,
+      },
+      required: ["path", "kind", "name"],
+    },
+  },
+  {
+    name: "plan_update_node",
+    title: "Update a plan node",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Changes the content of one node: description, name, brief, ` +
+      "payload, `## Заметки`, or its kind. A snapshot of the previous state is written to " +
+      "`__history` first; a content change raises `revision` by one, a kind change raises " +
+      "`version` and resets `revision` to 1. A stale `expected_revision` or a manual edit on " +
+      "disk refuses the write instead of overwriting it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Node path relative to the planning root." },
+        description: { type: "string", description: "New short description." },
+        name: { type: "string", description: "New name." },
+        brief: { type: "object", description: "Replacement leaf brief, or null to remove it." },
+        payload: { type: "object", description: "Replacement payload, or null to remove it." },
+        notes: { type: "string", description: "Replacement text for `## Заметки`." },
+        kind: {
+          type: "string",
+          enum: ["root", "trunk", "branch", "subbranch", "leaf"],
+          description: "New kind. Raises version and resets revision; refused when children would not fit.",
+        },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "plan_set_status",
+    title: "Move a plan node through its lifecycle",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Performs exactly one allowed status transition on a node, ` +
+      "incident or goal. An illegal transition writes nothing and lists the allowed targets. " +
+      "A status set by the user can be overridden by an agent only with `reason`, which is " +
+      "recorded in the journal. The previous state is snapshotted first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Node path relative to the planning root." },
+        status: {
+          type: "string",
+          description:
+            "Target status: draft, ready, claimed, in_progress, blocked, deferred, done, " +
+            "cancelled, superseded (nodes); open, investigating, resolved, cancelled (incidents); " +
+            "draft, proposed, approved, in_progress, done, cancelled, superseded (goals).",
+        },
+        reason: { type: "string", description: "Why the change happened; required to override a user-set status." },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path", "status"],
+    },
+  },
+  {
+    name: "plan_history",
+    title: "List or read plan snapshots",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Lists the snapshots of one node (version, revision, reason, ` +
+      "time, actor) or reads one of them. This is the only tool that reads `__history`: a " +
+      "snapshot is immutable, and restoring one is `plan_restore`, not an edit.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "The live node path whose history you want." },
+        version: { type: "number", description: "With `revision`: read that snapshot." },
+        revision: { type: "number", description: "With `version`: read that snapshot." },
+        limit: { type: "number", description: "How many of the latest snapshots to list, 1–200 (default 50)." },
+      },
+      required: ["path"],
+    },
+  },
 ];
 
 type PlanHandler = (
@@ -100,6 +237,10 @@ const HANDLERS: Record<string, PlanHandler> = {
   plan_scope: (settings) => planScopeTool(settings),
   plan_read: (settings, input) => planReadTool(settings, input),
   plan_search: (settings, input) => planSearch(settings, input),
+  plan_create_node: (settings, input) => planCreateNode(settings, input),
+  plan_update_node: (settings, input) => planUpdateNode(settings, input),
+  plan_set_status: (settings, input) => planSetStatus(settings, input),
+  plan_history: (settings, input) => planHistory(settings, input),
 };
 
 /**

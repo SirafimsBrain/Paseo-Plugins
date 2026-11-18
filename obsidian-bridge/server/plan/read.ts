@@ -126,7 +126,9 @@ export function linkTarget(value: string): string | null {
 
 /** Resolves a wikilink against the tree; `null` when nothing matches exactly once. */
 export function resolveLink(tree: PlanTree, value: unknown): PlanNode | null {
-  const raw = typeof value === "string" ? linkTarget(value) : null;
+  // A tool argument may be a wikilink or a bare plan path; both address a note.
+  const raw =
+    typeof value === "string" ? (linkTarget(value) ?? value.trim()) : null;
   if (!raw) return null;
   const target = raw.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\.md$/i, "");
   const withRoot = target.startsWith(`${tree.root.relPath}/`)
@@ -360,7 +362,7 @@ function overview(tree: PlanTree): PlanReadResult {
 }
 
 /** Closest plan nodes for an unknown path, so a refusal is actionable. */
-function suggest(tree: PlanTree, value: string): NodeSummary[] {
+export function suggestPlanNodes(tree: PlanTree, value: string): NodeSummary[] {
   const needle = value.toLowerCase().replace(/\.md$/i, "");
   const basename = needle.split("/").pop() ?? needle;
   return [...tree.nodes.values()]
@@ -374,6 +376,36 @@ function suggest(tree: PlanTree, value: string): NodeSummary[] {
     .filter((row) => row.hit)
     .slice(0, 5)
     .map((row) => summarize(row.node));
+}
+
+/**
+ * Resolves a `plan_*` path argument to a live node.
+ *
+ * Three forms reach the same file: the folder (`centurion/backend/auth`), the
+ * file (`…/auth.md`) and the project folder (`centurion` → `centurion.md`).
+ * A miss returns real candidates — a refusal an agent cannot act on is a dead
+ * end, and re-reading the whole vault to find the name is worse.
+ */
+export function findPlanNode(
+  tree: PlanTree,
+  rawPath: string,
+): { node: PlanNode } | { error: string; suggestions: NodeSummary[] } {
+  const resolved = resolvePlanPath(tree.root, rawPath);
+  if ("error" in resolved) return { error: resolved.error, suggestions: [] };
+
+  const candidates = [
+    resolved.vaultPath,
+    `${resolved.vaultPath}.md`,
+    `${resolved.vaultPath}/${path.posix.basename(resolved.vaultPath)}.md`,
+  ];
+  const node = candidates.map((candidate) => tree.nodes.get(candidate)).find(Boolean) ?? null;
+  if (!node) {
+    return {
+      error: `'${rawPath}' is not a plan node under '${tree.root.relPath}'.`,
+      suggestions: suggestPlanNodes(tree, rawPath),
+    };
+  }
+  return { node };
 }
 
 export function planRead(
@@ -407,29 +439,18 @@ export function planRead(
     };
   }
 
-  const resolved = resolvePlanPath(tree.root, rawPath);
-  if ("error" in resolved) {
-    return {
-      error: { planning_available: true, root: tree.root.relPath, error: resolved.error },
-    };
-  }
-
-  const candidates = [
-    resolved.vaultPath,
-    `${resolved.vaultPath}.md`,
-    `${resolved.vaultPath}/${path.posix.basename(resolved.vaultPath)}.md`,
-  ];
-  const node = candidates.map((candidate) => tree.nodes.get(candidate)).find(Boolean) ?? null;
-  if (!node) {
+  const found = findPlanNode(tree, rawPath);
+  if ("error" in found) {
     return {
       error: {
         planning_available: true,
         root: tree.root.relPath,
-        error: `'${rawPath}' is not a plan node under '${tree.root.relPath}'.`,
-        suggestions: suggest(tree, rawPath),
+        error: found.error,
+        suggestions: found.suggestions,
       },
     };
   }
+  const node = found.node;
 
   const parent = parentOf(tree, node);
   const influences = influencesOf(tree, node);

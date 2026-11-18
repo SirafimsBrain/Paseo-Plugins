@@ -2,6 +2,24 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.13.11 — writing a plan: create, update, status, history (2026-11-18)
+
+Feature release (0.12.11 → 0.13.11), stage 4 of the migration. The SDK and host floor are unchanged; the MCP catalogue
+grows from 16 to 20 tools and the document write tools share the extracted write gate.
+
+| Change | Behaviour |
+| --- | --- |
+| tool `plan_create_node` | node file at its layout path, `v1 r1`, parent `children` updated, journal line; refuses an existing file, an orphan or a forbidden child kind |
+| tool `plan_update_node` | description/name/brief/payload/notes/kind; snapshot before write; revision +1 or version +1 with revision 1; `expected_revision`, `accept_external` |
+| tool `plan_set_status` | one allowed transition (nodes, incidents, goals); illegal and same-status moves refuse; a user-set status needs `reason` |
+| tool `plan_history` | list snapshots or read one by version/revision; the only reader of `__history` |
+| snapshot rule | snapshots are taken before the write and are never rewritten; an existing snapshot for the same v/r is left alone |
+| concurrency | atomic temp + rename with an mtime re-check; a manual edit newer than `updated` needs `accept_external: true` |
+| journal | `<project>/_journal.md` receives `at · tool · node · v/r` lines; a journal failure is reported, never silent |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **33 suites / 289 tests** pass. Not deployed and not exercised against a
+live Paseo host; the tools were driven through `dispatchTool`, the same path the stdio server uses.
+
 ## Plugin 0.12.11 — reading a plan: overview, node context, search (2026-11-18)
 
 Feature release (0.11.12 → 0.12.11), stage 3 of the `luck-planner` migration. The SDK, host floor and every existing

@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.12.11)
+## What it does (0.13.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -87,8 +87,13 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   proposed goals) or one node in context — ancestors, children, siblings, influences in both directions, blocking
   incidents, the goal and growth record, and `beeCycle` when influence edges close a loop. `plan_search` ranks plan
   documents with the same index the vault uses, but only inside the planning directory and with `kind`/`status`/`project`
-  filters read from YAML frontmatter. Writing plan nodes, snapshots and the remaining `plan_*` tools arrive in the next
-  stages.
+  filters read from YAML frontmatter.
+- **Writing a plan (0.13.11).** `plan_create_node` builds the tree (`version: 1`, `revision: 1`, the parent's `children`
+  updated), `plan_update_node` changes description, brief, payload, notes or kind (revision +1, or version +1 with the
+  revision reset to 1), `plan_set_status` performs one allowed lifecycle transition, and `plan_history` lists and reads
+  the `__history` snapshots every write takes first. A stale `expected_revision`, a manual Obsidian edit, an illegal
+  transition, or overriding a status the user set without a `reason` all refuse instead of overwriting, and every change
+  appends one line to the project's `_journal.md`.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only

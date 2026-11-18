@@ -23,6 +23,7 @@ import { scanVault } from "./scan";
 import { searchIndex } from "./search";
 import { BridgeStore } from "./store";
 import { isPlanSystemPath, looksLikeVault, readVaultNote, splitList } from "./vault";
+import { writeRefusal } from "./write-gate";
 
 /**
  * Tool definitions and dispatch for the obsidian-bridge MCP server.
@@ -527,20 +528,10 @@ function write(
   role: WritableRole,
   input: Record<string, unknown>,
 ): ToolOutcome {
-  if (settings.readOnly) {
-    return fail(
-      "Writes are disabled (readOnly is on). Ask the user to turn them off in " +
-        "Settings → Plugins → Obsidian Bridge.",
-    );
-  }
   const body = typeof input.body === "string" ? input.body : "";
+  const refusal = writeRefusal(settings, body.length);
+  if (refusal) return fail(refusal);
   if (body.trim().length === 0) return fail("body is required.");
-  if (body.length > settings.maxWriteChars) {
-    return fail(
-      `The document body is ${body.length} characters; the configured limit is ` +
-        `${settings.maxWriteChars}. Split it into sections.`,
-    );
-  }
   // A write always names its note: the inbox is the user's, so it is never a
   // default dumping ground.
   const name = typeof input.name === "string" ? input.name.trim() : "";

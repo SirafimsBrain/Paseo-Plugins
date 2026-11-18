@@ -78,12 +78,36 @@ export function canTransitionLeaf(from: LeafStatus, to: LeafStatus): boolean {
 export const BEE_STATUSES = ["active", "watching", "resolved", "cancelled"] as const;
 export type BeeStatus = (typeof BEE_STATUSES)[number];
 
+/** A resolved or cancelled influence can be revived; nothing else moves. */
+export const BEE_TRANSITIONS: Record<BeeStatus, readonly BeeStatus[]> = {
+  active: ["watching", "resolved", "cancelled"],
+  watching: ["active", "resolved", "cancelled"],
+  resolved: ["active"],
+  cancelled: ["active"],
+};
+
+export function canTransitionBee(from: BeeStatus, to: BeeStatus): boolean {
+  return BEE_TRANSITIONS[from].includes(to);
+}
+
 /** incidents: a defect that blocks one or more leaves. */
 export const INCIDENT_STATUSES = ["open", "investigating", "resolved", "cancelled"] as const;
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 
 /** Only these incident statuses block their leaves. */
 export const BLOCKING_INCIDENT_STATUSES: readonly IncidentStatus[] = ["open", "investigating"];
+
+/** `resolved`/`cancelled` reopen as `open`: a regression is a new investigation. */
+export const INCIDENT_TRANSITIONS: Record<IncidentStatus, readonly IncidentStatus[]> = {
+  open: ["investigating", "resolved", "cancelled"],
+  investigating: ["open", "resolved", "cancelled"],
+  resolved: ["open"],
+  cancelled: ["open"],
+};
+
+export function canTransitionIncident(from: IncidentStatus, to: IncidentStatus): boolean {
+  return INCIDENT_TRANSITIONS[from].includes(to);
+}
 
 export const INCIDENT_SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type IncidentSeverity = (typeof INCIDENT_SEVERITIES)[number];
@@ -100,6 +124,24 @@ export const GOAL_STATUSES = [
 ] as const;
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 
+/**
+ * A goal is approved only from `proposed`; `approved` starts work, `done` may
+ * only be superseded. `draft` may be proposed or cancelled, nothing more.
+ */
+export const GOAL_TRANSITIONS: Record<GoalStatus, readonly GoalStatus[]> = {
+  draft: ["proposed", "cancelled"],
+  proposed: ["approved", "draft", "cancelled"],
+  approved: ["in_progress", "cancelled", "superseded"],
+  in_progress: ["done", "cancelled", "superseded"],
+  done: ["superseded"],
+  cancelled: [],
+  superseded: [],
+};
+
+export function canTransitionGoal(from: GoalStatus, to: GoalStatus): boolean {
+  return GOAL_TRANSITIONS[from].includes(to);
+}
+
 /** growth: a progress record attached to one node or goal. */
 export const GROWTH_STATUSES = ["active", "stalled", "done", "cancelled"] as const;
 export type GrowthStatus = (typeof GROWTH_STATUSES)[number];
@@ -112,6 +154,18 @@ export const GROWTH_STEP_STATES = [
   "failed",
 ] as const;
 export type GrowthStepState = (typeof GROWTH_STEP_STATES)[number];
+
+/** A growth record can be revived from `done`/`cancelled`, like a bee. */
+export const GROWTH_TRANSITIONS: Record<GrowthStatus, readonly GrowthStatus[]> = {
+  active: ["stalled", "done", "cancelled"],
+  stalled: ["active", "done", "cancelled"],
+  done: ["active"],
+  cancelled: ["active"],
+};
+
+export function canTransitionGrowth(from: GrowthStatus, to: GrowthStatus): boolean {
+  return GROWTH_TRANSITIONS[from].includes(to);
+}
 
 /** Why a snapshot was taken; stored as `snapshot_reason`. */
 export const SNAPSHOT_REASONS = [
@@ -130,6 +184,32 @@ export function statusesOfKind(kind: PlanKind): readonly string[] {
   if (kind === "incident") return INCIDENT_STATUSES;
   if (kind === "goal") return GOAL_STATUSES;
   return LEAF_STATUSES;
+}
+
+/**
+ * Whether `from → to` is allowed for a file of this kind. Unknown statuses and
+ * a no-op move are always refused: the writer treats them as a rejected write,
+ * not as a revision bump.
+ */
+export function canTransitionStatus(kind: PlanKind, from: string, to: string): boolean {
+  if (from === to) return false;
+  if (!statusesOfKind(kind).includes(to)) return false;
+  if (kind === "incident") {
+    return (
+      (INCIDENT_STATUSES as readonly string[]).includes(from) &&
+      canTransitionIncident(from as IncidentStatus, to as IncidentStatus)
+    );
+  }
+  if (kind === "goal") {
+    return (
+      (GOAL_STATUSES as readonly string[]).includes(from) &&
+      canTransitionGoal(from as GoalStatus, to as GoalStatus)
+    );
+  }
+  return (
+    (LEAF_STATUSES as readonly string[]).includes(from) &&
+    canTransitionLeaf(from as LeafStatus, to as LeafStatus)
+  );
 }
 
 export function isPlanKind(value: unknown): value is PlanKind {

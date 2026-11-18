@@ -246,3 +246,41 @@ export function livePlanDocuments(): Array<[string, string]> {
     ([vaultPath]) => !vaultPath.includes("/__history/"),
   );
 }
+
+/** A second leaf of the auth branch, so the fixture has a valid influence pair. */
+export const TOKEN_REFRESH_DOCUMENT = [
+  "---",
+  "id: 77d1a3b0-4c2e-4f88-9b11-3a6f5e2c8d90",
+  "schema: 1",
+  "kind: leaf",
+  "name: Token refresh",
+  "description: Refresh flow rotates the token on every use.",
+  "status: ready",
+  "version: 1",
+  "revision: 1",
+  'parent: "[[Workspaces/centurion/backend/auth/auth|auth]]"',
+  "children: []",
+  "influences:",
+  '  - target: "[[Workspaces/centurion/backend/auth/session-store|session-store]]"',
+  "    status: active",
+  "    impact: test edge",
+  "    version: 1",
+  "    revision: 1",
+  "created: 2026-11-18T10:00:00Z",
+  "updated: 2026-11-18T10:00:00Z",
+  "created_by: user",
+  "updated_by: user",
+  "---",
+  "",
+  "# Token refresh",
+  "",
+].join("\n");
+
+/** The fixture files plus the second leaf, ready to write into a temp vault. */
+export function planFiles(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...PLAN_FIXTURE,
+    "Workspaces/centurion/backend/auth/token-refresh.md": TOKEN_REFRESH_DOCUMENT,
+    ...extra,
+  };
+}
