@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.15.11**.
+Version covered: **0.16.11**.
 
 ## 1. Purpose and scope
 
@@ -68,7 +68,9 @@ obsidian-bridge/
 │   │   ├── goal.ts          # `plan_goal`: create/update/propose (0.14.11)
 │   │   ├── growth.ts        # `plan_growth`: progress record on a node or goal (0.14.11)
 │   │   ├── ops.ts           # move/archive/approve: op markers, link rewriting (0.15.11)
-│   │   └── restore.ts       # `plan_restore`: snapshot becomes a new revision (0.15.11)
+│   │   ├── restore.ts       # `plan_restore`: snapshot becomes a new revision (0.15.11)
+│   │   ├── validate.ts      # `plan_validate`: links, bodies, roots, cycles, operations (0.16.11)
+│   │   └── import.ts        # `plan_import`: luck_tree_export → folders, links, YAML (0.16.11)
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
@@ -432,7 +434,28 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11)
+
+### 0.16.11 — integrity report and import from luck_tree_export
+
+Feature release (0.15.11 → 0.16.11), stage 7 of the migration. The catalogue grows to 30 tools. Both new tools are about
+the same fact: the plan is a directory of files, so the invariants a database would enforce have to be *checked*, and the
+way in from the source plugin has to prove the graph before it writes anything.
+
+| Tool / module | Behaviour |
+| --- | --- |
+| `plan_validate` | one report of every issue the file model can have: `unresolved_link` (every link field), `body_divergence`, `orphan`, `missing_root`/`multiple_roots`, `invalid_parent_kind`, `invalid_status`, `missing_counters`, `missing_id`/`duplicate_id`, `leaf_with_children`, `bee_cycle`, `unfinished_operation`, `not_a_plan` |
+| `plan_import` | reads a `.json.zip` written by `luck_tree_export` (or the extracted `.json`), verifies it whole, rebuilds the hierarchy as folders and links, keeps every original id as `legacy_id`; `dry_run` defaults to true, `include_archived` defaults to true, a repeat answers `unchanged` |
+| `server/plan/validate.ts` | tree walk, link resolution, body comparison, journal scan for `op:start` without `op:done`, cycle de-duplication, `project`/`limit` scoping |
+| `server/plan/import.ts` | zip reader (central directory, stored + deflate), export validation, path assignment (`<project>/<slug>/<slug>.md`, leaves `<parent>/<slug>.md`), incident/goal/growth mapping, op markers |
+| `resolvePlanRoot(settings, { allowMissing })` | the one boundary change: `plan_import` plans against a missing root and creates it only when it writes |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **42 suites / 344 tests** pass. `plan-validate.test.ts` breaks one
+invariant per case on the real fixture (dangling link, orphan, non-plan file, hand-edited body, unfinished operation,
+duplicate id, cycle reported once, `limit`/`truncated`, and a read that changes no bytes); `plan-import.test.ts` drives a
+document built from the source plugin's own `exportDocumentSchema`, including a hand-built `.json.zip`, and checks the
+rebuilt links, the incident's `blocks`/the leaf's `blocked_by`, the goal's `plan`/`materialized`, growth on its subject,
+`legacy_id` idempotency and the read-only gate. Not done yet, by design: the SKILL files (stage 8).
 
 ### 0.15.11 — multi-file operations: move, archive, approve, restore
 
@@ -1247,3 +1270,46 @@ A restore is not a rollback: the current state is snapshotted, the counters move
 (`name`, `description`, `brief`, `payload`, `plan`, `growth`, `severity`, `formal_text`, `status`, plus `## Заметки`).
 Relations stay live on purpose, and a snapshot taken before a kind change is refused, because a kind change is a version
 event and not a revision.
+
+### 15.9 Integrity checks and import (0.16.11)
+
+`plan_validate` exists because the plan has no schema engine at rest. It re-reads the tree and reports:
+
+- `not_a_plan` — a Markdown file under the root whose frontmatter does not parse, that carries no plan `kind`, is a
+  stored snapshot or is oversized;
+- `unresolved_link` — a value in `parent`, `children`, `influences[].target`, `blocked_by`, `blocks`, `materialized`,
+  `goal` or `project` that no document in the plan resolves to (a link into `_archive` is expected to land here);
+- `body_divergence` — the body is not what the frontmatter renders, i.e. someone edited a generated section by hand;
+- `orphan` — a tree node without a parent (or with a parent that does not exist), and an incident or goal without a
+  `project`;
+- `missing_root` / `multiple_roots` — per project, exactly one `kind: root` document;
+- `invalid_parent_kind` / `invalid_status` / `leaf_with_children` — the schema rules, checked against the actual parent;
+- `missing_counters` / `missing_id` / `duplicate_id` — identity and the snapshot naming contract;
+- `bee_cycle` — the influence graph closes a loop, reported once per loop with the loop itself;
+- `unfinished_operation` — the journal holds an `op:start <id>` with no `op:done <id>`.
+
+Duplicates are reported because an id, not a file name, is what a link means. The answer carries `valid`, `issue_count`,
+`counts.byKind`, `truncated` and a `project`/`limit` window; the call writes nothing.
+
+`plan_import` is the way in from `luck-planner`. The archive is read without a dependency: the central directory is
+parsed, the `.json` entry is inflated, and the envelope is checked by hand (`format`, `schemaVersion: 1`, one root,
+existing parents, allowed parent→child kinds). A refused file names the failing field and leaves the disk untouched.
+
+The path mapping is the plan's own layout, with the plan root supplied by the caller (`project`, defaulting to the export's
+project key):
+
+| Export row | Plan file |
+| --- | --- |
+| root | `<project>/<project>.md` |
+| trunk / branch / subbranch | `<parent folder>/<slug>/<slug>.md` |
+| leaf | `<parent folder>/<slug>.md` |
+| bug + attachment | `<project>/_incidents/<slug>.md`, linked from each leaf's `blocked_by` and back through `blocks` |
+| goal | `<project>/_goals/<slug>.md`, `plan:` steps kept, `materialized` linked to the approved branch |
+| bee | `influences` on the source leaf, with the impact as `note` |
+| growth record | `growth:` on its subject (node or goal) |
+
+Every original row id is stored as `legacy_id`, which is what makes a second import of the same file answer `unchanged`
+instead of duplicating the tree; a target project that holds a *different* tree is refused, never merged. Archived nodes
+travel with their `archived` stamp unless `include_archived: false`, and a node that cannot be reached from the root or an
+attachment whose end is missing becomes a warning rather than a silent drop. The write is bracketed by `op:start`/
+`op:done` like the stage-6 operations, so a failed import is visible in the journal and can be repeated with `op_id`.

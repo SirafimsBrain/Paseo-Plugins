@@ -2,10 +2,12 @@ import type { RuntimeSettings } from "../../shared/settings";
 import type { McpToolDefinition, ToolOutcome } from "../mcp-tools";
 import { planGoal } from "./goal";
 import { planGrowth } from "./growth";
+import { planImport } from "./import";
 import { planIncident } from "./incident";
 import { planLink } from "./links";
 import { planApproveGoal, planArchiveNode, planMoveNode } from "./ops";
 import { planRestore } from "./restore";
+import { planValidate } from "./validate";
 import { planReadTool } from "./read";
 import { planSearch } from "./search";
 import { planScopeTool } from "./scope";
@@ -456,6 +458,51 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
       required: ["path", "version", "revision"],
     },
   },
+  {
+    name: "plan_validate",
+    title: "Check the plan's integrity",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Reports every integrity problem the file model can have: a link ` +
+      "that resolves to nothing, a body that no longer matches its frontmatter, a node without a " +
+      "parent, a project without one root (or with two), a leaf with children, a status or a " +
+      "parent kind the schema does not allow, duplicate ids, an influence cycle, a half-finished " +
+      "`op:start` in the journal and a file inside the planning root that is not a plan. Reads " +
+      "only; each issue names the file to fix.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Only check this project folder." },
+        limit: { type: "number", description: "How many issues to return, 1–500 (default 200)." },
+      },
+    },
+  },
+  {
+    name: "plan_import",
+    title: "Import a luck_tree_export project",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Rebuilds a project from a \`.json.zip\` written by ` +
+      "`luck_tree_export` (or the extracted `.json`): the hierarchy becomes folders and links, " +
+      "bees become `influences`, bugs become incidents with `blocks`, goals keep their steps and " +
+      "materialised branch, and every original row id is stored as `legacy_id`. `dry_run` " +
+      "defaults to true and reports the plan without writing; the target project must be empty, " +
+      "and importing the same file twice answers `unchanged` instead of duplicating the tree.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "A `.json.zip` or `.json` inside the vault. Use `content` for a file kept outside it.",
+        },
+        content: { type: "string", description: "The export JSON itself, when the file lives outside the vault." },
+        project: { type: "string", description: "Target project folder; defaults to the export's project key." },
+        include_archived: { type: "boolean", description: "Import archived nodes too (default true)." },
+        dry_run: { type: "boolean", description: "Report only, write nothing. Defaults to true." },
+        op_id: { type: "string", description: "Repeat a failed import with the same id to see it in the journal." },
+        reason: { type: "string", description: "Why this import happens, recorded in the journal." },
+        actor: ACTOR,
+      },
+    },
+  },
 ];
 
 type PlanHandler = (
@@ -479,6 +526,8 @@ const HANDLERS: Record<string, PlanHandler> = {
   plan_archive_node: (settings, input) => planArchiveNode(settings, input),
   plan_approve_goal: (settings, input) => planApproveGoal(settings, input),
   plan_restore: (settings, input) => planRestore(settings, input),
+  plan_validate: (settings, input) => planValidate(settings, input),
+  plan_import: (settings, input) => planImport(settings, input),
 };
 
 /**

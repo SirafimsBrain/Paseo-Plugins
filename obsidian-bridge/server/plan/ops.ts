@@ -65,7 +65,7 @@ interface OpState {
   done: boolean;
 }
 
-function parseOpId(input: Record<string, unknown>): { id: string } | { error: string } {
+export function parseOpId(input: Record<string, unknown>): { id: string } | { error: string } {
   const raw = stringField(input.op_id);
   if (raw === null) return { id: crypto.randomUUID() };
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(raw)) {
@@ -74,7 +74,7 @@ function parseOpId(input: Record<string, unknown>): { id: string } | { error: st
   return { id: raw };
 }
 
-function opState(root: PlanRoot, project: string | null, id: string): OpState {
+export function opState(root: PlanRoot, project: string | null, id: string): OpState {
   const absolute = path.join(root.vaultRoot, journalPathFor(root, project));
   let text = "";
   try {
@@ -88,7 +88,7 @@ function opState(root: PlanRoot, project: string | null, id: string): OpState {
   };
 }
 
-function markStart(
+export function markStart(
   root: PlanRoot,
   project: string | null,
   id: string,
@@ -107,7 +107,7 @@ function markStart(
   return "error" in journal ? journal.error : null;
 }
 
-function markDone(
+export function markDone(
   root: PlanRoot,
   project: string | null,
   id: string,
@@ -1081,7 +1081,7 @@ export function planApproveGoal(
 }
 
 /** `durable-sessions`; a non-latin title falls back to the step id. */
-function slugify(value: string, fallback: string): string {
+export function slugify(value: string, fallback: string): string {
   const latin = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -1091,7 +1091,7 @@ function slugify(value: string, fallback: string): string {
 }
 
 /** Serializes a generated plan document with its body sections. */
-function planDocument(frontmatter: Record<string, unknown>): string {
+export function planDocument(frontmatter: Record<string, unknown>): string {
   const ordered = orderPlanKeys(frontmatter);
   return serializePlanDocument({ frontmatter: ordered, body: renderPlanBody(ordered, "") });
 }

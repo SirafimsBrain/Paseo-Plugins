@@ -2,6 +2,24 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.16.11 — integrity report and import from luck_tree_export (2026-11-18)
+
+Feature release (0.15.11 → 0.16.11), stage 7 of the migration. The SDK and host floor are unchanged; the MCP catalogue
+grows from 28 to 30 tools. The only boundary change is `resolvePlanRoot(settings, { allowMissing })`, used by
+`plan_import` alone: it may plan against a missing planning root and creates that root only when it writes.
+
+| Change | Behaviour |
+| --- | --- |
+| tool `plan_validate` | `valid`, `issue_count`, `counts.byKind`, `issues[]`, `truncated`; `project` and `limit` scope the answer; never writes |
+| tool `plan_import` | reads `.json.zip` / `.json`, validates the whole graph, rebuilds folders, links, incidents, goals and growth, keeps `legacy_id`; `dry_run` default true; refuses a non-empty different project |
+| import of a real export | the `.json.zip` path is read through the zip central directory (stored and deflate entries), no new dependency; `content` accepts the JSON for a file kept outside the vault |
+| incidents and goals | an export's bugs and goals keep their text and status; archived nodes are imported flagged (`include_archived: false` skips them with a warning); an attachment with a missing end is a warning, not a drop |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **42 suites / 344 tests** pass. The import fixture is built from the
+source plugin's `exportDocumentSchema` (`luck-planner/shared/export.ts`); no export file from a live install exists on
+this machine, so that is the one acceptance item still to confirm by hand. Not deployed and not exercised against a live
+Paseo host: the tools were driven through `dispatchTool`, the same path the stdio server uses.
+
 ## Plugin 0.15.11 — multi-file operations: move, archive, approve, restore (2026-11-18)
 
 Feature release (0.14.11 → 0.15.11), stage 6 of the migration. The SDK and host floor are unchanged; the MCP catalogue

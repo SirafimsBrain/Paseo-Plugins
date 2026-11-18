@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.15.11)
+## What it does (0.16.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -99,6 +99,12 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   `blocked_by:` in sync on both sides while only `open`/`investigating` incidents block, `plan_goal` authors a goal
   (`create`, `update`, `propose`) for a human to approve, and `plan_growth` upserts the progress record of a node or
   goal, merging steps by title. Each write snapshots the previous state first and journals the change.
+- **Integrity and import (0.16.11).** `plan_validate` is the report a directory of Markdown files needs in place of
+  foreign keys: a dangling link, a body that no longer matches its frontmatter, an orphan, a missing or doubled root, a
+  leaf with children, an invalid status or parent kind, duplicate ids, an influence cycle, an `op:start` that never got
+  its `op:done`, and a file inside the planning root that is not a plan. `plan_import` rebuilds a `luck_tree_export`
+  `.json.zip` (or its extracted `.json`) as plan files — folders, links, incidents, goals and growth, with the original
+  row id kept in `legacy_id` — dry-run by default and idempotent by `legacy_id`.
 - **Multi-file operations (0.15.11).** `plan_move_node` moves a subtree and rewrites every link into it (`parent`,
   `children`, `influences`, `blocked_by`, `blocks`, `materialized`), `plan_archive_node` moves a subtree into `_archive/`
   and unlists it without deleting anything, `plan_approve_goal` materialises a proposed goal into a trunk plus one leaf

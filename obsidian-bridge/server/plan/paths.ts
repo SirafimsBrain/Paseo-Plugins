@@ -54,7 +54,10 @@ export type PlanRootResult =
  * The planning directory must already exist: creating it is a user decision
  * (start a project, ask for a tree), not a side effect of reading the scope.
  */
-export function resolvePlanRoot(settings: RuntimeSettings): PlanRootResult {
+export function resolvePlanRoot(
+  settings: RuntimeSettings,
+  options: { allowMissing?: boolean } = {},
+): PlanRootResult {
   const vaultRoot = resolveVaultRoot(settings.vaultPath);
   if (vaultRoot.length === 0) {
     return {
@@ -97,6 +100,7 @@ export function resolvePlanRoot(settings: RuntimeSettings): PlanRootResult {
   try {
     stat = fs.statSync(absolute);
   } catch {
+    if (options.allowMissing) return { root: { vaultRoot, relPath, absolute } };
     return {
       reason: "missing",
       error: `The planning directory '${relPath}' does not exist under '${vaultRoot}'.`,

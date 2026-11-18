@@ -52,6 +52,8 @@ describe("tool catalogue", () => {
       "plan_archive_node",
       "plan_approve_goal",
       "plan_restore",
+      "plan_validate",
+      "plan_import",
     ]);
     for (const tool of MCP_TOOLS) {
       expect(
