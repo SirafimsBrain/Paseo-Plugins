@@ -473,6 +473,10 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
       properties: {
         project: { type: "string", description: "Only check this project folder." },
         limit: { type: "number", description: "How many issues to return, 1–500 (default 200)." },
+        offset: {
+          type: "number",
+          description: "Skip the first N issues; supplied by a [TRUNCATED] result.",
+        },
       },
     },
   },

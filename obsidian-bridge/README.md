@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.17.12)
+## What it does (0.18.12)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -23,9 +23,12 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   Ollama, no Python, no Docker, no vector database. Vectors live in the same SQLite index and are built by a short-lived
   child process, so a full re-embedding does not pin gigabytes inside the daemon. Unchanged notes are never re-read
   into vectors, and an edited note only re-embeds the sections whose text changed.
-- **Read tools.** `obsidian_search`, `obsidian_read` (whole note or one heading subtree), `obsidian_outline`,
-  `obsidian_list`, `obsidian_links`, `obsidian_directories`, plus `obsidian_index`, `obsidian_diagnose` and
-  `obsidian_status`. The workspace tab and the composer attachment picker use the same index.
+- **Read tools.** `obsidian_search`, `obsidian_read` (whole note, one heading subtree or a character window),
+  `obsidian_outline`, `obsidian_list`, `obsidian_links`, `obsidian_directories`, plus `obsidian_index`,
+  `obsidian_diagnose` and `obsidian_status`. The workspace tab and the composer attachment picker use the same index.
+- **Truncation has a next step (0.18.12).** When a tool cannot show everything it found, the result carries
+  `[TRUNCATED]` and a `continuation` object. `obsidian_continue` re-runs exactly that call, so an agent never switches to
+  file operations or guesses an offset. Search pages, note windows, note listings and integrity reports use it.
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
   notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
@@ -232,6 +235,7 @@ If the path is not configured, nothing is indexed and every tool answers with an
 | `obsidian_index` | Rebuilds the index from disk. |
 | `obsidian_diagnose` | recall@k of lexical vs hybrid retrieval over cases you supply. |
 | `obsidian_status` | Directory, role map, counts, freshness, write state, vector coverage, memory. |
+| `obsidian_continue` | Re-runs the tool named in a `[TRUNCATED]` result with the exact `continuation` object. |
 
 The MCP server is registered under the name `obsidian-bridge`. When a provider cannot take an MCP server, the plugin
 attaches the equivalent `obsidian_bridge_*` tools instead.

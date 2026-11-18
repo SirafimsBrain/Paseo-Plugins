@@ -71,3 +71,6 @@ Answer in the user's language, and keep every claim traceable:
 
 Write plan files under `planRoot` only through the tools, on every step of a review. `plan_history` reads snapshots; `plan_restore`
 writes one back. Nothing in `__history` or `_archive` is an editable note.
+
+A `[TRUNCATED]` integrity report carries a `continuation`: call `obsidian_continue` with that object to read the next
+page of issues instead of opening plan files directly. Review every page before concluding the tree is clean.

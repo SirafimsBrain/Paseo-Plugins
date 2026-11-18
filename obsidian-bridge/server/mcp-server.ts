@@ -1,4 +1,5 @@
 import { MCP_TOOLS, dispatchTool, mcpInstructions } from "./mcp-tools";
+import { normalizeTruncation } from "./continuation";
 import { resolveRoleDirs } from "./dirs";
 import { parseSettingsFile } from "./settings-file";
 
@@ -103,7 +104,7 @@ async function handleRequest(
     case "tools/call": {
       const params = request.params ?? {};
       const name = String(params.name ?? "");
-      const outcome = await dispatchTool(name, params.arguments ?? {}, settings);
+      const outcome = normalizeTruncation(await dispatchTool(name, params.arguments ?? {}, settings));
       if (outcome.isError) {
         process.stderr.write(`[obsidian-bridge] tool ${name} failed: ${outcome.text}\n`);
       }

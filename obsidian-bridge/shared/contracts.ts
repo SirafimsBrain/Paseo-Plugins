@@ -1,5 +1,6 @@
 import { defineRpc, defineSubscription } from "@getpaseo/plugin";
 import { z } from "zod";
+import type { Continuation } from "./continuation";
 
 /**
  * Shared contracts: value types used by the plugin server, the MCP bundle and
@@ -43,6 +44,11 @@ export const searchResultSchema = z.object({
     used: z.boolean(),
     error: z.string().nullable(),
   }),
+  /** Truncation protocol (0.18.12): total candidates and what was hidden. */
+  total: z.number().int().nonnegative().optional(),
+  omitted: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().optional(),
+  continuation: z.custom<Continuation | null>().optional(),
 });
 
 export type SearchResult = z.infer<typeof searchResultSchema>;

@@ -79,3 +79,6 @@ id is kept as `legacy_id`, so importing the same file twice answers `unchanged` 
 Call `plan_validate { project: "<project>" }` after a batch of creation: it reports dangling links, orphans, a doubled
 root and a half-finished operation, each with the file to fix. A clean tree is one root, every link resolving, every
 body matching its frontmatter.
+
+If `plan_validate` returns `[TRUNCATED]`, copy its `continuation` object into `obsidian_continue` unchanged to see the
+remaining issues. Never replace a truncated plan result with a file read or a direct edit of `planRoot`.

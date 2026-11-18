@@ -1,6 +1,8 @@
 import { defineAgentTool, type AgentToolDefinition } from "@getpaseo/plugin/server";
 import { z } from "zod";
+import { continuationSchema } from "../shared/continuation";
 import type { RuntimeSettings } from "../shared/settings";
+import { normalizeTruncation } from "./continuation";
 import { CONTRACT_SENTENCE, dispatchTool, type ToolOutcome } from "./mcp-tools";
 
 /**
@@ -19,12 +21,13 @@ import { CONTRACT_SENTENCE, dispatchTool, type ToolOutcome } from "./mcp-tools";
 export type RuntimeSettingsReader = () => Promise<RuntimeSettings>;
 
 function toResult(outcome: ToolOutcome) {
+  const normalized = normalizeTruncation(outcome);
   return {
-    text: outcome.text,
-    ...(outcome.structuredContent !== undefined
-      ? { structuredContent: outcome.structuredContent }
+    text: normalized.text,
+    ...(normalized.structuredContent !== undefined
+      ? { structuredContent: normalized.structuredContent }
       : {}),
-    ...(outcome.isError ? { isError: true } : {}),
+    ...(normalized.isError ? { isError: true } : {}),
   };
 }
 
@@ -150,6 +153,22 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     },
   });
 
+  const continueTool = defineAgentTool({
+    name: "obsidian_bridge_continue",
+    title: "Continue a truncated Obsidian result",
+    description:
+      `${CONTRACT_SENTENCE} Re-runs the tool named in a [TRUNCATED] result with its exact ` +
+      "arguments. Copy the `continuation` object verbatim instead of using file tools.",
+    input: z.object({
+      continuation: continuationSchema.describe("The continuation object from a truncated result."),
+    }),
+    async execute(input, { signal }) {
+      if (signal.aborted) return { text: "Cancelled.", isError: true };
+      const settings = await readSettings();
+      return toResult(await dispatchTool("obsidian_continue", input, settings));
+    },
+  });
+
   const status = defineAgentTool({
     name: "obsidian_bridge_status",
     title: "Obsidian vault status",
@@ -163,5 +182,15 @@ export function createObsidianTools(readSettings: RuntimeSettingsReader): AgentT
     },
   });
 
-  return [directories, search, read, writeDocument, writeScratch, appendInbox, diagnose, status];
+  return [
+    directories,
+    search,
+    read,
+    continueTool,
+    writeDocument,
+    writeScratch,
+    appendInbox,
+    diagnose,
+    status,
+  ];
 }

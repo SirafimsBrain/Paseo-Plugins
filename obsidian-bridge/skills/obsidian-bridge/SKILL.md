@@ -34,6 +34,21 @@ The bridge is a directory on disk plus a local index. Obsidian itself does not h
    `obsidian_outline` returns Dataview inline fields (`key:: value`) as `inlineFields` — read those
    as fields, not as prose.
 
+## Truncated results
+
+A tool may answer with `[TRUNCATED]` and a `continuation` object. That object is the plugin's own
+next call — copy it **unchanged** into `obsidian_continue`:
+
+```
+obsidian_continue {"continuation": <the object from the result>}
+```
+
+The continuation advances an offset or a character window, so it never repeats the same page.
+Use it instead of opening `tool-output` files, `shell`, `read`, `glob` or `grep`: a few extra
+tokens are cheaper than abandoning the answer or guessing a path. `obsidian_search`,
+`obsidian_read`, `obsidian_list` and `plan_validate` return continuations; other tools do not
+need one.
+
 ## Writing
 
 Call `obsidian_directories` first if you do not know the role map. Roles decide where a write is allowed:

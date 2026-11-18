@@ -2,6 +2,26 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.18.12 — continuation for truncated results (2026-11-18)
+
+Feature release (0.17.12 → 0.18.12). The SDK (`@getpaseo/plugin ^0.16.0`), host floor (`>=0.15.0`) and Node requirement
+are unchanged. The MCP catalogue grows from 30 to 31 tools; the attached Paseo tool set grows from 8 to 9. Existing
+tool inputs gain optional parameters only. The one breaking field rename is `plan_validate.truncated` (a count in older
+releases): it is now a boolean and the count lives in `truncated_count`.
+
+| Change | Behaviour |
+| --- | --- |
+| tool `obsidian_continue` | takes the `continuation` object from a `[TRUNCATED]` result verbatim, validates it, and re-runs the named target through the shared dispatcher; malformed objects, unknown targets and recursion are refused |
+| `obsidian_search` | `offset` plus counters from `packHitsDetailed()` produce a continuation when hits were omitted by the budget or the page limit |
+| `obsidian_read` | `char_offset`/`max_chars` windows for large notes, with the next window supplied as a continuation |
+| `obsidian_list`, `plan_validate` | `offset` continuations for further pages of notes or integrity issues |
+| both transports | `mcp-server.ts` and `agent-tools.ts` normalize the text channel so `[TRUNCATED]` and the exact next call reach clients that ignore `structuredContent` |
+| skills | `CONTRACT_SENTENCE`, `initialize` and all four `SKILL.md` files teach the continuation protocol and forbid substituting file tools |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **43 suites / 354 tests** pass. Not deployed and not exercised against a
+live Paseo host in this pass. Checking permission boundaries and detecting tools that escape them is a separate task.
+Linux remains the primary target; macOS and Windows remain future work.
+
 ## Plugin 0.17.12 — agent-facing descriptions (2026-11-18)
 
 Patch release (0.17.11 → 0.17.12). SDK, host floor and the 30-tool catalogue are unchanged; only descriptions change.

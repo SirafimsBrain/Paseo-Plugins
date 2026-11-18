@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.17.12**.
+Version covered: **0.18.12**.
 
 ## 1. Purpose and scope
 
@@ -182,7 +182,9 @@ result and `structuredContent.semantic.error` says why.
 
 Filters (`folder`, `tags`) are applied to the candidate set before truncation. The final list is packed into
 `searchBudgetChars` (default 8000), each hit rendered as `[n] path § Heading (backlinks: k)` plus a snippet trimmed to
-`snippetChars`. Hits whose text does not fit stop the packing, so an agent never receives a half-sentence.
+`snippetChars`. Hits whose text does not fit stop the packing, so an agent never receives a half-sentence. Since 0.18.12
+`packHitsDetailed()` also reports how many hits were omitted; the tool turns that into a ready-made `continuation`
+(§5.1) instead of silently dropping the tail.
 
 `toFtsQuery` lowercases the query, keeps `\p{L}\p{N}_-` tokens, quotes each and joins with `OR`: recall first, ranking by
 BM25 afterwards. An empty query lists recent notes — the "show me what I was working on" path.
@@ -193,7 +195,28 @@ Definitions in `server/mcp-tools.ts`, shared by the stdio server, the attached a
 
 `obsidian_directories`, `obsidian_search`, `obsidian_read`, `obsidian_outline`, `obsidian_list`, `obsidian_links`,
 `obsidian_edit`, `obsidian_write_document`, `obsidian_write_scratch`, `obsidian_append_inbox`, `obsidian_index`,
-`obsidian_diagnose`, `obsidian_status`.
+`obsidian_diagnose`, `obsidian_status`, `obsidian_continue`.
+
+### 5.1 Truncation protocol (0.18.12)
+
+`shared/continuation.ts` defines the wire contract; `server/continuation.ts` builds and normalizes it. A tool that
+cannot return everything sets `truncated: true` and a `continuation` object with four fields: `call` (exact tool name
+and normalized arguments), `reason` (`char_budget`, `max_results`, `note_window`, `list_window`, `issue_window`),
+`omitted` (count) and `hint`. `withTruncation()` adds a machine-readable `[TRUNCATED]` line to the **text** channel as
+well, because several MCP clients render only `text`; `normalizeTruncation()` reapplies that line at both transport
+boundaries (`mcp-server.ts` and `agent-tools.ts`).
+
+`obsidian_continue` takes the object verbatim, validates it against `continuationSchema`, refuses any target outside
+`CONTINUATION_TARGETS` (`obsidian_search`, `obsidian_read`, `obsidian_list`, `plan_validate`) — recursion included — and
+dispatches it through the same `dispatchTool()` the original call used. It is stateless: the next page is encoded in the
+arguments (`offset`, `char_offset`), so it needs no server-side cursor and cannot outlive the settings it was created
+with. Target tools re-apply their own path and role checks.
+
+Current producers: `obsidian_search` (`offset` plus `packHitsDetailed`), `obsidian_read` (`char_offset`/`max_chars`
+windows), `obsidian_list` (`offset`), `plan_validate` (`offset`; its former numeric `truncated` field is now
+`truncated_count`, since `truncated` is a boolean in this contract). The four shipped skills repeat the same rule: a
+`[TRUNCATED]` result is continued with the plugin primitive, never with `shell`, `read`, `glob`, `grep` or a guessed
+path. Validation of permission boundaries and cross-tool escapes is deliberately out of scope for this release.
 
 `obsidian_diagnose` measures recall@k over cases the caller supplies (`{query, expected_paths}`), for lexical and for
 hybrid retrieval, so "semantic helps here" is a measurement rather than a claim. Without cases it reports vector
@@ -434,7 +457,29 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12)
+
+### 0.18.12 — a continuation primitive for truncated results
+
+Feature release (0.17.12 → 0.18.12). The new tool grows the MCP catalogue from 30 to 31 and the attached Paseo tool
+set from 8 to 9. No setting, host floor, SDK requirement or existing tool input was removed; the only behavioural
+change to an existing result is `plan_validate.truncated`, which was a count and is now a boolean with the count moved
+to `truncated_count`.
+
+| Area | Change |
+| --- | --- |
+| `shared/continuation.ts`, `server/continuation.ts` | shared zod contract, `[TRUNCATED]` text marker, transport normalization, monotonic text windows, explicit continuation targets |
+| tool `obsidian_continue` | re-runs one named tool with the exact arguments from a continuation; refuses malformed objects, unknown targets and recursion |
+| `obsidian_search` | `offset` input, `packHitsDetailed()` counters, continuation for omitted hits and further pages |
+| `obsidian_read` | `char_offset`/`max_chars` windows with continuation; a whole note still needs no extra call |
+| `obsidian_list`, `plan_validate` | `offset` input and continuations for the next page of notes or issues |
+| transports | text marker appended in `mcp-server.ts` and `agent-tools.ts`, so clients that render only `text` see the exact next call |
+| skills and instructions | `CONTRACT_SENTENCE`, `initialize` and all four `SKILL.md` files teach `[TRUNCATED]` → `obsidian_continue`, never a file tool |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **43 suites / 354 tests** pass (new `tests/continuation.test.ts` covers
+the instructions, the text marker, search/read/list continuations and refusals). Not exercised against a live Paseo
+host in this pass. Permission-boundary validation and tool escape detection are intentionally deferred to a separate
+task.
 
 ### 0.17.12 — descriptions point to the `plan_*` tools
 

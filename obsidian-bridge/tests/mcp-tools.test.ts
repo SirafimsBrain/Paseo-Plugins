@@ -37,6 +37,7 @@ describe("tool catalogue", () => {
       "obsidian_index",
       "obsidian_diagnose",
       "obsidian_status",
+      "obsidian_continue",
       "plan_scope",
       "plan_read",
       "plan_search",

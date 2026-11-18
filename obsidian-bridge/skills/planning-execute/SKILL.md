@@ -64,3 +64,6 @@ an archived node is out of the tree; neither is a note to edit.
 3. If the plan's shape no longer matches reality, fix the shape now (move, archive, add the missing leaf), not "later".
 4. Answer with what changed in the plan: node paths, the status you set, the revision you produced. A reader should be
    able to open the node and see exactly what you reported.
+
+A `[TRUNCATED]` result is not a failure: pass its `continuation` object unchanged to `obsidian_continue`. Do not use
+file tools to fetch the rest of a plan answer — the continuation is the supported and cheaper path.

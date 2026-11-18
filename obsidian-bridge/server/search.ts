@@ -40,6 +40,8 @@ export interface SearchOptions {
   scope?: Role | "all";
   budgetChars?: number;
   snippetChars?: number;
+  /** Skip the first N ranked candidates (continuation paging). */
+  offset?: number;
   /** Directory roles, so every hit can name the folder it came from. */
   dirs?: RoleDirs;
   /** Query vector + model whose vectors should join the fusion (0.3.0). */
@@ -65,6 +67,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
   const limit = options.limit ?? 10;
   const snippetChars = options.snippetChars ?? 600;
   const budgetChars = options.budgetChars ?? 8000;
+  const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const folder = options.folder?.trim() ?? "";
   const wantedTags = (options.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean);
   const scope = options.scope ?? "all";
@@ -203,7 +206,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
   }
 
   candidates.sort((a, b) => b.score - a.score);
-  const top = candidates.slice(0, limit);
+  const top = candidates.slice(offset, offset + limit);
   const backlinks = store.backlinkCounts(top.map((candidate) => candidate.path));
 
   const hits: SearchHit[] = top.map((candidate) => {
@@ -227,10 +230,13 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         : "No notes matched. Try fewer words, or drop the folder/tag filters."
       : null;
 
+  const packed = packHitsDetailed(hits, budgetChars);
   return {
     query,
     hits,
-    text: packHits(hits, budgetChars),
+    text: packed.text,
+    total: candidates.length,
+    omitted: packed.omitted + (candidates.length - offset - hits.length),
     tookMs: Date.now() - startedAt,
     signals,
     note,
@@ -260,9 +266,16 @@ function dotProduct(a: Float32Array, b: Float32Array): number {
   return sum;
 }
 
+/** How much of a packed answer was actually shown. */
+export interface PackedHits {
+  text: string;
+  included: number;
+  omitted: number;
+}
+
 /** Packs hits into a bounded text block an agent can quote from. */
-export function packHits(hits: SearchHit[], budgetChars: number): string {
-  if (hits.length === 0) return "";
+export function packHitsDetailed(hits: SearchHit[], budgetChars: number): PackedHits {
+  if (hits.length === 0) return { text: "", included: 0, omitted: 0 };
   const lines: string[] = [];
   let used = 0;
   for (const [index, hit] of hits.entries()) {
@@ -279,5 +292,14 @@ export function packHits(hits: SearchHit[], budgetChars: number): string {
     const last = lines.pop() ?? "";
     used -= last.length;
   }
-  return lines.join("\n").trim();
+  return {
+    text: lines.join("\n").trim(),
+    included: lines.length,
+    omitted: hits.length - lines.length,
+  };
+}
+
+/** Text-only wrapper kept for callers that never needed the counters. */
+export function packHits(hits: SearchHit[], budgetChars: number): string {
+  return packHitsDetailed(hits, budgetChars).text;
 }

@@ -1,5 +1,12 @@
 import * as fs from "node:fs";
+import { continuationSchema } from "../shared/continuation";
 import type { RuntimeSettings } from "../shared/settings";
+import {
+  CONTINUATION_TARGETS,
+  makeContinuation,
+  windowText,
+  withTruncation,
+} from "./continuation";
 import { EMPTY_EVENT_STATE, readEnrichmentState } from "./enrichment-state";
 import {
   appendToNote,
@@ -54,7 +61,9 @@ export const CONTRACT_SENTENCE =
   "it to record agent memory (that is memory-flash) or to plan project work (use `plan_*`). " +
   "Planning calls are confined to the configured planning directory (`planRoot`): their paths " +
   "are relative to it, and a plan file is only ever written by a `plan_*` tool — never with " +
-  "`obsidian_edit`, `obsidian_write_*`, `shell` or an editor.";
+  "`obsidian_edit`, `obsidian_write_*`, `shell` or an editor. " +
+  "If a result says `[TRUNCATED]`, continue with `obsidian_continue` and its exact `continuation` " +
+  "object; never replace it with a file tool.";
 
 /** Role descriptions shared by the MCP instructions and the agent tools. */
 export function directoryGuide(dirs: RoleDirs): string {
@@ -78,6 +87,10 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "`obsidian_outline`. Call these tools by their exact names — do not probe for names, guess " +
     "a vault path, or fall back to `glob`/`grep`/`read`: the index finds a note by its title, " +
     "aliases, tags and body in one call.\n\n" +
+    "A `[TRUNCATED]` result is a normal answer with a built-in next step: copy its `continuation` " +
+    "object into `obsidian_continue` unchanged and keep working. Do not switch to `shell`, `read`, " +
+    "`glob` or `grep`, and do not guess an offset or a path — a larger continuation costs fewer " +
+    "tokens than an abandoned task.\n\n" +
     toolIndex() +
     "\n\nWrite only where the user asked you to: authored documents go to `out`, scratch and " +
     "intermediate notes to `raw`, and appends to incoming material to `inbox`. Never create a " +
@@ -101,6 +114,9 @@ export interface JsonSchemaProperty {
   items?: { type?: string; description?: string };
   enum?: string[];
   default?: unknown;
+  /** Nested object schema (used by the `obsidian_continue` argument). */
+  properties?: Record<string, JsonSchemaProperty>;
+  required?: string[];
 }
 
 export interface McpToolDefinition {
@@ -162,6 +178,10 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           type: "number",
           description: "Character budget for the packed answer text (default from settings).",
         },
+        offset: {
+          type: "number",
+          description: "Skip the first N ranked hits; supplied by a [TRUNCATED] result.",
+        },
         semantic: {
           type: "boolean",
           description:
@@ -182,6 +202,14 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       properties: {
         path: { type: "string", description: "Path relative to the configured directory." },
         heading: { type: "string", description: "Optional heading text; reads only that section." },
+        char_offset: {
+          type: "number",
+          description: "Skip the first N characters of the body; supplied by a [TRUNCATED] result.",
+        },
+        max_chars: {
+          type: "number",
+          description: "Return at most this many characters; a larger window is a continuation.",
+        },
       },
       required: ["path"],
     },
@@ -215,6 +243,10 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           description: "Restrict to one directory role. Default: all.",
         },
         limit: { type: "number", description: "Maximum notes, 1–500 (default 50)." },
+        offset: {
+          type: "number",
+          description: "Skip the first N notes; supplied by a [TRUNCATED] result.",
+        },
       },
     },
   },
@@ -357,6 +389,31 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       "writes are enabled and whether optional Obsidian enrichment is reachable. Use it to " +
       "check that the bridge is connected before relying on it.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "obsidian_continue",
+    title: "Continue a truncated result",
+    description:
+      `${CONTRACT_SENTENCE} Re-runs the tool named in a \`[TRUNCATED]\` result with exactly ` +
+      "the arguments printed there. Copy the `continuation` object verbatim; the plugin " +
+      "rechecks its boundaries before answering.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        continuation: {
+          type: "object",
+          description: "The `continuation` object from the truncated result, unchanged.",
+          properties: {
+            call: { type: "object", description: "{tool, arguments} chosen by the plugin." },
+            reason: { type: "string", description: "Why the previous result was cut." },
+            omitted: { type: "number", description: "How many items or characters were hidden." },
+            hint: { type: "string", description: "One-line explanation for the agent." },
+          },
+          required: ["call", "reason", "omitted", "hint"],
+        },
+      },
+      required: ["continuation"],
+    },
   },
   // Planning tools (0.11.11) share this server and settings; their boundary is
   // the `planRoot` directory inside the vault, not the whole vault.
@@ -595,6 +652,24 @@ export async function dispatchTool(
     if (planned) return planned;
   }
 
+  // A continuation re-runs one named tool with the arguments the plugin itself
+  // produced. It never opens the index here: the target tool does that.
+  if (name === "obsidian_continue") {
+    const parsed = continuationSchema.safeParse(input.continuation);
+    if (!parsed.success) {
+      return fail(
+        "continuation is required: copy the `continuation` object from a [TRUNCATED] result unchanged.",
+      );
+    }
+    const target = parsed.data.call.tool;
+    if (!CONTINUATION_TARGETS.has(target)) {
+      return fail(
+        `'${target}' is not a continuation target. Allowed: ${[...CONTINUATION_TARGETS].join(", ")}.`,
+      );
+    }
+    return dispatchTool(target, parsed.data.call.arguments, settings);
+  }
+
   // Pure configuration query: answered without opening (and creating) an index.
   if (name === "obsidian_directories") {
     const dirs = resolveRoleDirs(settings);
@@ -627,6 +702,11 @@ export async function dispatchTool(
           typeof input.budget_chars === "number" && Number.isFinite(input.budget_chars)
             ? Math.max(500, Math.min(60000, Math.trunc(input.budget_chars)))
             : settings.searchBudgetChars;
+        const offset =
+          typeof input.offset === "number" && Number.isFinite(input.offset)
+            ? Math.max(0, Math.trunc(input.offset))
+            : 0;
+        const scope = parseScope(input.scope);
         const semanticWanted =
           input.semantic === undefined ? settings.semanticSearch : input.semantic === true;
         const queryEmbedding =
@@ -637,7 +717,8 @@ export async function dispatchTool(
           limit,
           folder,
           tags,
-          scope: parseScope(input.scope),
+          scope,
+          offset,
           budgetChars: budget,
           snippetChars: settings.snippetChars,
           dirs: runtime.dirs,
@@ -648,9 +729,26 @@ export async function dispatchTool(
           enrichment: { enabled: fuzzy.enabled, error: fuzzy.error },
         });
         const text = result.text.length > 0 ? result.text : (result.note ?? "No results.");
-        return {
-          text,
-          structuredContent: {
+        const remaining = Math.max(0, (result.total ?? 0) - offset - result.hits.length);
+        const omitted = result.omitted ?? 0;
+        const nextArgs: Record<string, unknown> = { query };
+        if (input.limit !== undefined) nextArgs.limit = limit;
+        if (folder.length > 0) nextArgs.folder = folder;
+        if (tags.length > 0) nextArgs.tags = input.tags;
+        if (scope !== "all") nextArgs.scope = scope;
+        if (typeof input.budget_chars === "number") nextArgs.budget_chars = budget;
+        if (offset > 0 || omitted > 0) nextArgs.offset = offset + result.hits.length;
+        const continuation =
+          omitted > 0
+            ? makeContinuation(
+                { tool: "obsidian_search", arguments: nextArgs },
+                remaining > 0 ? "max_results" : "char_budget",
+                omitted,
+                `${omitted} search hits were not shown; ask for the next page to keep reading.`,
+              )
+            : null;
+        return withTruncation(
+          {
             query: result.query,
             hits: result.hits,
             signals: result.signals,
@@ -665,7 +763,9 @@ export async function dispatchTool(
               error: queryEmbedding?.error ?? null,
             },
           },
-        };
+          continuation,
+          text,
+        );
       }
 
       case "obsidian_read": {
@@ -682,13 +782,34 @@ export async function dispatchTool(
         const note = readVaultNote(runtime.root, relPath, { heading });
         if ("error" in note) return fail(note.error);
         const meta = runtime.store.noteMeta(relPath);
-        return {
-          text: note.text,
-          // The body is part of the structured result too: an MCP client that
-          // renders only `structuredContent` (OpenCode does) would otherwise
-          // see the metadata and no text at all.
-          structuredContent: {
-            content: note.text,
+        const charOffset =
+          typeof input.char_offset === "number" && Number.isFinite(input.char_offset)
+            ? Math.max(0, Math.trunc(input.char_offset))
+            : 0;
+        const maxChars =
+          typeof input.max_chars === "number" && Number.isFinite(input.max_chars)
+            ? Math.max(1, Math.trunc(input.max_chars))
+            : null;
+        const window = windowText(note.text, charOffset, maxChars);
+        const nextArgs: Record<string, unknown> = { path: relPath };
+        if (heading !== undefined) nextArgs.heading = heading;
+        if (maxChars !== null) nextArgs.max_chars = maxChars;
+        nextArgs.char_offset = charOffset + window.text.length;
+        const continuation =
+          window.omittedAfter > 0
+            ? makeContinuation(
+                { tool: "obsidian_read", arguments: nextArgs },
+                "note_window",
+                window.omittedAfter,
+                `${window.omittedAfter} characters of the note were not shown; read the next window.`,
+              )
+            : null;
+        // The body is part of the structured result too: an MCP client that
+        // renders only `structuredContent` (OpenCode does) would otherwise
+        // see the metadata and no text at all.
+        return withTruncation(
+          {
+            content: window.text,
             path: relPath,
             role: roleOfPath(relPath, runtime.dirs),
             title: note.parsed.title,
@@ -698,9 +819,11 @@ export async function dispatchTool(
             headings: note.parsed.headings,
             backlinks: runtime.store.backlinksOf(relPath).length,
             indexed: meta !== null,
-            truncated: note.truncated,
+            noteTruncated: note.truncated,
           },
-        };
+          continuation,
+          window.text,
+        );
       }
 
       case "obsidian_edit": {
@@ -798,22 +921,43 @@ export async function dispatchTool(
           typeof input.limit === "number" && Number.isFinite(input.limit)
             ? Math.max(1, Math.min(500, Math.trunc(input.limit)))
             : 50;
-        const rows = runtime.store
-          .notesUnder(folder, scope === "all" ? limit : limit * 4)
-          .filter((row) => scope === "all" || roleOfPath(row.path, runtime.dirs) === scope)
-          .slice(0, limit);
-        return json({
-          folder: folder || "(everything)",
-          scope,
-          count: rows.length,
-          notes: rows.map((row) => ({
-            path: row.path,
-            role: roleOfPath(row.path, runtime.dirs),
-            title: row.title,
-            words: row.word_count,
-            modifiedAt: new Date(row.mtime_ms).toISOString(),
-          })),
-        });
+        const offset =
+          typeof input.offset === "number" && Number.isFinite(input.offset)
+            ? Math.max(0, Math.trunc(input.offset))
+            : 0;
+        const wanted = offset + limit + 1;
+        const available = runtime.store
+          .notesUnder(folder, scope === "all" ? wanted : wanted * 4)
+          .filter((row) => scope === "all" || roleOfPath(row.path, runtime.dirs) === scope);
+        const rows = available.slice(offset, offset + limit);
+        const omitted = Math.max(0, available.length - offset - rows.length);
+        const nextArgs: Record<string, unknown> = { limit, offset: offset + rows.length };
+        if (input.folder !== undefined) nextArgs.folder = input.folder;
+        if (scope !== "all") nextArgs.scope = scope;
+        const continuation =
+          omitted > 0
+            ? makeContinuation(
+                { tool: "obsidian_list", arguments: nextArgs },
+                "list_window",
+                omitted,
+                `${omitted} notes were not shown; ask for the next page to keep listing.`,
+              )
+            : null;
+        return withTruncation(
+          {
+            folder: folder || "(everything)",
+            scope,
+            count: rows.length,
+            notes: rows.map((row) => ({
+              path: row.path,
+              role: roleOfPath(row.path, runtime.dirs),
+              title: row.title,
+              words: row.word_count,
+              modifiedAt: new Date(row.mtime_ms).toISOString(),
+            })),
+          },
+          continuation,
+        );
       }
 
       case "obsidian_links": {

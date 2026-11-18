@@ -170,9 +170,16 @@ describe("plan_validate", () => {
     });
     const outcome = await call(created, "plan_validate", { limit: 1 });
     expectOk(outcome);
-    const result = outcome.structuredContent as Report & { truncated: number };
+    const result = outcome.structuredContent as Report & {
+      truncated: boolean;
+      truncated_count: number;
+      continuation: { call: { tool: string; arguments: Record<string, unknown> } } | null;
+    };
     expect(result.issues.length).toBe(1);
-    expect(result.truncated).toBeGreaterThanOrEqual(1);
+    expect(result.truncated).toBe(true);
+    expect(result.truncated_count).toBeGreaterThanOrEqual(1);
+    expect(result.continuation?.call.tool).toBe("plan_validate");
+    expect(result.continuation?.call.arguments.offset).toBe(1);
   });
 
   it("reads and never writes", async () => {

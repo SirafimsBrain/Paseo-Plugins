@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RuntimeSettings } from "../../shared/settings";
+import { makeContinuation, withTruncation } from "../continuation";
 import type { ToolOutcome } from "../mcp-tools";
 import { positiveInt, stringField } from "./frontmatter";
 import { journalPathFor } from "./journal";
@@ -20,7 +21,7 @@ import {
   type PlanTree,
 } from "./read";
 import { bodyMatchesFrontmatter } from "./sections";
-import { fail, isRecord, json } from "./write";
+import { fail, isRecord } from "./write";
 
 /**
  * `plan_validate`: the integrity report the file model needs in place of a
@@ -142,6 +143,10 @@ export function planValidate(
     typeof input.limit === "number" && Number.isFinite(input.limit)
       ? Math.max(1, Math.min(500, Math.trunc(input.limit)))
       : 200;
+  const offset =
+    typeof input.offset === "number" && Number.isFinite(input.offset)
+      ? Math.max(0, Math.trunc(input.offset))
+      : 0;
 
   const issues: PlanIssue[] = [];
   const push = (issue: PlanIssue) => {
@@ -394,9 +399,22 @@ export function planValidate(
     if (kind) nodeCounts[kind] = (nodeCounts[kind] ?? 0) + 1;
   }
 
-  const window = issues.slice(0, limit);
+  const window = issues.slice(offset, offset + limit);
+  const omitted = Math.max(0, issues.length - offset - window.length);
+  const nextArgs: Record<string, unknown> = { limit };
+  if (input.project !== undefined) nextArgs.project = input.project;
+  if (offset > 0 || omitted > 0) nextArgs.offset = offset + window.length;
+  const continuation =
+    omitted > 0
+      ? makeContinuation(
+          { tool: "plan_validate", arguments: nextArgs },
+          "issue_window",
+          omitted,
+          `${omitted} integrity issues were not shown; ask for the next page.`,
+        )
+      : null;
 
-  return json({
+  return withTruncation({
     ok: true,
     valid: issues.length === 0,
     root: tree.root.relPath,
@@ -405,7 +423,7 @@ export function planValidate(
     counts: { byKind: nodeCounts },
     issues: window,
     issue_count: issues.length,
-    truncated: issues.length > window.length ? issues.length - window.length : 0,
+    truncated_count: omitted,
     checked: {
       documents: tree.nodes.size,
       skipped: tree.skipped.length,
@@ -431,5 +449,5 @@ export function planValidate(
       issues.length === 0
         ? "No integrity problems: every link resolves, every body matches its frontmatter, one root per project."
         : "Each issue names the file to fix; nothing was changed by this call.",
-  });
+  }, continuation);
 }
