@@ -5,21 +5,46 @@ import { paseoHome } from "./paths";
 import { configuredPluginPath } from "./mcp-launch";
 
 /**
- * Installs the plugin's own agent skill.
+ * Installs the plugin's agent skills.
  *
- * Paseo 0.15.x has no skill API, so the skill is delivered the way the agent
+ * Paseo 0.15.x has no skill API, so the skills are delivered the way the agent
  * runtimes already look for one: a `<skills-root>/<name>/SKILL.md` directory in
  * the user's home. The roots belong to the agents (OpenCode, Codex-style
  * `~/.agents`, Claude Code), so a root that does not exist is left alone — the
  * plugin never creates a skills directory for a runtime the user does not have.
  *
- * The skill itself lives in the repository (`skills/obsidian-bridge/SKILL.md`),
- * which makes it reviewable and versioned with the code instead of being
- * generated from strings. It is rewritten only when its content differs, and it
- * is removed when the settings switch is turned off.
+ * The plugin ships four skills rather than one because they answer four
+ * different questions an agent asks: how to read and write the vault
+ * (`obsidian-bridge`), how to grow a plan (`planning-create`), how to carry a
+ * plan through the work (`planning-execute`) and how to review plan against
+ * fact afterwards (`planning-review`). All of them live in the repository
+ * (`skills/<name>/SKILL.md`), are reviewed with the code, are rewritten only
+ * when their content differs, and are removed when the switch is turned off —
+ * the same contract the single skill had, applied to a list.
  */
 
-export const SKILL_NAME = "obsidian-bridge";
+export interface SkillDefinition {
+  /** Directory name under `skills/` and under every skills root. */
+  name: string;
+  /** What the skill is for, shown in the settings screen. */
+  purpose: string;
+}
+
+/**
+ * The shipped skills. `obsidian-bridge` stays first: it is the one the settings
+ * screen has always reported as the plugin's own, and `SKILL_NAME` keeps
+ * pointing at it for callers that predate the list.
+ */
+export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
+  { name: "obsidian-bridge", purpose: "Read and write the vault" },
+  { name: "planning-create", purpose: "Grow a plan tree" },
+  { name: "planning-execute", purpose: "Carry a plan through the work" },
+  { name: "planning-review", purpose: "Review plan against fact" },
+];
+
+export const SKILL_NAME = SKILL_DEFINITIONS[0].name;
+export const SKILL_NAMES: readonly string[] = SKILL_DEFINITIONS.map((skill) => skill.name);
+
 const SKILL_FILE = "SKILL.md";
 
 export interface SkillRoot {
@@ -28,6 +53,9 @@ export interface SkillRoot {
 }
 
 export interface SkillTargetStatus {
+  /** Skill directory name, e.g. `planning-execute`. */
+  skill: string;
+  purpose: string;
   label: string;
   root: string;
   path: string;
@@ -36,29 +64,42 @@ export interface SkillTargetStatus {
   upToDate: boolean | null;
 }
 
-/** Per-root state of the installed skill, for the settings screen. */
+/** Per-root, per-skill state of the installed copies, for the settings screen. */
 export function skillStatuses(): SkillTargetStatus[] {
-  const source = resolveSkillSource();
-  const content = source === null ? null : readIfExists(source);
-  return skillRoots().map((root) => {
-    const skillDir = path.join(root.dir, SKILL_NAME);
-    const file = path.join(skillDir, SKILL_FILE);
+  const rows: SkillTargetStatus[] = [];
+  for (const root of skillRoots()) {
     const detected = isDirectory(root.dir);
-    const existing = readIfExists(file);
-    return {
-      label: root.label,
-      root: root.dir,
-      path: file,
-      detected,
-      installed: existing !== null,
-      upToDate: existing === null || content === null ? null : existing === content,
-    };
-  });
+    for (const skill of SKILL_DEFINITIONS) {
+      const source = resolveSkillSource(skill.name);
+      const content = source === null ? null : readIfExists(source);
+      const file = path.join(root.dir, skill.name, SKILL_FILE);
+      const existing = readIfExists(file);
+      rows.push({
+        skill: skill.name,
+        purpose: skill.purpose,
+        label: root.label,
+        root: root.dir,
+        path: file,
+        detected,
+        installed: existing !== null,
+        upToDate: existing === null || content === null ? null : existing === content,
+      });
+    }
+  }
+  return rows;
+}
+
+export interface SkillSource {
+  name: string;
+  /** Absolute path of the skill in the checkout, or `null` when it is missing. */
+  path: string | null;
 }
 
 export interface SkillStatus {
-  /** Absolute path of the skill in the checkout, or `null` when it is missing. */
+  /** Absolute path of `obsidian-bridge/SKILL.md`, or `null` when it is missing. */
   source: string | null;
+  /** Every shipped skill and where it was found. */
+  sources: SkillSource[];
   /** Skills roots that exist on this machine. */
   detected: string[];
   /** `<root>/<name>/SKILL.md` where the installed copy is current. */
@@ -109,38 +150,55 @@ function readIfExists(candidate: string): string | null {
   }
 }
 
-/** Locates `skills/obsidian-bridge/SKILL.md` in the installed checkout. */
-export function resolveSkillSource(): string | null {
+/** Locates `skills/<name>/SKILL.md` in the installed checkout. */
+export function resolveSkillSource(name: string = SKILL_NAME): string | null {
   const candidates: string[] = [];
   const configured = configuredPluginPath();
-  if (configured) candidates.push(path.join(configured, "skills", SKILL_NAME, SKILL_FILE));
+  if (configured) candidates.push(path.join(configured, "skills", name, SKILL_FILE));
   if (typeof __dirname === "string") {
-    candidates.push(path.join(__dirname, "..", "skills", SKILL_NAME, SKILL_FILE));
-    candidates.push(path.join(__dirname, "skills", SKILL_NAME, SKILL_FILE));
+    candidates.push(path.join(__dirname, "..", "skills", name, SKILL_FILE));
+    candidates.push(path.join(__dirname, "skills", name, SKILL_FILE));
   }
-  candidates.push(path.join(paseoHome(), "plugins", SKILL_NAME, "skills", SKILL_NAME, SKILL_FILE));
+  candidates.push(path.join(paseoHome(), "plugins", SKILL_NAME, "skills", name, SKILL_FILE));
   for (const candidate of candidates) {
     if (readIfExists(candidate) !== null) return candidate;
   }
   return null;
 }
 
+/** Every shipped skill with the checkout path it was found at. */
+export function resolveSkillSources(): SkillSource[] {
+  return SKILL_DEFINITIONS.map((skill) => ({
+    name: skill.name,
+    path: resolveSkillSource(skill.name),
+  }));
+}
+
 export function agentSkillStatus(): SkillStatus {
-  const source = resolveSkillSource();
-  const content = source === null ? null : readIfExists(source);
+  const sources = resolveSkillSources();
   const detected: string[] = [];
   const installed: string[] = [];
   const stale: string[] = [];
   for (const root of skillRoots()) {
     if (!isDirectory(root.dir)) continue;
     detected.push(root.dir);
-    const file = path.join(root.dir, SKILL_NAME, SKILL_FILE);
-    const existing = readIfExists(file);
-    if (existing === null) continue;
-    if (content !== null && existing === content) installed.push(file);
-    else stale.push(file);
+    for (const skill of SKILL_DEFINITIONS) {
+      const source = sources.find((entry) => entry.name === skill.name)?.path ?? null;
+      const content = source === null ? null : readIfExists(source);
+      const file = path.join(root.dir, skill.name, SKILL_FILE);
+      const existing = readIfExists(file);
+      if (existing === null) continue;
+      if (content !== null && existing === content) installed.push(file);
+      else stale.push(file);
+    }
   }
-  return { source, detected, installed, stale };
+  return {
+    source: sources.find((entry) => entry.name === SKILL_NAME)?.path ?? null,
+    sources,
+    detected,
+    installed,
+    stale,
+  };
 }
 
 export interface SkillVerifyResult {
@@ -153,7 +211,8 @@ export interface SkillVerifyResult {
 }
 
 /**
- * Verifies every installed copy against the checkout and repairs what drifted.
+ * Verifies every installed copy of every shipped skill against the checkout and
+ * repairs what drifted.
  *
  * This is the currency check the plugin runs on load, after a settings change
  * and on a timer: a skill directory can be edited, replaced or removed by hand,
@@ -166,40 +225,59 @@ export function verifyAgentSkill(): SkillVerifyResult {
   const checked: string[] = [];
   const repaired: string[] = [];
   const errors: string[] = [];
-  const source = resolveSkillSource();
-  if (source === null) {
-    return { checked, repaired, errors: ["skills/obsidian-bridge/SKILL.md is missing from the checkout"] };
+
+  const contents = new Map<string, string>();
+  for (const skill of SKILL_DEFINITIONS) {
+    const source = resolveSkillSource(skill.name);
+    if (source === null) {
+      errors.push(`skills/${skill.name}/SKILL.md is missing from the checkout`);
+      continue;
+    }
+    try {
+      contents.set(skill.name, fs.readFileSync(source, "utf-8"));
+    } catch (cause) {
+      errors.push(
+        `${source}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
   }
-  let content: string;
-  try {
-    content = fs.readFileSync(source, "utf-8");
-  } catch (cause) {
-    return { checked, repaired, errors: [cause instanceof Error ? cause.message : String(cause)] };
-  }
+
   for (const root of skillRoots()) {
     if (!isDirectory(root.dir)) continue;
     checked.push(root.dir);
-    const skillDir = path.join(root.dir, SKILL_NAME);
-    const file = path.join(skillDir, SKILL_FILE);
-    if (readIfExists(file) === content) continue;
-    const temp = path.join(skillDir, `.${SKILL_FILE}.${process.pid}.${Date.now()}.tmp`);
-    try {
-      fs.mkdirSync(skillDir, { recursive: true });
-      fs.writeFileSync(temp, content, "utf-8");
-      fs.renameSync(temp, file);
-      repaired.push(file);
-    } catch (cause) {
-      fs.rmSync(temp, { force: true });
-      errors.push(`${file}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    for (const skill of SKILL_DEFINITIONS) {
+      const content = contents.get(skill.name);
+      if (content === undefined) continue;
+      const skillDir = path.join(root.dir, skill.name);
+      const file = path.join(skillDir, SKILL_FILE);
+      if (readIfExists(file) === content) continue;
+      const temp = path.join(
+        skillDir,
+        `.${SKILL_FILE}.${process.pid}.${Date.now()}.${skill.name}.tmp`,
+      );
+      try {
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(temp, content, "utf-8");
+        fs.renameSync(temp, file);
+        repaired.push(file);
+      } catch (cause) {
+        fs.rmSync(temp, { force: true });
+        errors.push(`${file}: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
     }
   }
   return { checked, repaired, errors };
 }
 
-/** Writes the skill wherever it is missing or stale (see `verifyAgentSkill`). */
+/** Writes every skill wherever it is missing or stale (see `verifyAgentSkill`). */
 export function installAgentSkill(): { ok: boolean; targets: string[]; error?: string } {
-  if (resolveSkillSource() === null) {
-    return { ok: false, targets: [], error: "skills/obsidian-bridge/SKILL.md is missing from the checkout" };
+  const missing = SKILL_DEFINITIONS.filter((skill) => resolveSkillSource(skill.name) === null);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      targets: [],
+      error: `${missing.map((skill) => `skills/${skill.name}/SKILL.md`).join(", ")} missing from the checkout`,
+    };
   }
   const result = verifyAgentSkill();
   if (result.errors.length > 0) {
@@ -208,20 +286,22 @@ export function installAgentSkill(): { ok: boolean; targets: string[]; error?: s
   return { ok: true, targets: result.repaired };
 }
 
-/** Removes the plugin's skill from every root that has a copy. */
+/** Removes the plugin's skills from every root that has a copy. */
 export function removeAgentSkill(): { removed: string[]; errors: string[] } {
   const removed: string[] = [];
   const errors: string[] = [];
   for (const root of skillRoots()) {
     if (!isDirectory(root.dir)) continue;
-    const skillDir = path.join(root.dir, SKILL_NAME);
-    if (path.basename(skillDir) !== SKILL_NAME) continue;
-    if (!isDirectory(skillDir)) continue;
-    try {
-      fs.rmSync(skillDir, { recursive: true, force: true });
-      removed.push(skillDir);
-    } catch (cause) {
-      errors.push(`${skillDir}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    for (const name of SKILL_NAMES) {
+      const skillDir = path.join(root.dir, name);
+      if (path.basename(skillDir) !== name) continue;
+      if (!isDirectory(skillDir)) continue;
+      try {
+        fs.rmSync(skillDir, { recursive: true, force: true });
+        removed.push(skillDir);
+      } catch (cause) {
+        errors.push(`${skillDir}: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
     }
   }
   return { removed, errors };

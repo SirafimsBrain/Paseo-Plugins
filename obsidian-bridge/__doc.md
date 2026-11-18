@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.16.11**.
+Version covered: **0.17.11**.
 
 ## 1. Purpose and scope
 
@@ -336,7 +336,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `obsidianApiUrl` | `https://127.0.0.1:27124` | Local REST API base URL. Self-signed TLS is accepted for loopback hosts only. |
 | `obsidianApiKey` | `""` | Bearer token for that API. Mirrored in a `0600` settings file; never logged. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
-| `installAgentSkill` | `true` | Install `skills/obsidian-bridge/SKILL.md` into every agent skills directory that exists; verify and repair it on load, on a settings change and every five minutes; remove it when off. |
+| `installAgentSkill` | `true` | Install the four shipped skills (`obsidian-bridge`, `planning-create`, `planning-execute`, `planning-review`) into every agent skills directory that exists; verify and repair them on load, on a settings change and every five minutes; remove them when off. |
 | `registerClineMcp` | `true` | Register the MCP server in `~/.cline/data/settings/cline_mcp_settings.json` (Cline ignores a stdio server from the session payload). |
 | `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists); keep it across plugin restarts and remove it when the switch is off. |
 
@@ -434,7 +434,27 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11)
+
+### 0.17.11 — the three planning skills, and a skill list instead of one skill
+
+Feature release (0.16.11 → 0.17.11), stage 8 of the migration. No new MCP tool: the change is what an agent is told, and
+how many skill directories the plugin keeps current.
+
+| Part | Behaviour |
+| --- | --- |
+| `skills/planning-create/SKILL.md` | the shape of a tree (root → one trunk level → branches → sub-branches → leaves), create in order, goals before work, `plan_import` instead of retyping, and the rule that only `plan_*` writes a plan file |
+| `skills/planning-execute/SKILL.md` | the working loop: `plan_scope` → `plan_read` → `plan_set_status`/`plan_update_node`/`plan_growth`, `plan_link` and `plan_incident`, `plan_move_node`/`plan_archive_node` with `op_id`, `expected_revision` and `accept_external`, and a second agent's view of the same node |
+| `skills/planning-review/SKILL.md` | plan against fact: `plan_history` and snapshot diffs, what a review must answer, growth as the fact and status as the summary, incidents and cycles, `plan_restore` as a content restore rather than a rollback |
+| `server/agent-skill.ts` | `SKILL_DEFINITIONS` list (name + purpose), `resolveSkillSources()`, `skillStatuses()` one row per root per skill, install/verify/remove over the whole list, `SKILL_NAME` still pointing at `obsidian-bridge` |
+| `CONTRACT_SENTENCE` and `mcpInstructions` | the `planRoot` boundary and the ban on `obsidian_edit`/`obsidian_write_*`/`shell`/`write`/`patch` against plan files now arrive with every tool description and with the `initialize` block, together with the names of the four skills |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **42 suites / 348 tests** pass. `agent-skill.test.ts` now checks that
+every skill has Agent Skills frontmatter, names its tools and carries no machine-specific absolute path; that installing
+a root writes four directories, that removing a root removes all four and spares another plugin's skill, that a drifted
+`planning-execute` is the only thing repaired, and that the settings list has one row per skill per root.
+`mcp-tools.test.ts` checks the `planRoot` boundary and the skill names in the `initialize` instructions. Linux stays the
+primary target; macOS and Windows remain future work, as `__compatibility.md` records.
 
 ### 0.16.11 — integrity report and import from luck_tree_export
 
@@ -1313,3 +1333,31 @@ instead of duplicating the tree; a target project that holds a *different* tree 
 travel with their `archived` stamp unless `include_archived: false`, and a node that cannot be reached from the root or an
 attachment whose end is missing becomes a warning rather than a silent drop. The write is bracketed by `op:start`/
 `op:done` like the stage-6 operations, so a failed import is visible in the journal and can be repeated with `op_id`.
+
+### 15.10 Skills and instructions (0.17.11)
+
+The plugin teaches four workflows, each a real Agent Skills file reviewed with the code:
+
+| Skill | Answers |
+| --- | --- |
+| `obsidian-bridge` | how to find a note, read one heading, write in the right role and edit an exact fragment |
+| `planning-create` | how to grow a tree: one root, trunks, branches, leaves with briefs, goals, import |
+| `planning-execute` | how to carry the plan through the work and keep its state honest |
+| `planning-review` | how to compare plan with fact using snapshots, growth and `plan_validate` |
+
+`server/agent-skill.ts` holds `SKILL_DEFINITIONS` (directory name plus a one-line purpose for the settings screen) and
+works over that list everywhere: `resolveSkillSources()` finds each `skills/<name>/SKILL.md` in the checkout (configured
+plugin path, then next to `__dirname`, then `$PASEO_HOME/plugins/obsidian-bridge`), `skillStatuses()` reports one row per
+root per skill, `verifyAgentSkill()` repairs only the copies that differ, `installAgentSkill()` refuses when a source file
+is missing, and `removeAgentSkill()` removes the four directories while leaving another plugin's skill alone. Only skills
+roots that already exist are touched, and `SKILL_NAME` keeps pointing at `obsidian-bridge` for callers that predate the
+list.
+
+The `initialize` block carries the same boundary the tools enforce: `plan_*` paths are relative to `planRoot`, a plan file
+is never created, edited, renamed or deleted with `obsidian_edit`, `obsidian_write_*`, `shell`, `write` or `patch`, and a
+snapshot is read only through `plan_history`. That paragraph exists because a skill is an instruction and the boundary is
+code — the skill explains the boundary, it cannot replace it.
+
+No skill contains an absolute path: `planRoot` is configuration, so every example is relative (`centurion/backend/auth`)
+and every root is resolved at runtime. Linux is the primary target; the skills contain no shell-specific step, so a
+macOS/Windows agent follows the same instructions once the plugin is ported.

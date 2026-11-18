@@ -2,6 +2,22 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.17.11 — four agent skills, three of them for planning (2026-11-18)
+
+Feature release (0.16.11 → 0.17.11), stage 8 of the migration. The SDK, host floor and tool catalogue (30 tools) are
+unchanged; the change is agent-facing documentation and the skill installer.
+
+| Change | Behaviour |
+| --- | --- |
+| skills | `skills/planning-create`, `skills/planning-execute` and `skills/planning-review` join `skills/obsidian-bridge`; each has Agent Skills frontmatter naming its tools and no machine-specific absolute path |
+| installer | `server/agent-skill.ts` installs, verifies and removes the whole list; `skillStatuses()` returns one row per root per skill; only roots that exist are written, unchanged copies are not rewritten |
+| removal | turning `installAgentSkill` off removes all four directories and spares another plugin's skill |
+| instructions | `CONTRACT_SENTENCE` and the `initialize` block state the `planRoot` boundary, the ban on `obsidian_edit`/`obsidian_write_*`/`shell`/`write`/`patch` against plan files, `plan_history` as the only snapshot reader, and the four skill names |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **42 suites / 348 tests** pass. Not deployed and not exercised against a
+live Paseo host: the installer was driven over temporary HOME directories, and the instructions were read through
+`mcpInstructions`. Linux is the primary target; macOS and Windows remain future work for the plugin as a whole.
+
 ## Plugin 0.16.11 — integrity report and import from luck_tree_export (2026-11-18)
 
 Feature release (0.15.11 → 0.16.11), stage 7 of the migration. The SDK and host floor are unchanged; the MCP catalogue

@@ -71,6 +71,14 @@ describe("tool catalogue", () => {
     for (const tool of MCP_TOOLS) expect(instructions).toContain(`\`${tool.name}\``);
     expect(instructions).toContain("do not probe for names");
     expect(instructions).toContain("`obsidian_search`");
+    // The planning boundary and the skill names arrive with the same block.
+    expect(instructions).toContain("`planRoot`");
+    expect(instructions).toContain("planning-create");
+    expect(instructions).toContain("planning-execute");
+    expect(instructions).toContain("planning-review");
+    for (const name of ["plan_read", "plan_create_node", "plan_validate", "plan_import"]) {
+      expect(instructions).toContain(`\`${name}\``);
+    }
   });
 
   it("states the explicit-use contract in every content tool", async () => {

@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.16.11)
+## What it does (0.17.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -99,6 +99,11 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   `blocked_by:` in sync on both sides while only `open`/`investigating` incidents block, `plan_goal` authors a goal
   (`create`, `update`, `propose`) for a human to approve, and `plan_growth` upserts the progress record of a node or
   goal, merging steps by title. Each write snapshots the previous state first and journals the change.
+- **Four agent skills, three of them for planning (0.17.11).** `skills/planning-create`, `skills/planning-execute` and
+  `skills/planning-review` teach an agent to grow a plan tree, carry it through the work and review plan against fact;
+  `obsidian-bridge` keeps the read → cite → write workflow. `server/agent-skill.ts` installs, verifies and removes a
+  list of skills instead of one, and the `initialize` instructions now state the `planRoot` boundary and forbid direct
+  file operations on plan files.
 - **Integrity and import (0.16.11).** `plan_validate` is the report a directory of Markdown files needs in place of
   foreign keys: a dangling link, a body that no longer matches its frontmatter, an orphan, a missing or doubled root, a
   leaf with children, an invalid status or parent kind, duplicate ids, an influence cycle, an `op:start` that never got
@@ -233,11 +238,18 @@ Obsidian notes, never as a place to record agent memory.
 
 ## Agent skill
 
-The plugin ships its own [Agent Skills](https://agentskills.io/specification) skill at
-[`skills/obsidian-bridge/SKILL.md`](./skills/obsidian-bridge/SKILL.md) and installs it on load into the skills directories
-that exist: `~/.config/opencode/skills`, `~/.opencode/skills`, `~/.agents/skills`, `~/.claude/skills` (each as
-`obsidian-bridge/SKILL.md`). Unchanged copies are not rewritten; the switch in the settings screen removes the directory.
-A runtime that only scans skills at startup needs a restart to pick it up.
+The plugin ships four [Agent Skills](https://agentskills.io/specification) and installs all of them on load into the
+skills directories that exist: `~/.agents/skills` first, then OpenCode, Cline, Kilo, Kimi, Qwen, Codex and Claude Code.
+
+| Skill | For |
+| --- | --- |
+| [`obsidian-bridge`](./skills/obsidian-bridge/SKILL.md) | reading the vault, citing a heading, writing in the right role, the exact-fragment edit |
+| [`planning-create`](./skills/planning-create/SKILL.md) | growing a plan tree: project, trunks, branches, first leaves, goals, import |
+| [`planning-execute`](./skills/planning-execute/SKILL.md) | carrying a plan through the work: status, briefs, growth, links, incidents, moves |
+| [`planning-review`](./skills/planning-review/SKILL.md) | plan against fact: snapshots, revisions, growth, integrity, restore |
+
+Each lands as `<root>/<skill>/SKILL.md`. Unchanged copies are not rewritten; the switch in the settings screen removes
+all four directories. A runtime that only scans skills at startup needs a restart to pick them up.
 
 The official Obsidian skills are a separate upstream project, kept as the reference for the formats this plugin does not
 cover — [github.com/obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills) (`obsidian-markdown`,

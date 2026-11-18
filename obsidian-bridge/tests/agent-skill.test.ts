@@ -3,11 +3,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  SKILL_DEFINITIONS,
   SKILL_NAME,
+  SKILL_NAMES,
   agentSkillStatus,
   installAgentSkill,
   removeAgentSkill,
   resolveSkillSource,
+  resolveSkillSources,
   skillRoots,
   skillStatuses,
   verifyAgentSkill,
@@ -20,6 +23,11 @@ import {
  */
 
 const repoSkill = path.join(__dirname, "..", "skills", SKILL_NAME, "SKILL.md");
+const PLANNING_SKILLS = ["planning-create", "planning-execute", "planning-review"];
+
+function skillFile(name: string): string {
+  return path.join(__dirname, "..", "skills", name, "SKILL.md");
+}
 let home = "";
 const previousHome = process.env.HOME;
 const previousXdg = process.env.XDG_CONFIG_HOME;
@@ -65,17 +73,22 @@ describe("agent skill", () => {
     const result = installAgentSkill();
     expect(result.ok).toBe(true);
     const installed = path.join(second, SKILL_NAME, "SKILL.md");
-    expect(result.targets).toEqual([installed]);
+    expect(result.targets.length).toBe(SKILL_NAMES.length);
+    expect(result.targets).toContain(installed);
     expect(fs.existsSync(path.join(first, SKILL_NAME))).toBe(false);
     expect(fs.readFileSync(installed, "utf-8")).toContain("Obsidian Bridge Skill");
+    for (const name of PLANNING_SKILLS) {
+      expect(fs.existsSync(path.join(second, name, "SKILL.md"))).toBe(true);
+    }
   });
 
   it("does not rewrite a copy that is already current", () => {
     const [root] = roots();
     makeRoot(root);
-    expect(installAgentSkill().targets.length).toBe(1);
+    expect(installAgentSkill().targets.length).toBe(SKILL_NAMES.length);
     expect(installAgentSkill().targets).toEqual([]);
-    expect(agentSkillStatus().installed).toEqual([path.join(root, SKILL_NAME, "SKILL.md")]);
+    expect(agentSkillStatus().installed.length).toBe(SKILL_NAMES.length);
+    expect(agentSkillStatus().installed).toContain(path.join(root, SKILL_NAME, "SKILL.md"));
   });
 
   it("replaces a stale copy", () => {
@@ -84,8 +97,8 @@ describe("agent skill", () => {
     const file = path.join(root, SKILL_NAME, "SKILL.md");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, "old", "utf-8");
-    expect(agentSkillStatus().stale).toEqual([file]);
-    expect(installAgentSkill().targets).toEqual([file]);
+    expect(agentSkillStatus().stale).toContain(file);
+    expect(installAgentSkill().targets).toContain(file);
     expect(agentSkillStatus().stale).toEqual([]);
   });
 
@@ -96,7 +109,11 @@ describe("agent skill", () => {
     fs.writeFileSync(path.join(root, "other-skill", "SKILL.md"), "other", "utf-8");
     installAgentSkill();
     const { removed } = removeAgentSkill();
-    expect(removed).toEqual([path.join(root, SKILL_NAME)]);
+    expect(removed.length).toBe(SKILL_NAMES.length);
+    expect(removed).toContain(path.join(root, SKILL_NAME));
+    for (const name of SKILL_NAMES) {
+      expect(fs.existsSync(path.join(root, name))).toBe(false);
+    }
     expect(fs.existsSync(path.join(root, "other-skill", "SKILL.md"))).toBe(true);
   });
 
@@ -108,7 +125,8 @@ describe("agent skill", () => {
     fs.writeFileSync(file, "stale", "utf-8");
     const result = verifyAgentSkill();
     expect(result.checked).toContain(shared);
-    expect(result.repaired).toEqual([file]);
+    expect(result.repaired).toContain(file);
+    expect(result.repaired.length).toBe(SKILL_NAMES.length);
     expect(fs.readFileSync(file, "utf-8")).toBe(fs.readFileSync(repoSkill, "utf-8"));
     // A second pass has nothing to repair.
     expect(verifyAgentSkill().repaired).toEqual([]);
@@ -128,13 +146,62 @@ describe("agent skill", () => {
     makeRoot(opencode);
     installAgentSkill();
     const statuses = skillStatuses().filter((row) => row.detected);
-    expect(statuses.length).toBe(2);
+    expect(statuses.length).toBe(2 * SKILL_NAMES.length);
     expect(statuses.every((row) => row.installed && row.upToDate === true)).toBe(true);
-    expect(statuses.map((row) => row.root).sort()).toEqual([opencode, shared].sort());
+    expect([...new Set(statuses.map((row) => row.root))].sort()).toEqual([opencode, shared].sort());
+    expect(new Set(statuses.map((row) => row.skill)).size).toBe(SKILL_NAMES.length);
   });
 
   it("reports no root when no agent is installed", () => {
     expect(agentSkillStatus().detected).toEqual([]);
     expect(installAgentSkill()).toEqual({ ok: true, targets: [] });
+  });
+
+  it("ships the three planning skills, each naming its tools and the planning root", () => {
+    for (const name of PLANNING_SKILLS) {
+      const text = fs.readFileSync(skillFile(name), "utf-8");
+      expect(text.startsWith("---\n")).toBe(true);
+      expect(text).toContain(`name: ${name}`);
+      expect(text).toMatch(/\ndescription: .+\n/);
+      expect(text).toContain("planRoot");
+      expect(text).toMatch(/plan_[a-z_]+/);
+      // The skills never carry a machine-specific path: the root is configured, not assumed.
+      expect(text).not.toMatch(/(^|\s)\/(home|Users|tmp|var|DISK1|mnt)\//);
+    }
+  });
+
+  it("installs and removes every shipped skill, not just the first", () => {
+    const [root] = roots();
+    makeRoot(root);
+    const installed = installAgentSkill();
+    expect(installed.ok).toBe(true);
+    expect(installed.targets.length).toBe(SKILL_DEFINITIONS.length);
+    for (const name of SKILL_NAMES) {
+      expect(fs.existsSync(path.join(root, name, "SKILL.md"))).toBe(true);
+    }
+    expect(removeAgentSkill().removed.sort()).toEqual(
+      SKILL_NAMES.map((name) => path.join(root, name)).sort(),
+    );
+  });
+
+  it("repairs exactly the planning skill that drifted", () => {
+    const [root] = roots();
+    makeRoot(root);
+    installAgentSkill();
+    const target = path.join(root, "planning-execute", "SKILL.md");
+    fs.writeFileSync(target, "old instructions", "utf-8");
+    expect(agentSkillStatus().stale).toEqual([target]);
+    expect(verifyAgentSkill().repaired).toEqual([target]);
+    expect(fs.readFileSync(target, "utf-8")).toBe(
+      fs.readFileSync(skillFile("planning-execute"), "utf-8"),
+    );
+  });
+
+  it("reports one row per skill and root in the settings list", () => {
+    makeRoot(roots()[0]);
+    const rows = skillStatuses().filter((row) => row.detected);
+    expect(rows.map((row) => row.skill).sort()).toEqual([...SKILL_NAMES].sort());
+    expect(rows.every((row) => row.purpose.length > 0)).toBe(true);
+    expect(resolveSkillSources().every((entry) => entry.path !== null)).toBe(true);
   });
 });
