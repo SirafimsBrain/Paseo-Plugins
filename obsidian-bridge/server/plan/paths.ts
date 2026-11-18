@@ -4,6 +4,7 @@ import type { RuntimeSettings } from "../../shared/settings";
 import { normalizeRoleDir } from "../dirs";
 import { resolveVaultRoot } from "../paths";
 import { PLAN_SYSTEM_DIRS, isPlanSystemPath, resolveInsideVault } from "../vault";
+import { currentWorkspace } from "./workspace";
 
 /**
  * Path boundary of the planning tools.
@@ -20,8 +21,12 @@ import { PLAN_SYSTEM_DIRS, isPlanSystemPath, resolveInsideVault } from "../vault
  * 3. a `realpath` comparison against the planning root rejects a symlink that
  *    leads out of it (the same check `obsidian_edit` makes on a note).
  *
- * Nothing here creates a directory: a missing planning root is reported, never
- * materialised, so `plan_scope` on an empty installation stays read-only.
+ * The plugin owns the directory hierarchy. A missing planning root is created
+ * here (with `recursive: true`), together with a folder named after the Paseo
+ * workspace of the calling agent. An agent can never address a sibling
+ * workspace: its root is already the workspace folder, and `..` is refused by
+ * `normalizePlanPath`. Status queries pass `{ create: false }` so reporting
+ * never changes the vault.
  */
 
 /** Directory the planning tools are confined to when nothing else is configured. */
@@ -40,6 +45,8 @@ export interface PlanRoot {
   relPath: string;
   /** Absolute, symlink-resolved planning directory. */
   absolute: string;
+  /** Paseo workspace this root belongs to; null in a standalone process. */
+  workspace: { id: string | null; name: string } | null;
 }
 
 export type PlanUnavailableReason = "not_configured" | "invalid" | "missing";
@@ -56,7 +63,7 @@ export type PlanRootResult =
  */
 export function resolvePlanRoot(
   settings: RuntimeSettings,
-  options: { allowMissing?: boolean } = {},
+  options: { allowMissing?: boolean; create?: boolean } = {},
 ): PlanRootResult {
   const vaultRoot = resolveVaultRoot(settings.vaultPath);
   if (vaultRoot.length === 0) {
@@ -68,17 +75,7 @@ export function resolvePlanRoot(
     };
   }
 
-  const configured = settings.planRoot.trim();
-  if (configured.length === 0) {
-    return {
-      reason: "not_configured",
-      error:
-        "The planning directory is not configured. Set `planRoot` in Settings → Plugins → " +
-        `Obsidian Bridge; the default is '${DEFAULT_PLAN_ROOT}'.`,
-    };
-  }
-
-  const relPath = normalizeRoleDir(configured);
+  const relPath = planRootRelPath(settings);
   if (relPath === null) {
     return {
       reason: "invalid",
@@ -95,16 +92,31 @@ export function resolvePlanRoot(
       error: `The planning directory '${relPath}' resolves outside the configured vault.`,
     };
   }
+  const workspace = currentWorkspace();
+  const scope = workspace.name === null ? null : { id: workspace.id, name: workspace.name };
 
   let stat: fs.Stats;
   try {
     stat = fs.statSync(absolute);
   } catch {
-    if (options.allowMissing) return { root: { vaultRoot, relPath, absolute } };
-    return {
-      reason: "missing",
-      error: `The planning directory '${relPath}' does not exist under '${vaultRoot}'.`,
-    };
+    if (options.allowMissing) return { root: { vaultRoot, relPath, absolute, workspace: scope } };
+    if (options.create === false) {
+      return {
+        reason: "missing",
+        error: `The planning directory '${relPath}' does not exist under '${vaultRoot}'.`,
+      };
+    }
+    try {
+      fs.mkdirSync(absolute, { recursive: true });
+      stat = fs.statSync(absolute);
+    } catch (cause) {
+      return {
+        reason: "invalid",
+        error: `The planning directory '${relPath}' cannot be created: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      };
+    }
   }
   if (!stat.isDirectory()) {
     return { reason: "missing", error: `The planning directory '${relPath}' is not a directory.` };
@@ -128,7 +140,20 @@ export function resolvePlanRoot(
     };
   }
 
-  return { root: { vaultRoot, relPath, absolute: realRoot } };
+  return { root: { vaultRoot, relPath, absolute: realRoot, workspace: scope } };
+}
+
+/**
+ * Vault-relative planning root: the configured directory (or the default) plus
+ * the folder named after the current Paseo workspace. Pure — no filesystem
+ * access — so the UI can show the effective root without creating anything.
+ */
+export function planRootRelPath(settings: RuntimeSettings): string | null {
+  const base = settings.planRoot.trim() || DEFAULT_PLAN_ROOT;
+  const normalized = normalizeRoleDir(base);
+  if (normalized === null) return null;
+  const workspace = currentWorkspace();
+  return workspace.name === null ? normalized : `${normalized}/${workspace.name}`;
 }
 
 export interface ResolvedPlanPath {
@@ -199,12 +224,13 @@ export function planRootSummary(settings: RuntimeSettings): {
   path: string | null;
   exists: boolean;
 } {
-  const resolved = resolvePlanRoot(settings);
+  // Reporting must not create directories; `plan_scope` and the plan tools do.
+  const resolved = resolvePlanRoot(settings, { create: false });
   if ("root" in resolved) {
     return { root: resolved.root.relPath, path: resolved.root.absolute, exists: true };
   }
   return {
-    root: settings.planRoot.trim() || DEFAULT_PLAN_ROOT,
+    root: (planRootRelPath(settings) ?? settings.planRoot.trim()) || DEFAULT_PLAN_ROOT,
     path: null,
     exists: false,
   };

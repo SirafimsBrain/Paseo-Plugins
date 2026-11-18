@@ -46,17 +46,17 @@ describe("resolvePlanRoot", () => {
     }
   });
 
-  it("treats an empty planRoot as not configured", () => {
+  it("treats an empty planRoot as the default directory", () => {
     const created = workspace({ "Workspaces/centurion/centurion.md": "# Centurion\n" });
     const resolved = resolvePlanRoot(runtimeSettings(created.vault, { planRoot: "  " }));
-    expect("reason" in resolved && resolved.reason).toBe("not_configured");
+    expect("root" in resolved && resolved.root.relPath).toBe(DEFAULT_PLAN_ROOT);
   });
 
-  it("reports a missing directory and does not create it", () => {
+  it("creates a missing planning directory", () => {
     const created = workspace({ "A.md": "# A\n" });
     const resolved = resolvePlanRoot(runtimeSettings(created.vault));
-    expect("reason" in resolved && resolved.reason).toBe("missing");
-    expect(fs.existsSync(path.join(created.vault, DEFAULT_PLAN_ROOT))).toBe(false);
+    expect("root" in resolved).toBe(true);
+    expect(fs.existsSync(path.join(created.vault, DEFAULT_PLAN_ROOT))).toBe(true);
   });
 
   it("resolves the default directory inside the vault", () => {

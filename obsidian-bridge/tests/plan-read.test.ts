@@ -259,14 +259,14 @@ describe("plan_read refusals", () => {
     );
   });
 
-  it("reports planning as unavailable instead of reading an empty root", async () => {
+  it("reports an empty root as ready instead of failing", async () => {
     const created = makeWorkspace({ "A.md": "# A\n" });
     workspaces.push(created);
     const outcome = await read(created.vault, {});
-    expect(outcome.isError).toBe(true);
+    expect(outcome.isError).toBeUndefined();
     expect(outcome.structuredContent).toMatchObject({
-      planning_available: false,
-      reason: "missing",
+      planning_available: true,
+      documents: 0,
     });
   });
 });

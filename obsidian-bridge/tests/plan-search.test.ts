@@ -144,14 +144,15 @@ describe("plan_search", () => {
     expect(outcome.text).toContain("index is empty");
   });
 
-  it("reports planning as unavailable when the root does not exist", async () => {
+  it("reports an empty root as ready when the directory did not exist", async () => {
     const created = makeWorkspace({ "A.md": "# A\n" });
     workspaces.push(created);
     const outcome = await search(runtimeSettings(created.vault), { query: "x" });
-    expect(outcome.isError).toBe(true);
+    expect(outcome.isError).toBeUndefined();
     expect(outcome.structuredContent).toMatchObject({
-      planning_available: false,
-      reason: "missing",
+      planning_available: true,
+      hits: [],
+      root: "Workspaces",
     });
   });
 });

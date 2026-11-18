@@ -75,8 +75,11 @@ export function planSearch(
       return {
         text: JSON.stringify(
           {
+            planning_available: true,
+            root: root.relPath,
             query,
             hits: [],
+            total: 0,
             note:
               "The vault index is empty, so planning search has nothing to rank. " +
               "Run `obsidian_index` (or wait for the next scan) and search again.",
@@ -84,7 +87,13 @@ export function planSearch(
           null,
           2,
         ),
-        structuredContent: { query, hits: [], total: 0 },
+        structuredContent: {
+          planning_available: true,
+          root: root.relPath,
+          query,
+          hits: [],
+          total: 0,
+        },
       };
     }
 

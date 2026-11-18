@@ -10,10 +10,12 @@ plan says now that it did not say before**. Snapshots and the journal are the ev
 
 ## Reading the history
 
-1. `plan_read { path }` — the live state: `version`, `revision`, `status`, relations, `growth`, snapshot count.
-2. `plan_history { path }` — the snapshots, newest first: version, revision, reason, time, actor. Every write produced
+1. `plan_scope {}` to confirm which Paseo workspace folder you are reviewing; `plan_*` never crosses into another
+   workspace (only `obsidian_*` may read those notes, and only when the user asked).
+2. `plan_read { path }` — the live state: `version`, `revision`, `status`, relations, `growth`, snapshot count.
+3. `plan_history { path }` — the snapshots, newest first: version, revision, reason, time, actor. Every write produced
    one, so the list is the change log of the node.
-3. `plan_history { path, version, revision }` — one snapshot's full content. Compare it with the live node in your
+4. `plan_history { path, version, revision }` — one snapshot's full content. Compare it with the live node in your
    answer: what text changed, what status moved, which relations appeared or disappeared.
 
 `version` moves only on a structural decision (a new branch, a re-plan); `revision` moves on every edit. A jump in

@@ -74,6 +74,7 @@ export const obsidianBridgeSettings = defineSettings({
      * by the same code that guards the document tools. Empty = planning is not
      * configured and `plan_scope` answers `planning_available: false`.
      */
+    // Empty means "use Workspaces"; the plugin creates it and the workspace folder.
     planRoot: z.string().trim().max(512).default("Workspaces"),
     /**
      * Indexing starts automatically once `vaultPath` resolves to a real

@@ -38,21 +38,22 @@ describe("planScope", () => {
     expect(scope.path).toBeNull();
   });
 
-  it("reports a missing root without creating it", () => {
+  it("creates a missing root and reports it ready", () => {
     const created = workspace({ "A.md": "# A\n" });
     const scope = planScope(runtimeSettings(created.vault));
-    expect(scope.planning_available).toBe(false);
-    expect(scope.reason).toBe("missing");
-    expect(scope.path).toBeNull();
-    expect(fs.existsSync(path.join(created.vault, "Workspaces"))).toBe(false);
+    expect(scope.planning_available).toBe(true);
+    expect(scope.reason).toBeNull();
+    expect(scope.path).not.toBeNull();
+    expect(fs.existsSync(path.join(created.vault, "Workspaces"))).toBe(true);
   });
 
-  it("reports an empty root as empty, not as a usable tree", () => {
+  it("reports an empty root as ready, not as an unusable tree", () => {
     const created = workspace({});
     fs.mkdirSync(path.join(created.vault, "Workspaces"));
     const scope = planScope(runtimeSettings(created.vault));
-    expect(scope.planning_available).toBe(false);
-    expect(scope.reason).toBe("empty");
+    expect(scope.planning_available).toBe(true);
+    expect(scope.reason).toBeNull();
+    expect(scope.empty).toBe(true);
     expect(scope.path).not.toBeNull();
     expect(scope.documents).toBe(0);
     expect(scope.projects).toEqual([]);

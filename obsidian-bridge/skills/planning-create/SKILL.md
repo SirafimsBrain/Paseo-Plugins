@@ -11,11 +11,14 @@ A plan is a **directory of Markdown documents** inside the configured planning r
 
 ## Where you are
 
-1. `plan_scope {}` first. It answers `planning_available`, the resolved root, the projects it already holds,
-   `writesEnabled` and the limits. If planning is unavailable, stop and tell the user — the tools never create the
-   planning directory for you.
-2. Paths are **relative to the planning root**: `centurion/backend/auth` — never `Workspaces/centurion/...`, never an
-   absolute path. `..`, a leading `/` and `.obsidian` are refused by code, not by this skill.
+1. `plan_scope {}` first. It answers `planning_available`, the resolved root, the Paseo `workspace` you are confined
+   to, the projects it already holds, `writesEnabled` and the limits. The plugin creates the planning directory and
+   your workspace folder on demand, so an empty tree is a normal starting point; if planning is still unavailable,
+   stop and tell the user instead of guessing a path.
+2. Paths are **relative to your workspace folder** (`<planRoot>/<workspace>`): `centurion/backend/auth` — never
+   `Workspaces/centurion/...`, never another workspace's name, never an absolute path. `..`, a leading `/` and
+   `.obsidian` are refused by code, not by this skill. Another workspace's plans are out of reach for `plan_*`;
+   `obsidian_*` may read them only when the user's task asks for it.
 3. Look before you grow: `plan_search` finds a node by name or text, `plan_read` returns a node with its children,
    relations and the snapshot list.
 

@@ -95,12 +95,15 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "\n\nWrite only where the user asked you to: authored documents go to `out`, scratch and " +
     "intermediate notes to `raw`, and appends to incoming material to `inbox`. Never create a " +
     "note outside those directories.\n\n" +
-    "Planning sits in the same server: `plan_*` reads and edits the project plan under " +
-    "`planRoot` (default `Workspaces`), with paths relative to that directory. Never create, " +
-    "edit, rename or delete a plan file with `obsidian_edit`, `obsidian_write_*`, `shell`, " +
-    "`write` or `patch`, and never read `__history`/`_archive` directly: `plan_*` is the only " +
-    "write path that snapshots, checks `expected_revision` and journals the change, and " +
-    "`plan_history` is the only reader of a snapshot.\n\n" +
+    "Planning sits in the same server: the plugin creates `planRoot` (default `Workspaces`) and " +
+    "a folder named after the current Paseo workspace; `plan_*` reads and edits only that " +
+    "folder, with paths relative to it. Another workspace is out of reach for `plan_*` — do " +
+    "not pass `..` or a sibling workspace name. `obsidian_*` may read notes in other " +
+    "workspaces when the user's task asks for it, but never write a plan file with " +
+    "`obsidian_edit`, `obsidian_write_*`, `shell`, `write` or `patch`, and never read " +
+    "`__history`/`_archive` directly: `plan_*` is the only write path that snapshots, checks " +
+    "`expected_revision` and journals the change, and `plan_history` is the only reader of a " +
+    "snapshot.\n\n" +
     "Four skills document these workflows in more detail; load the one that matches the task: " +
     "`obsidian-bridge` (read → cite → write), `planning-create` (grow a tree), " +
     "`planning-execute` (carry a plan through the work), `planning-review` (plan against fact, " +

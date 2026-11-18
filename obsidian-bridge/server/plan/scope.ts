@@ -6,6 +6,7 @@ import { MAX_NOTE_BYTES, walkMarkdown } from "../vault";
 import {
   DEFAULT_PLAN_ROOT,
   PLAN_SYSTEM_DIRS,
+  planRootRelPath,
   resolvePlanRoot,
   type PlanUnavailableReason,
 } from "./paths";
@@ -24,10 +25,14 @@ export interface PlanScopeResult {
   planning_available: boolean;
   /** Why planning is unavailable; `null` when it is available. */
   reason: null | PlanUnavailableReason | "empty";
-  /** Vault-relative planning directory as configured (or the default). */
+  /** Vault-relative planning directory, including the Paseo workspace folder. */
   root: string;
+  /** The Paseo workspace this scope is confined to; null in a standalone process. */
+  workspace: { id: string | null; name: string } | null;
   /** Absolute planning directory; `null` when it does not resolve. */
   path: string | null;
+  /** True when the workspace folder exists but holds no plan documents yet. */
+  empty: boolean;
   /** `false` when `readOnly` is on: every `plan_*` write refuses. */
   writesEnabled: boolean;
   /** Projects found in the planning root (its first-level folders with notes). */
@@ -49,8 +54,10 @@ export function planScope(settings: RuntimeSettings): PlanScopeResult {
   const base: PlanScopeResult = {
     planning_available: false,
     reason: null,
-    root: settings.planRoot.trim() || DEFAULT_PLAN_ROOT,
+    root: (planRootRelPath(settings) ?? settings.planRoot.trim()) || DEFAULT_PLAN_ROOT,
+    workspace: null,
     path: null,
+    empty: false,
     // There is nowhere to write until a planning directory resolves, and
     // `readOnly` closes the gate even then.
     writesEnabled: false,
@@ -88,6 +95,7 @@ export function planScope(settings: RuntimeSettings): PlanScopeResult {
 
   const scope: PlanScopeResult = {
     ...base,
+    workspace: root.workspace,
     path: root.absolute,
     writesEnabled: !settings.readOnly,
     projectCount: projects.size,
@@ -97,16 +105,16 @@ export function planScope(settings: RuntimeSettings): PlanScopeResult {
     schema: fs.existsSync(path.join(root.vaultRoot, schemaPath)) ? schemaPath : null,
   };
 
-  if (walk.files.length === 0) {
-    return {
-      ...scope,
-      reason: "empty",
-      error:
-        `The planning directory '${root.relPath}' holds no plan documents. Nothing is read ` +
-        "and no directory is created until the user asks for a planning tree.",
-    };
-  }
-  return { ...scope, planning_available: true };
+  const empty = walk.files.length === 0;
+  return {
+    ...scope,
+    empty,
+    planning_available: true,
+    error: empty
+      ? `The planning directory '${root.relPath}' is ready but holds no plan documents. ` +
+        "Create the first node with `plan_create_node`."
+      : null,
+  };
 }
 
 export function planScopeTool(settings: RuntimeSettings): ToolOutcome {
