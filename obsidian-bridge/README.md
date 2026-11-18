@@ -12,7 +12,7 @@ belongs to [`luck-planner`](../luck-planner/README.md).
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.14.11)
+## What it does (0.15.11)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -99,6 +99,12 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   `blocked_by:` in sync on both sides while only `open`/`investigating` incidents block, `plan_goal` authors a goal
   (`create`, `update`, `propose`) for a human to approve, and `plan_growth` upserts the progress record of a node or
   goal, merging steps by title. Each write snapshots the previous state first and journals the change.
+- **Multi-file operations (0.15.11).** `plan_move_node` moves a subtree and rewrites every link into it (`parent`,
+  `children`, `influences`, `blocked_by`, `blocks`, `materialized`), `plan_archive_node` moves a subtree into `_archive/`
+  and unlists it without deleting anything, `plan_approve_goal` materialises a proposed goal into a trunk plus one leaf
+  per step (an agent cannot approve the goal it created), and `plan_restore` writes a snapshot back as a new revision.
+  Every operation journals `op:start`/`op:done`, snapshots each file it changes, and repeating it with the same `op_id`
+  resumes an interrupted run instead of duplicating it.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only

@@ -191,7 +191,7 @@ export function writeStored(
 }
 
 /** Captures the current state into `__history`; an existing snapshot is left alone. */
-function takeSnapshot(
+export function takeSnapshot(
   root: PlanRoot,
   node: PlanNode,
   reason: SnapshotReason,
@@ -451,7 +451,7 @@ function inferParent(tree: PlanTree, kind: NodeKind, folder: string): PlanNode |
 }
 
 /** Adds a child link to the parent and bumps its revision, snapshot first. */
-function appendChild(
+export function appendChild(
   root: PlanRoot,
   parent: PlanNode,
   childVaultPath: string,

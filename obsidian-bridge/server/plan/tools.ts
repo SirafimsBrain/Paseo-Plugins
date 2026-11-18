@@ -4,6 +4,8 @@ import { planGoal } from "./goal";
 import { planGrowth } from "./growth";
 import { planIncident } from "./incident";
 import { planLink } from "./links";
+import { planApproveGoal, planArchiveNode, planMoveNode } from "./ops";
+import { planRestore } from "./restore";
 import { planReadTool } from "./read";
 import { planSearch } from "./search";
 import { planScopeTool } from "./scope";
@@ -357,6 +359,103 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
       required: ["path"],
     },
   },
+  {
+    name: "plan_move_node",
+    title: "Move a plan subtree",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Moves one node and its subtree (or one leaf) to a new path inside ` +
+      "the planning root, rewrites every link into the moved files (`parent`, `children`, " +
+      "`influences`, `blocked_by`, `blocks`, `materialized`) and snapshots each changed file before " +
+      "the edit. The journal carries `op:start`/`op:done`; repeating the call with the same `op_id` " +
+      "resumes an interrupted move instead of duplicating it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "The node or leaf to move." },
+        to: {
+          type: "string",
+          description:
+            "Destination: the node's new folder (`centurion/frontend/auth`) or the leaf's new file " +
+            "(`centurion/frontend/session-store`). The new parent must already exist.",
+        },
+        op_id: {
+          type: "string",
+          description: "Operation id: pass the id from an interrupted call to resume it.",
+        },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path", "to"],
+    },
+  },
+  {
+    name: "plan_archive_node",
+    title: "Archive a plan subtree",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Moves a node and its subtree into '<project>/_archive/', marks ` +
+      "it `archived` and removes it from its parent's `children`, so it leaves the indexed tree " +
+      "while its files and snapshots stay on disk. Nothing is deleted. The journal carries " +
+      "`op:start`/`op:done`; the same `op_id` resumes an interrupted archive.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "The node or leaf to archive." },
+        op_id: {
+          type: "string",
+          description: "Operation id: pass the id from an interrupted call to resume it.",
+        },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "plan_approve_goal",
+    title: "Approve a goal and materialise its steps",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Turns a \`proposed\` goal into a branch: one trunk named after the ` +
+      "goal file, one leaf per `plan:` step linked back through `goal:`, the goal moved to " +
+      "`approved` with `materialized` pointing at the branch. An agent cannot approve a goal it " +
+      "created itself — that approval belongs to the user.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "The proposed goal to approve." },
+        op_id: {
+          type: "string",
+          description: "Operation id: pass the id from an interrupted call to resume it.",
+        },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "plan_restore",
+    title: "Restore a plan snapshot as a new revision",
+    description:
+      `${PLAN_CONTRACT_SENTENCE} Reads one \`__history\` snapshot and writes its content into the ` +
+      "live file as `revision + 1` with `restored_from: \"v<v> r<r>\"`. The version never goes " +
+      "back, the current state is snapshotted first, and relations (`parent`, `children`, " +
+      "influences, blocks, goal, materialized) stay as the live file has them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "The live node whose content is restored." },
+        version: { type: "number", description: "Snapshot version to read." },
+        revision: { type: "number", description: "Snapshot revision to read." },
+        expected_revision: EXPECTED_REVISION,
+        accept_external: ACCEPT_EXTERNAL,
+        actor: ACTOR,
+      },
+      required: ["path", "version", "revision"],
+    },
+  },
 ];
 
 type PlanHandler = (
@@ -376,6 +475,10 @@ const HANDLERS: Record<string, PlanHandler> = {
   plan_incident: (settings, input) => planIncident(settings, input),
   plan_goal: (settings, input) => planGoal(settings, input),
   plan_growth: (settings, input) => planGrowth(settings, input),
+  plan_move_node: (settings, input) => planMoveNode(settings, input),
+  plan_archive_node: (settings, input) => planArchiveNode(settings, input),
+  plan_approve_goal: (settings, input) => planApproveGoal(settings, input),
+  plan_restore: (settings, input) => planRestore(settings, input),
 };
 
 /**

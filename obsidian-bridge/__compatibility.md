@@ -2,6 +2,24 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.15.11 — multi-file operations: move, archive, approve, restore (2026-11-18)
+
+Feature release (0.14.11 → 0.15.11), stage 6 of the migration. The SDK and host floor are unchanged; the MCP catalogue
+grows from 24 to 28 tools. Existing plan files stay valid: incidents and goals in the fixture now carry `version: 1`,
+which the schema always required.
+
+| Change | Behaviour |
+| --- | --- |
+| tool `plan_move_node` | moves a folder or leaf, rewrites every link into it, snapshots each changed file; refuses a root, an occupied destination, a move inside itself and a missing new parent |
+| tool `plan_archive_node` | moves the subtree to `<project>/_archive/<slug>`, sets `archived`, unlists it from the parent; nothing deleted, history preserved |
+| tool `plan_approve_goal` | proposed goal → trunk plus one leaf per step; refuses a goal the same agent created, a non-proposed goal, an already materialised goal and an empty `plan:` |
+| tool `plan_restore` | snapshot → `revision + 1` with `restored_from`; content only, relations kept, version never rolled back, kind changes refused |
+| operation markers | `op:start <uuid>` / `op:done <uuid>` in `_journal.md`; `op_id` turns a retry into a resume, and a finished id answers `already_done` |
+| fixture | incidents and goals carry `version: 1` like every other plan file |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **40 suites / 327 tests** pass. Not deployed and not exercised against a
+live Paseo host; the tools were driven through `dispatchTool`, the same path the stdio server uses.
+
 ## Plugin 0.14.11 — links, incidents, goals and growth (2026-11-18)
 
 Feature release (0.13.11 → 0.14.11), stage 5 of the migration. The SDK and host floor are unchanged; the MCP catalogue

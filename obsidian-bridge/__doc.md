@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.14.11**.
+Version covered: **0.15.11**.
 
 ## 1. Purpose and scope
 
@@ -66,7 +66,9 @@ obsidian-bridge/
 │   │   ├── links.ts         # `plan_link`: leaf-to-leaf influences (0.14.11)
 │   │   ├── incident.ts      # `plan_incident`: blocks/blocks_by in sync both ways (0.14.11)
 │   │   ├── goal.ts          # `plan_goal`: create/update/propose (0.14.11)
-│   │   └── growth.ts        # `plan_growth`: progress record on a node or goal (0.14.11)
+│   │   ├── growth.ts        # `plan_growth`: progress record on a node or goal (0.14.11)
+│   │   ├── ops.ts           # move/archive/approve: op markers, link rewriting (0.15.11)
+│   │   └── restore.ts       # `plan_restore`: snapshot becomes a new revision (0.15.11)
 │   ├── mcp-tools.ts         # tool definitions, directory guide, dispatch
 │   ├── mcp-server.ts        # standalone stdio MCP server (bundled to dist/mcp-server.js)
 │   ├── mcp-launch.ts        # node + dist/mcp-server.js resolution
@@ -430,7 +432,27 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11)
+
+### 0.15.11 — multi-file operations: move, archive, approve, restore
+
+Feature release (0.14.11 → 0.15.11), stage 6 of the migration. The catalogue grows to 28 tools. An operation is a
+resumable sequence rather than a transaction: `op:start <uuid>` in the project journal, the filesystem steps, the link
+and structural rewrites through `commitNodeChange`, then `op:done <uuid>`.
+
+| Tool / module | Behaviour |
+| --- | --- |
+| `plan_move_node` | renames the node's folder (or the leaf's file), rewrites `parent`/`children` inside the subtree and `influences`/`blocked_by`/`blocks`/`materialized` everywhere, carries the leaf's `__history` along and snapshots every changed file; the old parent loses the child, the new parent gains it |
+| `plan_archive_node` | renames the folder into `<project>/_archive/<slug>`, sets `archived`, drops it from the parent's `children`; nothing is deleted and the history moves with it |
+| `plan_approve_goal` | `proposed` → trunk named after the goal plus one leaf per `plan:` step linked back through `goal:`, with `materialized` set on the goal; refused when the approving agent created the goal, for a non-proposed goal and for a goal without steps |
+| `plan_restore` | reads `__history/<slug>.v<v>.r<r>.md` and writes its content as `revision + 1` with `restored_from`, keeping the live relations and the line's version |
+| `server/plan/ops.ts` | journal markers, `op_id` resumption, link rewriting, subtree rename, goal materialisation |
+| `server/plan/restore.ts` | snapshot read, content-only restore, kind-change refusal |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **40 suites / 327 tests** pass, including a subtree move whose links
+follow it, a resume after a rename that writes exactly one `op:done`, an archive that leaves search silent, the approval
+gate (creator ≠ approver, user approval, second approval), and a restore that keeps relations while refusing a kind
+change. Not done yet, by design: `plan_validate` and `plan_import` (stage 7) and the SKILL files (stage 8).
 
 ### 0.14.11 — links, incidents, goals and growth
 
@@ -1190,3 +1212,38 @@ an agent cannot author and approve the same plan in one tool.
 `growth.ts` upserts a single record: `status`, `summary`, `progress` 0–100, `steps`. Steps are keyed by title, so
 recording the same step again updates its state instead of appending a duplicate, and `replace: true` is the explicit way
 to start a new list. An incident is refused: a defect is resolved through its lifecycle, not described as progress.
+
+### 15.8 Multi-file operations (0.15.11)
+
+The filesystem has no transaction, so an operation is a **resumable sequence**, not an emulation of one:
+
+1. `op:start <uuid>` in the project journal, with the tool name and the target;
+2. every file that will be overwritten is snapshotted first (relation rewrites go through `commitNodeChange`, which takes
+   its own snapshot);
+3. the filesystem steps happen between the markers (rename a folder, create a branch and its leaves);
+4. `op:done <uuid>` — written only once every step landed.
+
+The id is caller-controlled (`op_id`), so a failed run can be repeated instead of guessed at. A move is resumable from two
+states: the source is still in place (a normal retry), or it was already renamed and the destination is the only address
+left (the mapping is rebuilt from it). `plan_archive_node` and `plan_approve_goal` accept an already moved folder or an
+already created branch the same way; a completed id answers `already_done` without touching anything. A half-finished
+operation is visible in the journal as an `op:start` without its `op:done`, which is exactly what `plan_validate`
+(stage 7) will report.
+
+A move rewrites what the tools themselves write: `parent`, `children`, `influences[].target`, `blocked_by`, `blocks` and
+`materialized`, inside the moved subtree and everywhere else in the plan. Links are matched by their written target, so a
+short `[[session-store]]` stays as it is (Obsidian still resolves it); links from `Documentation`/`Inbox` are untouched
+and become `plan_validate`'s business. Archiving is deliberately narrower: the subtree leaves the tree, so its parent stops
+listing it and incoming links stay as they were — a dangling link is a fact for the report, not something an archive
+should invent. A move cannot change a root, an incident or a goal, and it cannot place a node inside itself.
+
+Approval is the one place where a goal becomes work. The branch is a `trunk` under the project root (the only child kind a
+root allows), each step is a leaf named after its title (`move-the-session-table`, falling back to the step id for a
+non-latin title), and each leaf carries `goal:` back to the file. The gate is the source plugin's rule: an agent may
+propose a goal but not approve the one it created — `actor` is compared with `created_by` — and the user approves either
+in the panel or by passing `actor: "user"`.
+
+A restore is not a rollback: the current state is snapshotted, the counters move forward, and only content travels back
+(`name`, `description`, `brief`, `payload`, `plan`, `growth`, `severity`, `formal_text`, `status`, plus `## Заметки`).
+Relations stay live on purpose, and a snapshot taken before a kind change is refused, because a kind change is a version
+event and not a revision.
