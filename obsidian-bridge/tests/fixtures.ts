@@ -7,7 +7,7 @@ import * as path from "node:path";
 // covered separately in tests/plan-workspace.test.ts, which sets the env back.
 delete process.env.PASEO_WORKSPACE_ID;
 delete process.env.PASEO_AGENT_CWD;
-delete process.env.OBSIDIAN_WORKSPACE_NAME;
+delete process.env.OBSIDIAN_PROJECT_NAME;
 
 /**
  * Throwaway vault + Paseo home for tests. Both live under a fresh temp

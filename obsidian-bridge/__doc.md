@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.19.12**.
+Version covered: **0.19.13**.
 
 ## 1. Purpose and scope
 
@@ -457,7 +457,26 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13)
+
+### 0.19.13 — project-scoped planning tree, workspace id in YAML
+
+Patch release (0.19.12 → 0.19.13) correcting the boundary introduced by 0.19.12. The user clarified that the folder
+belongs to the **Paseo project**, not to a single workspace: all workspaces of one project are orchestrated by Paseo
+and must share the tree, while a different project stays out of reach for `plan_*`.
+
+| Area | Change |
+| --- | --- |
+| `server/plan/project.ts` | replaces `workspace.ts`; reads `PASEO_AGENT_CWD` for the project name (`OBSIDIAN_PROJECT_NAME` override) and keeps `PASEO_WORKSPACE_ID` as the id to record |
+| `server/plan/paths.ts` | root is `<planRoot>/<project>`; `PlanRoot` carries `project` and `workspaceId` instead of a workspace folder |
+| plan YAML | `plan_create_node`, `commitNodeChange` and `plan_import` write `workspace_id` from the calling Paseo workspace; `PLAN_KEY_ORDER` places it after `project_key` |
+| `plan_scope` | reports `project` and `workspaceId` instead of `workspace`; an empty project tree is still usable |
+| instructions | contract sentence, `initialize`, settings hint and the three planning skills describe the project tree and the YAML field |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **44 suites / 358 tests** pass. `tests/plan-workspace.test.ts` now
+checks that a second workspace of the same project reads the same tree, that `workspace_id` is written to the file, and
+that another project remains out of reach for `plan_*` while readable through `obsidian_*`. Not exercised against a
+live Paseo host.
 
 ### 0.19.12 — plugin-owned planning root and Paseo workspace scope
 
@@ -1175,7 +1194,7 @@ import, the three skills, and only after that a dashboard).
 ```
 vaultPath/                      # the one directory available to Paseo
 └── planRoot/                   # default: Workspaces; created by the plugin
-    └── <paseo-workspace>/      # created by the plugin; the plan_* boundary
+    └── <paseo-project>/        # created by the plugin; the plan_* boundary
         ├── _index.md           # project registry (not a tree node)
         ├── _schema.md          # field and status schema
         └── <project>/
@@ -1187,12 +1206,13 @@ vaultPath/                      # the one directory available to Paseo
                 └── __history/  # revision snapshots — never indexed
 ```
 
-Since 0.19.12 a `plan_*` argument is a path **relative to the workspace folder**, so no tool accepts a vault path, an
-absolute path or a sibling workspace. Both boundaries are applied in order (`server/plan/paths.ts`): `normalizeRoleDir`
+Since 0.19.13 a `plan_*` argument is a path **relative to the project folder**, shared by every workspace of that
+Paseo project; the calling workspace is recorded in each plan file as `workspace_id`. No tool accepts a vault path, an
+absolute path or a sibling project. Both boundaries are applied in order (`server/plan/paths.ts`): `normalizeRoleDir`
 refuses absolute paths, `..`, control characters and `.obsidian`; `resolveInsideVault` refuses anything above the vault;
-a `realpath` comparison against the workspace-scoped planning root refuses a symlink that leads out of it. For a file
+a `realpath` comparison against the project-scoped planning root refuses a symlink that leads out of it. For a file
 that does not exist yet, the nearest existing ancestor is resolved, so a symlinked folder is caught before the write,
-not after. The plugin, never the agent, creates the planning directory and the workspace folder.
+not after. The plugin, never the agent, creates the planning directory and the project folder.
 
 ### 15.2 `plan_scope`
 

@@ -29,6 +29,7 @@ import {
   type SnapshotReason,
 } from "./model";
 import { normalizePlanPath, resolvePlanPath, resolvePlanRoot, type PlanRoot } from "./paths";
+import { currentProject } from "./project";
 import {
   findPlanNode,
   kindOf,
@@ -265,6 +266,8 @@ export function commitNodeChange(
   }
   next.updated = nowIso();
   next.updated_by = actor;
+  const workspaceId = currentProject().workspaceId;
+  if (workspaceId !== null && next.workspace_id === undefined) next.workspace_id = workspaceId;
 
   const body = renderPlanBody(
     next,
@@ -591,6 +594,9 @@ export function planCreateNode(
     children: [],
     influences: [],
     blocked_by: [],
+    ...(currentProject().workspaceId
+      ? { workspace_id: currentProject().workspaceId }
+      : {}),
     ...(kind === "root" && stringField(input.project_key)
       ? { project_key: stringField(input.project_key) }
       : {}),

@@ -25,13 +25,15 @@ export interface PlanScopeResult {
   planning_available: boolean;
   /** Why planning is unavailable; `null` when it is available. */
   reason: null | PlanUnavailableReason | "empty";
-  /** Vault-relative planning directory, including the Paseo workspace folder. */
+  /** Vault-relative planning directory, including the Paseo project folder. */
   root: string;
-  /** The Paseo workspace this scope is confined to; null in a standalone process. */
-  workspace: { id: string | null; name: string } | null;
+  /** Paseo project whose plan tree is reachable; null in a standalone process. */
+  project: { name: string } | null;
+  /** Paseo workspace id recorded in plan files; null in a standalone process. */
+  workspaceId: string | null;
   /** Absolute planning directory; `null` when it does not resolve. */
   path: string | null;
-  /** True when the workspace folder exists but holds no plan documents yet. */
+  /** True when the project folder exists but holds no plan documents yet. */
   empty: boolean;
   /** `false` when `readOnly` is on: every `plan_*` write refuses. */
   writesEnabled: boolean;
@@ -55,7 +57,8 @@ export function planScope(settings: RuntimeSettings): PlanScopeResult {
     planning_available: false,
     reason: null,
     root: (planRootRelPath(settings) ?? settings.planRoot.trim()) || DEFAULT_PLAN_ROOT,
-    workspace: null,
+    project: null,
+    workspaceId: null,
     path: null,
     empty: false,
     // There is nowhere to write until a planning directory resolves, and
@@ -95,7 +98,8 @@ export function planScope(settings: RuntimeSettings): PlanScopeResult {
 
   const scope: PlanScopeResult = {
     ...base,
-    workspace: root.workspace,
+    project: root.project,
+    workspaceId: root.workspaceId,
     path: root.absolute,
     writesEnabled: !settings.readOnly,
     projectCount: projects.size,

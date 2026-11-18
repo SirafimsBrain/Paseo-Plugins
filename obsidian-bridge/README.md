@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.19.12)
+## What it does (0.19.13)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -29,10 +29,10 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Truncation has a next step (0.18.12).** When a tool cannot show everything it found, the result carries
   `[TRUNCATED]` and a `continuation` object. `obsidian_continue` re-runs exactly that call, so an agent never switches to
   file operations or guesses an offset. Search pages, note windows, note listings and integrity reports use it.
-- **The plugin owns the planning hierarchy (0.19.12).** It creates the planning directory (default `Workspaces`, used
-  when the setting is empty) and a folder named after the current Paseo workspace. `plan_*` tools can only reach that
-  folder and below; a sibling workspace is out of reach. `obsidian_*` may still read another workspace when the user's
-  task asks for it.
+- **The plugin owns the planning hierarchy (0.19.12, corrected in 0.19.13).** It creates the planning directory
+  (default `Workspaces`, used when the setting is empty) and a folder named after the current Paseo project. All
+  workspaces of that project share the tree; each plan file records the calling workspace by id in YAML
+  (`workspace_id`). `plan_*` cannot reach another project, while `obsidian_*` may read its plans on an explicit task.
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
   notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
@@ -243,7 +243,8 @@ If the path is not configured, nothing is indexed and every tool answers with an
 
 The MCP server is registered under the name `obsidian-bridge`. When a provider cannot take an MCP server, the plugin
 attaches the equivalent `obsidian_bridge_*` tools instead. Planning tools resolve their root to
-`<planRoot>/<paseo-workspace>`; an empty `planRoot` uses the default `Workspaces`.
+`<planRoot>/<paseo-project>`; an empty `planRoot` uses the default `Workspaces`, and the calling workspace id goes into
+each plan file's YAML.
 
 Every tool description states the rule the plugin is built around: use it only when the user explicitly asks about their
 Obsidian notes, never as a place to record agent memory.

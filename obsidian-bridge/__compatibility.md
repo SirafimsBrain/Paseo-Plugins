@@ -2,23 +2,25 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Plugin 0.19.12 — plugin-owned planning root and workspace scope (2026-11-18)
+## Plugin 0.19.13 — project-scoped planning tree, workspace id in YAML (2026-11-18)
 
-Feature release (0.18.12 → 0.19.12). No new tool, setting, SDK or host requirement. The change is behavioral: the
-planning root moves from `<vault>/<planRoot>` to `<vault>/<planRoot>/<paseo-workspace>`, the plugin creates missing
-directories itself, and an empty `planRoot` now selects the default `Workspaces` instead of disabling planning.
+Patch release (0.19.12 → 0.19.13). 0.19.12 made the plugin create the planning directory and named the folder after the
+Paseo **workspace**; the user clarified that all workspaces of one Paseo project are orchestrated together and must
+share one planning tree. 0.19.13 corrects the folder to the **project** and records the calling workspace by id in the
+plan YAML. No new tool, setting, SDK or host requirement.
 
 | Change | Behaviour |
 | --- | --- |
-| workspace identity | `server/plan/workspace.ts` reads `PASEO_WORKSPACE_ID` and `PASEO_AGENT_CWD` inherited by the spawned MCP process, slugifies the workspace name (override: `OBSIDIAN_WORKSPACE_NAME`) and falls back to the id |
-| directory creation | `resolvePlanRoot()` creates the planning directory and workspace folder with `recursive: true`; `plan_scope` therefore reports a new empty tree as `planning_available: true`, `empty: true`, `reason: null` |
+| project identity | `server/plan/project.ts` reads `PASEO_AGENT_CWD` for the project name (override: `OBSIDIAN_PROJECT_NAME`) and keeps `PASEO_WORKSPACE_ID` as the value written to YAML |
+| directory creation | `resolvePlanRoot()` creates `<planRoot>/<project>` with `recursive: true`; `plan_scope` reports a fresh empty tree as `planning_available: true`, `empty: true`, `reason: null` |
 | status side effects | `obsidian_status` uses `{ create: false }`, so reporting never changes the vault |
-| `plan_*` boundary | every plan path is relative to the workspace folder; `..`, absolute paths and sibling workspace names are refused; hierarchy and naming inside it remain free for the agent |
-| `obsidian_*` | unchanged: may read other workspaces' notes when the user's task requires it, never writes plan files |
-| instructions | `PLAN_CONTRACT_SENTENCE`, `initialize`, the settings hint and the three planning skills describe the scoped root |
+| `plan_*` boundary | paths are relative to the project folder; all workspaces of that project share it; `..`, absolute paths and sibling project names are refused; hierarchy and naming inside it remain free for the agent |
+| plan YAML | `workspace_id` is written by `plan_create_node`, `commitNodeChange` and `plan_import`, ordered after `project_key` |
+| `obsidian_*` | unchanged: may read another project's plans when the user's task requires it, never writes plan files |
+| instructions | `PLAN_CONTRACT_SENTENCE`, `initialize`, the settings hint and the three planning skills describe the project tree and the YAML field |
 
 Evidence: `npm run typecheck` exit 0; `npm test` **44 suites / 358 tests** pass. Not deployed and not exercised against a
-live Paseo host in this pass; the workspace identity is derived from the agent environment observed on this machine.
+live Paseo host in this pass; workspace/project identity is derived from the agent environment observed on this machine.
 Linux remains the primary target; macOS and Windows remain future work.
 
 ## Plugin 0.18.12 — continuation for truncated results (2026-11-18)

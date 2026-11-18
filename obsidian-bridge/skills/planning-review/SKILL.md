@@ -10,8 +10,9 @@ plan says now that it did not say before**. Snapshots and the journal are the ev
 
 ## Reading the history
 
-1. `plan_scope {}` to confirm which Paseo workspace folder you are reviewing; `plan_*` never crosses into another
-   workspace (only `obsidian_*` may read those notes, and only when the user asked).
+1. `plan_scope {}` to confirm which Paseo project folder you are reviewing; all workspaces of that project share the
+   tree, and each node carries its originating `workspace_id` in YAML. `plan_*` never crosses into another project
+   (only `obsidian_*` may read those notes, and only when the user asked).
 2. `plan_read { path }` — the live state: `version`, `revision`, `status`, relations, `growth`, snapshot count.
 3. `plan_history { path }` — the snapshots, newest first: version, revision, reason, time, actor. Every write produced
    one, so the list is the change log of the node.

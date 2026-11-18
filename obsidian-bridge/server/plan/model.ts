@@ -238,6 +238,7 @@ export const PLAN_KEY_ORDER = [
   "version",
   "revision",
   "project_key",
+  "workspace_id",
   "parent",
   "children",
   "stack",

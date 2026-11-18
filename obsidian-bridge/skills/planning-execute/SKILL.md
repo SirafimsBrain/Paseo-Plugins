@@ -10,9 +10,10 @@ one snapshot per change, one journal line per change, and never a hand-edited fi
 
 ## Before every change
 
-1. `plan_scope {}` if you have not called it in this session: it reports the root, the Paseo workspace you are scoped
-   to, the projects and whether writes are enabled. Stay inside that workspace — `plan_*` cannot address a sibling
-   workspace, and trying `..` or its name is a refusal, not a path to resolve.
+1. `plan_scope {}` if you have not called it in this session: it reports the root, the Paseo project whose tree you
+   share with the other workspaces of that project, the `workspace_id` recorded in plan YAML, the projects and whether
+   writes are enabled. Stay inside that project — `plan_*` cannot address a sibling project, and trying `..` or its
+   name is a refusal, not a path to resolve. Other workspaces of the same project may work on the same nodes.
 2. `plan_search { query: "<words from the title>" }` then `plan_read { path: "…" }`. Read the node you are about to
    touch: `revision`, `status`, `children`, `influences`, `blockedBy`, `beeCycle` and the brief all come back.
 3. Keep the `revision` you saw. Every write accepts `expected_revision`; if another agent (or a person in Obsidian)

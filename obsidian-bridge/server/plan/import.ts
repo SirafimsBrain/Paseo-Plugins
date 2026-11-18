@@ -6,6 +6,7 @@ import type { ToolOutcome } from "../mcp-tools";
 import { resolveInsideVault } from "../vault";
 import { canHaveChild, isNodeKind, type NodeKind } from "./model";
 import { resolvePlanRoot } from "./paths";
+import { currentProject } from "./project";
 import { markDone, markStart, planDocument, slugify } from "./ops";
 import { appendJournal } from "./journal";
 import {
@@ -539,6 +540,7 @@ function planTree(
       revision:
         typeof node.revision === "number" && node.revision > 0 ? Math.trunc(node.revision) : 1,
       ...(stringOf(node.version) ? { legacy_version: stringOf(node.version) } : {}),
+      ...(currentProject().workspaceId ? { workspace_id: currentProject().workspaceId } : {}),
       ...(node.projectKey ? { project_key: node.projectKey } : {}),
       parent: node.kind === "root" ? null : link(node.parentId as string),
       children,

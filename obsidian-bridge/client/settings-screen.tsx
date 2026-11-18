@@ -268,7 +268,7 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
         >
           <SettingsInput
             label="Planning directory"
-            hint="Vault-relative folder, e.g. Workspaces; empty uses Workspaces. The plugin creates it plus a subfolder named after the current Paseo workspace, and plan_* can only reach that subfolder. Its __history and _archive folders are never indexed."
+            hint="Vault-relative folder, e.g. Workspaces; empty uses Workspaces. The plugin creates it plus a subfolder named after the current Paseo project; all workspaces of that project share the tree, and plan_* cannot reach another project. Its __history and _archive folders are never indexed."
             initialValue={values.planRoot}
             placeholder="Workspaces"
             onChangeText={(text: string) => patch({ planRoot: text })}

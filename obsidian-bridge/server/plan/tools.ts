@@ -28,10 +28,11 @@ import { planCreateNode, planHistory, planSetStatus, planUpdateNode } from "./wr
  * a note an agent may cite at will, and it is not agent memory either.
  */
 export const PLAN_CONTRACT_SENTENCE =
-  "Planning tool for the project plan inside the Paseo workspace folder under the configured " +
-  "planning directory (`planRoot/<workspace>`): use it for plan nodes, incidents and goals — not " +
+  "Planning tool for the project plan inside the Paseo project folder under the configured " +
+  "planning directory (`planRoot/<project>`): use it for plan nodes, incidents and goals — not " +
   "to record agent memory (memory-flash) and not as a general note search (obsidian_search). " +
-  "Paths are relative to your own workspace folder; another workspace, `__history` and " +
+  "Paths are relative to the project folder, shared by all of its workspaces; the calling " +
+  "workspace is recorded in the plan YAML as `workspace_id`. Another project, `__history` and " +
   "`_archive` are unreachable from here.";
 
 const EXPECTED_REVISION = {

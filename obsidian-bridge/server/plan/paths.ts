@@ -4,7 +4,7 @@ import type { RuntimeSettings } from "../../shared/settings";
 import { normalizeRoleDir } from "../dirs";
 import { resolveVaultRoot } from "../paths";
 import { PLAN_SYSTEM_DIRS, isPlanSystemPath, resolveInsideVault } from "../vault";
-import { currentWorkspace } from "./workspace";
+import { currentProject } from "./project";
 
 /**
  * Path boundary of the planning tools.
@@ -23,10 +23,11 @@ import { currentWorkspace } from "./workspace";
  *
  * The plugin owns the directory hierarchy. A missing planning root is created
  * here (with `recursive: true`), together with a folder named after the Paseo
- * workspace of the calling agent. An agent can never address a sibling
- * workspace: its root is already the workspace folder, and `..` is refused by
- * `normalizePlanPath`. Status queries pass `{ create: false }` so reporting
- * never changes the vault.
+ * project of the calling agent. All workspaces of that project share this tree;
+ * the calling workspace is recorded in each plan file's YAML by id. An agent
+ * cannot address a sibling project: its root is already the project folder, and
+ * `..` is refused by `normalizePlanPath`. Status queries pass `{ create: false }`
+ * so reporting never changes the vault.
  */
 
 /** Directory the planning tools are confined to when nothing else is configured. */
@@ -45,8 +46,10 @@ export interface PlanRoot {
   relPath: string;
   /** Absolute, symlink-resolved planning directory. */
   absolute: string;
-  /** Paseo workspace this root belongs to; null in a standalone process. */
-  workspace: { id: string | null; name: string } | null;
+  /** Paseo project whose plan tree this root addresses; null when standalone. */
+  project: { name: string } | null;
+  /** Paseo workspace id recorded in plan files; null when standalone. */
+  workspaceId: string | null;
 }
 
 export type PlanUnavailableReason = "not_configured" | "invalid" | "missing";
@@ -92,14 +95,17 @@ export function resolvePlanRoot(
       error: `The planning directory '${relPath}' resolves outside the configured vault.`,
     };
   }
-  const workspace = currentWorkspace();
-  const scope = workspace.name === null ? null : { id: workspace.id, name: workspace.name };
+  const identity = currentProject();
+  const scope =
+    identity.name === null
+      ? { project: null, workspaceId: null }
+      : { project: { name: identity.name }, workspaceId: identity.workspaceId };
 
   let stat: fs.Stats;
   try {
     stat = fs.statSync(absolute);
   } catch {
-    if (options.allowMissing) return { root: { vaultRoot, relPath, absolute, workspace: scope } };
+    if (options.allowMissing) return { root: { vaultRoot, relPath, absolute, ...scope } };
     if (options.create === false) {
       return {
         reason: "missing",
@@ -140,20 +146,20 @@ export function resolvePlanRoot(
     };
   }
 
-  return { root: { vaultRoot, relPath, absolute: realRoot, workspace: scope } };
+  return { root: { vaultRoot, relPath, absolute: realRoot, ...scope } };
 }
 
 /**
  * Vault-relative planning root: the configured directory (or the default) plus
- * the folder named after the current Paseo workspace. Pure — no filesystem
+ * the folder named after the current Paseo project. Pure — no filesystem
  * access — so the UI can show the effective root without creating anything.
  */
 export function planRootRelPath(settings: RuntimeSettings): string | null {
   const base = settings.planRoot.trim() || DEFAULT_PLAN_ROOT;
   const normalized = normalizeRoleDir(base);
   if (normalized === null) return null;
-  const workspace = currentWorkspace();
-  return workspace.name === null ? normalized : `${normalized}/${workspace.name}`;
+  const identity = currentProject();
+  return identity.name === null ? normalized : `${normalized}/${identity.name}`;
 }
 
 export interface ResolvedPlanPath {
