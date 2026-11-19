@@ -561,7 +561,9 @@ export default function contribute(server: PluginServerContext) {
     };
     if ("error" in opened) return notePreviewSchema.parse(empty);
     try {
-      const note = readVaultNote(opened.runtime.root, path);
+      const note = readVaultNote(opened.runtime.root, path, {
+        allowedExtensions: runtimeSettings.allowedExtensions,
+      });
       if ("error" in note) {
         return notePreviewSchema.parse({ ...empty, content: note.error });
       }
@@ -603,7 +605,10 @@ export default function contribute(server: PluginServerContext) {
     try {
       // Refuse paths outside the configured directory (and `.obsidian/`)
       // before handing anything to the API.
-      const note = readVaultNote(opened.runtime.root, notePath, { maxBytes: 1024 });
+      const note = readVaultNote(opened.runtime.root, notePath, {
+        maxBytes: 1024,
+        allowedExtensions: runtimeSettings.allowedExtensions,
+      });
       if ("error" in note) return { ok: false, error: note.error };
     } finally {
       opened.runtime.store.close();
@@ -642,7 +647,10 @@ export default function contribute(server: PluginServerContext) {
         resourceType: string;
       }> = [];
       for (const hit of result.hits) {
-        const note = readVaultNote(opened.runtime.root, hit.path, { maxBytes: 4 * 1024 * 1024 });
+        const note = readVaultNote(opened.runtime.root, hit.path, {
+          maxBytes: 4 * 1024 * 1024,
+          allowedExtensions: runtimeSettings.allowedExtensions,
+        });
         if ("error" in note) continue;
         const absolute = path.join(opened.runtime.root, hit.path);
         const text =

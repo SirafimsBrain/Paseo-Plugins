@@ -240,14 +240,31 @@ the vault root, and refuses `.obsidian/` (plugin code and settings are not the a
 absolute path or `.obsidian` is refused instead of being used as a `LIKE` prefix. A path like `../../etc/passwd` returns an
 explicit error, covered by tests.
 
+Since 0.20.13 that containment is also checked **physically**: after the lexical test, the `realpath` of the target — or
+of its nearest existing ancestor, for a file that does not exist yet — must still be inside the `realpath` of the root.
+A lexical check alone was defeated by a symlink (`notes/link.md -> ~/.ssh/id_rsa` is inside the vault as a string), and
+because `resolveInsideVault` is the single resolver, the fix covers reads, appends and everything the planning tools
+resolve through it, including the case where a *role directory* is itself a symlink to a folder outside.
+
+The read and edit tools additionally accept only the extensions in `allowedExtensions` (`.md` by default) and refuse any
+path with a dot-entry segment, so `.env`, `.git/config`, `.obsidian/…` and extensionless files such as `LICENSE` never
+become notes, whatever the allowlist says (`isAllowedDocumentPath`, `extensionRefusal`). Boundary errors are reported
+before format errors: a path above the directory is an escape, not a file of the wrong type. Indexing is unaffected — it
+remains Markdown-only, and the setting governs what the tools hand out, not what the index stores.
+
 ### Editing an existing note (`server/edit.ts`, 0.6.7)
 
 `obsidian_edit` is the deliberate exception to role-scoped writing: a note the user filed outside `inbox`/`out`/`raw`
 (project folders, a moved document, the workspace itself) could be read but never changed, which made the bridge useless
 for "append a line to this report". It takes `path`, `old_text`, `new_text` and:
 
-- resolves the path with `resolveInsideVault` (no absolute paths, no `..`, no `.obsidian`) and additionally compares
-  `realpath` of the note with `realpath` of the root, so a symlink pointing outside the directory is refused;
+- resolves the path with `resolveInsideVault` (no absolute paths, no `..`, no `.obsidian`, and a `realpath` comparison
+  on both sides since 0.20.13, so a symlink pointing outside the directory is refused);
+- accepts only a file with an allowed extension (`.md` by default) and no dot-entry segment, so a project checkout's
+  `.env` or `.git/config` is not editable;
+- says so when the boundary is hit: the refusal states that the configured directory is the whole of what the plugin may
+  touch, that everything above it is out of bounds and does not need to be written, and that retrying with `..`, a
+  symlink or a file tool is not the way forward;
 - requires an existing regular file — it never creates a note (`create` stays the write tools' job);
 - requires `old_text` to occur **exactly once**. Zero occurrences report "not found", several report the count and ask for
   more context: the tool never picks a place to edit. A CRLF note is retried with the fragment's line breaks converted,
@@ -340,7 +357,8 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `inboxDir` | `Inbox` | Vault-relative incoming-material role. Empty = role disabled. |
 | `outDir` | `Documentation` | Vault-relative authored-documents role. |
 | `rawDir` | `raw` | Vault-relative scratch role. |
-| `planRoot` | `Workspaces` | Vault-relative directory the `plan_*` tools are confined to (0.11.11). Resolved through `vaultPath`, so absolute paths, `..` and symlinks out of the vault are refused. Empty = planning not configured. |
+| `planRoot` | `Projects` | Vault-relative directory the `plan_*` tools are confined to (0.11.11, default changed in 0.20.13). Resolved through `vaultPath`, so absolute paths, `..` and symlinks out of the vault are refused. Empty = planning not configured. |
+| `allowedExtensions` | `.md` | Comma-separated extensions the read and edit tools accept (0.20.13). A user keeping `.txt`/`.rst` notes in the same directory adds them; dot files and extensionless files are refused regardless. Indexing remains Markdown-only. |
 | `indexingEnabled` | `true` | Pause indexing without clearing the path. |
 | `includeFolders` | `""` | Comma-separated vault-relative folders. |
 | `excludeGlobs` | `.obsidian/**, .trash/**, .git/**, .smart-env/**` | Comma-separated globs, `*`/`**` supported. |
@@ -364,7 +382,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists); keep it across plugin restarts and remove it when the switch is off. |
 
 `README.md`'s "First run" is the only configuration entry point: a Paseo settings screen, no side-channel HTTP server.
-That choice is deliberate (19 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
+That choice is deliberate (20 keys, all simple), and it matches `bunny-search`/`memory-flash`. The settings schema
 version is 4: role directories and `maxWriteChars` came in 0.2.0 (`readOnly` defaults to `false` since the write tools
 exist), 0.3.0 added the four semantic keys, and 0.4.0 added the three enrichment keys. 0.11.11 added `planRoot`:
 a key with a default, so a stored document still validates and the schema version stays 4. If the setting
@@ -457,7 +475,30 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13)
+
+### 0.20.13 — the plugin enforces its own boundary, and planning is project-scoped
+
+Feature release (0.19.13 → 0.20.13) after a permission audit of the plugin's tool surface. The user's framing decided the
+scope: an agent started **outside** Paseo runs on permissions the plugin cannot influence, so that fact is documented and
+not fought; what the plugin must guarantee is that its own tools cannot leave the configured directory, and that an agent
+understands what it is doing with them.
+
+| Area | Change |
+| --- | --- |
+| `server/vault.ts` | `resolveInsideVault` compares the `realpath` of the target (or nearest existing ancestor) with the root's, so a symlinked note or role directory cannot escape (R1, R2) |
+| `server/vault.ts` | `isAllowedDocumentPath` / `extensionRefusal`: only configured extensions, never dot entries or extensionless files (R3) |
+| setting `allowedExtensions` | new, default `.md`; `.txt`/`.rst` can be added, `.env`/`.git/config` cannot |
+| setting `planRoot` | default `Workspaces` → `Projects` |
+| `server/edit.ts` | allowed extensions, and refusals that state the boundary instead of naming a path (R4) |
+| `server/plan/project.ts` | project folder from the Git root (`gitRootOf`), no workspace-id fallback; an unknown project is refused (R8) |
+| `server/settings-file.ts`, `server/settings-mirror.ts` | the mirror is plugin data: marker `writtenBy`, regular user-owned `0600` file, otherwise ignored as a whole (R5) |
+| docs | §16 records the audit registry, the two recorded-but-unimplemented items (R6/R7), the deferred one (R9) and the open ones |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **45 suites / 371 tests** pass, including the new
+`tests/boundary.test.ts` (symlinked read, symlinked role directory, symlinked edit, `.env`/`.git/config`/`LICENSE`
+refusals, allowlist extension, edit above the directory, mirror provenance) and the new project-scoping tests in
+`tests/plan-workspace.test.ts`. Not exercised against a live Paseo daemon or Obsidian application in this pass.
 
 ### 0.19.13 — project-scoped planning tree, workspace id in YAML
 
@@ -1184,7 +1225,7 @@ after a concrete use case that the card does not serve.
 
 The plugin is also becoming the home of project planning, taking over the core of the frozen `luck-planner` plugin.
 Planning is a **directory inside the vault**, not a second plugin, a second MCP server or a second database:
-`planRoot` (default `Workspaces`) is resolved against `vaultPath`, and the `plan_*` tools share this server, this
+`planRoot` (default `Projects`) is resolved against `vaultPath`, and the `plan_*` tools share this server, this
 settings file, this index and this limit gate. Stage 1 delivers the boundary only; the plan model follows in later
 stages (`plan_read`/`plan_search`, then writes and snapshots, links and goals, multi-file operations, validation and
 import, the three skills, and only after that a dashboard).
@@ -1193,7 +1234,7 @@ import, the three skills, and only after that a dashboard).
 
 ```
 vaultPath/                      # the one directory available to Paseo
-└── planRoot/                   # default: Workspaces; created by the plugin
+└── planRoot/                   # default: Projects; created by the plugin
     └── <paseo-project>/        # created by the plugin; the plan_* boundary
         ├── _index.md           # project registry (not a tree node)
         ├── _schema.md          # field and status schema
@@ -1214,6 +1255,13 @@ a `realpath` comparison against the project-scoped planning root refuses a symli
 that does not exist yet, the nearest existing ancestor is resolved, so a symlinked folder is caught before the write,
 not after. The plugin, never the agent, creates the planning directory and the project folder.
 
+Since 0.20.13 the scope is derived from the **project**, not from the workspace's last path segment: the folder name is
+`OBSIDIAN_PROJECT_NAME`, else the root of the Git checkout containing `PASEO_AGENT_CWD` (so `repo/backend` and a linked
+worktree of `repo` both resolve to `repo`), else the last segment of the working directory. A workspace whose project
+cannot be named is refused before anything is created — a fallback to the workspace id would give each workspace a
+private tree and could put one project's plans inside another project's folder. All workspaces of one project keep full
+use of that project's tree; reaching another project stays the job of `obsidian_*` reads, never of `plan_*`.
+
 ### 15.2 `plan_scope`
 
 The first call of every planning workflow answers a question that has no safe guess:
@@ -1229,7 +1277,7 @@ The first call of every planning workflow answers a question that has no safe gu
 | `writesEnabled` | `false` when no directory resolves or `readOnly` is on |
 | `limits`, `systemDirs` | `maxWriteChars`, `maxNoteBytes`; the two hidden directories |
 
-It never creates anything: a missing `Workspaces` is reported, not materialised, and the tool is answered before the
+It never creates anything: a missing `Projects` is reported, not materialised, and the tool is answered before the
 index is opened — so a scope check on a fresh install leaves no database behind.
 
 ### 15.3 Hidden history and archive
@@ -1459,3 +1507,84 @@ code — the skill explains the boundary, it cannot replace it.
 No skill contains an absolute path: `planRoot` is configuration, so every example is relative (`centurion/backend/auth`)
 and every root is resolved at runtime. Linux is the primary target; the skills contain no shell-specific step, so a
 macOS/Windows agent follows the same instructions once the plugin is ported.
+
+## 16. Permission boundaries inside the plugin (0.20.13)
+
+This section records the permission audit performed before 0.20.13, what was fixed, and what was deliberately left open.
+It exists so a later pass does not have to re-derive it.
+
+### 16.1 What is in scope, and what is not
+
+An agent started **outside Paseo** (a terminal, an editor, its own config file) runs on permissions the plugin cannot see
+or influence: Paseo plugins are trusted, unsandboxed code, and `paseo-plugin.json` has no permission model to grant or
+revoke. That fact is accepted and documented rather than fought: the plugin cannot make a foreign agent less privileged,
+so every claim below is about the plugin's own tools, not about the operating system.
+
+Inside that scope the rule is one sentence: **the configured directory (`vaultPath`) is the whole of what any tool may
+read or write** — nothing above it, nothing beside it, no symlink around it — and every refusal says so in words an agent
+cannot read as "try another route".
+
+### 16.2 Registry
+
+States: **fixed** in 0.20.13, **recorded** (documented, not implemented), **open** (known, not scheduled), **ok** (checked
+and already correct).
+
+| Id | Finding | State | Where |
+| --- | --- | --- | --- |
+| R1 | A note symlinked out of the directory was readable: `notes/link.md -> ../outside/secret.md` returned the file. The containment test was lexical only. | fixed | `resolveInsideVault` compares `realpath` of target (or nearest existing ancestor) with the root's |
+| R2 | A role directory that is a symlink was writable outside: with `raw -> ../outside-writes`, `obsidian_write_scratch` created a file there. | fixed | same resolver, used by `appendToNote` before `mkdir`/write |
+| R3 | Read and edit accepted any file: `.env` (with a live API key) and `.git/config` (with a token in the URL) were returned, and `obsidian_edit` rewrote `.env`. | fixed | setting `allowedExtensions` (default `.md`) plus `isAllowedDocumentPath`, which also refuses dot entries and extensionless names |
+| R4 | Documentation and runtime disagreed: `dirs.ts` described the workspace role as "never writable" while `obsidian_edit` writes anywhere in the vault. | fixed | `dirs.ts` documentation, `describeRoleDirs`, tool descriptions and refusals now state the real boundary |
+| R5 | A rewritten `$PASEO_HOME/plugins/obsidian-bridge/settings.json` re-bound `vaultPath` and cleared `readOnly` in a new MCP process. | fixed (bar raised) | `readSettingsMirror` accepts only a regular, user-owned, non-group-writable file carrying `writtenBy: "obsidian-bridge"`; anything else is ignored as a whole (§16.4) |
+| R6 | The create/open hooks inject the tools into every agent on the host; there is no filter by labels or workspace. | recorded | a user-level choice, not a boundary defect; see §16.3 |
+| R7 | The same for the config-file registrations (OpenCode/Kilo/Cline): the entry is host-wide. | recorded | §16.3 |
+| R8 | Planning scope came from `basename(PASEO_AGENT_CWD)` and fell back to the workspace id; a standalone process got the whole planning root, and two workspaces could diverge into private folders. | fixed | `gitRootOf` + project-only scoping; a workspace whose project is unknown is refused before anything is created |
+| R9 | The skill installer rewrites `SKILL.md` every five minutes and `rmSync`s skill directories; a directory another tool owns could be replaced. | recorded | §16.3 |
+| R10 | The stable MCP copy under the plugin data directory is trusted by path, not by hash. | open | a content hash checked at start would catch a tampered copy |
+| R11 | `$PASEO_HOME/plugins/obsidian-bridge/vaults/<id>/index.db` was created `0644`, so note text was readable by other local users. | open | create the database (and its directory) `0600`/`0700` |
+| R12 | `resolveNodeCommand` falls back to bare `node` from `PATH`. | open | require a verified executable, as `mcp-stable` already does for its own copy |
+| — | Plan zip import bounds the archive at 64 MiB but not the inflate result, and the import does not apply `maxWriteChars` per document. | open | an inflate budget and the shared write gate inside the importer |
+| — | `obsidian_continue` accepts only `obsidian_search`, `obsidian_read`, `obsidian_list` and `plan_validate`; `readOnly`, `maxWriteChars`, `__history`, `_archive` and plan `realpath` checks were already correct. | ok | — |
+
+### 16.3 Recorded, not implemented
+
+These are documented so the decision is not lost; none of them is a hole in the directory boundary.
+
+- **R6/R7 — host-wide injection.** Paseo hands `agent.create.before` and `agent.open.before` the `agentId`,
+  `workspaceId` and `labels`, so the plugin *could* inject the tools only into agents with an opt-in label. It does not,
+  because the plugin's contract is "available to every agent, used only when the user asks"; a filter would be a second
+  configuration surface for the same guarantee. If that changes, the filter belongs in `decideSessionOpen`, and the
+  settings screen would need a label field.
+- **R9 — skill ownership.** The installer repairs its own copies and removes them when the switch is off. A marker file
+  per installed skill (name, version, source path) would let it refuse to overwrite a directory it did not create, instead
+  of comparing content. Recorded; the current behaviour is repair-only and it leaves skills of other plugins alone.
+
+### 16.4 R5 — the mirror as data, not an order
+
+The mirror exists because the spawned MCP server cannot use the plugin API. That also means any process running as the
+same user can write the file, so its content alone must not decide where the boundary is.
+
+Implementation: `writeSettingsMirror` publishes `{ writtenBy: "obsidian-bridge", values, writtenAt }` with mode `0600`;
+`readSettingsMirror` accepts the document only when it is a regular file (`lstat`, so a symlink is refused), owned by the
+current user, not writable by group or others, and carries the marker next to a `values` object. A document that fails any
+check is ignored **as a whole** — never partially applied — and the process falls back to the environment and the compiled
+defaults, where an empty `vaultPath` makes every tool refuse with instructions.
+
+This raises the bar; it does not make the channel unforgeable, and the documentation says so. An attacker with the same
+user id can re-create a plausible mirror. The only unforgeable channel would be the spawn environment, because Paseo — not
+a file in the home directory — hands it to the agent: the hooks may change `env`, so the boundary values (`vaultPath`,
+`readOnly`) could be injected as `OBSIDIAN_VAULT_PATH`/`OBSIDIAN_READ_ONLY` at open time and the mirror would keep only the
+non-security values. That option stays documented and unimplemented, because it freezes the directory into every saved
+agent configuration and makes a settings edit require a new session.
+
+### 16.5 What the documentation promises an agent
+
+The instructions block, the four skills and the tool descriptions now say the same thing, so an agent does not have to
+guess and does not develop an appetite for tools it does not need:
+
+1. One directory, its whole subtree, nothing above it, nothing beside it, no symlink around it.
+2. Reads and edits: configured extensions only; dot files and configuration are never notes.
+3. New notes: `inbox`, `out`, `raw` only. `obsidian_edit`: an existing note anywhere below the directory.
+4. Planning: the project folder only, shared by every workspace of that project; `plan_*` is the only writer of a plan
+   file, `plan_history` the only reader of a snapshot.
+5. A refusal is the answer. It is not an invitation to try `shell`, `write`, `patch`, `..` or an absolute path.

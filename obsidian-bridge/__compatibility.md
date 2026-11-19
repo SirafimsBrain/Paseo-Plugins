@@ -2,6 +2,29 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.20.13 — the plugin enforces its own boundary (2026-11-19)
+
+Feature release (0.19.13 → 0.20.13) from a permission audit of the tool surface. No Paseo API change: the SDK stays
+`@getpaseo/plugin ^0.16.0` and the host floor `>=0.15.0`; the settings schema stays version 4, because every new key has a
+default. The MCP catalogue, the attached tools and every tool input are unchanged — this release tightens behaviour.
+
+| Change | Behaviour |
+| --- | --- |
+| setting `planRoot` | default is now `Projects` (was `Workspaces`); a stored value is kept, so nothing moves for an existing install |
+| setting `allowedExtensions` | new, default `.md`. Read and edit tools accept only these extensions; add `.txt`, `.rst` if those files belong to the knowledge base |
+| boundary of reads (`R1`) | `resolveInsideVault` also compares the `realpath` of the target (or its nearest existing ancestor) with the root's, so a symlinked note that points outside is refused |
+| boundary of writes (`R2`) | the same resolver guards `appendToNote`, so a role directory that is a symlink out of the directory can no longer receive files |
+| dot files and non-documents (`R3`) | `.env`, `.git/config`, `.obsidian/…` and extensionless files are never readable or editable, whatever the allowlist says; indexing remains Markdown-only |
+| `obsidian_edit` (`R4`) | may rewrite an existing note anywhere below the configured directory and nowhere above it; the refusal states the boundary and that retrying through another path or tool is not the way forward |
+| planning scope (`R8`) | the project folder is the Git root of `PASEO_AGENT_CWD` (then the last path segment), so `repo/backend` and its worktrees share `repo`; a workspace whose project cannot be named is refused instead of getting a private tree; the workspace-id fallback is gone |
+| settings mirror (`R5`) | accepted only as plugin data: regular file, current user, not group/other writable, marked `writtenBy: "obsidian-bridge"`; otherwise ignored as a whole and defaults/env apply (an empty `vaultPath` is the closed state) |
+| documentation | `__doc.md` §16 records the audit registry; R6/R7 (host-wide injection) and R9 (skill ownership) are recorded but not implemented; R10/R11/R12 and the import limits stay open |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **45 suites / 371 tests** pass, including the new
+`tests/boundary.test.ts`. Not deployed and not exercised against a live Paseo daemon or Obsidian application in this pass;
+symlink behaviour was verified on Linux (the primary target). macOS and Windows remain future work — the `realpath`
+comparison is platform-neutral, the uid and mode checks of the mirror are skipped where `process.getuid` does not exist.
+
 ## Plugin 0.19.13 — project-scoped planning tree, workspace id in YAML (2026-11-18)
 
 Patch release (0.19.12 → 0.19.13). 0.19.12 made the plugin create the planning directory and named the folder after the

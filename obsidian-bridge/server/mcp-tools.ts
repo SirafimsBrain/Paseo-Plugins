@@ -95,11 +95,19 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "\n\nWrite only where the user asked you to: authored documents go to `out`, scratch and " +
     "intermediate notes to `raw`, and appends to incoming material to `inbox`. Never create a " +
     "note outside those directories.\n\n" +
-    "Planning sits in the same server: the plugin creates `planRoot` (default `Workspaces`) and " +
+    "Boundaries, which are enforced by code and not by these words: the configured directory " +
+    "is the whole of what this plugin may touch — nothing above it, nothing outside it, and no " +
+    "symlink around it. Read and edit tools accept only the configured document extensions " +
+    "(`.md` by default) and never dot files. Write tools create notes only in `inbox`, `out` and " +
+    "`raw`; `obsidian_edit` may change an existing note anywhere below the configured " +
+    "directory, and nowhere above it. Never look for another path or a shell command when a " +
+    "tool refuses: the refusal is the answer.\n\n" +
+    "Planning sits in the same server: the plugin creates `planRoot` (default `Projects`) and " +
     "a folder named after the current Paseo project; `plan_*` reads and edits the whole project " +
     "tree, shared by all workspaces of that project. Each plan file records the calling workspace " +
-    "by id in its YAML (`workspace_id`). Another project is out of reach for `plan_*` — do not " +
-    "pass `..` or a sibling project name. `obsidian_*` may read plans of other projects when the " +
+    "by id in its YAML (`workspace_id`). The project, not the workspace, is the scope: another " +
+    "project is out of reach for `plan_*` — do not pass `..` or a sibling project name. " +
+    "`obsidian_*` may read plans of other projects when the " +
     "user's task asks for it, but never write a plan file with `obsidian_edit`, " +
     "`obsidian_write_*`, `shell`, `write` or `patch`, and never read `__history`/`_archive` " +
     "directly: `plan_*` is the only write path that snapshots, checks `expected_revision` and " +
@@ -199,7 +207,8 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     title: "Read an Obsidian note",
     description:
       `${CONTRACT_SENTENCE} Reads a note (or one heading subtree) from the configured directory, ` +
-      "including its frontmatter, tags and link counts.",
+      "including its frontmatter, tags and link counts. Only files with an allowed extension " +
+      "(`.md` by default) are readable; dot files and configuration are refused.",
     inputSchema: {
       type: "object",
       properties: {
@@ -271,10 +280,12 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "obsidian_edit",
     title: "Edit an existing Obsidian note",
     description:
-      `${CONTRACT_SENTENCE} Replaces one exact fragment in an existing note addressed by its vault ` +
-      "path — the tool that reaches notes outside the inbox/out/raw roles. The fragment must occur " +
-      "exactly once (include surrounding context to make it unique); everything else in the note is " +
-      "kept byte for byte. It never creates a note. A refusal lists the closest text with line " +
+      `${CONTRACT_SENTENCE} Replaces one exact fragment in an existing note addressed by its path ` +
+      "below the configured directory — the tool that reaches notes outside the inbox/out/raw " +
+      "roles. The fragment must occur exactly once (include surrounding context to make it " +
+      "unique); everything else in the note is kept byte for byte. It never creates a note and it " +
+      "never reaches a path above the configured directory, so a refusal is final — do not retry " +
+      "through `shell`, `write` or another tool. A refusal lists the closest text with line " +
       "numbers, and `ignore_whitespace: true` matches a re-wrapped fragment.",
     inputSchema: {
       type: "object",
@@ -680,7 +691,12 @@ export async function dispatchTool(
       root: resolveVaultRoot(settings.vaultPath),
       directories: dirs,
       roles: describeRoleDirs(dirs),
+      allowedExtensions: settings.allowedExtensions,
       writesEnabled: !settings.readOnly,
+      boundary:
+        "This directory is the whole boundary: nothing above it, nothing outside it, no symlink " +
+        "around it. New notes are created only in inbox/out/raw; obsidian_edit may rewrite an " +
+        "existing note anywhere below it.",
     });
   }
 
@@ -782,7 +798,10 @@ export async function dispatchTool(
           );
         }
         const heading = typeof input.heading === "string" ? input.heading : undefined;
-        const note = readVaultNote(runtime.root, relPath, { heading });
+        const note = readVaultNote(runtime.root, relPath, {
+          heading,
+          allowedExtensions: settings.allowedExtensions,
+        });
         if ("error" in note) return fail(note.error);
         const meta = runtime.store.noteMeta(relPath);
         const charOffset =
@@ -852,6 +871,7 @@ export async function dispatchTool(
           oldText: typeof input.old_text === "string" ? input.old_text : "",
           newText: typeof input.new_text === "string" ? input.new_text : "",
           maxWriteChars: settings.maxWriteChars,
+          allowedExtensions: settings.allowedExtensions,
           ignoreWhitespace,
         });
         if ("error" in outcome) {
@@ -893,7 +913,10 @@ export async function dispatchTool(
               "document tools do not outline it. Use the planning tools instead.",
           );
         }
-        const note = readVaultNote(runtime.root, relPath, { maxBytes: 4 * 1024 * 1024 });
+        const note = readVaultNote(runtime.root, relPath, {
+          maxBytes: 4 * 1024 * 1024,
+          allowedExtensions: settings.allowedExtensions,
+        });
         if ("error" in note) return fail(note.error);
         // Obsidian's metadata cache is authoritative when the app answers;
         // the parsed index remains the fallback.

@@ -10,14 +10,43 @@ import { settingsMirrorPath } from "./paths";
  * cannot use the plugin API. It reads the JSON file the plugin mirrors:
  * `$PASEO_HOME/plugins/obsidian-bridge/settings.json`. Environment variables
  * override the file so the server also works standalone.
+ *
+ * ## The mirror is data, not an order (0.20.13)
+ *
+ * Any process running as the same user can write a file in the plugin data
+ * directory, so "the JSON at that path says `vaultPath` is somewhere else" is
+ * not by itself a reason to move the boundary. The reader therefore treats the
+ * mirror as **data the plugin published**, and accepts it only when it looks
+ * like that:
+ *
+ * - it is a regular file (`lstat`, so a symlink somewhere else is refused);
+ * - it belongs to the current user and is not writable by group or others;
+ * - it carries the marker `writtenBy: "obsidian-bridge"` next to a `values`
+ *   object, instead of being a bare bag of keys.
+ *
+ * A file that fails any check is ignored as a whole — never partially applied —
+ * and the process falls back to the environment and the compiled defaults. An
+ * empty `vaultPath` then makes every tool refuse with instructions, which is the
+ * closed state. This raises the bar rather than making the channel unforgeable:
+ * a process that runs as the same user can still re-create a plausible mirror.
+ * The only unforgeable channel would be the spawn environment (it is Paseo, not
+ * a file in the home directory, that hands it to the agent), which is recorded
+ * in `__doc.md` as the remaining option.
  */
+
+/** Marker a plugin-written mirror carries. */
+export const MIRROR_MARKER_KEY = "writtenBy";
+
+/** Value of {@link MIRROR_MARKER_KEY} a mirror must carry to be trusted. */
+export const MIRROR_MARKER_VALUE = "obsidian-bridge";
 
 const DEFAULTS: RuntimeSettings = {
   vaultPath: "",
   inboxDir: "Inbox",
   outDir: "Documentation",
   rawDir: "raw",
-  planRoot: "Workspaces",
+  planRoot: "Projects",
+  allowedExtensions: ".md",
   indexingEnabled: true,
   includeFolders: "",
   excludeGlobs: ".obsidian/**, .trash/**, .git/**, .smart-env/**",
@@ -50,68 +79,117 @@ function optionalBool(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
-function parseFile(filePath: string): Partial<RuntimeSettings> {
+/**
+ * Why this file is not a plugin-published mirror, or `null` when it is.
+ *
+ * Checked before reading the content so a symlink, a foreign owner or a
+ * group-writable file never becomes settings.
+ */
+function mirrorRejection(filePath: string): string | null {
+  let stat: fs.Stats;
   try {
-    const raw: unknown = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    if (typeof raw !== "object" || raw === null) return {};
-    const record = raw as Record<string, unknown>;
-    // Accept both the host layout `{revision, values}` and a flat object.
-    const values =
-      typeof record.values === "object" && record.values !== null
-        ? (record.values as Record<string, unknown>)
-        : record;
-
-    const parsed: Partial<RuntimeSettings> = {};
-    if (typeof values.vaultPath === "string") {
-      parsed.vaultPath = values.vaultPath.trim().slice(0, 1024);
-    }
-    for (const key of ["inboxDir", "outDir", "rawDir", "planRoot"] as const) {
-      if (typeof values[key] === "string") parsed[key] = values[key].trim().slice(0, 512);
-    }
-    if (typeof values.indexingEnabled === "boolean") parsed.indexingEnabled = values.indexingEnabled;
-    if (typeof values.includeFolders === "string") {
-      parsed.includeFolders = values.includeFolders.trim().slice(0, 2000);
-    }
-    if (typeof values.excludeGlobs === "string") {
-      parsed.excludeGlobs = values.excludeGlobs.trim().slice(0, 2000);
-    }
-    if (typeof values.ftsStemming === "boolean") parsed.ftsStemming = values.ftsStemming;
-    const reconcile = optionalInt(values.reconcileMinutes, 1, 240);
-    if (reconcile !== undefined) parsed.reconcileMinutes = reconcile;
-    const maxResults = optionalInt(values.maxResults, 1, 50);
-    if (maxResults !== undefined) parsed.maxResults = maxResults;
-    const budget = optionalInt(values.searchBudgetChars, 500, 60000);
-    if (budget !== undefined) parsed.searchBudgetChars = budget;
-    const snippet = optionalInt(values.snippetChars, 120, 4000);
-    if (snippet !== undefined) parsed.snippetChars = snippet;
-    const readOnly = optionalBool(values.readOnly);
-    if (readOnly !== undefined) parsed.readOnly = readOnly;
-    const maxWrite = optionalInt(values.maxWriteChars, 1000, 400_000);
-    if (maxWrite !== undefined) parsed.maxWriteChars = maxWrite;
-    if (typeof values.semanticSearch === "boolean") {
-      parsed.semanticSearch = values.semanticSearch;
-    }
-    if (typeof values.embeddingModel === "string" && values.embeddingModel.trim().length > 0) {
-      parsed.embeddingModel = values.embeddingModel.trim().slice(0, 200);
-    }
-    if (typeof values.embeddingDtype === "string" && values.embeddingDtype.trim().length > 0) {
-      parsed.embeddingDtype = values.embeddingDtype.trim().slice(0, 16);
-    }
-    const idle = optionalInt(values.embeddingIdleMinutes, 0, 240);
-    if (idle !== undefined) parsed.embeddingIdleMinutes = idle;
-    if (typeof values.obsidianApiEnabled === "boolean") {
-      parsed.obsidianApiEnabled = values.obsidianApiEnabled;
-    }
-    if (typeof values.obsidianApiUrl === "string") {
-      parsed.obsidianApiUrl = values.obsidianApiUrl.trim().slice(0, 512);
-    }
-    if (typeof values.obsidianApiKey === "string") {
-      parsed.obsidianApiKey = values.obsidianApiKey.trim().slice(0, 512);
-    }
-    return parsed;
-  } catch {
-    return {};
+    stat = fs.lstatSync(filePath);
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    return code === "ENOENT" ? null : "the file cannot be inspected";
   }
+  if (!stat.isFile()) return "not a regular file";
+  if ((stat.mode & 0o022) !== 0) return "writable by group or others";
+  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+    return "owned by another user";
+  }
+  return null;
+}
+
+function parseValues(values: Record<string, unknown>): Partial<RuntimeSettings> {
+  const parsed: Partial<RuntimeSettings> = {};
+  if (typeof values.vaultPath === "string") {
+    parsed.vaultPath = values.vaultPath.trim().slice(0, 1024);
+  }
+  for (const key of ["inboxDir", "outDir", "rawDir", "planRoot"] as const) {
+    if (typeof values[key] === "string") parsed[key] = values[key].trim().slice(0, 512);
+  }
+  if (typeof values.allowedExtensions === "string") {
+    parsed.allowedExtensions = values.allowedExtensions.trim().slice(0, 512);
+  }
+  if (typeof values.indexingEnabled === "boolean") parsed.indexingEnabled = values.indexingEnabled;
+  if (typeof values.includeFolders === "string") {
+    parsed.includeFolders = values.includeFolders.trim().slice(0, 2000);
+  }
+  if (typeof values.excludeGlobs === "string") {
+    parsed.excludeGlobs = values.excludeGlobs.trim().slice(0, 2000);
+  }
+  if (typeof values.ftsStemming === "boolean") parsed.ftsStemming = values.ftsStemming;
+  const reconcile = optionalInt(values.reconcileMinutes, 1, 240);
+  if (reconcile !== undefined) parsed.reconcileMinutes = reconcile;
+  const maxResults = optionalInt(values.maxResults, 1, 50);
+  if (maxResults !== undefined) parsed.maxResults = maxResults;
+  const budget = optionalInt(values.searchBudgetChars, 500, 60000);
+  if (budget !== undefined) parsed.searchBudgetChars = budget;
+  const snippet = optionalInt(values.snippetChars, 120, 4000);
+  if (snippet !== undefined) parsed.snippetChars = snippet;
+  const readOnly = optionalBool(values.readOnly);
+  if (readOnly !== undefined) parsed.readOnly = readOnly;
+  const maxWrite = optionalInt(values.maxWriteChars, 1000, 400_000);
+  if (maxWrite !== undefined) parsed.maxWriteChars = maxWrite;
+  if (typeof values.semanticSearch === "boolean") {
+    parsed.semanticSearch = values.semanticSearch;
+  }
+  if (typeof values.embeddingModel === "string" && values.embeddingModel.trim().length > 0) {
+    parsed.embeddingModel = values.embeddingModel.trim().slice(0, 200);
+  }
+  if (typeof values.embeddingDtype === "string" && values.embeddingDtype.trim().length > 0) {
+    parsed.embeddingDtype = values.embeddingDtype.trim().slice(0, 16);
+  }
+  const idle = optionalInt(values.embeddingIdleMinutes, 0, 240);
+  if (idle !== undefined) parsed.embeddingIdleMinutes = idle;
+  if (typeof values.obsidianApiEnabled === "boolean") {
+    parsed.obsidianApiEnabled = values.obsidianApiEnabled;
+  }
+  if (typeof values.obsidianApiUrl === "string") {
+    parsed.obsidianApiUrl = values.obsidianApiUrl.trim().slice(0, 512);
+  }
+  if (typeof values.obsidianApiKey === "string") {
+    parsed.obsidianApiKey = values.obsidianApiKey.trim().slice(0, 512);
+  }
+  return parsed;
+}
+
+/** Result of reading the mirror: accepted values, or why nothing was taken. */
+export interface MirrorRead {
+  values: Partial<RuntimeSettings>;
+  accepted: boolean;
+  reason: string | null;
+}
+
+/**
+ * Reads the mirror as plugin data. A missing file is not an error (a standalone
+ * process may be configured entirely through the environment); a file that
+ * exists but fails the checks above is reported with its reason.
+ */
+export function readSettingsMirror(filePath: string = settingsMirrorPath()): MirrorRead {
+  const rejected = mirrorRejection(filePath);
+  if (rejected !== null) return { values: {}, accepted: false, reason: rejected };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { values: {}, accepted: false, reason: null };
+    return { values: {}, accepted: false, reason: "unreadable or not valid JSON" };
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { values: {}, accepted: false, reason: "not a JSON object" };
+  }
+  const record = raw as Record<string, unknown>;
+  if (record[MIRROR_MARKER_KEY] !== MIRROR_MARKER_VALUE) {
+    return { values: {}, accepted: false, reason: "not written by this plugin" };
+  }
+  const values = record.values;
+  if (typeof values !== "object" || values === null || Array.isArray(values)) {
+    return { values: {}, accepted: false, reason: "no values object" };
+  }
+  return { values: parseValues(values as Record<string, unknown>), accepted: true, reason: null };
 }
 
 function parseEnv(): Partial<RuntimeSettings> {
@@ -126,6 +204,8 @@ function parseEnv(): Partial<RuntimeSettings> {
   if (rawDir) parsed.rawDir = rawDir.slice(0, 512);
   const planRoot = optionalString(process.env.OBSIDIAN_PLAN_ROOT);
   if (planRoot) parsed.planRoot = planRoot.slice(0, 512);
+  const allowedExtensions = optionalString(process.env.OBSIDIAN_ALLOWED_EXTENSIONS);
+  if (allowedExtensions) parsed.allowedExtensions = allowedExtensions.slice(0, 512);
   const includeFolders = optionalString(process.env.OBSIDIAN_INCLUDE_FOLDERS);
   if (includeFolders) parsed.includeFolders = includeFolders;
   const excludeGlobs = optionalString(process.env.OBSIDIAN_EXCLUDE_GLOBS);
@@ -160,9 +240,15 @@ function parseEnv(): Partial<RuntimeSettings> {
   return parsed;
 }
 
-/** Settings the MCP server process runs with: defaults ← file ← env. */
+/**
+ * Settings the MCP server process runs with: defaults ← trusted mirror ← env.
+ *
+ * A mirror that fails the provenance checks contributes nothing, so the
+ * environment and the compiled defaults decide — the closed direction.
+ */
 export function parseSettingsFile(filePath: string = settingsMirrorPath()): RuntimeSettings {
-  return { ...DEFAULTS, ...parseFile(filePath), ...parseEnv() };
+  const mirror = readSettingsMirror(filePath);
+  return { ...DEFAULTS, ...mirror.values, ...parseEnv() };
 }
 
 /** Path of the mirror, re-exported so callers log one canonical location. */

@@ -17,8 +17,16 @@ import { resolveInsideVault } from "./vault";
  * | `raw` | scratch: clarifications, bugfix alternatives, temporary notes | write freely |
  *
  * Everything is enforced here, not in prompts: a path above `vaultPath` cannot
- * be resolved at all (`resolveInsideVault`), and a write is only accepted when
- * its target lands inside one of the configured roles.
+ * be resolved at all (`resolveInsideVault`, which also compares the real path so
+ * a symlink cannot step outside), and an **append** is only accepted when its
+ * target lands inside one of the configured roles.
+ *
+ * `workspace` is not read-only, and pretending otherwise was a defect (0.20.13).
+ * The append-only writers are limited to the roles, but `obsidian_edit` may
+ * replace one exact fragment in **any** note below the configured directory —
+ * that directory, not the role list, is the plugin's boundary. The tools say so
+ * in their descriptions, in the refusals and in `describeRoleDirs`, because an
+ * agent that believes the roles are the boundary asks for a different tool.
  */
 
 export type Role = "workspace" | "inbox" | "out" | "raw";
@@ -67,7 +75,8 @@ export function resolveRoleDirs(settings: RuntimeSettings): RoleDirs {
 
 /**
  * Role of a vault-relative path. `workspace` means "inside the configured
- * directory but outside every named role" — readable, never writable.
+ * directory but outside every named role" — readable everywhere, and editable
+ * in place with `obsidian_edit`; the append-only writers stay role-only.
  */
 export function roleOfPath(relPath: string, dirs: RoleDirs): Role {
   const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -268,7 +277,7 @@ export function describeRoleDirs(dirs: RoleDirs): Array<{ role: Role; path: stri
     {
       role: "workspace",
       path: dirs.workspace === "" ? "." : dirs.workspace,
-      use: "Project working material; readable everywhere inside this directory, writable only through the roles below.",
+      use: "Project working material; readable everywhere inside this directory, and editable in place with obsidian_edit. New notes are created only in the roles below.",
     },
     {
       role: "inbox",

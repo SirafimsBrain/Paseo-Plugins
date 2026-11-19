@@ -268,9 +268,9 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
         >
           <SettingsInput
             label="Planning directory"
-            hint="Vault-relative folder, e.g. Workspaces; empty uses Workspaces. The plugin creates it plus a subfolder named after the current Paseo project; all workspaces of that project share the tree, and plan_* cannot reach another project. Its __history and _archive folders are never indexed."
+            hint="Vault-relative folder, e.g. Projects; empty uses Projects. The plugin creates it plus a subfolder named after the current Paseo project (the root of its Git checkout); all workspaces of that project share the tree, and plan_* cannot reach another project. Its __history and _archive folders are never indexed."
             initialValue={values.planRoot}
-            placeholder="Workspaces"
+            placeholder="Projects"
             onChangeText={(text: string) => patch({ planRoot: text })}
           />
         </SettingsSection>
@@ -466,9 +466,16 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             value={values.registerClineMcp}
             onValueChange={(enabled: boolean) => patch({ registerClineMcp: enabled })}
           />
+          <SettingsInput
+            label="Document extensions"
+            hint="Comma-separated extensions the read and edit tools accept. Default .md; add .txt, .rst and so on only if those files belong to the knowledge base. Dot files (.env, .git/config) and extensionless files are always refused."
+            initialValue={values.allowedExtensions}
+            placeholder=".md"
+            onChangeText={(text: string) => patch({ allowedExtensions: text })}
+          />
           <SettingsSwitch
             label="Refuse writes"
-            hint="Turns every write tool off. Writes are already append-only and confined to the inbox/out/raw directories, so this is an extra brake."
+            hint="Turns every write tool off. Appends are already confined to the inbox/out/raw directories, and obsidian_edit rewrites only existing notes inside the configured directory, so this is an extra brake."
             value={values.readOnly}
             onValueChange={(enabled: boolean) => patch({ readOnly: enabled })}
           />

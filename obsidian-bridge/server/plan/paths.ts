@@ -10,7 +10,7 @@ import { currentProject } from "./project";
  * Path boundary of the planning tools.
  *
  * Planning is not a second vault: `planRoot` is a directory **inside** the one
- * directory the plugin already owns (`vaultPath`), by default `Workspaces`. A
+ * directory the plugin already owns (`vaultPath`), by default `Projects`. A
  * `plan_*` tool therefore has no path syntax of its own — every argument is a
  * path relative to `planRoot` and is resolved by the same ladder as an
  * `obsidian_*` argument:
@@ -23,15 +23,18 @@ import { currentProject } from "./project";
  *
  * The plugin owns the directory hierarchy. A missing planning root is created
  * here (with `recursive: true`), together with a folder named after the Paseo
- * project of the calling agent. All workspaces of that project share this tree;
- * the calling workspace is recorded in each plan file's YAML by id. An agent
- * cannot address a sibling project: its root is already the project folder, and
- * `..` is refused by `normalizePlanPath`. Status queries pass `{ create: false }`
- * so reporting never changes the vault.
+ * project of the calling agent. The **project** is the scoping unit: all
+ * workspaces of that project share this tree, the calling workspace is recorded
+ * in each plan file's YAML by id, and no workspace can address a sibling
+ * project — its root is already the project folder, and `..` is refused by
+ * `normalizePlanPath`. A workspace whose project cannot be named is refused
+ * rather than given a folder of its own, because a guessed folder could place
+ * one project's plans inside another project's tree. Status queries pass
+ * `{ create: false }` so reporting never changes the vault.
  */
 
 /** Directory the planning tools are confined to when nothing else is configured. */
-export const DEFAULT_PLAN_ROOT = "Workspaces";
+export const DEFAULT_PLAN_ROOT = "Projects";
 
 export { PLAN_SYSTEM_DIRS, isPlanSystemPath };
 
@@ -78,6 +81,22 @@ export function resolvePlanRoot(
     };
   }
 
+  // Scoping is by project, never by workspace (0.20.13). A Paseo workspace whose
+  // project folder cannot be derived gets an explanation instead of a private
+  // folder: one folder per workspace would silently split a project's tree and,
+  // worse, put a guessed name next to other projects.
+  const identity = currentProject();
+  if (identity.workspaceId !== null && identity.name === null) {
+    return {
+      reason: "invalid",
+      error:
+        "The Paseo project of this workspace cannot be determined, so the planning tools " +
+        "refuse to choose a project folder: a guessed folder could write into another " +
+        "project's plan tree. Open the workspace from its project checkout (or set " +
+        "OBSIDIAN_PROJECT_NAME for it) and retry; nothing was created.",
+    };
+  }
+
   const relPath = planRootRelPath(settings);
   if (relPath === null) {
     return {
@@ -95,7 +114,6 @@ export function resolvePlanRoot(
       error: `The planning directory '${relPath}' resolves outside the configured vault.`,
     };
   }
-  const identity = currentProject();
   const scope =
     identity.name === null
       ? { project: null, workspaceId: null }

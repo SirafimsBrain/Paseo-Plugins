@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.19.13)
+## What it does (0.20.13)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -29,10 +29,18 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Truncation has a next step (0.18.12).** When a tool cannot show everything it found, the result carries
   `[TRUNCATED]` and a `continuation` object. `obsidian_continue` re-runs exactly that call, so an agent never switches to
   file operations or guesses an offset. Search pages, note windows, note listings and integrity reports use it.
-- **The plugin owns the planning hierarchy (0.19.12, corrected in 0.19.13).** It creates the planning directory
-  (default `Workspaces`, used when the setting is empty) and a folder named after the current Paseo project. All
-  workspaces of that project share the tree; each plan file records the calling workspace by id in YAML
-  (`workspace_id`). `plan_*` cannot reach another project, while `obsidian_*` may read its plans on an explicit task.
+- **The plugin owns the planning hierarchy (0.19.12, corrected in 0.19.13 and 0.20.13).** It creates the planning
+  directory (default `Projects`, used when the setting is empty) and a folder named after the current Paseo project —
+  the root of its Git checkout, so a workspace opened in `repo/backend` shares the folder `repo`. All workspaces of that
+  project share the tree; each plan file records the calling workspace by id in YAML (`workspace_id`). Scope is the
+  project, never the workspace: a workspace whose project cannot be named is refused instead of being given a folder of
+  its own. `plan_*` cannot reach another project, while `obsidian_*` may read its plans on an explicit task.
+- **The plugin's boundary is enforced by the plugin (0.20.13).** The configured directory is the whole of what any tool
+  may touch: paths above it, beside it and `.obsidian` are refused, and a symlink is resolved with `realpath` on both
+  sides, so a symlinked note or role directory cannot step outside it. Reads and edits accept only the configured
+  document extensions (`.md` by default) and never dot files, so a project checkout's `.env` or `.git/config` is not a
+  note. `obsidian_edit` may change an existing note anywhere below the configured directory and nowhere above it; the
+  refusal says exactly that, in words meant to end the attempt rather than invite a retry.
 - **Append-only write tools.** `obsidian_write_document` (authored documents), `obsidian_write_scratch` (intermediate
   notes) and `obsidian_append_inbox` (add material to incoming sources). Every write names its note, appends a dated
   section, and never rewrites, moves or deletes anything.
@@ -44,7 +52,7 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   config entry and skill copy, so "is it installed correctly?" is a visible answer rather than a guess. The official Obsidian skills (Obsidian Flavored Markdown, Bases, JSON Canvas, Obsidian CLI) are a separate,
   upstream project — [obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills); this plugin ships its own
   skill so the workflow can be reviewed and versioned together with the tools it describes.
-- **Exact-fragment edit of any existing note.** `obsidian_edit` takes a vault path, an `old_text` that must occur exactly
+- **Exact-fragment edit of any existing note below the configured directory.** `obsidian_edit` takes a path, an `old_text` that must occur exactly
   once and its `new_text`: the one tool that can change a note outside the inbox/out/raw roles (a note the user filed in a
   project folder, a moved document). The rest of the file — frontmatter, other sections, whitespace — is written back byte
   for byte; the file is replaced atomically and only when it did not change while being read; a symlink leading outside the
@@ -85,7 +93,7 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   updated, skipped and could not read, and how long it took) and the time of the last full sync; embedding now waits for
   a short quiet period after watched-note changes, so a Git pull or a Syncthing burst becomes one job instead of several
   model loads.
-- **Planning foundation (0.11.11).** A `planRoot` setting (default `Workspaces`) reserves a directory inside the vault
+- **Planning foundation (0.11.11).** A `planRoot` setting (default `Projects`) reserves a directory inside the vault
   for planning tools, and `plan_scope` reports whether that tree exists, what it holds and whether writes are enabled —
   without opening the index, creating a folder or touching a note. Planning never leaves that directory, and its
   `__history` (revision snapshots) and `_archive` (archived subtrees) are excluded from indexing, search and listings and
@@ -221,6 +229,9 @@ If the path is not configured, nothing is indexed and every tool answers with an
 - An identical body already present in the document is reported as a duplicate and skipped.
 - Documents larger than `maxWriteChars` (default 200 000 characters) are refused with a request to split them.
 - The **Refuse writes** switch turns every write tool off without affecting reads.
+- Read and edit tools accept only the extensions in **Document extensions** (default `.md`). Add `.txt`, `.rst` or
+  another extension only if those files really belong to the knowledge base; dot files (`.env`, `.git/config`) and
+  extensionless files stay unreadable whatever the allowlist says. Indexing itself remains Markdown-only.
 
 ## What agents get
 
@@ -243,7 +254,7 @@ If the path is not configured, nothing is indexed and every tool answers with an
 
 The MCP server is registered under the name `obsidian-bridge`. When a provider cannot take an MCP server, the plugin
 attaches the equivalent `obsidian_bridge_*` tools instead. Planning tools resolve their root to
-`<planRoot>/<paseo-project>`; an empty `planRoot` uses the default `Workspaces`, and the calling workspace id goes into
+`<planRoot>/<paseo-project>`; an empty `planRoot` uses the default `Projects`, and the calling workspace id goes into
 each plan file's YAML.
 
 Every tool description states the rule the plugin is built around: use it only when the user explicitly asks about their

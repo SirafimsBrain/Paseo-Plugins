@@ -68,14 +68,24 @@ export const obsidianBridgeSettings = defineSettings({
     rawDir: z.string().trim().max(512).default("raw"),
     /**
      * Vault-relative directory the planning tools (`plan_*`) are confined to.
-     * Default `Workspaces`, the folder right below the configured directory.
+     * Default `Projects`, the folder right below the configured directory.
      * It is not a second vault: everything is resolved against `vaultPath`
      * first, so `..`, absolute paths and symlinks out of the vault are refused
      * by the same code that guards the document tools. Empty = planning is not
      * configured and `plan_scope` answers `planning_available: false`.
      */
-    // Empty means "use Workspaces"; the plugin creates it and the project folder.
-    planRoot: z.string().trim().max(512).default("Workspaces"),
+    // Empty means "use Projects"; the plugin creates it and the project folder.
+    planRoot: z.string().trim().max(512).default("Projects"),
+    /**
+     * Document extensions the read and edit tools accept, comma-separated.
+     * Default `.md`: the plugin is a Markdown bridge to Obsidian. A user who
+     * keeps plain-text or reStructuredText notes in the same directory can add
+     * `.txt`, `.rst`; anything not listed — including extensionless files such
+     * as `LICENSE`, `.env` or `.git/config` — is refused by the read and edit
+     * tools. Needs no schema bump: a stored document without the key validates
+     * to this default.
+     */
+    allowedExtensions: z.string().trim().max(512).default(".md"),
     /**
      * Indexing starts automatically once `vaultPath` resolves to a real
      * directory — the user typing the path in the settings screen is the
@@ -181,6 +191,8 @@ export interface RuntimeSettings {
   outDir: string;
   rawDir: string;
   planRoot: string;
+  /** Comma-separated extensions the read and edit tools accept (`.md` by default). */
+  allowedExtensions: string;
   indexingEnabled: boolean;
   includeFolders: string;
   excludeGlobs: string;
@@ -207,6 +219,7 @@ export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettin
     outDir: values.outDir,
     rawDir: values.rawDir,
     planRoot: values.planRoot,
+    allowedExtensions: values.allowedExtensions,
     indexingEnabled: values.indexingEnabled,
     includeFolders: values.includeFolders,
     excludeGlobs: values.excludeGlobs,

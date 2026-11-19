@@ -8,7 +8,10 @@ import { resolveVaultRoot } from "./paths";
  * include/exclude rules, and path-safe reads.
  *
  * Every read goes through `resolveInsideVault`, so a tool argument can never
- * escape the vault or reach Obsidian's configuration directory.
+ * escape the vault or reach Obsidian's configuration directory — not lexically
+ * and not through a symlink, because the target's `realpath` is compared with
+ * the root's. The read and edit tools additionally accept only the extensions
+ * in `allowedExtensions` (`.md` by default) and refuse dot entries.
  */
 
 /** Files larger than this are skipped: they are attachments, not notes. */
@@ -83,6 +86,66 @@ export function isIncluded(relPath: string, includeFolders: string): boolean {
 
 export function isMarkdownPath(relPath: string): boolean {
   return /\.md$/i.test(relPath);
+}
+
+/** Default document extensions: Markdown only, the format Obsidian is for. */
+export const DEFAULT_DOCUMENT_EXTENSIONS = ".md";
+
+/**
+ * Extensions the read and edit tools accept, from the comma-separated setting.
+ *
+ * `md`, `.md` and `MD` all normalize to `.md`; duplicates and empty entries are
+ * dropped. An empty setting falls back to `.md` rather than to "everything": a
+ * cleared field must never open the whole directory to the tools.
+ */
+export function parseExtensionList(value: string): string[] {
+  const source = typeof value === "string" ? value : "";
+  const entries = source
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0 && entry !== "*" && entry !== ".*")
+    .map((entry) => (entry.startsWith(".") ? entry : `.${entry}`))
+    .filter((entry) => /^\.[a-z0-9_+-]+$/.test(entry));
+  const unique = [...new Set(entries)];
+  return unique.length > 0 ? unique : [DEFAULT_DOCUMENT_EXTENSIONS];
+}
+
+/**
+ * True when a vault-relative path names a document the tools may read or edit.
+ *
+ * Two rules, both deliberate:
+ *
+ * - the file name must carry an extension from the allowlist (`.md` by default),
+ *   so `notes/readme.txt` is refused unless the user added `.txt`;
+ * - no path segment may start with `.`, so `.env`, `.git/config`,
+ *   `.obsidian/workspace.json` and extensionless files such as `LICENSE` are
+ *   never readable through a document tool, whatever the allowlist says. The
+ *   configured directory may be a project checkout, and its configuration and
+ *   secrets are not notes.
+ */
+export function isAllowedDocumentPath(relPath: string, allowedExtensions: string): boolean {
+  const normalized = relPath.replace(/\\/g, "/").replace(/^\.\//, "").trim();
+  if (normalized.length === 0) return false;
+  const segments = normalized.split("/").filter((segment) => segment.length > 0);
+  if (segments.length === 0) return false;
+  if (segments.some((segment) => segment.startsWith("."))) return false;
+  const base = segments[segments.length - 1];
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return false;
+  const extension = base.slice(dot).toLowerCase();
+  return parseExtensionList(allowedExtensions).includes(extension);
+}
+
+/** Agent-facing refusal for a path the extension allowlist does not cover. */
+export function extensionRefusal(relPath: string, allowedExtensions: string): string {
+  const allowed = parseExtensionList(allowedExtensions).join(", ");
+  return (
+    `'${relPath}' is not a document this plugin reads: only ${allowed} files inside the ` +
+    "configured directory are available. Dot files and configuration (`.env`, `.git/config`, " +
+    "`.obsidian/…`) and extensionless files are never readable, whatever the allowlist says. " +
+    "Ask the user to add an extension in Settings → Plugins → Obsidian Bridge if this file is " +
+    "really part of the knowledge base."
+  );
 }
 
 /**
@@ -211,7 +274,44 @@ export function checkVault(candidate: string, sampleLimit = 8): VaultCheck {
   return result;
 }
 
-/** Resolves a vault-relative path, refusing anything outside the vault. */
+/** True when `target` is `directory` itself or lies below it. */
+function insideDirectory(directory: string, target: string): boolean {
+  const prefix = directory.endsWith(path.sep) ? directory : `${directory}${path.sep}`;
+  return target === directory || target.startsWith(prefix);
+}
+
+/**
+ * Real path of `absolute`, or of its nearest existing ancestor.
+ *
+ * A path that is about to be created does not exist yet, but its parent does —
+ * resolving the parent catches a symlinked directory before anything is read
+ * or written through it. `null` when no ancestor resolves (an unreadable root).
+ */
+function nearestRealPath(absolute: string): string | null {
+  let current = absolute;
+  while (true) {
+    try {
+      return fs.realpathSync(current);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      current = parent;
+    }
+  }
+}
+
+/**
+ * Resolves a vault-relative path, refusing anything outside the vault.
+ *
+ * Containment is checked twice, because a lexical check alone is defeated by a
+ * symlink: `notes/link.md -> ~/.ssh/id_rsa` is lexically inside the vault and
+ * still reads a file outside it, and a role directory that is a symlink to
+ * `~/somewhere` makes every write of that role land outside. So after the
+ * lexical test, the resolved `realpath` of the target (or of its nearest
+ * existing ancestor, for a note that does not exist yet) must still be inside
+ * the resolved `realpath` of the root. When the root itself does not resolve,
+ * the lexical answer stands — nothing can be read or written there anyway.
+ */
 export function resolveInsideVault(root: string, relPath: string): string | null {
   const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "").trim();
   if (normalized.length === 0) return null;
@@ -221,6 +321,12 @@ export function resolveInsideVault(root: string, relPath: string): string | null
   if (!target.startsWith(prefix)) return null;
   const rel = path.relative(rootResolved, target).replace(/\\/g, "/");
   if (rel === ".obsidian" || rel.startsWith(".obsidian/")) return null;
+
+  const realRoot = nearestRealPath(rootResolved);
+  if (realRoot !== null) {
+    const realTarget = nearestRealPath(target);
+    if (realTarget === null || !insideDirectory(realRoot, realTarget)) return null;
+  }
   return target;
 }
 
@@ -238,10 +344,23 @@ export interface ReadNoteResult {
 export function readVaultNote(
   root: string,
   relPath: string,
-  options: { heading?: string; maxBytes?: number } = {},
+  options: { heading?: string; maxBytes?: number; allowedExtensions?: string } = {},
 ): ReadNoteResult | { error: string } {
+  // Boundary first, format second: a path above the directory is an escape, not
+  // a file of the wrong type, and the refusal has to say so.
   const absolute = resolveInsideVault(root, relPath);
-  if (!absolute) return { error: `Path '${relPath}' is outside the vault.` };
+  if (!absolute) {
+    return {
+      error:
+        `'${relPath}' is outside the vault — outside the configured directory, or leading ` +
+        "outside it through a symlink — so it cannot be read. The plugin reads only what is " +
+        "inside that one directory; nothing above it and nothing beside it is reachable.",
+    };
+  }
+  const allowed = options.allowedExtensions ?? DEFAULT_DOCUMENT_EXTENSIONS;
+  if (!isAllowedDocumentPath(relPath, allowed)) {
+    return { error: extensionRefusal(relPath, allowed) };
+  }
   let stat: fs.Stats;
   try {
     stat = fs.statSync(absolute);

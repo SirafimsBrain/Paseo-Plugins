@@ -1,7 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { findFragment, type FragmentSuggestion } from "./fragment-match";
-import { MAX_NOTE_BYTES, resolveInsideVault } from "./vault";
+import {
+  DEFAULT_DOCUMENT_EXTENSIONS,
+  MAX_NOTE_BYTES,
+  extensionRefusal,
+  isAllowedDocumentPath,
+  resolveInsideVault,
+} from "./vault";
 
 /**
  * Exact-fragment edit of an existing note, addressed by its vault path.
@@ -13,6 +19,11 @@ import { MAX_NOTE_BYTES, resolveInsideVault } from "./vault";
  * - the path is resolved by `resolveInsideVault`, so `..`, absolute paths and
  *   the vault's own `.obsidian` directory are refused, and a symlink that leads
  *   outside the directory is refused too (`realpath` both sides);
+ * - the file must carry an allowed extension (`.md` by default) and must not be
+ *   a dot entry, so a project checkout's `.env` or `.git/config` is not a note;
+ * - the refusal is explicit about the boundary: this tool writes **anywhere
+ *   below** the configured directory and **nowhere above it**, and it says so in
+ *   words an agent cannot mistake for a retry hint;
  * - the note must already exist: this tool never creates anything;
  * - the fragment must occur **exactly once**; zero or several occurrences are an
  *   error rather than a guess, so a rewrite can never hit an unintended place;
@@ -88,16 +99,31 @@ export function replaceInNote(input: {
   oldText: string;
   newText: string;
   maxWriteChars: number;
+  /** Extensions the tool accepts (`.md` by default). */
+  allowedExtensions?: string;
   /** Compare after collapsing whitespace runs (0.10.11). Default off. */
   ignoreWhitespace?: boolean;
 }): EditOutcome | EditFailure {
   const relPath = input.relPath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
   if (relPath.length === 0) return { error: "path is required." };
+  const allowed = input.allowedExtensions ?? DEFAULT_DOCUMENT_EXTENSIONS;
+  // Boundary first, format second: a path above the directory is an escape, not
+  // a file of the wrong type, and the refusal has to say so.
   const absolute = resolveInsideVault(input.root, relPath);
   if (!absolute) {
     return {
-      error: `'${input.relPath}' is outside the configured directory (or inside .obsidian), so it cannot be edited.`,
+      error:
+        `Refused: '${input.relPath}' is not inside the configured Obsidian directory. This plugin ` +
+        "writes only inside that one directory, at any depth below it. Everything above it — a " +
+        "sibling folder, the home directory, /etc, another project — is out of bounds and is not " +
+        "something you need to write: do not retry with '..', an absolute path, a symlink or a " +
+        "file tool (`shell`, `write`, `patch`), and do not look for another copy of the note. If " +
+        "the user means a note outside the configured directory, say so and ask whether they " +
+        "want it moved or added there.",
     };
+  }
+  if (!isAllowedDocumentPath(relPath, allowed)) {
+    return { error: extensionRefusal(relPath, allowed) };
   }
 
   let stat: fs.Stats;
@@ -138,7 +164,14 @@ export function replaceInNote(input: {
     const realRoot = fs.realpathSync(input.root);
     const realTarget = fs.realpathSync(absolute);
     if (!insideRoot(realRoot, realTarget)) {
-      return { error: `'${relPath}' resolves outside the configured directory through a symlink.` };
+      return {
+        error:
+          `Refused: '${relPath}' is a symlink that resolves outside the configured Obsidian ` +
+          "directory, so writing it would write outside the plugin's boundary. That boundary is " +
+          "the whole of what this plugin may touch: do not try the resolved path, a parent path " +
+          "or a shell/editor instead. Ask the user to move the target inside the configured " +
+          "directory if it belongs to the knowledge base.",
+      };
     }
   } catch (cause) {
     return { error: cause instanceof Error ? cause.message : String(cause) };

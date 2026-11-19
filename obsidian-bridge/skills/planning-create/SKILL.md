@@ -5,8 +5,8 @@ description: Grow a project plan as a tree of Markdown documents with the `plan_
 
 # Planning: creating a plan
 
-A plan is a **directory of Markdown documents** inside the configured planning root (`planRoot`, usually
-`Workspaces`). Every document carries frontmatter with an `id`, a `kind`, counters (`version`, `revision`),
+A plan is a **directory of Markdown documents** inside the configured planning root (`planRoot`, by default
+`Projects`). Every document carries frontmatter with an `id`, a `kind`, counters (`version`, `revision`),
 `parent`/`children` links and its relations. The tools write that shape; you never write it by hand.
 
 ## Where you are
@@ -16,7 +16,7 @@ A plan is a **directory of Markdown documents** inside the configured planning r
    `writesEnabled` and the limits. The plugin creates the planning directory and the project folder on demand, so an
    empty tree is a normal starting point; if planning is still unavailable, stop and tell the user.
 2. Paths are **relative to the project folder** (`<planRoot>/<project>`): `centurion/backend/auth` — never
-   `Workspaces/centurion/...`, never another project's name, never an absolute path. `..`, a leading `/` and
+   `Projects/centurion/...`, never another project's name, never an absolute path. `..`, a leading `/` and
    `.obsidian` are refused by code, not by this skill. Other workspaces of the same project use this same tree freely;
    another project's plans are out of reach for `plan_*`, while `obsidian_*` may read them only on an explicit task.
 3. Look before you grow: `plan_search` finds a node by name or text, `plan_read` returns a node with its children,

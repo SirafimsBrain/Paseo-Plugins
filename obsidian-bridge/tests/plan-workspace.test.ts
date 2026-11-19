@@ -43,10 +43,10 @@ describe("Paseo project planning root", () => {
     expect(scope.planning_available).toBe(true);
     expect(scope.reason).toBeNull();
     expect(scope.empty).toBe(true);
-    expect(scope.root).toBe("Workspaces/my-project");
+    expect(scope.root).toBe("Projects/my-project");
     expect(scope.project).toEqual({ name: "my-project" });
     expect(scope.workspaceId).toBe("wks_own");
-    expect(fs.statSync(path.join(created.vault, "Workspaces/my-project")).isDirectory()).toBe(true);
+    expect(fs.statSync(path.join(created.vault, "Projects/my-project")).isDirectory()).toBe(true);
   });
 
   it("respects a custom planning directory and the project-name override", () => {
@@ -95,6 +95,29 @@ describe("Paseo project planning root", () => {
     );
     expect(foreign.isError).toBeUndefined();
     expect((foreign.structuredContent as { content: string }).content).toContain("another project");
+  });
+
+  it("takes the project folder from the Git root, so sub-directories share it", () => {
+    const created = vaultWith();
+    const repo = path.join(path.dirname(created.vault), "repo");
+    fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "backend", "src"), { recursive: true });
+    paseoAgent("wks_deep", path.join(repo, "backend", "src"));
+
+    expect(planRootRelPath(runtimeSettings(created.vault))).toBe("Workspaces/repo");
+  });
+
+  it("refuses instead of inventing a project folder when the project is unknown", () => {
+    process.env.PASEO_WORKSPACE_ID = "wks_orphan";
+    for (const key of ["PASEO_AGENT_CWD", "OBSIDIAN_PROJECT_NAME"] as const) delete process.env[key];
+    const created = vaultWith();
+    const scope = planScope(runtimeSettings(created.vault));
+
+    expect(scope.planning_available).toBe(false);
+    expect(scope.reason).toBe("invalid");
+    expect(scope.error).toContain("project");
+    // Nothing is created, and no per-workspace folder appears.
+    expect(fs.existsSync(path.join(created.vault, "Workspaces"))).toBe(false);
   });
 
   it("uses the bare planning root without Paseo context", () => {

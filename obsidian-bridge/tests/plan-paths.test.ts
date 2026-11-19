@@ -54,9 +54,12 @@ describe("resolvePlanRoot", () => {
 
   it("creates a missing planning directory", () => {
     const created = workspace({ "A.md": "# A\n" });
-    const resolved = resolvePlanRoot(runtimeSettings(created.vault));
+    const resolved = resolvePlanRoot(runtimeSettings(created.vault, { planRoot: "  " }));
     expect("root" in resolved).toBe(true);
-    expect(fs.existsSync(path.join(created.vault, DEFAULT_PLAN_ROOT))).toBe(true);
+    if ("root" in resolved) {
+      expect(resolved.root.relPath).toBe(DEFAULT_PLAN_ROOT);
+      expect(fs.existsSync(path.join(created.vault, resolved.root.relPath))).toBe(true);
+    }
   });
 
   it("resolves the default directory inside the vault", () => {
@@ -129,7 +132,9 @@ describe("resolvePlanPath", () => {
     const root = planRootOf(runtimeSettings(created.vault));
     const resolved = resolvePlanPath(root, "link/secret.md");
     expect("error" in resolved).toBe(true);
-    if ("error" in resolved) expect(resolved.error).toContain("outside the planning directory");
+    // Either boundary catches it — the planning root's own check or the vault's
+    // realpath check — and both are refusals of the same escape.
+    if ("error" in resolved) expect(resolved.error).toMatch(/outside the (planning directory|configured vault)/);
   });
 
   it("refuses a symlinked planning directory that leads out of the vault", () => {

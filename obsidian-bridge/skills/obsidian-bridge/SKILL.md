@@ -64,8 +64,9 @@ Call `obsidian_directories` first if you do not know the role map. Roles decide 
   `obsidian_append_inbox` (`inbox`). Each call appends a `## <date> — <title>` section, creating the note
   with `title`/`kind`/`created`/`source` frontmatter when it does not exist. An identical body is reported
   as a duplicate instead of being written twice.
-- **Change an existing note anywhere** — `obsidian_edit` with `path`, `old_text`, `new_text`. This is the
-  only tool that writes outside the three roles. `old_text` must occur **exactly once**: include enough
+- **Change an existing note anywhere below the configured directory** — `obsidian_edit` with `path`, `old_text`,
+  `new_text`. This is the only tool that writes outside the three roles, and it still stops at the configured
+  directory: a path above it is refused with a final message, not a hint to try another route. `old_text` must occur **exactly once**: include enough
   surrounding text to make it unique, otherwise the tool refuses and tells you how many matches there are.
   A refusal is actionable: it lists `suggestions` — the closest text with line numbers (or the places an
   ambiguous fragment occurs) — so copy the exact wording from there instead of retyping from memory.
@@ -144,6 +145,9 @@ $e^{i\pi}+1=0$            inline math;  $$ … $$ for a block
 
 - Paths are resolved inside the configured directory. `..`, absolute paths, `.obsidian/` and symlinks
   leading outside are refused — do not try to work around a refusal; report it.
+- Only the configured document extensions are readable (`.md` by default, listed by `obsidian_directories`).
+  Dot files (`.env`, `.git/config`) and extensionless files never are, so a project checkout is not a
+  source of secrets or configuration for you.
 - A refused write (read-only, wrong role, ambiguous fragment, missing note) is information: relay the
   message and ask how to proceed.
 - Write in the language of the user's request unless they ask otherwise.
