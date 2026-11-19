@@ -2,6 +2,31 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.21.14 — fixes from the live plan test (2026-11-19)
+
+Patch release (0.21.13 → 0.21.14). A 57-document plan was written through `plan_*` on a real vault and its failures were
+reproduced in tests. No Paseo API change: SDK `@getpaseo/plugin ^0.16.0`, host floor `>=0.15.0`, settings schema version
+4, MCP catalogue and every tool input are unchanged.
+
+| Finding | Behaviour after the fix |
+| --- | --- |
+| `plan_approve_goal` put leaves directly under a trunk | approval writes root → trunk → branch (`steps`) → leaves; `materialized` points at the trunk, and `plan_validate` no longer reports `invalid_parent_kind` after a normal approval |
+| `plan_archive_node` moved the parent folder after a kind change | the archive path comes from the node's own slug (`<project>/_archive/<slug>/<slug>.md`); a node whose kind and folder disagree is refused before the rename, so siblings and their `__history` stay in the live tree; a leaf gets its own archive folder |
+| a kind change left the file and tags at the old layout | a leaf ↔ branching change moves the file, its snapshots (rewriting `snapshot_of`) and every link to it (`parent`, `children`, `influences`, `blocked_by`, `blocks`, `materialized`, `goal`); `tags` follow `plan/<kind>`; `plan_validate` gains `layout_mismatch` and `kind_tag_mismatch` |
+| `obsidian_read` lost nested frontmatter | YAML is parsed as a mapping (nested `brief`, `plan`, `influences` preserved); a rejected document falls back to the flat reader. `plan_read` returns `formal_text`, `plan`, `brief`, `payload`, `tags`, and a goal's `description` falls back to `formal_text` |
+| `obsidian_outline` returned `links: []` for a fresh plan note | outgoing links fall back to the note's own parsed body while the index has not flushed it; a `404` from Obsidian's metadata cache for a just-created note is still reported as `enrichmentError`, but it no longer erases the links |
+| `obsidian_index` failed with `UNIQUE constraint failed: embeddings.chunk_id` | carried vectors are deduplicated per model and upserted, so repeated chunk text in one note cannot insert two rows for one new chunk id |
+| `plan_search` returned nodes with no lexical match | a hit that contains none of the query words is dropped and counted as `unmatched` |
+| docs vs implementation | a snapshot is refused only when its `kind` differs from the live node's; `planning_available` means the directory resolves, an empty tree is `empty: true, reason: null` |
+
+An archive still leaves incoming links dangling by design; `plan_validate` reports them as `unresolved_link`.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **46 suites / 386 tests** pass, including new cases for nested
+frontmatter, the approval layout, kind-change migration, the archive layout refusal, both new validation rules, goal
+fields in `plan_read` and the duplicate-chunk reindex. Not deployed and not exercised against a live Paseo daemon or
+Obsidian application in this pass; symlink and layout behaviour was verified on Linux. macOS and Windows remain future
+work.
+
 ## Plugin 0.21.13 — planning folder check and create in the settings screen (2026-11-19)
 
 Feature release (0.20.13 → 0.21.13). No Paseo API change: SDK `@getpaseo/plugin ^0.16.0`, host floor `>=0.15.0`, settings

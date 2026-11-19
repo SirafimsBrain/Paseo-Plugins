@@ -57,7 +57,8 @@ current state first — so a restore is itself reviewable and reversible.
 
 Use it when the current text is wrong and an earlier text was right. Do **not** use it to "undo" a status change or a
 move: those are lifecycle and structure, and reversing them has its own tools (`plan_set_status`, `plan_move_node`).
-A snapshot from before a kind change is refused; a kind change is a version event, not an edit.
+A snapshot is refused only when its `kind` differs from the live node's: a kind change is a version event, not an edit.
+Once the node is back to that kind, the snapshot restores normally.
 
 ## Reporting a review
 

@@ -40,7 +40,8 @@ async function call(
 
 const GOAL = "centurion/_goals/durable-sessions";
 const GOAL_FILE = "Workspaces/centurion/_goals/durable-sessions.md";
-const BRANCH_FILE = "Workspaces/centurion/durable-sessions/durable-sessions.md";
+const TRUNK_FILE = "Workspaces/centurion/durable-sessions/durable-sessions.md";
+const BRANCH_FILE = "Workspaces/centurion/durable-sessions/steps/steps.md";
 
 /** A fresh goal: the tools write it, so no hand edit needs `accept_external`. */
 async function proposedGoal(created: TestWorkspace, actor: string) {
@@ -60,7 +61,7 @@ async function proposedGoal(created: TestWorkspace, actor: string) {
 }
 
 describe("plan_approve_goal", () => {
-  it("materialises the steps into a trunk and its leaves", async () => {
+  it("materialises the steps into a trunk, a branch and its leaves", async () => {
     const created = workspace();
     await proposedGoal(created, "claude");
 
@@ -73,6 +74,7 @@ describe("plan_approve_goal", () => {
       action: string;
       status: string;
       materialized: string;
+      trunk: { path: string; kind: string };
       branch: { path: string; kind: string };
       leaves: Array<{ path: string; name: string }>;
       revision: number;
@@ -81,34 +83,46 @@ describe("plan_approve_goal", () => {
       action: "approved",
       status: "approved",
       materialized: "centurion/durable-sessions/durable-sessions.md",
-      branch: { path: "centurion/durable-sessions/durable-sessions.md", kind: "trunk" },
+      trunk: { path: "centurion/durable-sessions/durable-sessions.md", kind: "trunk" },
+      branch: { path: "centurion/durable-sessions/steps/steps.md", kind: "branch" },
     });
     expect(result.leaves.map((leaf) => leaf.path)).toEqual([
-      "centurion/durable-sessions/move-the-session-table.md",
-      "centurion/durable-sessions/rotate-refresh-tokens.md",
+      "centurion/durable-sessions/steps/move-the-session-table.md",
+      "centurion/durable-sessions/steps/rotate-refresh-tokens.md",
     ]);
 
-    const branch = documentOf(created, BRANCH_FILE);
-    expect(branch.frontmatter).toMatchObject({
+    const trunk = documentOf(created, TRUNK_FILE);
+    expect(trunk.frontmatter).toMatchObject({
       kind: "trunk",
       version: 1,
       revision: 1,
       parent: "[[Workspaces/centurion/centurion|centurion]]",
     });
+    expect(trunk.frontmatter.children).toEqual([
+      "[[Workspaces/centurion/durable-sessions/steps/steps|steps]]",
+    ]);
+
+    const branch = documentOf(created, BRANCH_FILE);
+    expect(branch.frontmatter).toMatchObject({
+      kind: "branch",
+      version: 1,
+      revision: 1,
+      parent: "[[Workspaces/centurion/durable-sessions/durable-sessions|durable-sessions]]",
+    });
     expect(branch.frontmatter.children).toEqual([
-      "[[Workspaces/centurion/durable-sessions/move-the-session-table|move-the-session-table]]",
-      "[[Workspaces/centurion/durable-sessions/rotate-refresh-tokens|rotate-refresh-tokens]]",
+      "[[Workspaces/centurion/durable-sessions/steps/move-the-session-table|move-the-session-table]]",
+      "[[Workspaces/centurion/durable-sessions/steps/rotate-refresh-tokens|rotate-refresh-tokens]]",
     ]);
 
     const leaf = documentOf(
       created,
-      "Workspaces/centurion/durable-sessions/move-the-session-table.md",
+      "Workspaces/centurion/durable-sessions/steps/move-the-session-table.md",
     );
     expect(leaf.frontmatter).toMatchObject({
       kind: "leaf",
       status: "draft",
       goal: "[[Workspaces/centurion/_goals/durable-sessions|durable-sessions]]",
-      parent: "[[Workspaces/centurion/durable-sessions/durable-sessions|durable-sessions]]",
+      parent: "[[Workspaces/centurion/durable-sessions/steps/steps|steps]]",
     });
 
     const goal = documentOf(created, GOAL_FILE);
@@ -123,8 +137,21 @@ describe("plan_approve_goal", () => {
       "[[Workspaces/centurion/durable-sessions/durable-sessions|durable-sessions]]",
     );
 
+    // The approval must leave a plan the schema accepts: root → trunk → branch
+    // → leaf, never a leaf directly under a trunk (P1 of the live test report).
+    const validate = await call(created, "plan_validate", { project: "centurion" });
+    expectOk(validate);
+    // The fixture carries its own hand-written bodies and one influence loop,
+    // so the assertion is about the approval's structure, not the whole plan.
+    const report = validate.structuredContent as { issues: Array<{ kind: string }> };
+    expect(
+      report.issues.filter((issue) =>
+        ["invalid_parent_kind", "layout_mismatch", "kind_tag_mismatch"].includes(issue.kind),
+      ),
+    ).toEqual([]);
+
     const read = await call(created, "plan_read", {
-      path: "centurion/durable-sessions/move-the-session-table",
+      path: "centurion/durable-sessions/steps/move-the-session-table",
     });
     expectOk(read);
     expect((read.structuredContent as { goal?: { path: string } }).goal?.path).toBe(

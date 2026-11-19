@@ -242,7 +242,7 @@ describe("plan_update_node", () => {
     expect(snapshot.frontmatter).not.toHaveProperty("parent");
   });
 
-  it("raises the version and resets the revision when the kind changes", async () => {
+  it("raises the version, resets the revision, retags and moves the file on a kind change", async () => {
     const created = workspace();
     const outcome = await call(created, "plan_update_node", {
       path: "centurion/backend/auth/token-refresh",
@@ -250,17 +250,68 @@ describe("plan_update_node", () => {
       accept_external: true,
     });
     expect(outcome.isError).toBeUndefined();
-    expect(outcome.structuredContent).toMatchObject({ version: 2, revision: 1 });
+    expect(outcome.structuredContent).toMatchObject({
+      version: 2,
+      revision: 1,
+      files_changed: 2,
+    });
 
-    const node = documentOf(created, "Workspaces/centurion/backend/auth/token-refresh.md");
+    const node = documentOf(
+      created,
+      "Workspaces/centurion/backend/auth/token-refresh/token-refresh.md",
+    );
     expect(node.frontmatter.kind).toBe("subbranch");
     expect(node.frontmatter.version).toBe(2);
     expect(node.frontmatter.revision).toBe(1);
+    // The tag follows the kind instead of staying `plan/leaf` forever (P3).
+    expect(node.frontmatter.tags).toEqual(["plan/subbranch"]);
+    // The leaf layout is gone, the snapshots moved with the file (P2/P3).
+    expect(
+      fs.existsSync(path.join(created.vault, "Workspaces/centurion/backend/auth/token-refresh.md")),
+    ).toBe(false);
     expect(
       fs.existsSync(
-        path.join(created.vault, "Workspaces/centurion/backend/auth/__history/token-refresh.v1.r1.md"),
+        path.join(
+          created.vault,
+          "Workspaces/centurion/backend/auth/token-refresh/__history/token-refresh.v1.r1.md",
+        ),
       ),
     ).toBe(true);
+    // The parent's `children` entry follows the new address.
+    const auth = documentOf(created, "Workspaces/centurion/backend/auth/auth.md");
+    expect(auth.frontmatter.children).toContain(
+      "[[Workspaces/centurion/backend/auth/token-refresh/token-refresh|token-refresh]]",
+    );
+  });
+
+  it("refuses a kind change that would orphan children", async () => {
+    const created = workspace();
+    expect(
+      (
+        await call(created, "plan_create_node", {
+          path: "centurion/backend/auth/flows",
+          kind: "subbranch",
+          name: "Flows",
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(
+      (
+        await call(created, "plan_create_node", {
+          path: "centurion/backend/auth/flows/refresh",
+          kind: "leaf",
+          name: "Refresh",
+        })
+      ).isError,
+    ).toBeUndefined();
+
+    const outcome = await call(created, "plan_update_node", {
+      path: "centurion/backend/auth/flows",
+      kind: "leaf",
+      accept_external: true,
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("cannot become a leaf");
   });
 
   it("refuses a stale expected_revision and writes nothing", async () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { parseNote } from "../server/parse";
-import { BridgeStore, toFtsQuery } from "../server/store";
+import { BridgeStore, chunkTextHash, toFtsQuery } from "../server/store";
 
 const workspaces: Array<{ cleanup(): void }> = [];
 
@@ -115,6 +115,30 @@ describe("BridgeStore", () => {
     expect(store.counts().notes).toBe(1);
     expect(store.counts().unresolvedLinks).toBe(1);
     expect(store.searchChunks("B", 5).every((hit) => hit.path !== "B.md")).toBe(true);
+  });
+
+  it("re-indexes a note whose chunks share text without a UNIQUE failure", () => {
+    const { store } = makeStore();
+    const text = "# A\n\nSame paragraph.\n\n## B\n\nSame paragraph.\n";
+    add(store, "Duplicate.md", text);
+    const chunks = store.chunksToEmbed("model", 10);
+    expect(chunks).toHaveLength(2);
+    for (const chunk of chunks) {
+      // Same text in both chunks, so both vectors carry the same text hash.
+      store.putEmbedding({
+        chunkId: chunk.id,
+        path: chunk.path,
+        modelId: "model",
+        dim: 2,
+        textHash: chunkTextHash(chunk.text),
+        vec: new Float32Array([1, 0]),
+      });
+    }
+
+    // A rewrite recreates the chunks; carrying the vectors must not insert two
+    // rows for one new chunk id (the `obsidian_index` rebuild failure).
+    expect(() => add(store, "Duplicate.md", `${text}\n`)).not.toThrow();
+    expect(store.embeddingStats("model")).toMatchObject({ chunks: 2, embedded: 2 });
   });
 
   it("finds one-hop neighbours through the link graph", () => {

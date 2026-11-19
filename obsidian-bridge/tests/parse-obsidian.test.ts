@@ -31,6 +31,42 @@ describe("callouts", () => {
   });
 });
 
+describe("nested frontmatter", () => {
+  it("keeps mappings and lists of mappings instead of flattening them", () => {
+    const parsed = parseNote(
+      [
+        "---",
+        "kind: goal",
+        "brief:",
+        "  entryPoint: src/index.ts:10",
+        "  files: [src/index.ts, tests/index.test.ts]",
+        "plan:",
+        "  - id: s1",
+        "    title: Move the session table",
+        "  - id: s2",
+        "    title: Rotate refresh tokens",
+        "---",
+        "",
+        "# Goal",
+      ].join("\n"),
+      "goal.md",
+    );
+    expect(parsed.frontmatter.brief).toEqual({
+      entryPoint: "src/index.ts:10",
+      files: ["src/index.ts", "tests/index.test.ts"],
+    });
+    expect(parsed.frontmatter.plan).toEqual([
+      { id: "s1", title: "Move the session table" },
+      { id: "s2", title: "Rotate refresh tokens" },
+    ]);
+  });
+
+  it("falls back to the flat reader when the YAML is rejected", () => {
+    const parsed = parseNote("---\ntitle: Two\ntitle: Again\n---\n\n# Body\n", "a.md");
+    expect(parsed.frontmatter.title).toBe("Again");
+  });
+});
+
 describe("Dataview inline fields", () => {
   it("collects `key:: value` pairs by key", () => {
     const fields = extractInlineFields(

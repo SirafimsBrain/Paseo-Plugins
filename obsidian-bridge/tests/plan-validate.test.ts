@@ -117,6 +117,18 @@ describe("plan_validate", () => {
     expect(kinds(result)).toContain("body_divergence");
   });
 
+  it("reports a kind whose path or tag disagrees with it", async () => {
+    const text = planFiles()["Workspaces/centurion/backend/auth/token-refresh.md"]
+      .replace("kind: leaf", "kind: subbranch")
+      .replace("updated_by: user\n---", "updated_by: user\ntags: [plan/leaf]\n---");
+    const created = workspace({
+      "Workspaces/centurion/backend/auth/token-refresh.md": text,
+    });
+    const result = await report(created, { project: "centurion" });
+    expect(kinds(result)).toContain("layout_mismatch");
+    expect(kinds(result)).toContain("kind_tag_mismatch");
+  });
+
   it("finds an operation that started and never finished", async () => {
     const created = workspace({
       "Workspaces/centurion/_journal.md": [

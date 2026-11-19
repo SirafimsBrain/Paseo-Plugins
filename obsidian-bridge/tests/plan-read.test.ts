@@ -180,6 +180,25 @@ describe("plan_read node context", () => {
     expect(result.goal).toBeNull();
   });
 
+  it("keeps a goal's formal text and step plan readable", async () => {
+    const created = planWorkspace();
+    const outcome = await read(created.vault, { path: "centurion/_goals/session-persistence" });
+    const result = outcome.structuredContent as {
+      node: { description: string | null };
+      formal_text: string | null;
+      plan: Array<{ id: string; title: string }>;
+      tags: string[];
+    };
+    expect(result.node.description).toContain("survive a daemon restart");
+    expect(result.formal_text).toContain("survive a daemon restart");
+    expect(result.plan).toHaveLength(2);
+    expect(result.plan[0]).toMatchObject({
+      id: "s1",
+      title: "Move the session table into SQLite",
+    });
+    expect(result.tags).toContain("plan/goal");
+  });
+
   it("reports a resolved influence that is not yet in the tree as unresolved", async () => {
     const created = planWorkspace();
     const outcome = await read(created.vault, { path: "centurion/backend/auth/token-refresh" });

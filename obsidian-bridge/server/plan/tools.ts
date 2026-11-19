@@ -168,7 +168,9 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
       `${PLAN_CONTRACT_SENTENCE} Changes the content of one node: description, name, brief, ` +
       "payload, `## Заметки`, or its kind. A snapshot of the previous state is written to " +
       "`__history` first; a content change raises `revision` by one, a kind change raises " +
-      "`version` and resets `revision` to 1. A stale `expected_revision` or a manual edit on " +
+      "`version` and resets `revision` to 1. A leaf ↔ branching change also moves the file " +
+      "(and its snapshots) to the layout of the new kind and rewrites the links to it. A stale " +
+      "`expected_revision` or a manual edit on " +
       "disk refuses the write instead of overwriting it.",
     inputSchema: {
       type: "object",
@@ -399,7 +401,9 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
     description:
       `${PLAN_CONTRACT_SENTENCE} Moves a node and its subtree into '<project>/_archive/', marks ` +
       "it `archived` and removes it from its parent's `children`, so it leaves the indexed tree " +
-      "while its files and snapshots stay on disk. Nothing is deleted. The journal carries " +
+      "while its files and snapshots stay on disk. The archived path comes from the node's " +
+      "own slug, and a node whose kind and folder disagree is refused (its folder may hold " +
+      "siblings). Nothing is deleted. The journal carries " +
       "`op:start`/`op:done`; the same `op_id` resumes an interrupted archive.",
     inputSchema: {
       type: "object",
@@ -420,9 +424,10 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
     name: "plan_approve_goal",
     title: "Approve a goal and materialise its steps",
     description:
-      `${PLAN_CONTRACT_SENTENCE} Turns a \`proposed\` goal into a branch: one trunk named after the ` +
-      "goal file, one leaf per `plan:` step linked back through `goal:`, the goal moved to " +
-      "`approved` with `materialized` pointing at the branch. An agent cannot approve a goal it " +
+      `${PLAN_CONTRACT_SENTENCE} Turns a \`proposed\` goal into the layout the schema allows: ` +
+      "one trunk named after the goal file, one branch (`steps`) under it, and one leaf per " +
+      "`plan:` step linked back through `goal:`; the goal moves to `approved` with " +
+      "`materialized` pointing at the trunk. An agent cannot approve a goal it " +
       "created itself — that approval belongs to the user.",
     inputSchema: {
       type: "object",

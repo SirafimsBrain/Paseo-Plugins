@@ -225,6 +225,44 @@ export function planValidate(
       });
     }
 
+    // The layout is part of the contract: a branching node lives in its own
+    // folder, a leaf is one file in its parent's folder. A file that disagrees
+    // with its kind is what makes an archive rename the wrong folder.
+    if (isNodeKind(kind)) {
+      const slug = path.posix.basename(node.vaultPath, ".md");
+      const folderName = path.posix.basename(path.posix.dirname(node.vaultPath));
+      const inOwnFolder = kind !== "leaf" ? folderName === slug : folderName !== slug;
+      if (!inOwnFolder) {
+        push({
+          kind: "layout_mismatch",
+          path: node.vaultPath,
+          project,
+          message:
+            `'${node.relPath}' is a ${kind} but its file does not follow the layout ` +
+            `(${kind === "leaf"
+              ? "`<parent>/<name>.md` for a leaf"
+              : "`<parent>/<name>/<name>.md` for a branching node"}). ` +
+            "Recreate it at the expected path; an archive refuses a node whose kind and path disagree.",
+          data: { kind, expected_folder: slug },
+        });
+      }
+      const kindTags = ["root", "trunk", "branch", "subbranch", "leaf"].map((k) => `plan/${k}`);
+      const tags = Array.isArray(frontmatter.tags)
+        ? frontmatter.tags.filter((tag): tag is string => typeof tag === "string")
+        : [];
+      if (tags.some((tag) => kindTags.includes(tag)) && !tags.includes(`plan/${kind}`)) {
+        push({
+          kind: "kind_tag_mismatch",
+          path: node.vaultPath,
+          project,
+          message:
+            `'${node.relPath}' is a ${kind} but its \`tags\` do not include \`plan/${kind}\` ` +
+            `(found ${tags.filter((tag) => kindTags.includes(tag)).join(", ") || "none"}).`,
+          data: { kind, tags },
+        });
+      }
+    }
+
     // Unresolved links: every address the file claims must exist.
     for (const link of linkFields(node)) {
       if (resolveLink(tree, link.value) !== null) continue;
@@ -441,6 +479,8 @@ export function planValidate(
         "missing_id",
         "duplicate_id",
         "leaf_with_children",
+        "layout_mismatch",
+        "kind_tag_mismatch",
         "bee_cycle",
         "unfinished_operation",
       ],

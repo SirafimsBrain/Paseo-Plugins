@@ -482,7 +482,32 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14)
+
+### 0.21.14 — fixes from the live plan test
+
+Patch release (0.21.13 → 0.21.14). A full plan (57 documents) was written through `plan_*` on a real vault; the findings
+below are the ones that changed data, lost readability or returned noise. No tool, input, setting, SDK or host
+requirement changes.
+
+| Finding | Fix |
+| --- | --- |
+| approval placed leaves directly under a trunk | `plan_approve_goal` now writes root → trunk → branch (`steps`) → leaves; `materialized` points at the trunk, and the approval finishes with a structurally valid subtree |
+| archiving a node whose kind and folder disagreed moved the parent folder | the archived subtree is derived from the node's own folder and slug (`_archive/<slug>/<slug>.md`); a disagreement between kind and path is refused before the rename, so siblings and their `__history` stay put; a leaf gets its own archive folder instead of colliding with its parent folder's name |
+| a kind change left the file and the tags at the old layout | a change between a leaf and a branching node moves the file, its snapshots (rewriting `snapshot_of`) and every link that addresses it (`parent`, `children`, `influences`, `blocked_by`, `blocks`, `materialized`, `goal`); `tags` always follow `plan/<kind>`; `plan_validate` reports `layout_mismatch` and `kind_tag_mismatch` |
+| `obsidian_read` lost nested frontmatter | frontmatter is parsed as YAML (nested mappings and lists of mappings survive); a document the parser rejects falls back to the flat reader. `plan_read` returns `formal_text`, `plan`, `brief`, `payload` and `tags`, and a goal's summary uses `formal_text` as its description |
+| `obsidian_outline` showed `links: []` for a fresh plan note | outgoing links fall back to the note's own parsed body while the index has not flushed the file; a 404 from Obsidian's metadata cache for a just-created note is still reported as `enrichmentError`, but it no longer erases the links |
+| `obsidian_index` failed with `UNIQUE constraint failed: embeddings.chunk_id` | carried vectors are deduplicated per model and inserted with an upsert, so repeated chunk text in one note cannot insert two rows for one new chunk id |
+| `plan_search` returned graph/recency neighbours with no lexical match | a hit that contains none of the query words is dropped and counted as `unmatched`; filters (`kind`, `status`, `project`) are unchanged |
+| documentation disagreed with behaviour | a snapshot is refused only when its `kind` differs from the live node's (a snapshot taken before a kind change restores once the kinds match again); `planning_available` means the directory resolves, so an empty tree is `empty: true, reason: null` |
+
+An archive still leaves incoming links dangling by design (they resolve to nothing and `plan_validate` reports
+`unresolved_link`); that is a fact about the live tree, not a write to invent.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **46 suites / 386 tests** pass, including new cases for nested
+frontmatter, the approval layout, kind-change migration, the archive layout refusal, the two new validation rules,
+goal fields in `plan_read`, and the duplicate-chunk reindex. Not exercised against a live Paseo daemon or Obsidian app in
+this pass; macOS and Windows remain future work.
 
 ### 0.21.13 — check or create the planning folder from the settings screen
 
@@ -685,7 +710,7 @@ one reads history, and the document tools now use the same write gate.
 | Tool / module | Behaviour |
 | --- | --- |
 | `plan_create_node` | one node file (`auth/auth.md`, a leaf in its parent's folder), `version: 1`/`revision: 1`, parent's `children` updated (its own revision bump and snapshot), journal line; refuses an existing file, an orphan and a child kind the parent forbids |
-| `plan_update_node` | description, name, brief, payload, `## Заметки`, kind; snapshot first; revision +1, or version +1 and revision 1 on a kind change; `expected_revision` and `accept_external` gates |
+| `plan_update_node` | description, name, brief, payload, `## Заметки`, kind; snapshot first; revision +1, or version +1 and revision 1 on a kind change; a leaf↔branching change also moves the file and its snapshots and rewrites the links to it; `expected_revision` and `accept_external` gates |
 | `plan_set_status` | one transition per call for nodes, incidents and goals; illegal and no-op moves refuse and list the allowed targets; a user-set status needs `reason`; snapshot `status_change` |
 | `plan_history` | lists snapshots (version, revision, reason, time, actor) or reads one by `version`/`revision`; the only reader of `__history` |
 | `server/write-gate.ts` | the `readOnly`/`maxWriteChars` refusal extracted from `mcp-tools.ts` and shared with the planning writes; `readOnly` is checked before the file is even read |
@@ -1293,7 +1318,7 @@ The first call of every planning workflow answers a question that has no safe gu
 
 | Field | Meaning |
 | --- | --- |
-| `planning_available` | `true` only when the directory exists and holds at least one plan document |
+| `planning_available` | `true` when the planning directory resolves and is usable; an existing empty tree is `empty: true`, `reason: null`, `documents: 0` |
 | `reason` | `not_configured` (no `vaultPath` or empty `planRoot`), `invalid` (bad path/symlink), `missing`, `empty` |
 | `root`, `path` | configured vault-relative folder and its resolved absolute path |
 | `projects` | first-level folders that contain notes (`projectCount` is its size) |
@@ -1358,13 +1383,18 @@ the goals still `proposed`. With a `path` the answer is one node in context:
 - `blockedBy` resolves `blocked_by` to incident documents and marks `blocking` only for `open`/`investigating`;
 - `beeCycle` follows `active`/`watching` influences and returns the path from the node back to itself, or `null`. A loop
   is reported rather than rejected: a cycle has no honest execution order, and the plan owner decides what to cut;
-- a path may name the folder (`centurion/backend/auth`), the file, or the project; a miss lists up to five real nodes.
+- a path may name the folder (`centurion/backend/auth`), the file, or the project; a miss lists up to five real nodes;
+- the kind-specific payload is returned as written: `formal_text`, `plan`, `brief`, `payload` and `tags`, so a goal's
+  steps and a leaf's brief are readable without opening the file (0.21.14). A goal's summary uses `formal_text` as its
+  `description` instead of `null`.
 
 `search.ts` is a thin wrapper on purpose. It opens the same `BridgeStore` index, calls `searchIndex` with
 `folder = planRoot`, then re-checks every hit: prefix, no `_archive`/`__history`, parseable plan frontmatter. Filters run
 on parsed YAML, not on text — asking for `status: done` must not return a node whose description says "done". A node hit
 through several headings collapses to one row, `limit` is 1–50, and the answer reports how many hits were `filtered` by
-frontmatter and how many were `skipped` because they are not plans.
+frontmatter and how many were `skipped` because they are not plans. Since 0.21.14 a hit must also contain at least one
+word of the query: the graph and recency signals add neighbours that are useful for browsing but are not evidence that a
+plan node answers the question. Those hits are counted as `unmatched` instead of being returned with a score near zero.
 
 ### 15.6 Writing a plan (0.13.11)
 
@@ -1388,7 +1418,9 @@ atomicity (stage 6 adds the `op:start`/`op:done` journal markers for the operati
 
 `plan_update_node` changes description, name, brief, payload, `## Заметки` or kind. Content changes raise `revision` by
 one; a kind change raises `version` and resets `revision` to 1, and is refused when the parent would not accept the new
-kind or when a child would no longer fit under it. `plan_set_status` performs exactly one transition from the tables in
+kind or when a child would no longer fit under it. A change between a leaf and a branching node also changes the layout
+(`<parent>/<name>.md` ↔ `<parent>/<name>/<name>.md`): the file, its `__history` snapshots (with `snapshot_of`) and every
+link that addresses it move with it, and `tags` are rewritten to `plan/<kind>` (0.21.14). `plan_set_status` performs exactly one transition from the tables in
 `model.ts` (nodes, incidents, goals); the same-status move is not a transition, an illegal move lists what is allowed,
 and a status last set by `user` can be overridden by an agent only with `reason`, which is stored as `status_reason` and
 appears in the journal. `plan_history` is the read side: it lists `v/r/reason/time/actor` from the snapshot frontmatter,
@@ -1449,18 +1481,23 @@ A move rewrites what the tools themselves write: `parent`, `children`, `influenc
 short `[[session-store]]` stays as it is (Obsidian still resolves it); links from `Documentation`/`Inbox` are untouched
 and become `plan_validate`'s business. Archiving is deliberately narrower: the subtree leaves the tree, so its parent stops
 listing it and incoming links stay as they were — a dangling link is a fact for the report, not something an archive
-should invent. A move cannot change a root, an incident or a goal, and it cannot place a node inside itself.
+should invent. The archived path is derived from the node itself (`<project>/_archive/<slug>/<slug>.md`), never from the
+folder it happens to sit in; a node whose kind and path disagree is refused, because renaming that folder would archive
+its siblings too (0.21.14). A move cannot change a root, an incident or a goal, and it cannot place a node inside itself.
 
-Approval is the one place where a goal becomes work. The branch is a `trunk` under the project root (the only child kind a
-root allows), each step is a leaf named after its title (`move-the-session-table`, falling back to the step id for a
-non-latin title), and each leaf carries `goal:` back to the file. The gate is the source plugin's rule: an agent may
+Approval is the one place where a goal becomes work. The result is the layout the schema allows: a `trunk` under the
+project root (the only child kind a root allows), one `branch` (`steps`) under that trunk, and one leaf per step under the
+branch, named after its title (`move-the-session-table`, falling back to the step id for a non-latin title). Each leaf
+carries `goal:` back to the file and `materialized` points at the trunk. Before 0.21.14 the leaves sat directly under the
+trunk, which made `plan_validate` invalid immediately after a normal approval. The gate is the source plugin's rule: an agent may
 propose a goal but not approve the one it created — `actor` is compared with `created_by` — and the user approves either
 in the panel or by passing `actor: "user"`.
 
 A restore is not a rollback: the current state is snapshotted, the counters move forward, and only content travels back
 (`name`, `description`, `brief`, `payload`, `plan`, `growth`, `severity`, `formal_text`, `status`, plus `## Заметки`).
-Relations stay live on purpose, and a snapshot taken before a kind change is refused, because a kind change is a version
-event and not a revision.
+Relations stay live on purpose. A snapshot is refused only when its `kind` differs from the live node's (`A kind change is
+not a revision`), so a snapshot taken before a kind change restores normally once the node has the same kind again
+(0.21.14 corrected a wording that claimed every such snapshot was refused).
 
 ### 15.9 Integrity checks and import (0.16.11)
 
@@ -1475,6 +1512,9 @@ event and not a revision.
   `project`;
 - `missing_root` / `multiple_roots` — per project, exactly one `kind: root` document;
 - `invalid_parent_kind` / `invalid_status` / `leaf_with_children` — the schema rules, checked against the actual parent;
+- `layout_mismatch` — a branching node not in `<parent>/<name>/<name>.md`, or a leaf stored as its own folder; an archive
+  refuses such a node because its folder also holds its former siblings (0.21.14);
+- `kind_tag_mismatch` — `tags` carry a `plan/<kind>` tag that is not the node's actual kind;
 - `missing_counters` / `missing_id` / `duplicate_id` — identity and the snapshot naming contract;
 - `bee_cycle` — the influence graph closes a loop, reported once per loop with the loop itself;
 - `unfinished_operation` — the journal holds an `op:start <id>` with no `op:done <id>`.

@@ -160,7 +160,10 @@ export function summarize(node: PlanNode): NodeSummary {
     status: statusOf(node),
     version: positiveInt(node.frontmatter.version),
     revision: positiveInt(node.frontmatter.revision),
-    description: stringField(node.frontmatter.description),
+    // A goal states itself in `formal_text`; a reader asking for the summary
+    // should not see `null` merely because the field has another name.
+    description:
+      stringField(node.frontmatter.description) ?? stringField(node.frontmatter.formal_text),
   };
 }
 
@@ -290,6 +293,12 @@ export interface PlanReadResult {
   blockedBy?: Array<{ incident: NodeSummary; status: string | null; blocking: boolean }>;
   blocks?: Array<{ target: NodeSummary }>;
   goal?: NodeSummary | null;
+  /** The goal's own wording and step plan, kept as written in the file. */
+  formal_text?: string | null;
+  plan?: unknown;
+  brief?: unknown;
+  payload?: unknown;
+  tags?: string[];
   growth?: unknown;
   beeCycle?: string[] | null;
   unresolved?: string[];
@@ -511,6 +520,13 @@ export function planRead(
       blockedBy,
       blocks,
       goal: goalNode ? summarize(goalNode) : null,
+      formal_text: stringField(node.frontmatter.formal_text),
+      plan: node.frontmatter.plan ?? null,
+      brief: node.frontmatter.brief ?? null,
+      payload: node.frontmatter.payload ?? null,
+      tags: Array.isArray(node.frontmatter.tags)
+        ? node.frontmatter.tags.filter((tag): tag is string => typeof tag === "string")
+        : [],
       growth: node.frontmatter.growth ?? null,
       beeCycle: findBeeCycle(tree, node),
       unresolved: influences.unresolved,

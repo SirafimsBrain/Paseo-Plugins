@@ -922,6 +922,20 @@ export async function dispatchTool(
         // the parsed index remains the fallback.
         const obsidianApi = createObsidianApi(settings);
         const authority = obsidianApi ? await obsidianApi.noteLinks(relPath) : null;
+        const indexedLinks = runtime.store.outgoingLinks(relPath);
+        // A note written a moment ago may not be in the index yet (the watcher
+        // flushes on a debounce). Its own parsed body is still the authority for
+        // what it links to, so an empty index row must not answer `links: []`.
+        const links =
+          indexedLinks.length > 0
+            ? indexedLinks
+            : note.parsed.links.map((link) => ({
+                raw_target: link.rawTarget,
+                target_path: null,
+                alias: link.alias,
+                anchor: link.anchor,
+                kind: link.kind,
+              }));
         return json({
           path: relPath,
           role: roleOfPath(relPath, runtime.dirs),
@@ -931,7 +945,7 @@ export async function dispatchTool(
           tags: note.parsed.tags,
           /** Dataview inline fields (`key:: value`) from the note body (0.10.11). */
           inlineFields: note.parsed.inlineFields,
-          links: runtime.store.outgoingLinks(relPath),
+          links,
           backlinks: authority?.links?.backlinks ?? runtime.store.backlinksOf(relPath),
           unresolvedLinks: authority?.links?.unresolvedLinks ?? null,
           linkSource: authority?.links ? "obsidian" : "index",

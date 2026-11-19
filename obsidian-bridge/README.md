@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.21.13)
+## What it does (0.21.14)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -132,12 +132,18 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   its `op:done`, and a file inside the planning root that is not a plan. `plan_import` rebuilds a `luck_tree_export`
   `.json.zip` (or its extracted `.json`) as plan files — folders, links, incidents, goals and growth, with the original
   row id kept in `legacy_id` — dry-run by default and idempotent by `legacy_id`.
-- **Multi-file operations (0.15.11).** `plan_move_node` moves a subtree and rewrites every link into it (`parent`,
-  `children`, `influences`, `blocked_by`, `blocks`, `materialized`), `plan_archive_node` moves a subtree into `_archive/`
-  and unlists it without deleting anything, `plan_approve_goal` materialises a proposed goal into a trunk plus one leaf
-  per step (an agent cannot approve the goal it created), and `plan_restore` writes a snapshot back as a new revision.
+- **Multi-file operations (0.15.11, corrected in 0.21.14).** `plan_move_node` moves a subtree and rewrites every link
+  into it (`parent`, `children`, `influences`, `blocked_by`, `blocks`, `materialized`), `plan_archive_node` moves a
+  subtree into `_archive/` and unlists it without deleting anything, `plan_approve_goal` materialises a proposed goal
+  into a trunk → branch → leaves (an agent cannot approve the goal it created), and `plan_restore` writes a snapshot
+  back as a new revision.
   Every operation journals `op:start`/`op:done`, snapshots each file it changes, and repeating it with the same `op_id`
   resumes an interrupted run instead of duplicating it.
+- **Hardened by a live plan test (0.21.14).** Approving a goal produces the layout the schema requires; archiving takes
+  the node's own folder and refuses a node whose kind and path disagree; a kind change between a leaf and a branching
+  node moves the file, its snapshots and every link to it; nested frontmatter (`brief`, `plan`) is read as written;
+  `plan_search` drops graph-only neighbours that contain none of the query words; and reindexing a note with repeated
+  chunk text no longer fails on a duplicate embedding.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only

@@ -128,6 +128,7 @@ describe("plan_restore", () => {
 
   it("refuses a snapshot taken before a kind change", async () => {
     const created = workspace();
+    const moved = "Workspaces/centurion/backend/auth/session-store/session-store.md";
     expectOk(
       await call(created, "plan_update_node", {
         path: "centurion/backend/auth/session-store",
@@ -135,9 +136,18 @@ describe("plan_restore", () => {
         accept_external: true,
       }),
     );
-    const live = documentOf(created, LEAF);
+    const live = documentOf(created, moved);
     expect(live.frontmatter.version).toBe(3);
     expect(live.frontmatter.revision).toBe(1);
+    // The snapshots moved with the file, so v2 r4 is still reachable.
+    expect(
+      fs.existsSync(
+        path.join(
+          created.vault,
+          "Workspaces/centurion/backend/auth/session-store/__history/session-store.v2.r4.md",
+        ),
+      ),
+    ).toBe(true);
 
     const outcome = await call(created, "plan_restore", {
       path: "centurion/backend/auth/session-store",
@@ -146,6 +156,6 @@ describe("plan_restore", () => {
     });
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toContain("not a revision");
-    expect(documentOf(created, LEAF).frontmatter.version).toBe(3);
+    expect(documentOf(created, moved).frontmatter.version).toBe(3);
   });
 });

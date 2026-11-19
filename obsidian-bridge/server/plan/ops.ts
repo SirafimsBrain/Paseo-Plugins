@@ -644,10 +644,27 @@ export function planArchiveNode(
   const primary = loadWritableNode(root, node, input);
   if ("error" in primary) return primary.error;
 
+  // The subtree is the node's own folder, never the folder it happens to sit
+  // in. A file whose kind and location disagree (a leaf promoted to a
+  // subbranch before 0.21.14) shares its folder with its former siblings;
+  // renaming that folder would archive them too, so the layout is checked first.
+  const slug = path.posix.basename(node.vaultPath, ".md");
   const oldFolder = path.posix.dirname(node.vaultPath);
-  const archiveRel = `${project}/_archive/${path.posix.basename(oldFolder)}`;
+  if (kind !== "leaf" && path.posix.basename(oldFolder) !== slug) {
+    return fail(
+      `'${node.relPath}' is a ${kind} but its file does not live in its own folder ` +
+        `('${path.posix.basename(oldFolder)}/${slug}.md'). Its kind and path disagree, and ` +
+        "archiving it would move a folder that also holds other nodes; nothing was changed. " +
+        `Recreate the ${kind} at '<parent>/${slug}/${slug}.md' first, or change its kind back ` +
+        "with `plan_update_node`, then archive it.",
+      { op_id: opId, expected: `${path.posix.dirname(oldFolder)}/${slug}/${slug}.md` },
+    );
+  }
+  const archiveRel = `${project}/_archive/${slug}`;
   const archiveFolder = `${root.relPath}/${archiveRel}`;
   const newVault = nodeFileFor(archiveFolder);
+  // A leaf is one file: the archive gives it its own folder and file, so two
+  // leaves of the same parent cannot collide on the parent's folder name.
   const newAbs = absoluteFor(root, kind === "leaf" ? newVault : archiveFolder);
   const oldAbs = absoluteFor(root, kind === "leaf" ? node.vaultPath : oldFolder);
   if (!newAbs || !oldAbs) return fail("The archive path resolves outside the planning root.");
@@ -883,18 +900,11 @@ export function planApproveGoal(
     return fail(`Project '${project}' has no root node ('${project}/${project}.md').`);
   }
 
-  const branchSlug = path.posix.basename(goal.vaultPath, ".md");
-  const branchFolder = `${root.relPath}/${project}/${branchSlug}`;
-  const branchVault = nodeFileFor(branchFolder);
-  const branchAbs = absoluteFor(root, branchVault);
-  if (!branchAbs) return fail("The branch path resolves outside the planning root.");
-  if (!resume && (tree.nodes.has(branchVault) || fs.existsSync(branchAbs))) {
-    return fail(
-      `'${branchSlug}' already exists under '${project}'. Approving '${goal.relPath}' would create ` +
-        "a branch there; " +
-        "rename the existing node or the goal file first.",
-    );
-  }
+  const trunkSlug = path.posix.basename(goal.vaultPath, ".md");
+  const trunkFolder = `${root.relPath}/${project}/${trunkSlug}`;
+  const trunkVault = nodeFileFor(trunkFolder);
+  const trunkAbs = absoluteFor(root, trunkVault);
+  if (!trunkAbs) return fail("The trunk path resolves outside the planning root.");
 
   const steps = Array.isArray(goal.frontmatter.plan)
     ? goal.frontmatter.plan.filter(isRecord)
@@ -907,7 +917,7 @@ export function planApproveGoal(
   }
 
   const usedSlugs = new Set<string>();
-  const leaves = steps.map((step, index) => {
+  const planned = steps.map((step, index) => {
     const title = stringField(step.title) ?? `Step ${index + 1}`;
     const base = slugify(title, `step-${index + 1}`);
     let slug = base;
@@ -920,9 +930,42 @@ export function planApproveGoal(
     return {
       title,
       description: stringField(step.description) ?? "",
-      vaultPath: `${branchFolder}/${slug}.md`,
+      slug,
     };
   });
+
+  // A tree is root → trunk → branch → leaf: a trunk may only hold branches, so
+  // the steps live in one branch below the trunk, never directly in the trunk.
+  let branchSlug = "steps";
+  let branchSuffix = 2;
+  while (usedSlugs.has(branchSlug)) {
+    branchSlug = `steps-${branchSuffix}`;
+    branchSuffix += 1;
+  }
+  const branchFolder = `${trunkFolder}/${branchSlug}`;
+  const branchVault = nodeFileFor(branchFolder);
+  const branchAbs = absoluteFor(root, branchVault);
+  if (!branchAbs) return fail("The branch path resolves outside the planning root.");
+  if (!resume) {
+    const taken = (vaultPath: string, absolute: string): boolean =>
+      tree.nodes.has(vaultPath) || fs.existsSync(absolute);
+    if (taken(trunkVault, trunkAbs)) {
+      return fail(
+        `'${trunkSlug}' already exists under '${project}'. Approving '${goal.relPath}' would ` +
+          "create a trunk there; rename the existing node or the goal file first.",
+      );
+    }
+    if (taken(branchVault, branchAbs)) {
+      return fail(
+        `'${trunkSlug}/${branchSlug}' already exists under '${project}'. Approving ` +
+          `'${goal.relPath}' would create a branch there; rename the existing node first.`,
+      );
+    }
+  }
+  const leaves = planned.map((leaf) => ({
+    ...leaf,
+    vaultPath: `${branchFolder}/${leaf.slug}.md`,
+  }));
 
   const now = nowIso();
   if (!state.started) {
@@ -931,18 +974,18 @@ export function planApproveGoal(
   }
 
   const created: string[] = [];
-  if (!fs.existsSync(branchAbs)) {
-    const branchText = planDocument({
+  if (!fs.existsSync(trunkAbs)) {
+    const trunkText = planDocument({
       id: crypto.randomUUID(),
       schema: 1,
       kind: "trunk",
-      name: stringField(goal.frontmatter.name) ?? branchSlug,
+      name: stringField(goal.frontmatter.name) ?? trunkSlug,
       description: stringField(goal.frontmatter.formal_text) ?? "",
       status: "ready",
       version: 1,
       revision: 1,
       parent: wikilinkFor(projectRoot.vaultPath),
-      children: leaves.map((leaf) => wikilinkFor(leaf.vaultPath)),
+      children: [wikilinkFor(branchVault)],
       influences: [],
       blocked_by: [],
       created: now,
@@ -952,12 +995,45 @@ export function planApproveGoal(
       tags: ["plan/trunk", "plan/status/ready"],
       archived: null,
     });
+    const written = writeStored(root, trunkVault, trunkText, { create: true });
+    if ("error" in written) {
+      return fail(
+        `The approval stopped while creating '${trunkFolder}': ${written.error}. The journal keeps ` +
+          `\`op:start ${opId}\`; repeat the call with the same \`op_id\`.`,
+        { op_id: opId, partial: true, stage: "trunk" },
+      );
+    }
+    created.push(trunkVault);
+  }
+
+  if (!fs.existsSync(branchAbs)) {
+    const branchText = planDocument({
+      id: crypto.randomUUID(),
+      schema: 1,
+      kind: "branch",
+      name: "Steps",
+      description: "The steps of the approved goal.",
+      status: "ready",
+      version: 1,
+      revision: 1,
+      parent: wikilinkFor(trunkVault),
+      children: leaves.map((leaf) => wikilinkFor(leaf.vaultPath)),
+      influences: [],
+      blocked_by: [],
+      created: now,
+      updated: now,
+      created_by: actor,
+      updated_by: actor,
+      tags: ["plan/branch", "plan/status/ready"],
+      archived: null,
+    });
     const written = writeStored(root, branchVault, branchText, { create: true });
     if ("error" in written) {
       return fail(
-        `The approval stopped while creating '${branchFolder}': ${written.error}. The journal keeps ` +
-          `\`op:start ${opId}\`; repeat the call with the same \`op_id\`.`,
-        { op_id: opId, partial: true, stage: "branch" },
+        `The approval created '${trunkFolder}' and stopped while creating '${branchFolder}': ` +
+          `${written.error}. The journal keeps \`op:start ${opId}\`; repeat the call with the ` +
+          "same `op_id`.",
+        { op_id: opId, partial: true, stage: "branch", created },
       );
     }
     created.push(branchVault);
@@ -1000,10 +1076,10 @@ export function planApproveGoal(
   const rootAfter = loadPlanTree(root).nodes.get(projectRoot.vaultPath);
   if (rootAfter) {
     const listed = Array.isArray(rootAfter.frontmatter.children)
-      ? rootAfter.frontmatter.children.some((entry) => linkKey(entry) === linkKey(branchVault))
+      ? rootAfter.frontmatter.children.some((entry) => linkKey(entry) === linkKey(trunkVault))
       : false;
     if (!listed) {
-      const attached = appendChild(root, rootAfter, branchVault, actor);
+      const attached = appendChild(root, rootAfter, trunkVault, actor);
       if ("error" in attached) {
         return fail(
           `The branch and its leaves exist, but the project root could not list the branch: ` +
@@ -1031,7 +1107,7 @@ export function planApproveGoal(
         ...goalStored.document.frontmatter,
         status: "approved",
         status_by: actor,
-        materialized: wikilinkFor(branchVault),
+        materialized: wikilinkFor(trunkVault),
       },
       bump: "revision",
       reason: "status_change",
@@ -1040,7 +1116,7 @@ export function planApproveGoal(
   );
   if ("error" in goalChange) {
     return fail(
-      `The branch and leaves exist, but '${goal.relPath}' could not be marked approved: ` +
+      `The trunk, branch and leaves exist, but '${goal.relPath}' could not be marked approved: ` +
         `${goalChange.error}. The journal keeps \`op:start ${opId}\`.`,
       { op_id: opId, partial: true, stage: "goal", created },
     );
@@ -1051,7 +1127,7 @@ export function planApproveGoal(
     project,
     opId,
     "plan_approve_goal",
-    `${wikilinkFor(goal.vaultPath)} → ${wikilinkFor(branchVault)} · ${leaves.length} leaves`,
+    `${wikilinkFor(goal.vaultPath)} → ${wikilinkFor(trunkVault)} · ${leaves.length} leaves`,
     actor,
     now,
   );
@@ -1065,11 +1141,16 @@ export function planApproveGoal(
     op_id: opId,
     path: goal.relPath,
     status: "approved",
-    materialized: relative(branchVault),
-    branch: {
-      path: relative(branchVault),
+    materialized: relative(trunkVault),
+    trunk: {
+      path: relative(trunkVault),
       kind: "trunk",
       parent: projectRoot.relPath,
+    },
+    branch: {
+      path: relative(branchVault),
+      kind: "branch",
+      parent: relative(trunkVault),
     },
     leaves: leaves.map((leaf) => ({ path: relative(leaf.vaultPath), name: leaf.title })),
     created: created.map(relative),

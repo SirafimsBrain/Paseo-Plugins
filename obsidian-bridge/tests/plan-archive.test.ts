@@ -107,6 +107,34 @@ describe("plan_archive_node", () => {
     ).toBe(true);
   });
 
+  it("refuses a node whose kind and folder disagree instead of archiving the parent", async () => {
+    const created = workspace();
+    const relative = "Workspaces/centurion/backend/auth/token-refresh.md";
+    const text = fs.readFileSync(path.join(created.vault, relative), "utf-8");
+    fs.writeFileSync(
+      path.join(created.vault, relative),
+      text.replace("kind: leaf", "kind: subbranch"),
+      "utf-8",
+    );
+
+    const outcome = await call(created, "plan_archive_node", {
+      path: "centurion/backend/auth/token-refresh",
+      accept_external: true,
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("kind and path disagree");
+    // The siblings and their history are untouched: nothing under `auth/` moved.
+    expect(
+      fs.existsSync(path.join(created.vault, "Workspaces/centurion/backend/auth/session-store.md")),
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(created.vault, "Workspaces/centurion/backend/auth/__history/session-store.v1.r3.md"),
+      ),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(created.vault, "Workspaces/centurion/_archive"))).toBe(false);
+  });
+
   it("refuses the project root and a second archive of the same name", async () => {
     const created = workspace();
     const root = await call(created, "plan_archive_node", { path: "centurion" });

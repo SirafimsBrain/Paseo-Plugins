@@ -56,7 +56,7 @@ blocks work, `plan_goal` for an outcome that is not a node yet.
 A goal is a formal statement plus steps, not a node: `plan_goal { path: "<project>/_goals/<slug>", formal_text: …,
 plan: [{ title: "…" }], status: "proposed" }`. An agent may **propose** a goal but never approve the one it created —
 `plan_approve_goal` refuses that, and the user approves (or passes `actor: "user"`). Approval is what turns the goal into
-a trunk with one leaf per step, so do not create that branch by hand as well.
+a trunk → a `steps` branch → one leaf per step, so do not create that subtree by hand as well.
 
 ## Importing instead of retyping
 

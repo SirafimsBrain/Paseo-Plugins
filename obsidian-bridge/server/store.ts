@@ -317,11 +317,21 @@ export class BridgeStore {
         insertChunkFts.run(id, chunk.text, chunk.heading, relPath);
         const vectors = carried.get(chunkTextHash(chunk.text));
         if (vectors) {
+          // Two old chunks can carry the same text (a repeated section), and
+          // every vector list is keyed by that text: one vector per model for
+          // the new chunk is all a PRIMARY KEY on `chunk_id` allows. The upsert
+          // keeps a rebuild safe even when a stale row survives.
+          const seenModels = new Set<string>();
           for (const vector of vectors) {
+            if (seenModels.has(vector.modelId)) continue;
+            seenModels.add(vector.modelId);
             this.db
               .prepare(
                 `INSERT INTO embeddings (chunk_id, path, model_id, dim, text_hash, vec)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(chunk_id) DO UPDATE SET
+                   path = excluded.path, model_id = excluded.model_id, dim = excluded.dim,
+                   text_hash = excluded.text_hash, vec = excluded.vec`,
               )
               .run(id, relPath, vector.modelId, vector.dim, chunkTextHash(chunk.text), vector.vec);
           }

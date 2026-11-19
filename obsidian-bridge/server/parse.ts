@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { parse as parseYaml } from "yaml";
 
 /**
  * Markdown/vault parsing.
@@ -74,12 +75,35 @@ export function splitFrontmatter(text: string): {
 }
 
 /**
- * A deliberately small YAML subset: `key: value` scalars, `[a, b]` inline
- * lists, and `- item` block lists. That covers what Obsidian users put in
- * frontmatter for the fields this plugin indexes (title, tags, aliases,
- * project, status). Anything more elaborate is kept as a raw string.
+ * Frontmatter as a mapping. The YAML parser keeps nested values intact
+ * (`brief: {entryPoint, files, acceptance}`, `plan: [{id, title}]`,
+ * `influences: [{target, status}]`), which is what a reader expects to see:
+ * flattening or dropping a nested key made `obsidian_read` and
+ * `obsidian_outline` disagree with the file on disk.
+ *
+ * A document the parser rejects (duplicate keys, broken indentation) falls back
+ * to {@link parseYamlFlat}, so a malformed note still yields the flat fields the
+ * index used before instead of losing its title and tags.
  */
 export function parseYamlSubset(raw: string): Record<string, unknown> {
+  if (raw.trim().length === 0) return {};
+  try {
+    const parsed = parseYaml(raw);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Fall back to the tolerant flat reader below.
+  }
+  return parseYamlFlat(raw);
+}
+
+/**
+ * The fallback reader: `key: value` scalars, `[a, b]` inline lists and `- item`
+ * block lists. It never throws, so a note with frontmatter the YAML parser
+ * rejects still keeps its top-level fields.
+ */
+function parseYamlFlat(raw: string): Record<string, unknown> {
   const data: Record<string, unknown> = {};
   const lines = raw.split(/\r?\n/);
   let currentKey: string | null = null;

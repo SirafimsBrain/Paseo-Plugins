@@ -30,6 +30,11 @@ import { isSnapshotFrontmatter } from "./snapshot";
  *   plan node.
  */
 
+/** Words of a query that must appear in a hit; short tokens are punctuation noise. */
+function queryTokens(query: string): string[] {
+  return [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length >= 2))];
+}
+
 function asList(value: unknown): string[] {
   if (typeof value === "string") {
     return value
@@ -109,10 +114,16 @@ export function planSearch(
     });
 
     const prefix = `${root.relPath}/`;
+    const tokens = queryTokens(query);
     const hits: Array<Record<string, unknown>> = [];
     const seen = new Set<string>();
     let filtered = 0;
     let skipped = 0;
+    // The fusion includes one-hop link neighbours and recency, which are useful
+    // for browsing but not evidence that a plan node answers the query. A hit
+    // that contains none of the query words is dropped, so a plan search does
+    // not return eight unrelated nodes just because they sit next to a match.
+    let unmatched = 0;
 
     for (const hit of result.hits) {
       const vaultPath = hit.path.replace(/\\/g, "/");
@@ -130,6 +141,13 @@ export function planSearch(
       } catch {
         skipped += 1;
         continue;
+      }
+      if (tokens.length > 0) {
+        const haystack = text.toLowerCase();
+        if (!tokens.some((token) => haystack.includes(token))) {
+          unmatched += 1;
+          continue;
+        }
       }
       const parsed = parsePlanDocument(text);
       if ("error" in parsed) {
@@ -191,6 +209,7 @@ export function planSearch(
       total: hits.length,
       filtered,
       skipped,
+      unmatched,
       hits,
       note:
         hits.length === 0

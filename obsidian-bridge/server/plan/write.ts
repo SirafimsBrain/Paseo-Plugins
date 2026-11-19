@@ -666,6 +666,98 @@ export function planCreateNode(
 // plan_update_node
 // ---------------------------------------------------------------------------
 
+/** `[[Workspaces/a/b|b]]` or `Workspaces/a/b.md` → `Workspaces/a/b`. */
+function linkKeyOf(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const match = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/.exec(trimmed);
+  const raw = match ? match[1].split("#")[0] : trimmed;
+  const key = raw.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\.md$/i, "");
+  return key.length > 0 ? key : null;
+}
+
+/**
+ * Rewrites every link that addresses one node after its file moved. A kind
+ * change between a leaf and a branching node changes the path, so the parent's
+ * `children` entry, incoming `blocked_by`/`blocks`, `materialized` and
+ * `influences[].target` must follow it; a short `[[name]]` link stays as written.
+ */
+function remapLinks(
+  frontmatter: Record<string, unknown>,
+  from: string,
+  to: string,
+): { next: Record<string, unknown>; changed: boolean } {
+  const next: Record<string, unknown> = { ...frontmatter };
+  let changed = false;
+  const rewrite = (value: unknown): unknown => {
+    if (linkKeyOf(value) !== from) return value;
+    changed = true;
+    return wikilinkFor(`${to}.md`);
+  };
+
+  for (const field of ["parent", "materialized", "goal"] as const) {
+    if (next[field] === undefined) continue;
+    next[field] = rewrite(next[field]);
+  }
+  for (const field of ["children", "blocked_by", "blocks"] as const) {
+    const value = next[field];
+    if (!Array.isArray(value)) continue;
+    next[field] = value.map(rewrite);
+  }
+  if (Array.isArray(next.influences)) {
+    next.influences = next.influences.map((entry) => {
+      if (!isRecord(entry)) return entry;
+      const target = rewrite(entry.target);
+      return target === entry.target ? entry : { ...entry, target };
+    });
+  }
+  return { next, changed };
+}
+
+/** Moves `<slug>.v*.r*.md` snapshots from one folder's `__history` to another. */
+function moveSnapshots(
+  root: PlanRoot,
+  fromFolder: string,
+  toFolder: string,
+  slug: string,
+  oldVault: string,
+  newVault: string,
+): string | null {
+  const fromDir = `${fromFolder}/__history`;
+  const toDir = `${toFolder}/__history`;
+  if (fromDir === toDir) return null;
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(path.join(root.vaultRoot, fromDir));
+  } catch {
+    return null;
+  }
+  try {
+    for (const name of names) {
+      if (!name.startsWith(`${slug}.v`) || !name.endsWith(".md")) continue;
+      fs.mkdirSync(path.join(root.vaultRoot, toDir), { recursive: true });
+      const target = path.join(root.vaultRoot, toDir, name);
+      fs.renameSync(path.join(root.vaultRoot, fromDir, name), target);
+      // `snapshot_of` names the file the snapshot belongs to; a moved node
+      // would otherwise make every one of its snapshots unreadable.
+      const parsed = parsePlanDocument(fs.readFileSync(target, "utf-8"));
+      if (!("error" in parsed) && parsed.document.frontmatter.snapshot_of === oldVault) {
+        fs.writeFileSync(
+          target,
+          serializePlanDocument({
+            frontmatter: { ...parsed.document.frontmatter, snapshot_of: newVault },
+            body: parsed.document.body,
+          }),
+          "utf-8",
+        );
+      }
+    }
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause);
+  }
+  return null;
+}
+
 export function planUpdateNode(
   settings: RuntimeSettings,
   input: Record<string, unknown>,
@@ -744,12 +836,70 @@ export function planUpdateNode(
 
   const kindValue = stringField(input.kind);
   let kindChanged = false;
+  let layoutChange: {
+    oldVault: string;
+    newVault: string;
+    oldFolder: string;
+    newFolder: string;
+  } | null = null;
   if (kindValue !== null) {
     const currentKind = kindOf(node);
     if (!isNodeKind(kindValue)) {
       return fail("`kind` must be one of root, trunk, branch, subbranch, leaf.");
     }
     if (kindValue !== currentKind) {
+      if (currentKind === "root" || kindValue === "root") {
+        return fail(
+          "A root is the project's own document, so its kind is not changed. Create a new root " +
+            "for another project, or a child node with `plan_create_node`.",
+        );
+      }
+      // A leaf is `<parent>/<name>.md`; every branching node is
+      // `<parent>/<name>/<name>.md`. The two layouts differ, so the file moves
+      // with the kind and every link that addresses it is rewritten below. A
+      // file left at the old layout is what made an archive move the parent
+      // folder (P2/P3 of the live test report).
+      if ((currentKind === "leaf") !== (kindValue === "leaf")) {
+        const slug = path.posix.basename(node.vaultPath, ".md");
+        const oldFolder = path.posix.dirname(node.vaultPath);
+        if (kindValue === "leaf") {
+          let entries: string[] = [];
+          try {
+            entries = fs.readdirSync(path.join(root.vaultRoot, oldFolder));
+          } catch {
+            entries = [];
+          }
+          const extra = entries.filter(
+            (name) => name !== `${slug}.md` && name !== "__history",
+          );
+          if (extra.length > 0) {
+            return fail(
+              `'${oldFolder}' also holds ${extra.join(", ")}, so '${node.relPath}' cannot become ` +
+                "a leaf next to its former children. Move those files away first.",
+            );
+          }
+          layoutChange = {
+            oldVault: node.vaultPath,
+            newVault: `${path.posix.dirname(oldFolder)}/${slug}.md`,
+            oldFolder,
+            newFolder: path.posix.dirname(oldFolder),
+          };
+        } else {
+          layoutChange = {
+            oldVault: node.vaultPath,
+            newVault: `${oldFolder}/${slug}/${slug}.md`,
+            oldFolder,
+            newFolder: `${oldFolder}/${slug}`,
+          };
+        }
+        const newAbs = resolveInsideVault(root.vaultRoot, layoutChange.newVault);
+        if (!newAbs) return fail("The new layout path resolves outside the configured vault.");
+        if (tree.nodes.has(layoutChange.newVault) || fs.existsSync(newAbs)) {
+          return fail(
+            `'${layoutChange.newVault}' already exists; a kind change never overwrites a note.`,
+          );
+        }
+      }
       const parent = typeof node.frontmatter.parent === "string"
         ? resolveLink(tree, node.frontmatter.parent)
         : null;
@@ -771,6 +921,14 @@ export function planUpdateNode(
           );
         }
       }
+      // The tag is part of the identity a search or Obsidian filter reads; a
+      // kind change that left `plan/leaf` behind made the file contradict its
+      // own frontmatter.
+      const kindTags = new Set(["root", "trunk", "branch", "subbranch", "leaf"].map((k) => `plan/${k}`));
+      const tags = Array.isArray(next.tags)
+        ? next.tags.filter((tag): tag is string => typeof tag === "string" && !kindTags.has(tag))
+        : [];
+      next.tags = [...tags, `plan/${kindValue}`];
       next.kind = kindValue;
       kindChanged = true;
       changed = true;
@@ -815,21 +973,91 @@ export function planUpdateNode(
   );
   if ("error" in snapshot) return fail(snapshot.error);
 
-  const written = writeStored(root, node.vaultPath, text, { expected: stored.stat });
-  if ("error" in written) return fail(written.error);
+  let finalVault = node.vaultPath;
+  let rewiredFiles = 0;
+  if (layoutChange) {
+    const created = writeStored(root, layoutChange.newVault, text, { create: true });
+    if ("error" in created) return fail(created.error);
+    const historyError = moveSnapshots(
+      root,
+      layoutChange.oldFolder,
+      layoutChange.newFolder,
+      path.posix.basename(node.vaultPath, ".md"),
+      layoutChange.oldVault,
+      layoutChange.newVault,
+    );
+    if (historyError) {
+      return fail(
+        `'${layoutChange.newVault}' was written, but its snapshots could not be moved: ` +
+          `${historyError}. Fix the folder by hand; nothing was deleted.`,
+        { partial: true, vault_path: layoutChange.newVault },
+      );
+    }
+    try {
+      fs.rmSync(path.join(root.vaultRoot, layoutChange.oldVault), { force: true });
+      // Only an empty folder goes: a stray file keeps its directory.
+      if (kindValue === "leaf") {
+        fs.rmdirSync(path.join(root.vaultRoot, layoutChange.oldFolder));
+      }
+    } catch {
+      // A not-empty folder is not a reason to leave both copies of the node.
+    }
+    finalVault = layoutChange.newVault;
+
+    const from = layoutChange.oldVault.replace(/\.md$/i, "");
+    const to = layoutChange.newVault.replace(/\.md$/i, "");
+    for (const candidate of tree.nodes.values()) {
+      if (candidate.vaultPath === layoutChange.oldVault) continue;
+      const remapped = remapLinks(candidate.frontmatter, from, to);
+      if (!remapped.changed) continue;
+      const targetStored = readStored(root, candidate.vaultPath);
+      if ("error" in targetStored) {
+        return fail(
+          `The node moved to '${layoutChange.newVault}', but '${candidate.vaultPath}' could not ` +
+            `be read to rewrite its links: ${targetStored.error}.`,
+          { partial: true, vault_path: layoutChange.newVault, files_changed: rewiredFiles },
+        );
+      }
+      const change = commitNodeChange(
+        settings,
+        root,
+        candidate,
+        targetStored,
+        { next: remapped.next, bump: "revision", reason: "move" },
+        actor,
+      );
+      if ("error" in change) {
+        return fail(
+          `The node moved to '${layoutChange.newVault}', but '${candidate.vaultPath}' could not ` +
+            `be updated: ${change.error}`,
+          { partial: true, vault_path: layoutChange.newVault, files_changed: rewiredFiles },
+        );
+      }
+      rewiredFiles += 1;
+    }
+  } else {
+    const written = writeStored(root, node.vaultPath, text, { expected: stored.stat });
+    if ("error" in written) return fail(written.error);
+  }
 
   const journal = appendJournal(root, projectOf(node), {
     at: now,
     op: "plan_update_node",
-    target: wikilinkFor(node.vaultPath),
+    target: wikilinkFor(finalVault),
     result: `v${version} r${revision} → ${kindChanged ? `v${version + 1} r1` : `r${revision + 1}`}`,
     actor,
   });
 
+  const finalRel = finalVault.startsWith(`${root.relPath}/`)
+    ? finalVault.slice(root.relPath.length + 1)
+    : finalVault;
+
   return json({
     ok: true,
-    path: node.relPath,
-    vault_path: node.vaultPath,
+    path: finalRel,
+    vault_path: finalVault,
+    moved_from: layoutChange ? node.relPath : null,
+    files_changed: rewiredFiles,
     kind: kindOf({ ...node, frontmatter: next }),
     version: next.version,
     revision: next.revision,
