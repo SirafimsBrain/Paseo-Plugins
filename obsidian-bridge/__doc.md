@@ -394,6 +394,13 @@ The vault path is validated by the `obsidian-bridge.verify-vault` RPC before it 
 notes is reported as an error in the UI; the plugin still saves what the user typed, but indexing produces an empty index
 and the panel says so.
 
+The planning folder gets the same treatment (0.21.13) through the `obsidian-bridge.plan-directory` RPC and two actions
+next to the "Planning directory" field. **Check folder** reports whether `<vaultPath>/<planRoot>` exists (read-only), and
+**Create folder** creates it with missing parents. Both take the folder currently typed in the field, run it through
+`normalizeRoleDir` and `resolveInsideVault` (`server/plan/folder.ts`), so the buttons can never reach above the
+configured directory or through a symlink out of it. Only the planning *base* folder is addressed here: the per-project
+subfolder is still created by `plan_*`, because only the calling agent knows its project.
+
 ## 8. Not shipped yet (roadmap)
 
 | Version | Work |
@@ -475,7 +482,25 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13)
+
+### 0.21.13 — check or create the planning folder from the settings screen
+
+Feature release (0.20.13 → 0.21.13) requested by the user: typing "Planning directory" was a guess until the first
+`plan_*` call explained a typo, so the field gets two actions. No tool, MCP catalogue or settings key changes; the SDK
+and host floor stay as they are.
+
+| Area | Change |
+| --- | --- |
+| `server/plan/folder.ts` | `planDirectoryState()`: resolves the configured (or typed) folder, reports `exists` / `isDirectory`, and creates it with `recursive: true` only when asked; a status query stays read-only |
+| `shared/contracts.ts` | `obsidian-bridge.plan-directory` RPC (`path?`, `create?`) returning `folder`, `absolute`, `exists`, `isDirectory`, `created`, `error` |
+| `index.server.ts` | the handler reads the current runtime settings and passes the typed value as an override, so a click does not depend on a save having landed |
+| `client/settings-screen.tsx` | "Check folder" and "Create folder" next to "Planning directory", with the result in the section; the message is cleared when the field changes |
+| boundary | the same ladder as `plan_*`: `normalizeRoleDir`, then `resolveInsideVault`; a symlinked parent that leads out of the directory is refused before `mkdir`, and the folder is re-resolved afterwards |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **46 suites / 379 tests** pass, including the new
+`tests/plan-folder.test.ts`. Not exercised against a live Paseo daemon in this pass; the new screen actions were not
+clicked in a running app.
 
 ### 0.20.13 — the plugin enforces its own boundary, and planning is project-scoped
 

@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { VerifyVaultResult } from "./shared/contracts";
 import {
   agentIntegrationStatus,
+  checkPlanDirectory,
   notePreviewSchema,
   openInObsidian,
   readNote,
@@ -49,6 +50,7 @@ import {
   unregisterOpencodeMcp,
 } from "./server/opencode-mcp";
 import { openRuntime } from "./server/mcp-tools";
+import { planDirectoryState } from "./server/plan/folder";
 import { searchIndex } from "./server/search";
 import { parseSettingsFile } from "./server/settings-file";
 import { writeSettingsMirror } from "./server/settings-mirror";
@@ -467,6 +469,25 @@ export default function contribute(server: PluginServerContext) {
           : null),
     };
     return result;
+  });
+
+  // "Does my planning folder actually exist?" — the settings screen checks or
+  // creates it without leaving Paseo. Only the base folder is addressed here;
+  // the per-project subfolder stays the business of `plan_*`.
+  server.handle(checkPlanDirectory, async ({ path: requested, create }) => {
+    const runtimeSettings = await readRuntimeSettings();
+    const state = planDirectoryState(runtimeSettings, {
+      relPath: requested && requested.length > 0 ? requested : undefined,
+      create: create === true,
+    });
+    return {
+      folder: state.folder,
+      absolute: state.path,
+      exists: state.exists,
+      isDirectory: state.isDirectory,
+      created: state.created,
+      error: state.error,
+    };
   });
 
   server.handle(searchVaultRpc, async ({ query, limit, folder, semantic }) => {

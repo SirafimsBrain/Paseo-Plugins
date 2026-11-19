@@ -2,6 +2,22 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.21.13 — planning folder check and create in the settings screen (2026-11-19)
+
+Feature release (0.20.13 → 0.21.13). No Paseo API change: SDK `@getpaseo/plugin ^0.16.0`, host floor `>=0.15.0`, settings
+schema version 4, MCP catalogue and every tool input are unchanged. This is a UI + RPC addition only.
+
+| Change | Behaviour |
+| --- | --- |
+| settings screen | "Planning directory" gains **Check folder** and **Create folder**, with the result shown in the section and cleared when the field changes |
+| RPC `obsidian-bridge.plan-directory` | input `{ path?, create? }`, output `{ folder, absolute, exists, isDirectory, created, error }`; without `path` it uses the saved setting, with an empty setting it uses `Projects` |
+| creation | `mkdir -p` for the configured folder only, and only on an explicit click; checking is read-only. The per-project subfolder stays the business of `plan_*` |
+| boundary | `normalizeRoleDir` then `resolveInsideVault`, so `..`, absolute paths, `.obsidian` and a symlinked parent that leads out of the configured directory are refused before anything is created; an existing file in the folder's place is reported as such |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **46 suites / 379 tests** pass, including the new
+`tests/plan-folder.test.ts`. Not deployed and not exercised against a live Paseo daemon in this pass — the two new
+buttons were not clicked in a running app, and the screen was not viewed.
+
 ## Plugin 0.20.13 — the plugin enforces its own boundary (2026-11-19)
 
 Feature release (0.19.13 → 0.20.13) from a permission audit of the tool surface. No Paseo API change: the SDK stays

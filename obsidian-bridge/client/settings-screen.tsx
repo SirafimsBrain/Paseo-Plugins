@@ -11,11 +11,13 @@ import {
 } from "@getpaseo/plugin/client/ui";
 import {
   agentIntegrationStatus,
+  checkPlanDirectory,
   reindexVault,
   testEnrichment,
   vaultStatus,
   verifyVault,
   type AgentIntegrationStatus,
+  type PlanDirectoryState,
   type VerifyVaultResult,
 } from "../shared/contracts";
 import { obsidianBridgeSettings } from "../shared/settings";
@@ -45,6 +47,7 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
   const reindexRpc = useRpc(reindexVault);
   const testRpc = useRpc(testEnrichment);
   const integrationRpc = useRpc(agentIntegrationStatus);
+  const planRpc = useRpc(checkPlanDirectory);
 
   const [integration, setIntegration] = useState<AgentIntegrationStatus | null>(null);
   const [checkingIntegration, setCheckingIntegration] = useState(false);
@@ -104,6 +107,30 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
   useEffect(() => {
     if (currentPath.trim().length > 0) void runCheck(currentPath);
   }, [currentPath, runCheck]);
+
+  const [planState, setPlanState] = useState<PlanDirectoryState | null>(null);
+  const [planBusy, setPlanBusy] = useState<"check" | "create" | null>(null);
+
+  const runPlanAction = useCallback(
+    async (create: boolean, path: string) => {
+      setPlanBusy(create ? "create" : "check");
+      try {
+        setPlanState(await planRpc({ path, create }));
+      } catch (cause) {
+        setPlanState({
+          folder: path,
+          absolute: null,
+          exists: false,
+          isDirectory: false,
+          created: false,
+          error: cause instanceof Error ? cause.message : String(cause),
+        });
+      } finally {
+        setPlanBusy(null);
+      }
+    },
+    [planRpc],
+  );
 
   const testObsidianApi = useCallback(async () => {
     setTestingEnrichment(true);
@@ -271,8 +298,47 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             hint="Vault-relative folder, e.g. Projects; empty uses Projects. The plugin creates it plus a subfolder named after the current Paseo project (the root of its Git checkout); all workspaces of that project share the tree, and plan_* cannot reach another project. Its __history and _archive folders are never indexed."
             initialValue={values.planRoot}
             placeholder="Projects"
-            onChangeText={(text: string) => patch({ planRoot: text })}
+            onChangeText={(text: string) => {
+              setPlanState(null);
+              patch({ planRoot: text });
+            }}
           />
+          <SettingsAction
+            label="Planning folder"
+            hint="Checks whether the folder above exists under the configured directory."
+            actionLabel={planBusy === "check" ? "Checking…" : "Check folder"}
+            onPress={() => void runPlanAction(false, values.planRoot)}
+            disabled={planBusy !== null || values.vaultPath.trim().length === 0}
+          />
+          <SettingsAction
+            label="Create the planning folder"
+            hint="Creates the folder above, with missing parents, when it is not there yet. The per-project subfolder is still created by plan_* on first use."
+            actionLabel={planBusy === "create" ? "Creating…" : "Create folder"}
+            onPress={() => void runPlanAction(true, values.planRoot)}
+            disabled={planBusy !== null || values.vaultPath.trim().length === 0}
+          />
+          {planState ? (
+            <Text
+              style={{
+                color: planState.error
+                  ? danger
+                  : planState.exists
+                    ? success
+                    : fgMuted,
+                fontSize: font(11),
+                ...uiFontStyle,
+              }}
+              numberOfLines={4}
+            >
+              {planState.error
+                ? planState.error
+                : planState.created
+                  ? `Created '${planState.folder}' at ${planState.absolute}.`
+                  : planState.exists
+                    ? `Folder '${planState.folder}' exists: ${planState.absolute}`
+                    : `Folder '${planState.folder}' does not exist yet — plan_* would create it on first use, or press "Create folder".`}
+            </Text>
+          ) : null}
         </SettingsSection>
       </SettingsCard>
 

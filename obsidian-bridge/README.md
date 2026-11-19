@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.20.13)
+## What it does (0.21.13)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -35,6 +35,10 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   project share the tree; each plan file records the calling workspace by id in YAML (`workspace_id`). Scope is the
   project, never the workspace: a workspace whose project cannot be named is refused instead of being given a folder of
   its own. `plan_*` cannot reach another project, while `obsidian_*` may read its plans on an explicit task.
+- **The planning folder can be checked and created from the settings screen (0.21.13).** Two actions next to
+  "Planning directory" report whether `<directory>/<planning folder>` exists and create it with missing parents, so a
+  typo is caught before the first `plan_*` call. Both are confined to the configured directory exactly like the tools;
+  the per-project subfolder is still created by `plan_*` itself.
 - **The plugin's boundary is enforced by the plugin (0.20.13).** The configured directory is the whole of what any tool
   may touch: paths above it, beside it and `.obsidian` are refused, and a symlink is resolved with `realpath` on both
   sides, so a symlinked note or role directory cannot step outside it. Reads and edits accept only the configured

@@ -203,6 +203,38 @@ export const verifyVault = defineRpc({
 });
 
 /**
+ * State of the planning base folder (`<vaultPath>/<planRoot>`), used by the
+ * settings screen's "Check folder" / "Create folder" actions.
+ */
+export const planDirectorySchema = z.object({
+  /** Normalized vault-relative folder that was checked. */
+  folder: z.string(),
+  absolute: z.string().nullable(),
+  exists: z.boolean(),
+  isDirectory: z.boolean(),
+  /** True only when the call itself created the folder. */
+  created: z.boolean(),
+  error: z.string().nullable(),
+});
+
+export type PlanDirectoryState = z.infer<typeof planDirectorySchema>;
+
+/**
+ * Checks that the configured planning folder exists, or creates it on request.
+ * Confined to the configured directory; the per-project subfolder is still
+ * created by `plan_*` itself.
+ */
+export const checkPlanDirectory = defineRpc({
+  name: "obsidian-bridge.plan-directory",
+  input: z.object({
+    /** Folder to check; empty uses the saved "Planning directory" setting. */
+    path: z.string().trim().max(512).optional(),
+    create: z.boolean().optional(),
+  }),
+  output: planDirectorySchema,
+});
+
+/**
  * Where the plugin registered itself: agent MCP config files and installed
  * skill copies. Backs the settings screen's "installed correctly" view.
  */
