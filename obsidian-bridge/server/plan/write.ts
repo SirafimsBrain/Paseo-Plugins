@@ -28,7 +28,7 @@ import {
   type PlanKind,
   type SnapshotReason,
 } from "./model";
-import { normalizePlanPath, resolvePlanPath, resolvePlanRoot, type PlanRoot } from "./paths";
+import { normalizePlanPath, resolvePlanRoot, type PlanRoot } from "./paths";
 import { currentProject } from "./project";
 import {
   findPlanNode,
@@ -42,7 +42,7 @@ import {
   type PlanNode,
   type PlanTree,
 } from "./read";
-import { renderPlanBody } from "./sections";
+import { extractNotes, renderPlanBody } from "./sections";
 import { buildSnapshot, isSnapshotFrontmatter } from "./snapshot";
 
 /**
@@ -220,7 +220,15 @@ export function takeSnapshot(
 
   const name =
     stringField(node.frontmatter.name) ?? path.posix.basename(node.vaultPath, ".md");
-  const text = serializePlanDocument({ frontmatter: built.frontmatter, body: `# ${name}` });
+  // `## Заметки` is part of the document, so a snapshot keeps it too. Without
+  // it a restore put a hybrid together: content from the snapshot, notes from
+  // the live file that could never be brought back (live test R2).
+  const notes = extractNotes(node.body);
+  const keptNotes = notes === "—" ? "" : notes;
+  const text = serializePlanDocument({
+    frontmatter: built.frontmatter,
+    body: keptNotes.length > 0 ? `# ${name}\n\n## Заметки\n\n${keptNotes}` : `# ${name}`,
+  });
   const written = writeStored(root, built.path, text, { create: true });
   if ("error" in written) return written;
   return { path: built.path };
@@ -421,6 +429,20 @@ function targetForCreate(
   const clean = normalized.replace(/\.md$/i, "");
   const slug = path.posix.basename(clean);
   if (slug.length === 0) return { error: "The path must end with a node name." };
+
+  // A root is its project's own document. `centurion/centurion` would create a
+  // second, nested project instead of the canonical `centurion/centurion.md`
+  // (live test N7).
+  if (kind === "root") {
+    const segments = clean.split("/");
+    if (segments.length !== 1) {
+      return {
+        error:
+          `A root lives at '<project>/<project>.md': pass '${segments[0]}' (the project folder), ` +
+          `not '${clean}'. A nested path would create a second project inside the first.`,
+      };
+    }
+  }
 
   const folder = kind === "leaf" ? path.posix.dirname(clean) : clean;
   if (folder === "." || folder.length === 0) {
@@ -833,6 +855,12 @@ export function planUpdateNode(
     else return fail("`payload` must be an object or null.");
     changed = true;
   }
+  if (has("notes")) {
+    if (typeof input.notes !== "string") return fail("`notes` must be a string.");
+    // `notes` is a change on its own: the free-text section is part of the
+    // document, not an accessory of `description` (live test N2).
+    changed = true;
+  }
 
   const kindValue = stringField(input.kind);
   let kindChanged = false;
@@ -937,7 +965,8 @@ export function planUpdateNode(
 
   if (!changed) {
     return fail(
-      "Nothing to update: pass at least one of `description`, `name`, `brief`, `payload`, `kind`.",
+      "Nothing to update: pass at least one of `description`, `name`, `brief`, `payload`, " +
+        "`notes`, `kind`.",
     );
   }
 
@@ -1237,11 +1266,14 @@ export function planHistory(
     );
   }
 
-  const resolvedPath = resolvePlanPath(root, rawPath);
-  if ("error" in resolvedPath) return fail(resolvedPath.error);
-  const vaultPath = resolvedPath.vaultPath.endsWith(".md")
-    ? resolvedPath.vaultPath
-    : `${resolvedPath.vaultPath}.md`;
+  const loaded = loadPlanTreeFor(settings);
+  if ("error" in loaded) return fail(loaded.error, { reason: loaded.reason });
+  // `plan_read`/`plan_restore` accept the folder path of a branching node;
+  // `plan_history` resolved it differently (`<folder>.md`) and silently listed
+  // nothing. One resolver, the same paths everywhere (live test R3).
+  const found = findPlanNode(loaded.tree, rawPath);
+  if ("error" in found) return fail(found.error, { suggestions: found.suggestions });
+  const vaultPath = found.node.vaultPath;
   const slug = path.posix.basename(vaultPath, ".md");
   const historyDir = path.posix.join(path.posix.dirname(vaultPath), "__history");
   const absoluteDir = path.join(root.vaultRoot, historyDir);

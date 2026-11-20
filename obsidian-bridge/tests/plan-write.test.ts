@@ -242,6 +242,25 @@ describe("plan_update_node", () => {
     expect(snapshot.frontmatter).not.toHaveProperty("parent");
   });
 
+  it("updates only the `## Заметки` section", async () => {
+    const created = workspace();
+    const outcome = await call(created, "plan_update_node", {
+      path: "centurion/backend/auth/session-store",
+      notes: "A notes-only update.",
+      accept_external: true,
+    });
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.structuredContent).toMatchObject({ version: 2, revision: 5 });
+    expect((outcome.structuredContent as { snapshot: string }).snapshot).toBe(
+      "Workspaces/centurion/backend/auth/__history/session-store.v2.r4.md",
+    );
+
+    const node = documentOf(created, "Workspaces/centurion/backend/auth/session-store.md");
+    expect(node.body).toContain("A notes-only update.");
+    expect(node.body).not.toContain("Хэш считается");
+    expect(node.frontmatter.description).toContain("Refresh tokens are stored");
+  });
+
   it("raises the version, resets the revision, retags and moves the file on a kind change", async () => {
     const created = workspace();
     const outcome = await call(created, "plan_update_node", {

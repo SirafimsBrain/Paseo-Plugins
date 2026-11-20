@@ -94,7 +94,9 @@ obsidian-bridge/
 ### Data flow
 
 1. **Vault → index (plugin process).** `VaultIndexer` scans the vault at startup (only when `vaultPath` is set), watches it
-   with a debounced `fs.watch`, and reconciles every `reconcileMinutes` for events a watcher can miss.
+   with a debounced `fs.watch`, and reconciles every `reconcileMinutes` for events a watcher can miss. Since 0.21.15 a
+   directory event, a delete or a path inside `_archive`/`__history` also triggers a debounced reconciliation, because a
+   per-file flush cannot know which rows a folder rename removed.
 2. **Index → agent (agent process).** An agent spawns `dist/mcp-server.js`; each tool call opens the vault's SQLite file,
    answers, and closes it. Note bodies are re-read from disk, so a note is never quoted from a stale index.
 3. **Index → UI (plugin process).** The screen, workspace tab, attachment picker and settings screen call plugin RPCs;
@@ -482,7 +484,31 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15)
+
+### 0.21.15 — fixes from the second live plan test
+
+Patch release (0.21.14 → 0.21.15). A second plan (71 live nodes, 152 snapshots, 136 journal lines) was written through
+the installed `plan_*` tools on a real vault. No tool, setting, SDK or host requirement was added; `plan_read` gains the
+`notes` field and `plan_validate` gains the `growth_incomplete` rule.
+
+| Finding | Fix |
+| --- | --- |
+| `plan_move_node` answered `resumed` for a source that never existed | a missing source is refused before `op:start` unless the same `op_id` is already in the journal. A half-done move is the only case where the destination may stand in for the source. A leaf whose `to` names another node's folder is told to pass the new file path |
+| `plan_update_node` refused a notes-only change | `notes` is validated and counted as a change, and the "Nothing to update" hint lists it |
+| a snapshot kept no `## Заметки` | `takeSnapshot` serializes the notes section into the snapshot body; `plan_restore` already reads it back through `extractNotes` |
+| `plan_history` used a different path resolver | it resolves the node through `findPlanNode`, like `plan_read`/`plan_restore`: a folder path works, an unknown node is an error with suggestions |
+| the journal was reported as `not_a_plan` and issues were attributed to `Projects` | `loadPlanTree` ignores `_journal.md`; `plan_validate` derives `project` from the path relative to `planRoot`, so the project filter keeps real issues |
+| growth could be `done` with unfinished steps | `plan_validate` reports `growth_incomplete` with the step titles |
+| overview ignored `project`, omitted notes and hid approved goals | `overview(tree, projectFilter)` filters and rejects an unknown project; goals include `proposed` and `approved`; a node result carries `notes: extractNotes(node.body)` |
+| archive kept internal links on live paths | the archive builds a `<live> → <_archive>` mapping for the moved subtree and rewrites `parent`/`children`/`influences`/`blocked_by`/`blocks` through `rewriteLinks`, marking the root `archived` in the same commit; the result reports `links_rewritten` |
+| influence edges cached target counters | `influenceRow` no longer writes `version`/`revision`, an update deletes legacy fields, and `plan_read` reports the target's current counters |
+| the index kept notes that were renamed, deleted or archived | a watcher event that is not one note (directory, plan-system path) schedules a debounced `reconcile()`; `flushPending` deletes a path that moved into `_archive`/`__history` |
+| a nested root path was accepted | `plan_create_node` requires a root path to be one project folder, so `<project>/<project>` is refused with the canonical form |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **46 suites / 397 tests** pass. The watcher branch is not covered by an
+automated test; the reconciliation path it calls is the same `reconcile()` the timer uses. macOS and Windows remain
+future work.
 
 ### 0.21.14 — fixes from the live plan test
 
@@ -1384,9 +1410,10 @@ the goals still `proposed`. With a `path` the answer is one node in context:
 - `beeCycle` follows `active`/`watching` influences and returns the path from the node back to itself, or `null`. A loop
   is reported rather than rejected: a cycle has no honest execution order, and the plan owner decides what to cut;
 - a path may name the folder (`centurion/backend/auth`), the file, or the project; a miss lists up to five real nodes;
-- the kind-specific payload is returned as written: `formal_text`, `plan`, `brief`, `payload` and `tags`, so a goal's
-  steps and a leaf's brief are readable without opening the file (0.21.14). A goal's summary uses `formal_text` as its
-  `description` instead of `null`.
+- the kind-specific payload is returned as written: `formal_text`, `plan`, `brief`, `payload`, `tags` and the
+  free-text `notes` of `## Заметки` (0.21.15), so a goal's steps and a leaf's brief are readable without opening the
+  file. A goal's summary uses `formal_text` as its `description` instead of `null`. With no `path`, the overview honours
+  the `project` argument and lists `proposed` and `approved` goals.
 
 `search.ts` is a thin wrapper on purpose. It opens the same `BridgeStore` index, calls `searchIndex` with
 `folder = planRoot`, then re-checks every hit: prefix, no `_archive`/`__history`, parseable plan frontmatter. Filters run
@@ -1481,9 +1508,12 @@ A move rewrites what the tools themselves write: `parent`, `children`, `influenc
 short `[[session-store]]` stays as it is (Obsidian still resolves it); links from `Documentation`/`Inbox` are untouched
 and become `plan_validate`'s business. Archiving is deliberately narrower: the subtree leaves the tree, so its parent stops
 listing it and incoming links stay as they were — a dangling link is a fact for the report, not something an archive
-should invent. The archived path is derived from the node itself (`<project>/_archive/<slug>/<slug>.md`), never from the
+should invent. Inside the archived subtree the opposite is true: `children`, `parent`, `influences`, `blocked_by` and
+`blocks` are rewritten to the archived addresses, so an unarchived copy does not depend on live paths that may later
+move (0.21.15). The archived path is derived from the node itself (`<project>/_archive/<slug>/<slug>.md`), never from the
 folder it happens to sit in; a node whose kind and path disagree is refused, because renaming that folder would archive
 its siblings too (0.21.14). A move cannot change a root, an incident or a goal, and it cannot place a node inside itself.
+A missing source is refused before the journal is touched unless its `op_id` already carries `op:start` (0.21.15).
 
 Approval is the one place where a goal becomes work. The result is the layout the schema allows: a `trunk` under the
 project root (the only child kind a root allows), one `branch` (`steps`) under that trunk, and one leaf per step under the
@@ -1517,7 +1547,12 @@ not a revision`), so a snapshot taken before a kind change restores normally onc
 - `kind_tag_mismatch` — `tags` carry a `plan/<kind>` tag that is not the node's actual kind;
 - `missing_counters` / `missing_id` / `duplicate_id` — identity and the snapshot naming contract;
 - `bee_cycle` — the influence graph closes a loop, reported once per loop with the loop itself;
+- `growth_incomplete` — a growth record is `done` while its own steps are still `pending` or `in_progress` (0.21.15);
 - `unfinished_operation` — the journal holds an `op:start <id>` with no `op:done <id>`.
+
+The plugin's own `<project>/_journal.md` is not a skipped document: it is bookkeeping, not a broken plan (0.21.15).
+Issue attribution uses the path relative to `planRoot`, so `project` is the plan's project folder and a filtered report
+cannot hide a real issue.
 
 Duplicates are reported because an id, not a file name, is what a link means. The answer carries `valid`, `issue_count`,
 `counts.byKind`, `truncated` and a `project`/`limit` window; the call writes nothing.

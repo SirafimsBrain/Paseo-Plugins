@@ -96,6 +96,34 @@ describe("plan_restore", () => {
     expect(journal).toContain("restored v2 r4");
   });
 
+  it("restores the notes text a snapshot kept", async () => {
+    const created = workspace();
+    expectOk(
+      await call(created, "plan_create_node", {
+        path: "centurion/backend/auth/notes-probe",
+        kind: "leaf",
+        name: "Notes probe",
+        notes: "Original notes.",
+      }),
+    );
+    expectOk(
+      await call(created, "plan_update_node", {
+        path: "centurion/backend/auth/notes-probe",
+        notes: "Changed notes.",
+      }),
+    );
+
+    const outcome = await call(created, "plan_restore", {
+      path: "centurion/backend/auth/notes-probe",
+      version: 1,
+      revision: 1,
+    });
+    expectOk(outcome);
+    const live = documentOf(created, "Workspaces/centurion/backend/auth/notes-probe.md");
+    expect(live.body).toContain("Original notes.");
+    expect(live.body).not.toContain("Changed notes.");
+  });
+
   it("refuses a snapshot that does not exist", async () => {
     const created = workspace();
     const outcome = await call(created, "plan_restore", {

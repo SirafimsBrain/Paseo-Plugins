@@ -68,6 +68,23 @@ describe("plan_archive_node", () => {
 
     const archived = documentOf(created, "Workspaces/centurion/_archive/auth/auth.md");
     expect(archived.frontmatter.archived).toBeTruthy();
+    // Internal links follow the subtree into the archive instead of pointing
+    // back at live paths that may later disappear.
+    expect(archived.frontmatter.children).toEqual([
+      "[[Workspaces/centurion/_archive/auth/session-store|session-store]]",
+      "[[Workspaces/centurion/_archive/auth/token-refresh|token-refresh]]",
+    ]);
+    const archivedLeaf = documentOf(
+      created,
+      "Workspaces/centurion/_archive/auth/session-store.md",
+    );
+    const edge = (archivedLeaf.frontmatter.influences as Array<Record<string, unknown>>)[0];
+    expect(edge.target).toBe(
+      "[[Workspaces/centurion/_archive/auth/token-refresh|token-refresh]]",
+    );
+    expect(archivedLeaf.frontmatter.parent).toBe(
+      "[[Workspaces/centurion/_archive/auth/auth|auth]]",
+    );
 
     const backend = documentOf(created, "Workspaces/centurion/backend/backend.md");
     expect(backend.frontmatter.children).toEqual([]);

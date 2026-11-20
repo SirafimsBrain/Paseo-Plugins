@@ -1,6 +1,6 @@
 import type { RuntimeSettings } from "../../shared/settings";
 import type { ToolOutcome } from "../mcp-tools";
-import { positiveInt, stringField } from "./frontmatter";
+import { stringField } from "./frontmatter";
 import { appendJournal } from "./journal";
 import {
   BEE_STATUSES,
@@ -90,8 +90,8 @@ function influenceRow(
     status,
   };
   if (impact) row.impact = impact;
-  row.version = positiveInt(target.frontmatter.version) ?? 1;
-  row.revision = positiveInt(target.frontmatter.revision) ?? 1;
+  // No counters in the edge: `version`/`revision` belong to the target and are
+  // read from it live, so a cached copy cannot go stale (live test R5).
   return row;
 }
 
@@ -236,9 +236,11 @@ export function planLink(
           ? entry.target
           : wikilinkFor(target.vaultPath),
       status,
-      version: positiveInt(target.frontmatter.version) ?? 1,
-      revision: positiveInt(target.frontmatter.revision) ?? 1,
     };
+    // Clean the counters an older version cached on the edge; `plan_read` now
+    // takes them from the target.
+    delete updated.version;
+    delete updated.revision;
     if (nextImpact) updated.impact = nextImpact;
     else delete updated.impact;
     entries[index] = updated;

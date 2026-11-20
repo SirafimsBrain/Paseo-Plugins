@@ -93,8 +93,6 @@ describe("plan_link", () => {
         target: "[[Workspaces/centurion/backend/auth/token-refresh|token-refresh]]",
         status: "active",
         impact: "A rotation change invalidates the refresh assumptions",
-        version: 1,
-        revision: 1,
       },
     ]);
     expect(written.body).toContain("## Влияния");

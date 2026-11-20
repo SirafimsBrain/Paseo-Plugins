@@ -4,7 +4,7 @@ import type { RuntimeSettings } from "../../shared/settings";
 import { makeContinuation, withTruncation } from "../continuation";
 import type { ToolOutcome } from "../mcp-tools";
 import { positiveInt, stringField } from "./frontmatter";
-import { journalPathFor } from "./journal";
+import { isJournalPath, journalPathFor } from "./journal";
 import {
   canHaveChild,
   isNodeKind,
@@ -159,10 +159,17 @@ export function planValidate(
   // Files inside the root that are not plan documents: an unparsable
   // frontmatter, an oversized note, a snapshot or a plain note.
   for (const skipped of tree.skipped) {
+    if (isJournalPath(skipped)) continue;
+    // The project is the first folder under `planRoot`, not the vault's first
+    // segment: attributing every issue to `Projects` made the project filter
+    // hide real problems (live test R1).
+    const relative = skipped.startsWith(`${tree.root.relPath}/`)
+      ? skipped.slice(tree.root.relPath.length + 1)
+      : skipped;
     push({
       kind: "not_a_plan",
       path: skipped,
-      project: skipped.split("/")[0] ?? null,
+      project: relative.includes("/") ? relative.split("/")[0] : null,
       message:
         `'${skipped}' is inside the planning root but is not a plan document: its frontmatter ` +
         "does not parse, it has no plan `kind`, it is a stored snapshot or it is too large. " +
@@ -348,6 +355,34 @@ export function planValidate(
       });
     }
 
+    // A growth record that says `done` while its own steps are unfinished is a
+    // contradiction a reader should see (live test N6).
+    if (isRecord(frontmatter.growth)) {
+      const growth = frontmatter.growth;
+      const growthStatus = stringField(growth.status);
+      const steps = Array.isArray(growth.steps) ? growth.steps : [];
+      const unfinished = steps.filter(
+        (step) =>
+          isRecord(step) &&
+          ["pending", "in_progress"].includes(stringField(step.state) ?? "pending"),
+      );
+      if (growthStatus === "done" && unfinished.length > 0) {
+        push({
+          kind: "growth_incomplete",
+          path: node.vaultPath,
+          project,
+          message:
+            `'${node.relPath}' records growth as \`done\` while ${unfinished.length} step(s) ` +
+            "are still pending or in progress. Finish the steps or record the growth as " +
+            "`active`.",
+          data: {
+            status: growthStatus,
+            steps: unfinished.map((step) => stringField((step as Record<string, unknown>).title)),
+          },
+        });
+      }
+    }
+
     if (kind === "leaf" && !seenCycles.has(`n:${node.vaultPath}`)) {
       const cycle = findBeeCycle(tree, node);
       if (cycle) {
@@ -482,6 +517,7 @@ export function planValidate(
         "layout_mismatch",
         "kind_tag_mismatch",
         "bee_cycle",
+        "growth_incomplete",
         "unfinished_operation",
       ],
     },

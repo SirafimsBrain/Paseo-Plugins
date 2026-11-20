@@ -45,6 +45,11 @@ export function formatJournalLine(entry: JournalEntry): string {
  * `<planRoot>/<project>/_journal.md`; a project-less change (a file directly
  * under the root) goes to `<planRoot>/_journal.md`.
  */
+/** True for `<project>/_journal.md` or the journal at the planning root. */
+export function isJournalPath(vaultPath: string): boolean {
+  return path.posix.basename(vaultPath.replace(/\\/g, "/")) === "_journal.md";
+}
+
 export function journalPathFor(root: PlanRoot, project: string | null): string {
   return project
     ? `${root.relPath}/${project}/_journal.md`

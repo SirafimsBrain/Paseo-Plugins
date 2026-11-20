@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { dispatchTool } from "../server/mcp-tools";
 import { makeWorkspace, runtimeSettings, type TestWorkspace } from "./fixtures";
-import { PLAN_FIXTURE } from "./plan-fixtures";
+import { PLAN_FIXTURE, SECOND_PROJECT } from "./plan-fixtures";
 
 const workspaces: TestWorkspace[] = [];
 
@@ -97,6 +97,32 @@ describe("plan_read overview", () => {
     expect(centurion.goals.map((goal) => goal.path)).toEqual([
       "centurion/_goals/session-persistence.md",
     ]);
+  });
+
+  it("honours the project filter and shows approved goals", async () => {
+    const goalPath = "Workspaces/centurion/_goals/session-persistence.md";
+    const approvedGoal = PLAN_FIXTURE[goalPath]
+      .replace("status: proposed", "status: approved")
+      .replace(
+        "materialized: null",
+        'materialized: "[[Workspaces/centurion/backend/backend|backend]]"',
+      );
+    const created = planWorkspace({ ...SECOND_PROJECT, [goalPath]: approvedGoal });
+
+    const focused = await read(created.vault, { project: "centurion" });
+    expect(focused.isError).toBeUndefined();
+    const result = focused.structuredContent as {
+      projects: Array<{ project: string; goals: Array<{ path: string; status: string }> }>;
+    };
+    expect(result.projects.map((project) => project.project)).toEqual(["centurion"]);
+    expect(result.projects[0].goals.map((goal) => goal.path)).toContain(
+      "centurion/_goals/session-persistence.md",
+    );
+    expect(result.projects[0].goals[0].status).toBe("approved");
+
+    const missing = await read(created.vault, { project: "nowhere" });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toContain("no plan documents");
   });
 
   it("does not treat `_index.md` or a snapshot as a project node", async () => {
@@ -197,6 +223,13 @@ describe("plan_read node context", () => {
       title: "Move the session table into SQLite",
     });
     expect(result.tags).toContain("plan/goal");
+  });
+
+  it("returns the free-text notes of the document", async () => {
+    const created = planWorkspace();
+    const outcome = await read(created.vault, { path: "centurion/backend/auth/session-store" });
+    const result = outcome.structuredContent as { notes: string | null };
+    expect(result.notes).toContain("Хэш считается до вставки");
   });
 
   it("reports a resolved influence that is not yet in the tree as unresolved", async () => {

@@ -338,18 +338,21 @@ export function planMoveNode(
   }
 
   const found = findPlanNode(tree, rawPath);
+  // A missing source is an ordinary refusal unless this exact operation already
+  // started: only then may the destination hold the half-moved node. Without
+  // this check an existing destination node looked like a resumed move, and the
+  // call reported success for a path that never existed (live test N1).
+  const sourceMissing = "error" in found;
+  if (sourceMissing && !state.started) {
+    return fail(found.error, { suggestions: found.suggestions });
+  }
   // An interrupted move may already have renamed the folder and stopped before
   // the links were rewritten: the source is then gone and the destination is
   // the only way back in. Both addresses are known, so the operation continues.
   const atDestination =
     tree.nodes.get(`${toVault}.md`) ?? tree.nodes.get(nodeFileFor(toVault)) ?? null;
-  const sourceMissing = "error" in found;
   const node = sourceMissing ? atDestination : found.node;
   if (!node) {
-    if (!sourceMissing) return fail("The node could not be resolved.");
-    if (!state.started) {
-      return fail(found.error, { suggestions: found.suggestions });
-    }
     return fail(
       `'${rawPath}' is gone and nothing sits at '${toRel}', so there is no half-done move to ` +
         `resume. The journal keeps \`op:start ${opId}\`; inspect it before retrying.`,
@@ -378,6 +381,16 @@ export function planMoveNode(
   const newVault = kind === "leaf" ? `${toVault}.md` : nodeFileFor(toVault);
   if (newVault === oldVault) {
     return fail("Nothing to move: `to` resolves to the node's current path.");
+  }
+  // A leaf is a file, so `to` must name the new file. Passing a branching
+  // node's folder used to fall through to a parent-kind refusal that never said
+  // what was wrong with the argument (live test N1, companion case).
+  if (!sourceMissing && kind === "leaf" && tree.nodes.has(nodeFileFor(toVault))) {
+    return fail(
+      `\`to\` must be the leaf's new file path, not another node's folder: ` +
+        `'${toRel}' already names '${nodeFileFor(toVault)}'. Pass e.g. ` +
+        `'${toRel}/<leaf-name>'.`,
+    );
   }
   const oldFolder = path.posix.dirname(oldVault);
   if (kind !== "leaf" && `${toVault}/`.startsWith(`${oldFolder}/`)) {
@@ -714,38 +727,58 @@ export function planArchiveNode(
     );
   }
 
-  // `_archive` is outside the tree walk, so the root file is read directly.
-  const archivedStored = readStored(root, newVault);
-  if ("error" in archivedStored) {
-    return fail(
-      `The subtree moved to '${archiveFolder}', but its root could not be read: ${archivedStored.error}.`,
-      { op_id: opId, partial: true, stage: "archive" },
-    );
+  // `_archive` is outside the tree walk, so the files are read directly. Every
+  // link inside the archived subtree is rewritten to the archived address: a
+  // subtree that kept `children`/`influences` on live paths showed broken links
+  // in Obsidian and could not be re-attached without hand editing (live N5).
+  const mapping = new Map<string, string>();
+  for (const moved of movedNodes) {
+    const target =
+      kind === "leaf"
+        ? newVault
+        : `${archiveFolder}${moved.vaultPath.slice(oldFolder.length)}`;
+    mapping.set(moved.vaultPath.replace(/\.md$/i, ""), target.replace(/\.md$/i, ""));
   }
-  if (archivedStored.document.frontmatter.archived !== now) {
+
+  let rewritten = 0;
+  for (const moved of movedNodes) {
+    const archivedPath =
+      kind === "leaf"
+        ? newVault
+        : `${archiveFolder}${moved.vaultPath.slice(oldFolder.length)}`;
+    const archivedStored = readStored(root, archivedPath);
+    if ("error" in archivedStored) {
+      return fail(
+        `The subtree moved to '${archiveFolder}', but '${archivedPath}' could not be read: ` +
+          `${archivedStored.error}.`,
+        { op_id: opId, partial: true, stage: "archive" },
+      );
+    }
+    const remapped = rewriteLinks(archivedStored.document.frontmatter, mapping, "full");
+    const isRoot = archivedPath === newVault;
+    const next = isRoot ? { ...remapped.next, archived: now } : remapped.next;
+    if (!remapped.changed && !isRoot) continue;
     const change = commitNodeChange(
       settings,
       root,
       {
-        vaultPath: newVault,
-        relPath: newVault,
+        vaultPath: archivedPath,
+        relPath: archivedPath,
         frontmatter: archivedStored.document.frontmatter,
         body: archivedStored.document.body,
       },
       archivedStored,
-      {
-        next: { ...archivedStored.document.frontmatter, archived: now },
-        bump: "revision",
-        reason: "archive",
-      },
+      { next, bump: "revision", reason: "archive" },
       actor,
     );
     if ("error" in change) {
       return fail(
-        `The subtree moved to '${archiveFolder}', but marking it archived failed: ${change.error}.`,
+        `The subtree moved to '${archiveFolder}', but '${archivedPath}' could not be marked ` +
+          `archived: ${change.error}.`,
         { op_id: opId, partial: true, stage: "archive" },
       );
     }
+    rewritten += 1;
   }
 
   // The live tree loses the node: its parent must stop listing it.
@@ -812,6 +845,7 @@ export function planArchiveNode(
     vault_path: newVault,
     project,
     nodes: movedNodes.length,
+    links_rewritten: rewritten,
     parent_revision: parentRevision,
     journal_error: doneError,
     note:

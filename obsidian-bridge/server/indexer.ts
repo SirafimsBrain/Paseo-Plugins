@@ -52,6 +52,7 @@ export class VaultIndexer {
   private root: string | null = null;
   private watcher: fs.FSWatcher | null = null;
   private reconcileTimer: NodeJS.Timeout | null = null;
+  private rescanTimer: NodeJS.Timeout | null = null;
   private pending = new Set<string>();
   private pendingTimer: NodeJS.Timeout | null = null;
   private scanning = false;
@@ -338,10 +339,18 @@ export class VaultIndexer {
     try {
       this.watcher = fs.watch(this.root, { recursive: true }, (_event, filename) => {
         const rel = typeof filename === "string" ? filename.replace(/\\/g, "/") : null;
-        if (!rel || !isMarkdownPath(rel)) return;
+        if (!rel) return;
         const settings = this.settings;
         if (!settings) return;
-        if (isPlanSystemPath(rel)) return;
+        // A folder rename, a delete or a move into `_archive`/`__history` does
+        // not name one note: the per-file flush cannot know which rows vanished,
+        // so it is answered with a reconciliation pass. Without this, search
+        // kept returning archived paths until a manual `obsidian_index`
+        // (live test N3).
+        if (!isMarkdownPath(rel) || isPlanSystemPath(rel)) {
+          this.scheduleRescan();
+          return;
+        }
         if (!isIncluded(rel, settings.includeFolders)) return;
         if (isExcluded(rel, settings.excludeGlobs)) return;
         this.pending.add(rel);
@@ -425,6 +434,16 @@ export class VaultIndexer {
     this.pendingTimer.unref?.();
   }
 
+  /** Debounced reconciliation after a change that may have removed notes. */
+  private scheduleRescan(): void {
+    if (this.rescanTimer) return;
+    this.rescanTimer = setTimeout(() => {
+      this.rescanTimer = null;
+      void this.reconcile();
+    }, 1500);
+    this.rescanTimer.unref?.();
+  }
+
   private async flushPending(): Promise<void> {
     if (!this.store || !this.root || !this.settings) return;
     const paths = [...this.pending];
@@ -442,6 +461,14 @@ export class VaultIndexer {
       }
       try {
         if (!stat || !stat.isFile()) {
+          this.store.deleteNote(rel);
+          changed = true;
+          // A directory event may hide many removed notes under its prefix.
+          if (stat?.isDirectory()) this.scheduleRescan();
+          continue;
+        }
+        if (isPlanSystemPath(rel)) {
+          // A note moved into `_archive` or `__history` leaves the index.
           this.store.deleteNote(rel);
           changed = true;
           continue;
@@ -539,7 +566,12 @@ export class VaultIndexer {
     for (const candidate of paths) {
       if (!candidate) continue;
       const rel = candidate.replace(/\\/g, "/").replace(/^\/+/, "");
-      if (!isMarkdownPath(rel)) continue;
+      // A rename reports the new and the old path; a move into a system folder
+      // or a directory event is reconciled instead of flushed one note at a time.
+      if (!isMarkdownPath(rel) || isPlanSystemPath(rel)) {
+        this.scheduleRescan();
+        continue;
+      }
       if (!isIncluded(rel, settings.includeFolders)) continue;
       if (isExcluded(rel, settings.excludeGlobs)) continue;
       this.pending.add(rel);
@@ -552,6 +584,10 @@ export class VaultIndexer {
     if (this.embedTimer) {
       clearTimeout(this.embedTimer);
       this.embedTimer = null;
+    }
+    if (this.rescanTimer) {
+      clearTimeout(this.rescanTimer);
+      this.rescanTimer = null;
     }
     if (this.embedNotifyTimer) {
       clearTimeout(this.embedNotifyTimer);

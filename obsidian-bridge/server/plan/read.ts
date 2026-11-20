@@ -5,6 +5,8 @@ import { MAX_NOTE_BYTES, isPlanSystemPath, walkMarkdown } from "../vault";
 import { parsePlanDocument, positiveInt, stringField } from "./frontmatter";
 import { BLOCKING_INCIDENT_STATUSES, isPlanKind, type PlanKind } from "./model";
 import { isSnapshotFrontmatter as isSnapshot } from "./snapshot";
+import { extractNotes } from "./sections";
+import { isJournalPath } from "./journal";
 import { resolvePlanPath, resolvePlanRoot, type PlanRoot } from "./paths";
 
 /**
@@ -75,7 +77,9 @@ export function loadPlanTree(root: PlanRoot): PlanTree {
       const text = fs.readFileSync(absolute, "utf-8");
       const parsed = parsePlanDocument(text);
       if ("error" in parsed) {
-        skipped.push(vaultPath);
+        // The plugin writes the project journal itself; it is not a broken
+        // plan document and must not be reported as one (live test R1).
+        if (!isJournalPath(vaultPath)) skipped.push(vaultPath);
         continue;
       }
       const frontmatter = parsed.document.frontmatter;
@@ -243,8 +247,10 @@ function influencesOf(tree: PlanTree, node: PlanNode): {
       node: target,
       status: stringField(record.status),
       impact: stringField(record.impact),
-      version: positiveInt(record.version),
-      revision: positiveInt(record.revision),
+      // The counters describe the target, so they come from the target itself.
+      // A copy in the edge went stale as soon as the target was edited (R5).
+      version: positiveInt(target.frontmatter.version),
+      revision: positiveInt(target.frontmatter.revision),
     });
   }
   return { edges, unresolved };
@@ -299,6 +305,8 @@ export interface PlanReadResult {
   brief?: unknown;
   payload?: unknown;
   tags?: string[];
+  /** Free text of `## Заметки`, the one section the tools carry through. */
+  notes?: string | null;
   growth?: unknown;
   beeCycle?: string[] | null;
   unresolved?: string[];
@@ -315,7 +323,7 @@ function incidentBlocks(node: PlanNode): boolean {
   return status !== null && (BLOCKING_INCIDENT_STATUSES as readonly string[]).includes(status);
 }
 
-function overview(tree: PlanTree): PlanReadResult {
+function overview(tree: PlanTree, projectFilter: string | null): PlanReadResult {
   const projects = new Map<string, PlanNode[]>();
   for (const node of tree.nodes.values()) {
     const project = projectOf(node);
@@ -326,6 +334,7 @@ function overview(tree: PlanTree): PlanReadResult {
   }
 
   const rows = [...projects.entries()]
+    .filter(([project]) => projectFilter === null || project === projectFilter)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([project, nodes]) => {
       const rootNode =
@@ -355,8 +364,13 @@ function overview(tree: PlanTree): PlanReadResult {
         openIncidents: nodes
           .filter((node) => kindOf(node) === "incident" && incidentBlocks(node))
           .map(summarize),
+        // An approved goal is live work, not history: hiding it made the
+        // overview disagree with `plan_search` (R7).
         goals: nodes
-          .filter((node) => kindOf(node) === "goal" && statusOf(node) === "proposed")
+          .filter((node) => {
+            const status = statusOf(node);
+            return kindOf(node) === "goal" && (status === "proposed" || status === "approved");
+          })
           .map(summarize),
       };
     });
@@ -433,8 +447,22 @@ export function planRead(
   }
   const { tree } = loaded;
   const rawPath = typeof input.path === "string" ? input.path.trim() : "";
+  const projectFilter = stringField(input.project);
 
-  if (rawPath.length === 0) return { result: overview(tree) };
+  if (rawPath.length === 0) {
+    const result = overview(tree, projectFilter);
+    // A filter that silently matches nothing would read like an empty plan.
+    if (projectFilter !== null && (result.projects as unknown[]).length === 0) {
+      return {
+        error: {
+          planning_available: true,
+          root: tree.root.relPath,
+          error: `Project '${projectFilter}' has no plan documents under '${tree.root.relPath}'.`,
+        },
+      };
+    }
+    return { result };
+  }
 
   if (isPlanSystemPath(rawPath)) {
     return {
@@ -527,6 +555,7 @@ export function planRead(
       tags: Array.isArray(node.frontmatter.tags)
         ? node.frontmatter.tags.filter((tag): tag is string => typeof tag === "string")
         : [],
+      notes: extractNotes(node.body),
       growth: node.frontmatter.growth ?? null,
       beeCycle: findBeeCycle(tree, node),
       unresolved: influences.unresolved,

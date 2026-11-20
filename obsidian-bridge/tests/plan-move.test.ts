@@ -218,6 +218,41 @@ describe("plan_move_node", () => {
     expect((again.structuredContent as { action: string }).action).toBe("already_done");
   });
 
+  it("refuses a missing source instead of reporting a phantom resumed move", async () => {
+    const created = workspace();
+    const journalPath = path.join(created.vault, "Workspaces/centurion/_journal.md");
+    const journalBefore = fs.existsSync(journalPath)
+      ? fs.readFileSync(journalPath, "utf-8")
+      : "";
+    const destinationBefore = documentOf(created, "Workspaces/centurion/backend/auth/auth.md");
+
+    const outcome = await call(created, "plan_move_node", {
+      path: "centurion/backend/live/missing-leaf",
+      to: "centurion/backend/auth",
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("not a plan node");
+
+    const journalAfter = fs.existsSync(journalPath)
+      ? fs.readFileSync(journalPath, "utf-8")
+      : "";
+    expect(journalAfter).toBe(journalBefore);
+    expect(
+      documentOf(created, "Workspaces/centurion/backend/auth/auth.md").frontmatter.revision,
+    ).toBe(destinationBefore.frontmatter.revision);
+  });
+
+  it("asks for a leaf file name when `to` names another node's folder", async () => {
+    const created = workspace();
+    const outcome = await call(created, "plan_move_node", {
+      path: "centurion/backend/auth/session-store",
+      to: "centurion/backend/auth",
+      accept_external: true,
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("new file path");
+  });
+
   it("refuses a move into a folder without a parent node", async () => {
     const created = workspace();
     const outcome = await call(created, "plan_move_node", {

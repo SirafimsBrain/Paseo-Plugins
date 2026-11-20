@@ -105,6 +105,45 @@ describe("plan_validate", () => {
     expect(unresolved?.data).toMatchObject({ target: "[[Workspaces/centurion/nowhere|nowhere]]" });
   });
 
+  it("does not report its own journal as a non-plan file", async () => {
+    const created = workspace({
+      "Workspaces/centurion/_journal.md":
+        "2026-11-18T10:00:00.000Z · plan_create_node · [[Workspaces/centurion/centurion|Centurion]] · v1 r1 · actor: agent\n",
+    });
+    const result = await report(created);
+    expect(
+      result.issues.filter((issue) => issue.path?.endsWith("/_journal.md")),
+    ).toEqual([]);
+    expect(result.issues.filter((issue) => issue.kind === "not_a_plan")).toEqual([]);
+  });
+
+  it("attributes a non-plan file to its project so the filter keeps it", async () => {
+    const created = workspace({
+      "Workspaces/centurion/notes/misc.md": "# Not a plan\n",
+    });
+    const result = await report(created, { project: "centurion" });
+    expect(
+      result.issues.some(
+        (issue) => issue.kind === "not_a_plan" && issue.path?.endsWith("misc.md"),
+      ),
+    ).toBe(true);
+  });
+
+  it("reports growth marked done with unfinished steps", async () => {
+    const created = workspace();
+    expectOk(
+      await call(created, "plan_growth", {
+        path: "centurion/backend/auth/token-refresh",
+        status: "done",
+        progress: 100,
+        steps: [{ title: "Still running", state: "in_progress" }],
+        accept_external: true,
+      }),
+    );
+    const result = await report(created, { project: "centurion" });
+    expect(result.issues.some((issue) => issue.kind === "growth_incomplete")).toBe(true);
+  });
+
   it("reports a body that no longer matches its frontmatter", async () => {
     const text = planFiles()["Workspaces/centurion/backend/auth/token-refresh.md"].replace(
       "## Заметки",

@@ -2,6 +2,33 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.21.15 — fixes from the second live plan test (2026-11-20)
+
+Patch release (0.21.14 → 0.21.15). A second full plan (71 live nodes) was written through the installed `plan_*` tools on
+a real vault; the deviations below were reproduced in tests. No Paseo API change: SDK `@getpaseo/plugin ^0.16.0`, host
+floor `>=0.15.0`, settings schema version 4, MCP catalogue and every existing tool input are unchanged. `plan_read`
+additionally returns `notes`, and `plan_validate` gains the `growth_incomplete` rule.
+
+| Finding | Behaviour after the fix |
+| --- | --- |
+| `plan_move_node` reported `ok: true, action: "resumed"` for a source that never existed, journaled `op:start`/`op:done` and bumped the destination revision | a missing source is refused with `is not a plan node` unless the same `op_id` already has an `op:start` marker; nothing is journaled and no revision moves. Passing a branching node's folder as `to` for a leaf now answers that `to` must be the new leaf file path |
+| `plan_update_node` could not change only `## Заметки` | `notes` counts as a change on its own and appears in the "Nothing to update" hint |
+| a snapshot did not keep `## Заметки`, so a restore mixed snapshot fields with live notes | snapshots store the notes section; `plan_restore` writes it back with the rest of the content |
+| `plan_history` returned `count: 0` for a branching node's folder path | it uses the same resolver as `plan_read`/`plan_restore`; an unknown node is refused with suggestions instead of zero |
+| `plan_validate` reported the plugin's own `_journal.md` as `not_a_plan`, attributed issues to `Projects` and let the project filter hide them | the journal is not a skipped document; `project` is the first folder under `planRoot`, so the filter keeps real issues. A `done` growth record with pending/in-progress steps is reported as `growth_incomplete` |
+| `plan_read` ignored `project` in the overview and omitted notes; the overview hid approved goals | the overview honours `project` (an unknown project is an error) and lists `proposed` **and** `approved` goals; a node result carries `notes` |
+| `plan_archive_node` left `parent`/`children`/`influences` inside the archived subtree pointing at live paths | every internal link is rewritten to the archived address; the archived root is marked `archived` in the same pass |
+| influence edges cached the target's `version`/`revision` and went stale | new and updated edges carry no counters; `plan_read` reports the target's current counters, and legacy cached fields are dropped on update |
+| search served paths of archived/renamed notes until a manual `obsidian_index` | a watcher event for a directory, a delete or a path in `_archive`/`__history` schedules a debounced reconciliation; the per-file flush drops a note that moved into a system folder |
+| `plan_create_node` accepted `path: "<project>/<project>"` for a root and created a nested project | a root must be a single project folder (`<project>` → `<project>/<project>.md`) |
+
+Evidence: `npm run typecheck` exit 0; `npm test` **46 suites / 397 tests** pass, including new cases for the phantom
+move, a leaf's folder destination, notes-only updates, notes in snapshots/restore, folder-path history, the overview
+filter and approved goals, `notes` in `plan_read`, archived internal links, the journal exclusion, project attribution,
+`growth_incomplete` and the canonical root path. The indexer change is covered by the existing scan tests; the watcher
+path itself is not exercised by an automated test. Not deployed and not exercised against a live Paseo daemon or
+Obsidian application in this pass; Linux is the target platform, macOS and Windows remain future work.
+
 ## Plugin 0.21.14 — fixes from the live plan test (2026-11-19)
 
 Patch release (0.21.13 → 0.21.14). A 57-document plan was written through `plan_*` on a real vault and its failures were

@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.21.14)
+## What it does (0.21.15)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -139,11 +139,15 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   back as a new revision.
   Every operation journals `op:start`/`op:done`, snapshots each file it changes, and repeating it with the same `op_id`
   resumes an interrupted run instead of duplicating it.
-- **Hardened by a live plan test (0.21.14).** Approving a goal produces the layout the schema requires; archiving takes
-  the node's own folder and refuses a node whose kind and path disagree; a kind change between a leaf and a branching
-  node moves the file, its snapshots and every link to it; nested frontmatter (`brief`, `plan`) is read as written;
-  `plan_search` drops graph-only neighbours that contain none of the query words; and reindexing a note with repeated
-  chunk text no longer fails on a duplicate embedding.
+- **Hardened by two live plan tests (0.21.14, 0.21.15).** Approving a goal produces the layout the schema requires;
+  archiving takes the node's own folder and refuses a node whose kind and path disagree; a kind change between a leaf
+  and a branching node moves the file, its snapshots and every link to it; nested frontmatter (`brief`, `plan`) is read
+  as written; `plan_search` drops graph-only neighbours that contain none of the query words; and reindexing a note
+  with repeated chunk text no longer fails on a duplicate embedding. Since 0.21.15 `plan_move_node` refuses a missing
+  source instead of reporting a phantom resumed move, `plan_update_node` can change `## Заметки` alone, snapshots keep
+  the notes section, `plan_history` accepts a branching node's folder path, `plan_read` returns `notes`, honours its
+  `project` filter and lists approved goals, `plan_archive_node` rewrites internal links inside the archived subtree,
+  and the indexer reconciles renames, deletes and moves into `_archive` instead of serving dead paths.
 - **Per-agent injection marker (0.9.11).** Each hook records how an agent was provisioned
   (`obsidian-bridge: { mode: "mcp" | "tool" | "config" | "skipped", reason, at }`) in the daemon's agent `metadata`:
   via the create hook's result, and via `setMetadata` on later opens, because 0.16.0 lets `agent.open.before` change only

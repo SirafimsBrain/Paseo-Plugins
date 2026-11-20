@@ -105,6 +105,38 @@ describe("plan_history", () => {
     expect(result.note).toContain("No snapshots yet");
   });
 
+  it("accepts the folder path of a branching node", async () => {
+    const created = workspace();
+    await dispatchTool(
+      "plan_create_node",
+      { path: "centurion/backend/auth/flows", kind: "subbranch", name: "Flows" },
+      runtimeSettings(created.vault),
+    );
+    await dispatchTool(
+      "plan_update_node",
+      { path: "centurion/backend/auth/flows", description: "first edit" },
+      runtimeSettings(created.vault),
+    );
+
+    const outcome = await history(created, { path: "centurion/backend/auth/flows" });
+    expect(outcome.isError).toBeUndefined();
+    const result = outcome.structuredContent as {
+      count: number;
+      snapshots: Array<{ path: string; revision: number }>;
+    };
+    expect(result.count).toBe(1);
+    expect(result.snapshots[0].path).toBe(
+      "Workspaces/centurion/backend/auth/flows/__history/flows.v1.r1.md",
+    );
+  });
+
+  it("refuses a node that does not exist instead of answering zero", async () => {
+    const created = workspace();
+    const outcome = await history(created, { path: "centurion/backend/auth/not-a-node" });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("not a plan node");
+  });
+
   it("refuses a snapshot or archived path as the subject", async () => {
     const created = workspace();
     for (const value of [
