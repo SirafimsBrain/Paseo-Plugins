@@ -2,7 +2,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { dispatchTool } from "../server/mcp-tools";
+import { indexPathFor } from "../server/paths";
 import { parsePlanDocument } from "../server/plan/frontmatter";
+import { scanVault } from "../server/scan";
+import { BridgeStore } from "../server/store";
 import { makeWorkspace, runtimeSettings, type TestWorkspace } from "./fixtures";
 import { planFiles } from "./plan-fixtures";
 
@@ -38,9 +41,26 @@ async function call(
   return dispatchTool(name, input, runtimeSettings(created.vault, overrides));
 }
 
+/** A full scan, the same pass `obsidian_index` runs for the plugin. */
+function indexVault(created: TestWorkspace) {
+  const store = new BridgeStore(indexPathFor(created.vault), { stemming: false });
+  try {
+    return scanVault({
+      root: created.vault,
+      store,
+      settings: runtimeSettings(created.vault),
+      force: true,
+    });
+  } finally {
+    store.close();
+  }
+}
+
 describe("plan_archive_node", () => {
   it("moves a subtree into _archive, marks it and unlists it", async () => {
     const created = workspace();
+    // Index the live tree first: after the archive, a scan has rows to drop.
+    indexVault(created);
     const outcome = await call(created, "plan_archive_node", {
       path: "centurion/backend/auth",
       accept_external: true,
@@ -100,10 +120,25 @@ describe("plan_archive_node", () => {
     const read = await call(created, "plan_read", { path: "centurion/backend/auth" });
     expect(read.isError).toBe(true);
 
-    const search = await call(created, "plan_search", { query: "session-store", kind: "leaf" });
+    // The rescan drops the three rows that moved into `_archive`.
+    const rescan = indexVault(created);
+    expect(rescan.removed).toBe(3);
+    // Four live documents remain, plus the `_journal.md` line the archive wrote.
+    expect(rescan.notes).toBe(5);
+
+    // Text that only the archived leaves carry must find nothing.
+    const archivedOnly = await call(created, "plan_search", { query: "SHA-256" });
+    expectOk(archivedOnly);
+    expect((archivedOnly.structuredContent as { hits?: unknown[] }).hits ?? []).toEqual([]);
+
+    // A live query still works and never answers with an archived path.
+    const search = await call(created, "plan_search", { query: "Centurion" });
     expectOk(search);
-    const hits = (search.structuredContent as { results?: Array<{ path: string }> }).results ?? [];
-    expect(hits.every((hit) => !hit.path.includes("/_archive/"))).toBe(true);
+    const hits = (search.structuredContent as { hits?: Array<{ path: string }> }).hits ?? [];
+    expect(hits.length, JSON.stringify(search.structuredContent)).toBeGreaterThan(0);
+    expect(hits.every((hit) => !hit.path.includes("_archive") && !hit.path.includes("__history"))).toBe(
+      true,
+    );
   });
 
   it("keeps the history of the archived subtree", async () => {
