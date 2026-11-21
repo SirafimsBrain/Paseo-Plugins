@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.21.16)
+## What it does (0.21.17)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -39,6 +39,17 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   "Planning directory" report whether `<directory>/<planning folder>` exists and create it with missing parents, so a
   typo is caught before the first `plan_*` call. Both are confined to the configured directory exactly like the tools;
   the per-project subfolder is still created by `plan_*` itself.
+- **One writer at a time (0.21.17).** Every mutating `plan_*` call takes a write lock on its plan tree, the way
+  SQLite allows one writer: a second agent waits up to ten seconds and is then told to repeat the call after reading the
+  node again, instead of both read-modify-writing the same project. Lock directories live under the plugin's data
+  directory, never in the vault, and a lock left by a crashed process is recovered by pid or age.
+- **A restore puts text back, not lifecycle (0.21.17).** `plan_restore` keeps the live `status` and reports the
+  snapshot's as `snapshot_status`; moving status stays `plan_set_status`. `plan_growth` names its new counters apart from
+  the `previous` pair it replaced, and an identical `plan_link` repeat answers `action: "unchanged"` with
+  `written: false` instead of an error.
+- **The stable MCP copy follows the installed version (0.21.17).** After `paseo plugin update`, the next agent launch
+  rewrites the stable bundle from the checkout, so agents stop starting the previous version while they wait for
+  `paseo plugin reload`.
 - **The plugin's boundary is enforced by the plugin (0.20.13).** The configured directory is the whole of what any tool
   may touch: paths above it, beside it and `.obsidian` are refused, and a symlink is resolved with `realpath` on both
   sides, so a symlinked note or role directory cannot step outside it. Reads and edits accept only the configured

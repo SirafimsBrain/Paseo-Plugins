@@ -180,12 +180,16 @@ describe("plan_growth", () => {
     expectOk(first);
     expect(first.structuredContent).toMatchObject({
       revision: 2,
+      previous: { version: 1, revision: 1 },
       growth: {
         status: "active",
         summary: "Started the durable table",
         progress: 40,
       },
     });
+    // The counters this write replaced travel under `previous`, never as
+    // `node.revision` beside the new revision (0.21.17).
+    expect((first.structuredContent as { node?: unknown }).node).toBeUndefined();
 
     const second = await call(created, "plan_growth", {
       path: GOAL,

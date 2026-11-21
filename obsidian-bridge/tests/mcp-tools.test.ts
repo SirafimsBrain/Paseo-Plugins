@@ -143,6 +143,11 @@ describe("plan tool descriptions", () => {
     expect(descriptionOf("plan_archive_node")).toContain("no un-archive tool");
     expect(descriptionOf("plan_goal")).toContain("no `status` argument");
     expect(descriptionOf("plan_create_node")).toContain("never `<project>/<project>`");
+    // 0.21.17: the three answers a live run misread.
+    expect(descriptionOf("plan_restore")).toContain("`status` stay as the live file");
+    expect(descriptionOf("plan_restore")).toContain("`snapshot_status`");
+    expect(descriptionOf("plan_growth")).toContain("`previous` holds the pair");
+    expect(descriptionOf("plan_link")).toContain('action: "unchanged"');
   });
 });
 

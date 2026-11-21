@@ -123,7 +123,9 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "`plan_link`/`plan_incident`/`plan_goal`/`plan_growth` for relations and progress, " +
     "`plan_move_node`/`plan_archive_node` to restructure, `plan_restore` to bring a snapshot " +
     "back — passing the `revision` you read as `expected_revision`. (4) `plan_validate " +
-    "{ project }` after a batch of changes. `plan_history` is the change log of one node; " +
+    "{ project }` after a batch of changes. Planning writes are serialized per plan tree, one " +
+    "writer at a time; if a write answers that another agent is writing, it wrote nothing — wait " +
+    "ten seconds, re-read the node and repeat it. `plan_history` is the change log of one node; " +
     "`<project>/_journal.md` is the change log of the project and is read like a note.\n\n" +
     "Four skills document these workflows in more detail; load the one that matches the task: " +
     "`obsidian-bridge` (read → cite → write), `planning-create` (grow a tree), " +

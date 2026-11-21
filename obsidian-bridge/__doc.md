@@ -489,8 +489,38 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   `embeddingIdleMinutes`.
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
+- Planning writes are serialized per tree by a lock directory under `$PASEO_HOME/plugins/obsidian-bridge/locks` (0.21.17):
+  a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
+  lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17)
+
+### 0.21.17 — one writer at a time, and four answers a live run misread
+
+Patch release (0.21.16 → 0.21.17). The live planning run behind 0.21.16 left nine findings; this release fixes the four
+that could cost a wrong write, and adds the concurrency model the orchestration needs once two agents work on the same
+plan. No tool name, setting or host requirement changes; `plan_restore`, `plan_growth` and `plan_link` answer
+differently, and a mutating call can now be refused because another agent holds the tree.
+
+| Finding | Fix |
+| --- | --- |
+| U1 `plan_restore` resurrected an old `status` | `status` is no longer a restored field. A restore writes content, notes and counters; the live `status` stays, the result reports it as `status` and the snapshot's as `snapshot_status`, and a snapshot that differs only in status is refused with `plan_set_status` as the next call. A status change had no journal line reading as one, which is how a finished node came back to `in_progress` unnoticed |
+| U2 `plan_growth` returned `node.revision: 6` beside `revision: 7` | the pre-write counters travel as `previous: { version, revision }`; `node` is gone from the result, so an agent cannot take the old number for `expected_revision` |
+| U3 an identical `plan_link` repeat read as a failure | the edge already saying what was asked is a no-op success: `ok: true`, `action: "unchanged"`, `written: false`, `revision` unchanged, and a note saying not to repeat it. Same shape as removing an edge that is not there |
+| U7 the stable MCP bundle kept the old version after `paseo plugin update` | `refreshStableEntry()` runs at MCP startup: it compares the version this process runs with the checkout's `package.json` and rewrites the stable copy when they differ. The next agent launch gets the installed version without `paseo plugin reload`; the current process keeps the code it loaded and says so on stderr |
+| two agents in one project | every mutating `plan_*` call takes a per-tree write lock with a 10-second wait, then answers `reason: "locked"` and asks for a re-read and repeat. See §18 |
+
+Bootstrapping caveat: the check that repairs the stable copy lives inside the copy being installed, so installing
+0.21.17 itself still needs one `paseo plugin reload`; from 0.21.17 onward an update heals on the next agent launch.
+
+Not fixed here, recorded rather than silently dropped: U4 (`documents` count under a `project` filter), U5 (a snippet of
+`—` for a heading-only hit), U6 (`from` without `.md` beside `to`/`path` with it), U8 (no `plan_*` in the attached
+fallback surface), U9 (`plan_import` was not exercised in the live run).
+
+Evidence: `npm run typecheck` exit 0; `npm test` **47 suites / 414 tests** pass, including new cases for the lock
+(exclusivity with the 10-second instruction, a waited acquisition, dead-pid and expired-holder recovery, and the
+dispatch wiring), the restore status rule (kept, and status-only refused) and the link no-op. `pretest` rebuilt
+`dist/mcp-server.js`. Not exercised against a live Paseo daemon or Obsidian app in this pass.
 
 ### 0.21.16 — every tool states how to use it and why
 
@@ -1784,3 +1814,38 @@ about arguments.
   discovered from one read (`plan_read` on a node shows the whole shape) instead of from a schema dump.
 - **The fallback surface stays document-only in this release.** Half a planning toolset attached through a second
   transport would be worse than a clear gap: the skills would describe tools that do not exist for that agent.
+
+## 18. Concurrency: one writer at a time (0.21.17)
+
+**The model is SQLite's, chosen on purpose.** A plan is a folder of Markdown files on one machine, and an orchestration
+can put two agents on the same project. The access model that fits is SQLite's single writer with `busy_timeout`, not a
+database server's transactions: one write lock per plan tree, a bounded wait, a clear refusal that tells the agent to
+wait ten seconds, and recovery of a lock left by a crash. A full transactional model — write-ahead log, two-phase
+commit, multi-version snapshots, deadlock detection — would add a recovery engine, a new on-disk format and a large test
+surface to protect a handful of `rename`s.
+
+**The unit is the tree, not the node.** `expected_revision` already stops two agents editing the same node. What it
+cannot see is a move or an archive rewriting *other* files (`parent`, `children`, influences, the journal): each agent
+can pass its own revision check and still lose the other's link rewrite. So the lock covers `planRoot/<project>` — the
+same scope the tools already treat as one plan.
+
+| Aspect | Decision |
+| --- | --- |
+| Holder of the lock | every mutating tool: create, update, status, link, incident, goal, growth, move, archive, approve, restore, import. Reads (`plan_scope`, `plan_read`, `plan_search`, `plan_history`, `plan_validate`) never take it |
+| Mechanism | `mkdir` of `plan-<hash>.lock` under `$PASEO_HOME/plugins/obsidian-bridge/locks/`. `mkdir` is the one atomic create on every supported platform, and the directory stays out of Obsidian's note tree |
+| Diagnosis | `owner.json` inside the lock: pid, host, tool, actor, start time. The refusal names the tool, actor and pid, so the waiting agent knows a peer is writing and not that its call was wrong |
+| Wait | up to 10 seconds (`busy_timeout`), polling every 100–180 ms with jitter. Then `isError` with `reason: "locked"`, `retry_after_seconds: 10` and the holder; the text says to wait 10 seconds, re-read the node and repeat. `$OBSIDIAN_BRIDGE_LOCK_WAIT_MS` exists for tests and for a slower filesystem |
+| Crash recovery | a dead pid on this host is taken over immediately; any lock older than 5 minutes is taken over even across hosts. This is SQLite's hot-journal case, not a heartbeat protocol |
+| Release | the tool releases its own lock in `finally`, and only when the owner file still names its pid — a recovered lock is never deleted by the process that lost it |
+| Readers | lock-free, like a WAL reader. Every file is replaced by `rename`, so a read sees an old or a new revision of a file, never a half-written one |
+| Multi-file view | a move or archive is several atomic writes; a reader can observe the tree between them. That window is what `plan_validate` reports and a re-read repairs. It is the deliberate price of not writing a transaction log |
+| `op_id` is not a lock | it repairs an *interrupted* operation by one agent; the lock prevents a *concurrent* one. They answer different failures and both stay |
+
+**What is deliberately outside the model**, and stated in the code: two machines sharing a vault over a network
+filesystem (the pid check and the clock are local), a legitimate write longer than five minutes (it would be taken
+over), and Obsidian saving a note by hand (that is the external-edit check, not the lock). A refusal is a normal answer
+with a next step, never a thrown error: the tool wrote nothing, so repeating it after the other write finishes is safe.
+
+Tests: `tests/plan-lock.test.ts` covers exclusivity and the refusal text, a waiter that gets the lock when the first
+writer finishes, dead-pid recovery, expired cross-host recovery, and the dispatch path (a tool call refused by a held
+lock, then succeeding and leaving no lock directory behind).

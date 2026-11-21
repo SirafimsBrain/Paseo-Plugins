@@ -12,7 +12,9 @@ import { planValidate } from "./validate";
 import { planReadTool } from "./read";
 import { planSearch } from "./search";
 import { planScopeTool } from "./scope";
-import { planCreateNode, planHistory, planSetStatus, planUpdateNode } from "./write";
+import { acquirePlanWriteLock } from "./lock";
+import { resolvePlanRoot } from "./paths";
+import { actorOf, fail, planCreateNode, planHistory, planSetStatus, planUpdateNode } from "./write";
 
 /**
  * `plan_*` tool catalogue and dispatch.
@@ -335,7 +337,9 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
         "before writing. Only the source stores the edge (`influences`), and Obsidian shows the " +
         "reverse as a backlink, so the two sides cannot disagree: `plan_read` on the target shows " +
         "it under `influencedBy`. Calling it again for the same pair updates status and impact " +
-        "instead of duplicating the edge; `remove: true` drops it. A cycle is allowed and " +
+        "instead of duplicating the edge; `remove: true` drops it, and an identical repeat writes " +
+        "nothing and answers `action: \"unchanged\"` with `written: false` — that is the state you " +
+        "asked for, not an error to retry. A cycle is allowed and " +
         "reported by `plan_read` as `beeCycle` — name it and ask which edge is wrong rather than " +
         "cutting one silently.",
     ),
@@ -453,7 +457,9 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
         `${GROWTH_LIFECYCLE}. This does not change the node's \`status\` (use \`plan_set_status\`) ` +
         "and does not decide that the work is done: `plan_read.growth` shows the record, and " +
         "`plan_validate` reports `growth_incomplete` when `done` growth still has pending steps. " +
-        "A snapshot of the previous state is written first.",
+        "A snapshot of the previous state is written first. The result's `version`/`revision` are " +
+        "the new counters; `previous` holds the pair this write replaced, so never feed that back " +
+        "as `expected_revision`.",
     ),
     inputSchema: {
       type: "object",
@@ -578,10 +584,11 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
         "`restored_from: \"v<v> r<r>\"`. The content restored is what the snapshot holds, " +
         "`## Заметки` included; the version never goes back and the current state is snapshotted " +
         "first, so a restore is itself reviewable and reversible. Relations (`parent`, `children`, " +
-        "`influences`, blocks, goal, materialized) stay as the live file has them, and a snapshot " +
-        "whose `kind` differs from the live node is refused — that is a version event, not an " +
-        "edit. Do not use it to undo a status change or a move: those have `plan_set_status` and " +
-        "`plan_move_node`.",
+        "`influences`, blocks, goal, materialized) and `status` stay as the live file has them — a " +
+        "restore puts text back and never moves lifecycle, because that is `plan_set_status`; the " +
+        "result names the kept `status` and, when the snapshot disagrees, `snapshot_status`. A " +
+        "snapshot whose `kind` differs from the live node is refused — that is a version event, " +
+        "not an edit. Do not use it to undo a move: that is `plan_move_node`.",
     ),
     inputSchema: {
       type: "object",
@@ -680,10 +687,40 @@ const HANDLERS: Record<string, PlanHandler> = {
 };
 
 /**
+ * Tools that change a plan file.
+ *
+ * Every one takes the per-tree write lock for the duration of the call: a move
+ * or an archive rewrites other files (links, the parent's `children`, the
+ * journal), so two agents must not read-modify-write the same project at once.
+ * Reads (`plan_scope`, `plan_read`, `plan_search`, `plan_history`,
+ * `plan_validate`) never take it; `plan_import` takes it even for a dry run,
+ * which only costs one directory create (0.21.17).
+ */
+const MUTATING_TOOLS: ReadonlySet<string> = new Set([
+  "plan_create_node",
+  "plan_update_node",
+  "plan_set_status",
+  "plan_link",
+  "plan_incident",
+  "plan_goal",
+  "plan_growth",
+  "plan_move_node",
+  "plan_archive_node",
+  "plan_approve_goal",
+  "plan_restore",
+  "plan_import",
+]);
+
+/**
  * Dispatches a `plan_*` call, or returns `null` when the name is not a planning
  * tool. Planning calls run before the vault index is opened, so `plan_scope`
  * can report a missing or empty root without creating an index; `plan_search`
  * opens the index itself because ranking is its whole purpose.
+ *
+ * A mutating call is serialized per planning tree (0.21.17): one writer at a
+ * time, waiting up to ten seconds, because the alternative — two agents
+ * rewriting each other's links in the same project — is the failure the
+ * revision check cannot see.
  */
 export async function dispatchPlanTool(
   name: string,
@@ -691,5 +728,25 @@ export async function dispatchPlanTool(
   settings: RuntimeSettings,
 ): Promise<ToolOutcome | null> {
   const handler = HANDLERS[name];
-  return handler ? await handler(settings, input) : null;
+  if (!handler) return null;
+  if (!MUTATING_TOOLS.has(name)) return await handler(settings, input);
+
+  const resolved = resolvePlanRoot(settings);
+  // A missing or invalid root is the tool's own refusal to give, with its own
+  // reason; there is nothing to lock in that case.
+  if ("reason" in resolved) return await handler(settings, input);
+
+  const lock = await acquirePlanWriteLock(resolved.root, { tool: name, actor: actorOf(input) });
+  if ("busy" in lock) {
+    return fail(lock.busy, {
+      reason: "locked",
+      retry_after_seconds: 10,
+      holder: lock.holder,
+    });
+  }
+  try {
+    return await handler(settings, input);
+  } finally {
+    lock.release();
+  }
 }

@@ -1,6 +1,6 @@
 import type { RuntimeSettings } from "../../shared/settings";
 import type { ToolOutcome } from "../mcp-tools";
-import { stringField } from "./frontmatter";
+import { positiveInt, stringField } from "./frontmatter";
 import { appendJournal } from "./journal";
 import {
   GROWTH_STATUSES,
@@ -15,7 +15,6 @@ import {
   kindOf,
   loadPlanTreeFor,
   projectOf,
-  summarize,
   type PlanNode,
 } from "./read";
 import {
@@ -194,6 +193,13 @@ export function planGrowth(
   record.updated = nowIso();
 
   const actor = actorOf(input);
+  // The counters this write replaces. They used to travel as `node.revision`
+  // beside the new top-level `revision`, so an agent could take the old number
+  // and write it back as `expected_revision` (0.21.17).
+  const previous = {
+    version: positiveInt(frontmatter.version) ?? 1,
+    revision: positiveInt(frontmatter.revision) ?? 1,
+  };
   const change = commitNodeChange(
     settings,
     root,
@@ -222,7 +228,7 @@ export function planGrowth(
     path: node.relPath,
     vault_path: node.vaultPath,
     kind,
-    node: summarize(node),
+    previous,
     growth: record,
     version: change.version,
     revision: change.revision,

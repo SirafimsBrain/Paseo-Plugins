@@ -1,6 +1,6 @@
 import type { RuntimeSettings } from "../../shared/settings";
 import type { ToolOutcome } from "../mcp-tools";
-import { stringField } from "./frontmatter";
+import { positiveInt, stringField } from "./frontmatter";
 import { appendJournal } from "./journal";
 import {
   BEE_STATUSES,
@@ -224,10 +224,27 @@ export function planLink(
     const currentImpact = stringField(entry.impact) ?? "";
     const nextImpact = impact ?? currentImpact;
     if (status === current && nextImpact === currentImpact) {
-      return fail(
-        "Nothing to update: the influence already has this status and impact. Pass a new " +
-          "`status` or `impact`, or `remove: true` to drop the edge.",
-      );
+      // The edge already says exactly what was asked for. Refusing this with an
+      // error read as "the link failed" and invited a retry of the same call
+      // (live test U3); the answer is a no-op success, symmetric with removing
+      // an edge that is not there.
+      return json({
+        ok: true,
+        action: "unchanged",
+        removed: false,
+        written: false,
+        source: summarize(source),
+        target: summarize(target),
+        status,
+        impact: nextImpact.length > 0 ? nextImpact : null,
+        version: positiveInt(frontmatter.version),
+        revision: positiveInt(frontmatter.revision),
+        note:
+          `The influence '${source.relPath}' → '${target.relPath}' already has status \`${status}\`` +
+          `${nextImpact.length > 0 ? " and that impact" : ""}: nothing was written, because the edge ` +
+          "already says what you asked for. Do not repeat this call — pass a different `status` or " +
+          "`impact`, or `remove: true` to drop the edge.",
+      });
     }
     const updated: Record<string, unknown> = {
       ...entry,

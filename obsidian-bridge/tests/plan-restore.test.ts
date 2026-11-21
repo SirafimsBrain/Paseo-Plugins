@@ -124,6 +124,73 @@ describe("plan_restore", () => {
     expect(live.body).not.toContain("Changed notes.");
   });
 
+  it("keeps the live status and reports the snapshot's", async () => {
+    const created = workspace();
+    expectOk(
+      await call(created, "plan_update_node", {
+        path: "centurion/backend/auth/session-store",
+        description: "Wrong rewrite of the description.",
+        accept_external: true,
+      }),
+    );
+    expectOk(
+      await call(created, "plan_set_status", {
+        path: "centurion/backend/auth/session-store",
+        status: "done",
+      }),
+    );
+
+    const outcome = await call(created, "plan_restore", {
+      path: "centurion/backend/auth/session-store",
+      version: 2,
+      revision: 4,
+    });
+    expectOk(outcome);
+    expect(outcome.structuredContent).toMatchObject({
+      status: "done",
+      snapshot_status: "in_progress",
+    });
+
+    // The text goes back; the lifecycle does not (0.21.17).
+    const live = documentOf(created, LEAF);
+    expect(String(live.frontmatter.description).trim()).toBe(ORIGINAL_DESCRIPTION);
+    expect(live.frontmatter.status).toBe("done");
+  });
+
+  it("points a status-only difference at plan_set_status instead of restoring it", async () => {
+    const created = workspace();
+    expectOk(
+      await call(created, "plan_update_node", {
+        path: "centurion/backend/auth/session-store",
+        description: "Wrong rewrite of the description.",
+        accept_external: true,
+      }),
+    );
+    expectOk(
+      await call(created, "plan_restore", {
+        path: "centurion/backend/auth/session-store",
+        version: 2,
+        revision: 4,
+      }),
+    );
+    expectOk(
+      await call(created, "plan_set_status", {
+        path: "centurion/backend/auth/session-store",
+        status: "done",
+      }),
+    );
+
+    const outcome = await call(created, "plan_restore", {
+      path: "centurion/backend/auth/session-store",
+      version: 2,
+      revision: 4,
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("only in `status`");
+    expect(outcome.text).toContain("plan_set_status");
+    expect(documentOf(created, LEAF).frontmatter.status).toBe("done");
+  });
+
   it("refuses a snapshot that does not exist", async () => {
     const created = workspace();
     const outcome = await call(created, "plan_restore", {

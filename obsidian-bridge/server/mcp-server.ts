@@ -1,6 +1,8 @@
 import { MCP_TOOLS, dispatchTool, mcpInstructions } from "./mcp-tools";
 import { normalizeTruncation } from "./continuation";
 import { resolveRoleDirs } from "./dirs";
+import { resolveInstalledMcpEntry } from "./mcp-launch";
+import { refreshStableEntry } from "./mcp-stable";
 import { parseSettingsFile } from "./settings-file";
 
 /**
@@ -44,6 +46,18 @@ function respondError(id: number | string | null, code: number, message: string)
 function main(): void {
   const settings = parseSettingsFile();
   const serverInfo = { name: "obsidian-bridge", version: SERVER_VERSION };
+
+  // `paseo plugin update` does not restart the plugin host, so the stable copy
+  // an agent launches can still hold the previous version. Repair it from the
+  // installed checkout before serving anything (0.21.17); this process keeps
+  // the code it already loaded, stderr is the only place to say so.
+  const refresh = refreshStableEntry(resolveInstalledMcpEntry(), SERVER_VERSION);
+  if (refresh?.updated) {
+    process.stderr.write(
+      `[obsidian-bridge] stable MCP entry refreshed ${refresh.running} → ${refresh.installed}; ` +
+        "the next agent launch uses the installed version\n",
+    );
+  }
 
   process.stderr.write(
     `[obsidian-bridge] MCP server ready (vault: ${

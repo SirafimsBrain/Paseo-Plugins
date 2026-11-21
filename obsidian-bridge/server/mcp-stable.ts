@@ -37,6 +37,18 @@ import { paseoHome } from "./paths";
  *
  * Both steps are best-effort: a failure leaves the previous behaviour in place
  * and is reported in `paseo plugin logs obsidian-bridge`, never thrown.
+ *
+ * ## A copy that follows the installed version (0.21.17)
+ *
+ * `paseo plugin update` replaces the checkout but does not restart the plugin
+ * process, so the stable copy kept serving the previous version until
+ * `paseo plugin reload` — an update that looked half-applied (live test U7).
+ * The MCP server now compares the version it runs with the version the
+ * installed checkout ships and rewrites the stable copy when they differ, so
+ * the next agent launch gets the installed version without a reload. It never
+ * copies on content alone: a same-version rebuild stays a development case for
+ * `paseo plugin reload`, and rewriting the file on every start would race the
+ * agent that is starting from it.
  */
 
 /** Stable copy of the bundled server, inside the plugin's data directory. */
@@ -84,6 +96,86 @@ export function ensureStableEntry(
 /** The stable entry created by this run, or `null` — consumed by `mcp-launch.ts`. */
 export function currentStableMcpEntry(): string | null {
   return currentStableEntry;
+}
+
+export interface StableRefresh {
+  target: string;
+  /** True when the file on disk was rewritten in this call. */
+  updated: boolean;
+  /** Version this process runs (the bundle it was launched from). */
+  running: string;
+  /** Version the installed checkout ships. */
+  installed: string;
+}
+
+/** `version` from the checkout's own `package.json` (agents read the bundle, not a manifest). */
+function checkoutVersion(bundle: string): string | null {
+  const dir = path.dirname(bundle);
+  for (const candidate of [path.join(dir, "..", "package.json"), path.join(dir, "package.json")]) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf-8")) as {
+        name?: unknown;
+        version?: unknown;
+      };
+      if (parsed.name === "obsidian-bridge" && typeof parsed.version === "string") {
+        return parsed.version;
+      }
+    } catch {
+      // `dist/package.json` carries only the module type; the checkout one follows.
+    }
+  }
+  return null;
+}
+
+/**
+ * Rewrites the stable copy when the installed checkout ships another version
+ * than the one this process runs (0.21.17).
+ *
+ * Returns `null` when the refresh could not be attempted (no readable
+ * version), and `{ updated: false }` when the copy already matches. The caller
+ * logs the result; this module never writes to stdout, which is the MCP
+ * transport when it runs inside the bundled server.
+ */
+export function refreshStableEntry(
+  installedBundle: string,
+  runningVersion: string,
+  home: string = paseoHome(),
+): StableRefresh | null {
+  const target = stableMcpEntryPath(home);
+  try {
+    if (path.resolve(installedBundle) === path.resolve(target)) {
+      return { target, updated: false, running: runningVersion, installed: runningVersion };
+    }
+    const installed = checkoutVersion(installedBundle);
+    if (installed === null) return null;
+
+    const missing = !fs.existsSync(target);
+    if (installed === runningVersion && !missing) {
+      return { target, updated: false, running: runningVersion, installed };
+    }
+
+    const source = fs.readFileSync(installedBundle);
+    let current: Buffer | null = null;
+    try {
+      current = fs.readFileSync(target);
+    } catch {
+      current = null; // first start after an install
+    }
+    if (current !== null && current.equals(source)) {
+      return { target, updated: false, running: runningVersion, installed };
+    }
+
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(installedBundle, target);
+    return { target, updated: true, running: runningVersion, installed };
+  } catch (cause) {
+    console.warn(
+      `[obsidian-bridge] could not refresh the stable MCP entry (${target}): ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    return null;
+  }
 }
 
 /** True when `candidate` is inside the plugin's own data directory. */

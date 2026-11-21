@@ -29,9 +29,16 @@ import {
  * `blocked_by`, `blocks`, `goal` and `materialized`, because they point at live
  * documents, and restoring an old copy of the graph would silently resurrect
  * links that no longer exist.
+ *
+ * `status` is kept live for the same reason, and one more (0.21.17): a restore
+ * puts text back, a lifecycle move is `plan_set_status`. Restoring an old
+ * snapshot on a node that has since been claimed and finished used to resurrect
+ * `in_progress` behind the user's back, with no journal line that reads as a
+ * status change. The snapshot's status is still reported as `snapshot_status`,
+ * so the difference is visible and the next call is `plan_set_status`.
+ *
+ * Fields a restore takes from the snapshot; everything else stays live.
  */
-
-/** Fields a restore takes from the snapshot; everything else stays live. */
 const RESTORED_FIELDS = [
   "name",
   "description",
@@ -41,7 +48,6 @@ const RESTORED_FIELDS = [
   "growth",
   "severity",
   "formal_text",
-  "status",
 ] as const;
 
 export function planRestore(
@@ -126,15 +132,37 @@ export function planRestore(
   const next: Record<string, unknown> = { ...live };
   let changed = false;
   for (const field of RESTORED_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(snapshot, field)) {
+    const hasSnapshotValue = Object.prototype.hasOwnProperty.call(snapshot, field);
+    const hasLiveValue = Object.prototype.hasOwnProperty.call(next, field);
+    if (hasSnapshotValue) {
+      if (!hasLiveValue || JSON.stringify(next[field]) !== JSON.stringify(snapshot[field])) {
+        changed = true;
+      }
       next[field] = snapshot[field];
-      changed = true;
-    } else if (Object.prototype.hasOwnProperty.call(next, field)) {
+    } else if (hasLiveValue) {
       delete next[field];
       changed = true;
     }
   }
-  if (!changed) {
+
+  // `## Заметки` is content too: a notes-only edit leaves the frontmatter
+  // identical, and the first version of this comparison refused to restore it
+  // (a regression of the 0.21.15 notes fix, caught by the existing test).
+  const snapshotNotes = sectionBody(parsed.document.body, "Заметки");
+  const liveNotes = sectionBody(stored.document.body, "Заметки");
+  const notesDiffer = snapshotNotes !== liveNotes;
+
+  const liveStatus = stringField(live.status);
+  const snapshotStatus = stringField(snapshot.status);
+  if (!changed && !notesDiffer) {
+    if (snapshotStatus !== null && snapshotStatus !== liveStatus) {
+      return fail(
+        `The snapshot v${version} r${revision} differs from the live file only in \`status\` ` +
+          `(${snapshotStatus} in the snapshot, ${liveStatus ?? "none"} live). A restore never ` +
+          "moves `status`: use `plan_set_status` for that.",
+        { status: liveStatus, snapshot_status: snapshotStatus },
+      );
+    }
     return fail(
       `The snapshot v${version} r${revision} describes exactly the live state; there is nothing ` +
         "to restore.",
@@ -144,9 +172,8 @@ export function planRestore(
   const liveVersion = positiveInt(live.version) ?? 1;
   const liveRevision = positiveInt(live.revision) ?? 1;
   next.restored_from = `v${version} r${revision}`;
-  if (snapshot.status !== undefined) next.status_by = actorOf(input);
 
-  const notesPresent = sectionBody(parsed.document.body, "Заметки") !== null;
+  const notesPresent = snapshotNotes !== null;
   const actor = actorOf(input);
   const at = new Date().toISOString();
 
@@ -159,7 +186,9 @@ export function planRestore(
       next,
       bump: "revision",
       reason: "restore",
-      ...(notesPresent ? { notes: extractNotes(parsed.document.body) } : {}),
+      ...(notesDiffer
+        ? { notes: notesPresent ? extractNotes(parsed.document.body) : "" }
+        : {}),
     },
     actor,
   );
@@ -181,13 +210,15 @@ export function planRestore(
     kind: liveKind,
     restored_from: `v${version} r${revision}`,
     previous: { version: liveVersion, revision: liveRevision },
+    status: liveStatus,
+    snapshot_status: snapshotStatus === liveStatus ? null : snapshotStatus,
     version: change.version,
     revision: change.revision,
     snapshot: change.snapshot,
     journal: "path" in journal ? journal.path : null,
     journal_error: "error" in journal ? journal.error : null,
     note:
-      "Relations stay as the live file had them; the snapshot only carries content, counters and " +
-      "status.",
+      "Relations and `status` stay as the live file had them; the snapshot carries content, notes " +
+      "and counters only. A lifecycle move is `plan_set_status`, never a restore.",
   });
 }

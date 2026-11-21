@@ -188,6 +188,39 @@ describe("plan_link", () => {
     expect(edge.impact).toBe("Now only an assumption");
   });
 
+  it("answers an identical repeat with a no-op success instead of an error", async () => {
+    const created = workspace();
+    const source = await freshLeaf(created, "rotate-tokens");
+    const first = await call(created, "plan_link", {
+      source,
+      target: "centurion/backend/auth/token-refresh",
+      impact: "A rotation change invalidates the refresh assumptions",
+    });
+    expectOk(first);
+    expect(first.structuredContent).toMatchObject({ action: "created", revision: 2 });
+
+    const repeat = await call(created, "plan_link", {
+      source,
+      target: "centurion/backend/auth/token-refresh",
+      impact: "A rotation change invalidates the refresh assumptions",
+    });
+    expectOk(repeat);
+    expect(repeat.structuredContent).toMatchObject({
+      ok: true,
+      action: "unchanged",
+      written: false,
+      status: "active",
+      revision: 2,
+    });
+    expect(repeat.text).toContain("already says what you asked for");
+    expect(repeat.text).toContain("Do not repeat this call");
+
+    // A repeat writes nothing: the revision stays where the first call left it.
+    const live = documentOf(created, "Workspaces/centurion/backend/auth/rotate-tokens.md");
+    expect(live.frontmatter.revision).toBe(2);
+    expect(live.frontmatter.influences).toHaveLength(1);
+  });
+
   it("removes the edge and treats a second removal as a no-op", async () => {
     const created = workspace();
     const source = await freshLeaf(created, "rotate-tokens");
