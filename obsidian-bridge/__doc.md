@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.19.13**.
+Version covered: **0.21.16**.
 
 ## 1. Purpose and scope
 
@@ -197,7 +197,13 @@ Definitions in `server/mcp-tools.ts`, shared by the stdio server, the attached a
 
 `obsidian_directories`, `obsidian_search`, `obsidian_read`, `obsidian_outline`, `obsidian_list`, `obsidian_links`,
 `obsidian_edit`, `obsidian_write_document`, `obsidian_write_scratch`, `obsidian_append_inbox`, `obsidian_index`,
-`obsidian_diagnose`, `obsidian_status`, `obsidian_continue`.
+`obsidian_diagnose`, `obsidian_status`, `obsidian_continue`, plus the seventeen `plan_*` tools from `plan/tools.ts`
+(§17).
+
+Since 0.21.16 every description answers the same four questions in the same order: what the tool is for and when to reach
+for it, what to pass (path form, prerequisites), what comes back (the field the next call needs) and what to do next.
+The shared boundary follows, because a client may show one description without the others. The `initialize` block adds
+the planning workflow in order, so an agent does not have to probe the catalogue to learn the sequence.
 
 ### 5.1 Truncation protocol (0.18.12)
 
@@ -484,7 +490,35 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
 - Memory policy: silence below 2 GB, a warning in the panel and in `obsidian_status` between 2 and 4 GB, and never a hard
   limit. A full reindex of a very large vault may be isolated in a transient `systemd --user` unit instead of the daemon.
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16)
+
+### 0.21.16 — every tool states how to use it and why
+
+Patch release (0.21.15 → 0.21.16). After two real plans were written through the tools, every description an agent
+receives was re-read against the question it has to answer before its first call: *what is this for, what do I pass, what
+comes back, what do I do next, and how is it different from the tool beside it*. No tool, input, setting, SDK or host
+requirement changes; writes, reads and the file model are untouched.
+
+| Change | Detail |
+| --- | --- |
+| description order | the shared contract sentence moved from the front to the end of all seventeen `plan_*` descriptions. Seventeen identical ninety-word prefixes made the tool list indistinguishable at a glance; the tool-specific purpose now leads, and the boundary still travels with every tool |
+| lifecycle table in the description | `plan_set_status` prints the exact transition graph for nodes, incidents and goals, generated from `model.ts` rather than retyped; `plan_growth` prints the growth graph. An agent no longer discovers the graph by triggering a refusal |
+| result and next step per tool | every plan tool names the fields the next call needs (`revision` → `expected_revision`, `parent_revision`, `op_id`, `links_rewritten`, `path` values from a search hit) and the tool that follows it |
+| disambiguation | `plan_update_node` says it is content, not structure or lifecycle; `plan_read` says snapshots are `plan_history`; `plan_link` says only the source holds the edge; `plan_goal` says there is no `status` argument; `plan_growth` says it does not move the node's status |
+| canonical root path | `plan_create_node` states that a root is `<project>` alone and the parent must already exist, with the kind ladder, instead of leaving it to a refusal |
+| project slug | `plan_scope` states that `project.name` is the first segment of every other path — previously the only way to learn it was to infer it from a path in the tree |
+| journal | `plan_history` names `<project>/_journal.md` as the project-wide change log, read with `obsidian_read`; no plan tool documents it before |
+| no un-archive | `plan_archive_node` says so explicitly: the tools cannot address `_archive`, so putting work back is a user operation |
+| instructions | the `initialize` block carries the planning workflow in order (`plan_scope` → read → one write tool per change → `plan_validate`) and says every description is self-contained, so an agent reads one rather than probing the catalogue |
+| skills | `planning-create` and `planning-review` no longer claim `plan_read` returns a snapshot list, and the goal example no longer passes a `status` argument `plan_goal` does not accept |
+
+Known gap, recorded rather than fixed: the attached fallback tools (`obsidian_bridge_*`, used when a provider cannot take
+an MCP server) still cover only the document surface — an agent on such a provider gets no `plan_*` tool at all. Shipping
+the planning toolset through `defineAgentTool` is new functionality, not a description change.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **46 suites / 401 tests** pass, including a new case asserting that
+no plan tool description opens with the shared contract and that the lifecycle table is present. Not exercised against a
+live Paseo daemon or Obsidian app in this pass.
 
 ### 0.21.15 — fixes from the second live plan test
 
@@ -1688,3 +1722,65 @@ guess and does not develop an appetite for tools it does not need:
 4. Planning: the project folder only, shared by every workspace of that project; `plan_*` is the only writer of a plan
    file, `plan_history` the only reader of a snapshot.
 5. A refusal is the answer. It is not an invitation to try `shell`, `write`, `patch`, `..` or an absolute path.
+
+## 17. The agent-facing tool surface (0.21.16)
+
+### 17.1 The test every description has to pass
+
+An agent reaches a plan with thirty-one tools in one catalogue and four skills it may or may not load. Every turn it
+spends working out what a tool wants is a turn it does not spend on the plan, so each description has to answer four
+questions, in this order, before the agent's first call:
+
+1. **Purpose and trigger** — what state the tool changes and when to reach for it instead of a neighbour.
+2. **Call form** — the path shape that kind expects, what must already exist, which argument is a change on its own.
+3. **Result** — the returned field the *next* call consumes (`revision` → `expected_revision`, `parent_revision`,
+   `op_id`, a search hit's `path`), not a dump of the whole schema.
+4. **Next step** — the tool that follows, or the state that ends the work.
+
+Two further rules: the description must be distinguishable from its neighbours, and it must not promise behaviour the
+code does not have. A description that fails either one produces a wrong turn that looks like the agent's fault.
+
+Why this was worth a release: the two live plans (bunny-search, 71 nodes in the session-manager follow-up) were written
+by an agent that had the catalogue and the skills in front of it. The wasted turns were not bad writes. They were an
+agent finding out what a tool wanted — a folder path silently returning zero snapshots, `notes` alone refused, a nested
+root accepted, the status graph discovered one refusal at a time. The 0.21.14/0.21.15 passes fixed the behaviour; this
+one makes the behaviour legible without a test write, so the skills can stay about workflow rather than restating facts
+about arguments.
+
+### 17.2 Per-tool result
+
+| Tool | Question left unanswered before | State in 0.21.16 |
+| --- | --- | --- |
+| `plan_scope` | what the result holds, and that `project.name` is the first segment every other path begins with; whether `empty: true` is an error | states both; `empty` is named as a normal start |
+| `plan_read` | that it is the read before a write; which field feeds `expected_revision`; that it carries no snapshot list; which path forms resolve | all stated; snapshots delegated to `plan_history` |
+| `plan_search` | that a hit is a pointer to a node, not the node | stated, with `plan_read` as the next step |
+| `plan_create_node` | the canonical root path, that the parent must already exist, the kind ladder, what the result adds to the parent | all stated; `<project>/<project>` named as wrong |
+| `plan_update_node` | that it is content only; that `notes` alone is a change; what the new counters are for | stated, with the structure/lifecycle tools named instead |
+| `plan_set_status` | the allowed transitions (one refusal per attempt otherwise) | the full graph for nodes, incidents and goals, generated from `model.ts` |
+| `plan_history` | that a branching node's folder path works; that the list is the node's change log; how to see the project's operations | stated; `<project>/_journal.md` named as the project-wide log |
+| `plan_link` | that only the source stores the edge, and that a repeat updates instead of duplicating | stated |
+| `plan_incident` | which statuses block, and that status moves through another tool | stated |
+| `plan_goal` | that there is no `status` argument and `propose` is the transition | stated |
+| `plan_growth` | that it does not move the node's status; the growth graph; the `growth_incomplete` rule | stated |
+| `plan_move_node` | that a leaf's destination includes its file name, that the source must exist, how `op_id` resumes | stated |
+| `plan_archive_node` | that links inside are rewritten, incoming links dangle by design, and there is no un-archive | stated |
+| `plan_approve_goal` | that a draft is refused, that an agent cannot approve its own goal, and that the subtree must not be built by hand | stated |
+| `plan_restore` | content only, relations kept, kind must match, notes restored as snapshotted | stated |
+| `plan_validate` | what it checks, what is excluded by design, and that truncation continues with `obsidian_continue` | stated |
+| `plan_import` | dry run default, empty target, idempotent `unchanged` | already adequate, kept |
+| `obsidian_read`, `obsidian_outline`, `obsidian_search` | the shared contract told an agent to touch the vault only on an explicit request, which read as a ban on opening the plan note or `_journal.md` a `plan_*` result had just pointed at | the contract names that case as part of the planning task |
+| `obsidian_bridge_*` (attached fallback) | no planning tools at all — an agent on a provider without MCP cannot plan | **recorded gap**, not changed: shipping the toolset through `defineAgentTool` is new functionality |
+
+### 17.3 Deliberate choices
+
+- **The contract goes last, and shorter.** It used to open all seventeen descriptions, so the catalogue read as
+  seventeen identical paragraphs. The boundary is still on every tool — a client may show one description alone — but it
+  now follows the tool's own purpose, and it states only what no single description says (shared tree, `workspace_id`,
+  the two tools this is not, the three unreachable paths). The `tools/list` payload went from 32 506 to ~29 300
+  characters of description text, with more of it specific.
+- **The graphs are generated, not retyped.** `plan_set_status` and `plan_growth` build their tables from `model.ts`, so a
+  future lifecycle edit cannot leave the description lying.
+- **Results are named selectively.** Only the fields the next call needs are promised; the rest of a result is
+  discovered from one read (`plan_read` on a node shows the whole shape) instead of from a schema dump.
+- **The fallback surface stays document-only in this release.** Half a planning toolset attached through a second
+  transport would be worse than a clear gap: the skills would describe tools that do not exist for that agent.

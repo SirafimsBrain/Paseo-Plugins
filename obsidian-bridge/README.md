@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.21.15)
+## What it does (0.21.16)
 
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
@@ -273,6 +273,12 @@ each plan file's YAML.
 
 Every tool description states the rule the plugin is built around: use it only when the user explicitly asks about their
 Obsidian notes, never as a place to record agent memory.
+
+Since 0.21.16 each of the seventeen `plan_*` descriptions also answers the questions an agent has before its first call:
+what the tool is for and when to use it, what to pass (path form, what must exist), what comes back (the field the next
+call needs) and what to do next. The allowed lifecycle transitions are printed in the description instead of being
+discovered by a refusal, and the MCP `initialize` instructions carry the planning workflow in order. The boundary those
+tools share is stated last, so it no longer hides the sentence that tells the tools apart.
 
 ## Agent skill
 

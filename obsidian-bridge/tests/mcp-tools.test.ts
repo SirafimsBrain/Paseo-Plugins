@@ -104,6 +104,48 @@ describe("tool catalogue", () => {
   });
 });
 
+/**
+ * 0.21.16: an agent must learn what a planning tool wants from its description,
+ * not from a refusal. The shared boundary still travels with every tool, but it
+ * may no longer be the first thing an agent reads — seventeen identical prefixes
+ * made the catalogue indistinguishable.
+ */
+describe("plan tool descriptions", () => {
+  const planTools = MCP_TOOLS.filter((tool) => tool.name.startsWith("plan_"));
+  const descriptionOf = (name: string): string =>
+    MCP_TOOLS.find((tool) => tool.name === name)?.description ?? "";
+  const CONTRACT_OPENING = "Boundary: plan paths are relative to";
+
+  it("covers every planning tool and states the contract in each one", () => {
+    expect(planTools).toHaveLength(17);
+    for (const tool of planTools) {
+      expect(tool.description).toContain(CONTRACT_OPENING);
+      // A tool-specific purpose comes first; the contract follows it.
+      expect(tool.description.indexOf(CONTRACT_OPENING)).toBeGreaterThan(80);
+      expect(tool.description.slice(0, tool.description.indexOf(CONTRACT_OPENING)).trim().length)
+        .toBeGreaterThan(60);
+    }
+  });
+
+  it("prints the lifecycle graph instead of leaving it to a refusal", () => {
+    const status = descriptionOf("plan_set_status");
+    expect(status).toContain("draft → ready|deferred|cancelled|superseded");
+    expect(status).toContain("open → investigating|resolved|cancelled");
+    expect(status).toContain("draft → proposed|cancelled");
+    expect(descriptionOf("plan_growth")).toContain("active → stalled|done|cancelled");
+  });
+
+  it("names the result field and the next step of the tools easy to mistake", () => {
+    // `revision` → `expected_revision` is the one hand-off an agent must not guess.
+    expect(descriptionOf("plan_read")).toContain("expected_revision");
+    expect(descriptionOf("plan_history")).toContain("`plan_restore`, not an edit");
+    expect(descriptionOf("plan_history")).toContain("_journal.md");
+    expect(descriptionOf("plan_archive_node")).toContain("no un-archive tool");
+    expect(descriptionOf("plan_goal")).toContain("no `status` argument");
+    expect(descriptionOf("plan_create_node")).toContain("never `<project>/<project>`");
+  });
+});
+
 describe("dispatchTool", () => {
   const notes = {
     "Projects/orion/Plan.md": [

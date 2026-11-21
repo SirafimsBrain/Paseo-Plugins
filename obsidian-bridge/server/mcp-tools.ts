@@ -59,6 +59,8 @@ export const CONTRACT_SENTENCE =
   "Reference tool for the user's Obsidian knowledge base: use it only when the user " +
   "explicitly asks about their Obsidian notes, documents, plans or research. Do not use " +
   "it to record agent memory (that is memory-flash) or to plan project work (use `plan_*`). " +
+  "Reading a plan note or `<project>/_journal.md` that a `plan_*` result points at is part of " +
+  "that planning task, not a separate request. " +
   "Planning calls are confined to the configured planning directory (`planRoot`): their paths " +
   "are relative to it, and a plan file is only ever written by a `plan_*` tool — never with " +
   "`obsidian_edit`, `obsidian_write_*`, `shell` or an editor. " +
@@ -112,6 +114,17 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "`obsidian_write_*`, `shell`, `write` or `patch`, and never read `__history`/`_archive` " +
     "directly: `plan_*` is the only write path that snapshots, checks `expected_revision` and " +
     "journals the change, and `plan_history` is the only reader of a snapshot.\n\n" +
+    "Planning workflow, in order — every tool below says what it returns, so read one " +
+    "description instead of probing the catalogue: (1) `plan_scope` once per session; it names " +
+    "the `<project>` folder every other path starts with and says whether writes are enabled. " +
+    "(2) `plan_read` the node you are about to change, `plan_search` to find one, or " +
+    "`plan_read {}` for the overview. (3) One write tool per change — `plan_create_node` to " +
+    "grow the tree, `plan_update_node` for content, `plan_set_status` for lifecycle, " +
+    "`plan_link`/`plan_incident`/`plan_goal`/`plan_growth` for relations and progress, " +
+    "`plan_move_node`/`plan_archive_node` to restructure, `plan_restore` to bring a snapshot " +
+    "back — passing the `revision` you read as `expected_revision`. (4) `plan_validate " +
+    "{ project }` after a batch of changes. `plan_history` is the change log of one node; " +
+    "`<project>/_journal.md` is the change log of the project and is read like a note.\n\n" +
     "Four skills document these workflows in more detail; load the one that matches the task: " +
     "`obsidian-bridge` (read → cite → write), `planning-create` (grow a tree), " +
     "`planning-execute` (carry a plan through the work), `planning-review` (plan against fact, " +

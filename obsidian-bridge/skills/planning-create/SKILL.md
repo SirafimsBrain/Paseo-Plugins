@@ -19,8 +19,8 @@ A plan is a **directory of Markdown documents** inside the configured planning r
    `Projects/centurion/...`, never another project's name, never an absolute path. `..`, a leading `/` and
    `.obsidian` are refused by code, not by this skill. Other workspaces of the same project use this same tree freely;
    another project's plans are out of reach for `plan_*`, while `obsidian_*` may read them only on an explicit task.
-3. Look before you grow: `plan_search` finds a node by name or text, `plan_read` returns a node with its children,
-   relations and the snapshot list.
+3. Look before you grow: `plan_search` finds a node by name or text, `plan_read` returns the node with its children,
+   relations, brief and growth. Snapshots are not part of `plan_read` — `plan_history` lists those.
 
 ## The shape of a tree
 
@@ -53,8 +53,9 @@ blocks work, `plan_goal` for an outcome that is not a node yet.
 
 ## Goals before work
 
-A goal is a formal statement plus steps, not a node: `plan_goal { path: "<project>/_goals/<slug>", formal_text: …,
-plan: [{ title: "…" }], status: "proposed" }`. An agent may **propose** a goal but never approve the one it created —
+A goal is a formal statement plus steps, not a node: `plan_goal { path: "<project>/_goals/<slug>",
+formal_text: …, plan: [{ title: "…" }] }` writes it as `draft` — there is no `status` argument; `action: "propose"`
+is the step that moves it to `proposed`. An agent may **propose** a goal but never approve the one it created —
 `plan_approve_goal` refuses that, and the user approves (or passes `actor: "user"`). Approval is what turns the goal into
 a trunk → a `steps` branch → one leaf per step, so do not create that subtree by hand as well.
 
