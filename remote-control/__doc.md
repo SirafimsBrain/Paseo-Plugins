@@ -1631,3 +1631,79 @@ subscription as a real plugin client receives it, an actual SSH/RDP/VNC launch
 rendering of the sidebar view, the badge, the composer item and the
 New-workspace item — those were typechecked, not rendered.
 
+
+## Paseo 0.17.1 — compatibility pass (2026-11-22, plugin 1.1.2)
+
+Verified against the **stable Paseo 0.17.1** release
+(<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>) on this machine
+(`paseo --version` → 0.17.1). Patch bump 1.1.1 → 1.1.2: dev pin and documentation
+only — **no source file changed, no deprecated API found**.
+
+### Surface this plugin uses, re-checked against 0.17.1
+
+| Usage | 0.17.1 contract | Verdict |
+| --- | --- | --- |
+| `client.addWorkspacePanel` × 2 (`explorer`, `workspace`) | unchanged; `context` optional and deprecated | no `context` passed — already correct |
+| `client.addSidebarHeaderItem`, `addSidebarView`, `addWorkspaceRowBadgeItem` | unchanged | unchanged |
+| `client.addComposerItem`, `addNewWorkspaceItem` | unchanged | unchanged |
+| `client.addScreen`, `addSlashCommand`, `addCommandCenterItem` × 3 (`context: "global"`) | unchanged | unchanged |
+| `server.handle` × 11, `context.push` + `context.signal` subscriptions | unchanged | unchanged |
+| Binary RPC payload (`exportBundle` returns a byte buffer) | unchanged | unchanged |
+| `paseo.terminals.create/list/ref().kill()`, `paseo.workspaces.list/ref().setMetadata` | unchanged | unchanged |
+| `openExternalUrl`, `useRpc`, `usePaseo`, `useWorkspace` | unchanged, not deprecated | unchanged |
+
+**Deprecated-API scan: no hits.** The only `server.on(` calls are the plugin's own
+`node:http` listener (`clientError`, `error`), not Paseo lifecycle hooks — this plugin
+registers no hooks at all and never used `server.before`, `addSurface`,
+`addSidebarItem`, `openSurface`, `SettingsGroup`, `client/react-native` or
+`agent.turn.after.timeline`.
+
+The SDK diff `@getpaseo/plugin@0.16.0 → 0.17.1` is additive only (worktree manager and
+`worktree.*` hooks, `appendSystemPrompt`, provider `installation` metadata, usage
+`durationSeconds`/`observedAt`/`launch`, `ProviderSlashCommand.kind`,
+`navigation.supportsFocusHost`/`focusHost`, new ACP harness options), which is why both
+tsc projects and the whole suite pass without a source change. 0.17.1's
+#10049 (“plugin screens and settings failing to use plugin state hooks”) does not apply:
+this plugin uses no `useTabState`.
+
+**Floor stays `requirements.paseo >=0.16.0`** — subscriptions, binary payloads, sidebar
+views, composer items, New-workspace items and workspace metadata all arrive in 0.16.0 and
+none of the 0.17-only surface is adopted. The dev pin moves from the exact `0.16.0` to
+`^0.17.1` so the build type-checks against the current SDK; the manifest still builds from
+source (`npm ci` + `bundle`).
+
+### Verification (2026-11-22)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (both `tsconfig.json` and `console/tsconfig.json`) against SDK 0.17.1 | **exit 0** |
+| `npm test` (bundles first via `pretest`) | **21 suites / 232 tests pass** |
+| Live daemon | **not run** — no daemon was up, so the console endpoint, the sidebar view, the badge and the activity subscription were not exercised on a 0.17.1 host by hand |
+
+### Recommendations for improvement
+
+Not implemented; each is a decision for the user.
+
+1. **Let the sidebar view jump to a live session's terminal tab — and to its workspace.**
+   The view lists this workspace's ssh terminals and RDP/VNC windows as text, but
+   `PluginSidebarViewProps.navigation` already carries `openTerminal({ terminalId })`,
+   `openWorkspace` and `openAgent`, and the snapshot has the terminal id and
+   `workspaceId` for every entry. One press would put the cursor in the right terminal
+   instead of hunting the tab strip; for a window in another workspace,
+   `openWorkspace({ workspaceId, serverId })` moves there first. No new RPC — the data is
+   already in `remote-control.activity`. *Small; the highest-value of the list.*
+2. **A per-agent panel (`addAgentPanel`) for the agent's workspace.** The agent panel
+   receives `workspaceId` as well as `params.agentId`, so it could show that workspace's
+   connections and live sessions with the launch and vault actions — the remote surface
+   where a user actually is while working, without opening the Explorer panel. It has to
+   avoid pretending per-agent scope: sessions belong to the workspace, not the agent, and
+   the panel should say so. *Medium.*
+3. **Persist the console panel's section with `useTabState`.** The Explorer panel keeps
+   its selected view in component state, so closing and reopening it resets the view; the
+   tab-state API exists since 0.15.0 and this plugin has no `tab` usage yet. *Small, low
+   risk; worth doing together with #1.*
+4. **Do not adopt `appendSystemPrompt`, the worktree manager or provider `installation`
+   here.** This plugin creates terminals and external windows, never agents (so no
+   provenance instruction fits), does not manage worktrees, and its RDP/VNC/ssh binary
+   discovery is its own concern (`server/probe.ts`), not a Paseo provider installation.
+   Recorded as considered-and-rejected.

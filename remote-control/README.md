@@ -69,6 +69,6 @@ worked, and the new RPCs (including the binary export and its status) answered.
 
 ## Compatibility
 
-Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin 0.16.0` — compatible, and 1.1.1 adopts the release's plugin subscriptions, binary RPC payloads, sidebar views, composer items, New-workspace items, workspace badges and agent/workspace metadata. Version **1.1.1**.
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible, with **no deprecated API in use** and no source change needed: the 0.16.0 → 0.17.1 SDK diff is additive only, and every registration, subscription, binary payload and `paseo.*` call this plugin makes kept its signature. The floor stays `>=0.16.0` because the APIs it relies on (subscriptions, binary RPC payloads, sidebar views, composer items, New-workspace items, workspace metadata) all arrive in 0.16.0 and nothing 0.17-only is adopted; 1.1.1 was the release that adopted the 0.16.0 surface. Version **1.1.2**.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).
