@@ -473,7 +473,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
               the agent with the full memory server, for that session only. */}
           <SettingsInput
             label="Agent instructions"
-            hint="Appended on every session open that leaves the agent with the memory MCP server, for that session only (Paseo 0.17 appendSystemPrompt). Empty = no instruction. Max 2000 characters."
+            hint="Appended on every session open that leaves the agent with the memory MCP server, for that session only (Paseo 0.17 appendSystemPrompt). {server} is replaced with the MCP server name above, because Paseo prefixes tool names that way. Empty = no instruction. Max 2000 characters."
             initialValue={values.agentInstructions}
             placeholder="(none)"
             onChangeText={(text: string) => patch({ agentInstructions: text })}

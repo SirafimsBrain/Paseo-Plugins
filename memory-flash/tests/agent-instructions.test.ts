@@ -3,11 +3,12 @@ import {
   DEFAULT_AGENT_INSTRUCTIONS,
   instructionApplies,
   renderAgentInstructions,
+  SERVER_PLACEHOLDER,
   type InstructionTarget,
 } from "../shared/agent-instructions";
 
 /**
- * 0.14.0 coverage: the agent instruction that rides on `appendSystemPrompt`
+ * 0.14.1 coverage: the agent instruction that rides on `appendSystemPrompt`
  * (Paseo 0.17.x). The hook wiring lives in `agent-hooks.test.ts`.
  */
 
@@ -21,18 +22,35 @@ const BASE: InstructionTarget = {
 
 describe("renderAgentInstructions", () => {
   it("returns null for an empty or whitespace-only template", () => {
-    expect(renderAgentInstructions("")).toBeNull();
-    expect(renderAgentInstructions("   \n\t ")).toBeNull();
+    expect(renderAgentInstructions("", "memory-flash")).toBeNull();
+    expect(renderAgentInstructions("   \n\t ", "memory-flash")).toBeNull();
   });
 
   it("trims and returns the configured text", () => {
-    expect(renderAgentInstructions("  search first  ")).toBe("search first");
+    expect(renderAgentInstructions("  search first  ", "memory-flash")).toBe("search first");
   });
 
-  it("ships a default that names the three memory tools", () => {
+  it("substitutes every {server} with the configured server name", () => {
+    const text = renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, "team-memory");
+    expect(text).not.toBeNull();
+    expect(text).not.toContain(SERVER_PLACEHOLDER);
     for (const tool of ["memory_search", "memory_save", "memory_handoff"]) {
-      expect(DEFAULT_AGENT_INSTRUCTIONS).toContain(tool);
+      expect(text).toContain(`team-memory_${tool}`);
     }
+  });
+
+  it("uses the default memory-flash prefix when the server is not renamed", () => {
+    const text = renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, "memory-flash");
+    expect(text).toContain("memory-flash_memory_save");
+    expect(text).toContain("`memory-flash_memory_search`");
+    // Bare names would name tools Paseo does not expose under that form.
+    expect(text).not.toMatch(/(^|[^-_])memory_save/);
+  });
+
+  it("substitutes a placeholder the user added by hand", () => {
+    expect(renderAgentInstructions("Use `{server}_memory_get`.", "base")).toBe(
+      "Use `base_memory_get`.",
+    );
   });
 });
 

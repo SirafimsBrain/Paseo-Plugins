@@ -1,6 +1,22 @@
 # Compatibility — memory-flash
 
-Current: plugin **0.14.0**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.14.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+
+## Plugin 0.14.1 — instruction tool names carry the MCP server prefix (2026-11-22)
+
+Patch release: the 0.14.0 instruction named `memory_search` / `memory_save` /
+`memory_handoff` as bare tools, while Paseo exposes an MCP tool as
+`<server>_<tool>` (e.g. `memory-flash_memory_save`). The default text now uses a
+`{server}` placeholder, and `renderAgentInstructions(template, serverName)`
+substitutes the configured `mcpServerName` — the same name the hook registers the
+server under. A renamed server therefore gets instructions matching its real tool
+names; a template without the placeholder is unchanged, and an empty setting still
+disables the instruction. No new API, no floor change.
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `vitest` | exit 0 / **20 suites, 241 tests** pass |
+| Substitution | unit tests cover the default prefix, a renamed server, every placeholder occurrence and a custom template; the hook test asserts the rendered array |
 
 ## Plugin 0.14.0 — 0.17.x recommendations implemented (2026-11-22)
 

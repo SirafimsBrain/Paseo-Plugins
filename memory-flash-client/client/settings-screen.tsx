@@ -185,7 +185,7 @@ export function ConnectionsSettingsScreen({ theme }: PluginSurfaceProps) {
               the agent with a remote memory server. Never contains the key. */}
           <SettingsInput
             label="Agent instructions"
-            hint="Appended on every session open that leaves the agent with at least one remote memory server, for that session only (Paseo 0.17 appendSystemPrompt). Empty = no instruction. Max 2000 characters."
+            hint="Appended on every session open that leaves the agent with at least one remote memory server, for that session only (Paseo 0.17 appendSystemPrompt). {servers} becomes the configured server names and {server} the first one (Paseo prefixes tool names with the server name). Empty = no instruction. Max 2000 characters."
             initialValue={values.agentInstructions}
             placeholder="(none)"
             onChangeText={(text: string) => patch({ agentInstructions: text })}

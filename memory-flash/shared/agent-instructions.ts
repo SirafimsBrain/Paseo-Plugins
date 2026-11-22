@@ -8,31 +8,46 @@
  * open like the rest of the wiring, is never saved on the agent, and needs no
  * file writes.
  *
+ * Tool names carry the MCP server prefix in Paseo (`<server>_memory_save`), and
+ * the server name is configurable, so the default text uses `{server}` instead of
+ * a hard-coded `memory-flash`. `renderAgentInstructions` substitutes the name the
+ * open actually used.
+ *
  * Kept in `shared/` because it is pure and used from both sides: the settings
  * screen shows the default, the server hook returns the rendered text. No Node
  * APIs, no imports.
  */
 
 /**
- * Default instruction text. Deliberately short: it names the tool the agent can
+ * Default instruction text. Deliberately short: it names the tools the agent can
  * call and the three moments memory pays off (before the first edit, when a
  * bugfix lands, before stopping), without turning ordinary turns into writes.
  */
 export const DEFAULT_AGENT_INSTRUCTIONS =
-  "This host has a shared memory base reachable through the memory-flash tools. " +
-  "Search it (memory_search) before the first edit of a non-trivial task, save " +
-  "every bugfix the moment it is fixed (memory_save), and leave a handoff " +
-  "(memory_handoff) before you stop.";
+  "This host has a shared memory base served by the `{server}` MCP server. " +
+  "Search it (`{server}_memory_search`) before the first edit of a non-trivial " +
+  "task, save every bugfix the moment it is fixed (`{server}_memory_save`), and " +
+  "leave a handoff (`{server}_memory_handoff`) before you stop.";
+
+/** Placeholder replaced with the configured MCP server name. */
+export const SERVER_PLACEHOLDER = "{server}";
 
 /**
  * Renders the instruction for a session open.
  *
  * Returns `null` for an empty (or whitespace-only) template, which is how the
- * "Agent instructions" setting is switched off. The text is trimmed.
+ * "Agent instructions" setting is switched off. The text is trimmed and every
+ * `{server}` occurrence is replaced with the server name this open registered
+ * (the same name Paseo prefixes the tools with), so a renamed server never
+ * produces instructions that name a tool the agent does not have.
  */
-export function renderAgentInstructions(template: string): string | null {
+export function renderAgentInstructions(
+  template: string,
+  serverName: string,
+): string | null {
   const trimmed = template.trim();
-  return trimmed.length === 0 ? null : trimmed;
+  if (trimmed.length === 0) return null;
+  return trimmed.split(SERVER_PLACEHOLDER).join(serverName);
 }
 
 /** What this open left the agent with, as far as memory is concerned. */

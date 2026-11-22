@@ -277,7 +277,7 @@ export default function contribute(server: PluginServerContext) {
             lookup.status === "found" &&
             serverNames.some((name) => lookup.savedServers.includes(name)),
         })
-          ? renderAgentInstructions(values.agentInstructions)
+          ? renderAgentInstructions(values.agentInstructions, serverNames)
           : null;
       if (instruction !== null) {
         console.log(

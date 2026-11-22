@@ -1559,10 +1559,13 @@ memory server**:
 | `purpose: "history"` | none — the open never runs a turn |
 | `injectIntoAgents` off | none — a gated-off agent gets no advertised tools |
 
-The text names `memory_search`, `memory_save` and `memory_handoff` — the bare MCP
-tool names, not a provider-prefixed form, so it stays correct whatever transport
-delivered the tools. It is appended per open, never persisted, and costs no file
-write.
+The default text uses a `{server}` placeholder rather than bare tool names:
+Paseo exposes an MCP tool as `<server>_<tool>`, so the instruction renders
+`<mcpServerName>_memory_search`, `…_memory_save` and `…_memory_handoff` from the
+same `mcpServerName` the hook registers the server under (0.14.1). A renamed
+server therefore produces instructions that name the tools the agent really has;
+a template without the placeholder is left as written. It is appended per open,
+never persisted, and costs no file write.
 
 ### 23.2 `focusHost` on memory rows (implemented)
 
@@ -1613,3 +1616,17 @@ every project is created.
   `appendSystemPrompt` round trip (daemon accepting the field into a session), the
   **Open agent** press and the settings input were not exercised. The floor raise
   is the protective part: a 0.16.x host cannot load the plugin at all.
+
+### 23.6 0.14.1 — tool names carry the server prefix
+
+The 0.14.0 text named `memory_search`, `memory_save` and `memory_handoff` as bare
+tools. Paseo exposes an MCP tool as `<server>_<tool>` (the documented failure
+message is `No tool named "memory-flash_memory_save" is currently available`), so
+those names existed only if the server happened to be called `memory`. The
+default now uses `{server}` and `renderAgentInstructions(template, serverName)`
+substitutes the configured `mcpServerName` — the same value the hook passes to
+`decideSessionOpen` and to the MCP config key, so the instruction cannot drift
+from the registered name. A user template without the placeholder is left alone.
+Verification: typecheck exit 0, **20 suites / 241 tests**; the new cases render a
+renamed server (`team-memory_memory_save`), assert no bare `memory_save` remains,
+and the hook test compares the returned array against the rendered default.

@@ -10,7 +10,10 @@ import { decideSessionOpen, type SessionOpenInput } from "../server/session-open
 import { createMemoryRecallTool } from "../server/agent-tools";
 import { MemoryStore } from "../server/store";
 import { handleJsonRpcRequest, MCP_INSTRUCTIONS, PROTOCOL_VERSION } from "../server/mcp-jsonrpc";
-import { DEFAULT_AGENT_INSTRUCTIONS } from "../shared/agent-instructions";
+import {
+  DEFAULT_AGENT_INSTRUCTIONS,
+  renderAgentInstructions,
+} from "../shared/agent-instructions";
 
 /**
  * 0.9.4 coverage: the `agent.session_open` contribution, the read-only recall
@@ -351,7 +354,9 @@ describe("agent.session_open hook (contribution wiring)", () => {
     expect(servers["memory-flash"]).toMatchObject({ type: "stdio", alwaysLoad: true });
     expect(request.tools).toEqual([]);
     // 0.14.0: the same open also carries one instruction for the session.
-    expect(request.appendSystemPrompt).toEqual([DEFAULT_AGENT_INSTRUCTIONS]);
+    expect(request.appendSystemPrompt).toEqual([
+      renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, "memory-flash"),
+    ]);
     cleanup();
   });
 
@@ -421,7 +426,9 @@ describe("agent.session_open hook (contribution wiring)", () => {
     expect(request.tools).toEqual([]);
     // The saved server is launched by the host, so memory is still reachable and
     // the instruction still applies — nothing is duplicated, only explained.
-    expect(request.appendSystemPrompt).toEqual([DEFAULT_AGENT_INSTRUCTIONS]);
+    expect(request.appendSystemPrompt).toEqual([
+      renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, "memory-flash"),
+    ]);
     cleanup();
   });
 

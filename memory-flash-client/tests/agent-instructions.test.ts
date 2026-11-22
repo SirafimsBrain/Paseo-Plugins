@@ -3,11 +3,13 @@ import {
   DEFAULT_AGENT_INSTRUCTIONS,
   instructionApplies,
   renderAgentInstructions,
+  SERVER_PLACEHOLDER,
+  SERVERS_PLACEHOLDER,
   type ClientInstructionTarget,
 } from "../shared/agent-instructions";
 
 /**
- * 0.7.0 coverage: the agent instruction that rides on `appendSystemPrompt`
+ * 0.7.1 coverage: the agent instruction that rides on `appendSystemPrompt`
  * (Paseo 0.17.x). The hook wiring lives in `server-contribution.test.ts`.
  */
 
@@ -20,18 +22,37 @@ const BASE: ClientInstructionTarget = {
 
 describe("renderAgentInstructions", () => {
   it("returns null for an empty or whitespace-only template", () => {
-    expect(renderAgentInstructions("")).toBeNull();
-    expect(renderAgentInstructions(" \n ")).toBeNull();
+    expect(renderAgentInstructions("", ["memory-flash"])).toBeNull();
+    expect(renderAgentInstructions(" \n ", ["memory-flash"])).toBeNull();
   });
 
   it("trims and returns the configured text", () => {
-    expect(renderAgentInstructions("  search the team base  ")).toBe("search the team base");
+    expect(renderAgentInstructions("  search the team base  ", ["memory-flash"])).toBe(
+      "search the team base",
+    );
   });
 
-  it("ships a default that names the three memory tools", () => {
-    for (const tool of ["memory_search", "memory_save", "memory_handoff"]) {
-      expect(DEFAULT_AGENT_INSTRUCTIONS).toContain(tool);
-    }
+  it("substitutes the single configured server name into every placeholder", () => {
+    const text = renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, ["memory-flash"]);
+    expect(text).not.toBeNull();
+    expect(text).not.toContain(SERVER_PLACEHOLDER);
+    expect(text).not.toContain(SERVERS_PLACEHOLDER);
+    expect(text).toContain("`memory-flash`");
+    expect(text).toContain("memory-flash_memory_save");
+  });
+
+  it("uses the first actual name for the examples and lists all names", () => {
+    const text = renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, [
+      "memory-flash-conn_a",
+      "memory-flash-conn_b",
+    ]);
+    expect(text).toContain("`memory-flash-conn_a`, `memory-flash-conn_b`");
+    expect(text).toContain("memory-flash-conn_a_memory_search");
+  });
+
+  it("falls back to the documented default prefix when no name is known", () => {
+    const text = renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, []);
+    expect(text).toContain("memory-flash_memory_search");
   });
 });
 

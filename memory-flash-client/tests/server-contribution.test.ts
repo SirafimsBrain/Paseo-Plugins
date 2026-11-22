@@ -14,7 +14,10 @@ import {
   saveConnection,
 } from "../shared/contracts";
 import { saveConnection as persistConnection } from "../server/connections";
-import { DEFAULT_AGENT_INSTRUCTIONS } from "../shared/agent-instructions";
+import {
+  DEFAULT_AGENT_INSTRUCTIONS,
+  renderAgentInstructions,
+} from "../shared/agent-instructions";
 
 /**
  * Server contribution tests: the agent.create hook is the heart of the
@@ -428,8 +431,11 @@ describe("agent.session_open injection (0.3.2)", () => {
     });
     const injectedHeaders = servers["memory-flash"].headers as Record<string, string>;
     expect(injectedHeaders["X-Memory-Flash-Client-Id"]).toMatch(uuid);
-    // 0.7.0: the same open also carries one instruction for the session.
-    expect(out.appendSystemPrompt).toEqual([DEFAULT_AGENT_INSTRUCTIONS]);
+    // 0.7.0: the same open also carries one instruction for the session, naming
+    // the server this open actually registered.
+    expect(out.appendSystemPrompt).toEqual([
+      renderAgentInstructions(DEFAULT_AGENT_INSTRUCTIONS, ["memory-flash"]),
+    ]);
     cleanup();
   });
 

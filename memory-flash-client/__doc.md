@@ -784,3 +784,17 @@ Unchanged: this plugin is about remote memory and has no worktree policy.
 - **Not verified live:** the plugin is `disabled` on this machine and no daemon is
   running, so the real `appendSystemPrompt` round trip and the settings input were
   not exercised.
+
+### 21.6 0.7.1 — tool names carry the server prefix
+
+Paseo exposes an MCP tool as `<server>_<tool>`, and this plugin's server names are
+`memory-flash` (one connection) or `memory-flash-<connectionId>` (several), so the
+0.7.0 text's bare `memory_search` / `memory_save` / `memory_handoff` named tools
+that do not exist under that form. The default now uses `{server}` (first name,
+used in the tool examples) and `{servers}` (full backticked list), and
+`renderAgentInstructions(template, serverNames)` expands them with the names the
+open actually registered; an empty name list falls back to `memory-flash`, the
+documented default prefix. A user template without the placeholders is left
+alone, and the text still never contains a key. Verification: typecheck exit 0,
+**8 suites / 94 tests**, including one-name, several-name and fallback rendering
+plus the hook's rendered-array assertion.

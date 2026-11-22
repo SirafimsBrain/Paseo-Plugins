@@ -425,7 +425,7 @@ export default function contribute(server: PluginServerContext) {
           configCovered: cover.covered,
           savedHasServer,
         })
-          ? renderAgentInstructions(values.agentInstructions)
+          ? renderAgentInstructions(values.agentInstructions, serverName)
           : null;
       if (instruction !== null) {
         console.log(`[memory-flash] session_open instructions appended (${request.reason})`);
