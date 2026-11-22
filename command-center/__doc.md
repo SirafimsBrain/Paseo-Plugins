@@ -1322,3 +1322,130 @@ Read-back and the capability-probe shortcut are unchanged.
 tests** green, including the updated session-open tests (the marker reaches
 `setMetadata`, and no `metadata` key appears in the hook result). The failing path
 is host-side, so no live daemon run is claimed for this patch.
+
+## 23. Paseo 0.17.1 — compatibility pass (2026-11-22)
+
+Verified against the **stable 0.17.1** release
+(<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>, 2026-11-21). **No code
+change was needed and no deprecated API exists in this plugin.** The pins move to
+`^0.17.1` (`@getpaseo/plugin`, `@getpaseo/client`), four stale statements about the
+active-turn default are corrected, and the docs carry the evidence — so the plugin
+takes a patch release **0.13.4** (tag `command-center@0.13.4`). `requirements.paseo`
+stays `>=0.16.0`: no 0.17-only API is adopted, and a floor records the API promise,
+not the newest host tested.
+
+### 23.1 SDK diffs
+
+Both packages were unpacked from the registry and compared with the previous pins.
+
+**`@getpaseo/plugin` `0.16.0 → 0.17.1` — additive only:**
+
+| Declaration file | Change | Used here |
+| --- | --- | --- |
+| `server/index.d.ts`, `server/contracts.d.ts`, `server/worktree.d.ts` (new) | `registerWorktreeManager` and the worktree manager types | no — the plugin *consumes* worktrees, it does not create them for others |
+| `server/lifecycle.d.ts` | `appendSystemPrompt?: string[]` on the session-open request; `startPoint?` on the branch-off request; new `worktree.create.*` hooks | no (candidates, §23.5) |
+| `server/provider.d.ts` | `ProviderRegistration.installation` (install/update URLs, `inspect`, `checkForUpdates`, `update`), `ProviderSlashCommand.kind` | no — no provider registration |
+| `server/usage.d.ts` | `durationSeconds`, `observedAt`, `UsageScope.launch`, `UsageSourceRegistration.provider` | no — no usage source |
+| `server/acp.d.ts` | new optional ACP harness options | no |
+| `client/contracts.d.ts` | `navigation.supportsFocusHost`, `focusHost?` on `openAgent`/`openWorkspace` | no (candidate, §23.5) |
+| everything else (`client/ui`, `client/composer`, `client/host`, `settings`, `index`, …) | **identical** | — |
+
+**`@getpaseo/client` `0.16.0 → 0.17.1` — one changed declaration file**
+(`dist/daemon-client.d.ts`), additive: `listCheckoutWorktrees(cwd)`,
+`inspectProviderInstallation(provider)`, `checkProviderUpdates(provider)`, the
+`provider.installation.update` message and the `CheckoutWorktree` type. Every method
+the scheduler bridge calls (`scheduleCreate`, `scheduleList`, `scheduleUpdate`,
+`scheduleDelete`, `schedulePause`, `scheduleResume`, `scheduleRunOnce`,
+`scheduleLogs`) is unchanged, and the agent API the executor uses
+(`agents.ref(id).send/…`, `create`, terminals) is unchanged.
+
+The `typecheck` result is the practical proof: the plugin compiles against the
+0.17.1 declarations with no change.
+
+### 23.2 Deprecated APIs on 0.17.1 — none used
+
+The `@deprecated` set of the 0.17.1 SDK is identical to 0.16.0's (no new marks, no
+removal versions added). Audit of this plugin:
+
+| Deprecated member | Where | Used here? |
+| --- | --- | --- |
+| `addSurface`, `addSidebarItem`, `openSurface` | `client/contracts.d.ts` | **no** — `addScreen`, `addSidebarHeaderItem`, `openScreen` |
+| `PluginSidebarContribution`, `SettingsGroup` | `client/contracts.d.ts`, `client/ui.d.ts` | **no** |
+| panel `context` / `agentId` props, `addWorkspacePanel` with `context: "agent"` | `client/contracts.d.ts` | **no** — the plugin registers no panel |
+| `server.on`, `server.before` | `server/lifecycle.d.ts` | **no** — migrated in 0.7.0 |
+| `@getpaseo/plugin/client/react-native` entry, `useRevealedText` | `client/react-native.d.ts` | **no** — UI comes from `client/ui` |
+| provider report fields (`providerOptions`, `settings`, `controls`, `toolCallMode`) | `server/provider.d.ts` | **no** — no provider registration |
+
+**Not a deprecation, worth stating explicitly:** the `context: "workspace"` and
+`context: "agent"` literals in `index.client.tsx` are the **required discriminants**
+of `PluginCommandCenterItemContribution`, so the deprecated *panel* `context` rule
+does not apply to them, and `PluginSurfaceProps` (the prop type of the settings screen)
+is not deprecated. `useTabState`/`useTab` are current API.
+
+### 23.3 One stale statement: the active-turn default
+
+0.17 reworded `SendMessageOptions` in `@getpaseo/client`:
+
+```text
+/** Agent sources wait for turn end unless interrupt is explicit. Human sources default to interrupt. */
+```
+
+The plugin said the opposite in four places (“omitted means the daemon default
+(`interrupt`)”) — in `shared/targets.ts`, `shared/commands.ts` (the schema and the
+`runCommand` input), `server/executor.ts`, and in the run dialog's hint under the
+*If the agent is busy* chips.
+
+**Runtime behaviour is unaffected:** every UI dispatch passes the chip it showed
+(`run-dialog` state defaults to `interrupt`, and it is sent whenever an existing agent
+is targeted), so runs keep their documented semantics on 0.16 and 0.17 alike. The only
+path that omits the field is a `/cc <name>` run of a command that targets an existing
+agent, which the RPC does not support anyway. The four statements were corrected to
+describe the 0.17 rule instead of a single daemon default; the hint now explains what
+interrupt and steer do, not what the daemon does when the field is missing.
+
+### 23.4 Verification (2026-11-22, this machine)
+
+| Check | Result |
+| --- | --- |
+| Installed Paseo CLI | `paseo --version` → **0.17.1** |
+| `@getpaseo/plugin` / `@getpaseo/client` pinned to `^0.17.1` | install exit 0, `node_modules` at 0.17.1 |
+| `npm run typecheck` (`tsc --noEmit`) against 0.17.1 | **exit 0** |
+| `npm test` | **21 suites / 209 tests pass** |
+| SDK diff | §23.1 (additive only, scheduler methods byte-identical) |
+| Deprecated scan | §23.2, no live deprecation |
+| Live daemon | **not run** — no daemon is up on this machine, so plugin `running`, the 21 RPC methods, the scheduler bridge and the UI surfaces are not re-proven for 0.13.4. Nothing in the 0.17.1 diff touches the hooks, the RPC transport or the scheduler API |
+
+### 23.5 Recommendations for improvement (recorded 2026-11-22, not implemented)
+
+All of these use APIs that exist in the current SDK and were verified above; none
+requires raising the floor above `>=0.16.0` except where noted.
+
+1. **Per-agent Command Center panel (`addAgentPanel`) — medium, highest value.**
+   A panel scoped to `params.agentId` showing that agent's last runs (the history
+   already stores the target), a one-click rerun, and a command picker that runs into
+   *this* agent. It answers the question the History tab cannot: “what has Command
+   Center done to this agent, and what else can I run here?” The agent tool covers the
+   agent-side asking; the panel covers the user-side browsing.
+2. **`focusHost` deep links from results and history — small.** After a fan-out run,
+   each per-target result (and each history entry that names an agent or workspace)
+   could open that target with `navigation.openAgent/openWorkspace({ focusHost: true })`,
+   gated on `navigation.supportsFocusHost`. On a multi-host setup the current
+   behaviour stops at “agent created on host B”.
+3. **Workspace-row badge (`addWorkspaceRowBadgeItem`) — medium.** A small badge on
+   workspace rows (last run status, or a running count) built from the existing
+   `command-center.events` feed, for users who keep the sidebar visible while running
+   commands across workspaces.
+4. **Header button “Run a command…” (`addHeaderButton`) — small.** Opens the run
+   dialog with the focused agent (or workspace) preselected, instead of going through
+   the Command Center item and then choosing a target.
+5. **Provenance instruction for prompt commands (`appendSystemPrompt`) — small, low
+   risk.** When a run creates an agent, append one line naming the command and run id
+   (the same data already written into the agent's metadata). It makes “which command
+   produced this agent?” answerable from inside the session, and is appended per open,
+   never saved.
+6. **Worktree provenance (`worktree.create.before`) — needs a small spike.** 0.17 adds
+   worktree lifecycle hooks. The plugin cannot *replace* creation
+   (`registerWorktreeManager` is for plugins that provide worktrees), but the before
+   hook may annotate a request; whether a useful field is changeable besides
+   `repoRoot`/`sourceCheckout`/`startPoint` was not established, so this is recorded as
+   “investigate”, not “do”.

@@ -314,9 +314,11 @@ export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 
 /**
  * Turn-aware dispatch (`SendMessageOptions.activeTurnBehavior`, 0.11+ protocol,
- * `@getpaseo/client`): `interrupt` stops the running turn (the daemon's
- * default when omitted), `steer` delivers the prompt into the running turn.
- * No `queue` value exists — verified in `@getpaseo/protocol@0.14.0`.
+ * `@getpaseo/client`): `interrupt` stops the running turn, `steer` delivers the
+ * prompt into the running turn. No `queue` value exists — verified in
+ * `@getpaseo/protocol@0.14.0`. 0.17 documents the omission rule instead of a
+ * single default: an omitted value makes agent sources wait for the turn to end
+ * and human sources interrupt, so every UI dispatch passes its chip explicitly.
  */
 export const activeTurnBehaviorSchema = z.enum(["interrupt", "steer"]);
 
@@ -397,8 +399,9 @@ export const runCommand = defineRpc({
     provider: z.string().optional(),
     /**
      * Turn-aware dispatch for runs against an existing agent (0.6.0): what
-     * happens when the target agent is mid-turn. Omitted = the daemon default
-     * (`interrupt`).
+     * happens when the target agent is mid-turn. Omitted = the daemon decides by
+     * message source (0.17: agent sources wait for the turn to end, human sources
+     * interrupt); the run dialog always sends the chip it showed.
      */
     activeTurnBehavior: activeTurnBehaviorSchema.optional(),
     /**

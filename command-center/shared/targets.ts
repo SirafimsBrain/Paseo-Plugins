@@ -16,8 +16,10 @@ export interface BatchTarget {
   newWorktree: boolean;
   /**
    * Turn-aware dispatch (0.6.0), only for targets with an existing `agentId`:
-   * `interrupt` stops the running turn (the daemon default when omitted),
-   * `steer` delivers the prompt into the running turn.
+   * `interrupt` stops the running turn, `steer` delivers the prompt into the
+   * running turn. Every UI dispatch sends the chip it showed; an omitted value
+   * leaves the decision to the daemon, and since 0.17 that means "wait for the
+   * turn to end" for agent sources and "interrupt" for human sources.
    */
   activeTurnBehavior?: ActiveTurnBehavior;
   /** Create the new agent as a background agent (0.13.0, Paseo 0.16.0). */

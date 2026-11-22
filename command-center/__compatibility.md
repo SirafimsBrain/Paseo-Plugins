@@ -1,8 +1,48 @@
 # Compatibility — command-center
 
-Current: plugin **0.13.3**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.16.0`, `@getpaseo/client ^0.16.0`.
+Current: plugin **0.13.4**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.17.1`, `@getpaseo/client ^0.17.1`.
+Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration and
+**no deprecated API in use**; see *Plugin 0.13.4 — Paseo 0.17.1 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.13.4 — Paseo 0.17.1 pass (2026-11-22)
+
+Patch release (0.13.3 → 0.13.4): verification, pin and comments only — **no new
+functionality**. Release: <https://github.com/getpaseo/paseo/releases/tag/v0.17.1>;
+evidence in [`__doc.md`](./__doc.md) §23.
+
+- **`@getpaseo/plugin` `0.16.0 → 0.17.1`: additive only.** New
+  `registerWorktreeManager` (+ `server/worktree.*`), `appendSystemPrompt` on the
+  `agent.open.before` request, provider `installation` metadata, usage
+  `durationSeconds`/`observedAt`/`UsageScope.launch`, `ProviderSlashCommand.kind`,
+  `navigation.supportsFocusHost` + `focusHost`, and new ACP harness options.
+  Nothing was removed, and every declaration this plugin compiles against is
+  unchanged (`addHook`, `registerSettings`, `handle`, `defineSubscription`,
+  `defineAgentTool`, `defineAttachmentSource`, `addScreen`/`addSidebarHeaderItem`/
+  `addSettingsScreen`/`addCommandCenterItem`/`addComposerItem`/`addAttachmentSource`/
+  `addSlashCommand`, `useRpc`/`useSubscription`/`useSettings`, `paseo.agents.ref()`).
+- **`@getpaseo/client` `0.16.0 → 0.17.1`: one changed declaration file**
+  (`daemon-client.d.ts`), additive: `listCheckoutWorktrees`,
+  `inspectProviderInstallation`, `checkProviderUpdates`, the
+  `provider.installation.update` message and the `CheckoutWorktree` type. The nine
+  `schedule*` methods the scheduler bridge calls are byte-identical.
+- **Deprecated APIs on 0.17.1: none used.** Same mark set as 0.16.0; the plugin's
+  `context: "workspace"` / `context: "agent"` fields are the **required**
+  discriminants of `addCommandCenterItem`, not the deprecated panel `context`, and
+  `PluginSurfaceProps` (settings-screen component prop) is not deprecated.
+- **One stale statement fixed, no behaviour change.** 0.17 documents the omitting
+  rule for `activeTurnBehavior`: agent sources wait for the turn to end, human
+  sources interrupt. The plugin always sends its chip explicitly, so runs keep
+  their behaviour, but three code comments and the run-dialog hint still called
+  interrupt "the daemon default"; all four now describe what actually happens.
+- **Floor unchanged (`requirements.paseo >=0.16.0`)** — no 0.17-only API is adopted.
+  The pins moved to `^0.17.1` so the build type-checks against the current SDKs;
+  the host still supplies the runtime instances.
+- **Verified:** `npm run typecheck` (`tsc --noEmit`) exit 0 and `npm test`
+  **21 suites / 209 tests** pass against 0.17.1; local `paseo --version` → 0.17.1.
+  **Not verified:** no daemon was running, so no `running` status, RPC or
+  scheduler round trip is claimed for this pass.
 
 ## Plugin 0.13.3 — `agent.open.before` metadata fix (2026-11-16)
 

@@ -106,8 +106,9 @@ export async function executeCommand(
     /** Groups history entries of one fan-out run; null for single runs. */
     batchId?: string | null;
     /**
-     * Turn-aware dispatch for existing-agent targets (0.6.0): omitted means
-     * the daemon default (`interrupt`).
+     * Turn-aware dispatch for existing-agent targets (0.6.0). Sent as given; an
+     * omitted value lets the daemon decide by message source (0.17: agent sources
+     * wait for the turn to end, human sources interrupt).
      */
     activeTurnBehavior?: ActiveTurnBehavior;
     /**

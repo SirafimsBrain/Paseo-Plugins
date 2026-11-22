@@ -606,7 +606,7 @@ export function RunDialog({
                 </Pressable>
               </View>
               <Text style={[styles.hint, { color: foregroundMuted }]}>
-                Interrupt is the daemon default. Steer delivers the prompt into the running turn instead of stopping it.
+                Interrupt stops the running turn before the prompt is delivered. Steer delivers the prompt into the running turn instead of stopping it.
               </Text>
             </View>
           ) : null}
