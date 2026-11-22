@@ -132,11 +132,11 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.15.0 (2026-11-03, §16); requirement `>=0.15.0` — `server.addHook` exists only from 0.15.0 (§16). Earlier: 0.14.0 (2026-10-30, §15), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
-| SDK | `@getpaseo/plugin@^0.15.0` (pin raised from `^0.14.0` for the 2026-11-03 pass; the host supplies the runtime instance) |
+| Paseo | verified against 0.17.1 (2026-11-21, §21), 0.16.0 (2026-11-16, §18) and 0.15.0 (2026-11-03, §16); requirement `>=0.15.0` — `server.addHook` exists only from 0.15.0 (§16). Earlier: 0.14.0 (2026-10-30, §15), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
+| SDK | `@getpaseo/plugin@^0.17.1` (pin raised from `^0.16.0` for the 2026-11-22 pass; the host supplies the runtime instance, the pin only types the build) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
-| Verification | typecheck clean (three-project `tsc -b`) and vitest **10 suites / 133 tests** green against SDK 0.15.0, with 2 live-search tests skipped by default (`BUNNY_LIVE=1`) (§16.5); both hooks registered and firing on the **real 0.15.0 daemon** — `agent.create.before` logged `MCP injected`, `agent.open.before` logged the session-open decision (§16.5); older evidence: 0.14.0 (§15.3), 0.12.0 client audit still clean (§13.3), stable-0.11.0 checks in §10.1, live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0). Older passes: SDK 0.12.0 (§13.4) |
+| Verification | typecheck clean (three-project `tsc -b`) and vitest **13 suites / 183 tests** green against SDK 0.17.1 (§21.4); earlier evidence against SDK 0.15.0 — **10 suites / 133 tests** green, with 2 live-search tests skipped by default (`BUNNY_LIVE=1`) (§16.5); both hooks registered and firing on the **real 0.15.0 daemon** — `agent.create.before` logged `MCP injected`, `agent.open.before` logged the session-open decision (§16.5); older evidence: 0.14.0 (§15.3), 0.12.0 client audit still clean (§13.3), stable-0.11.0 checks in §10.1, live ddgs smoke (`BUNNY_LIVE=1`) — real search results + connection check `ok` on this machine (`~/venv/bin/python3`, ddgs 9.16.0). Older passes: SDK 0.12.0 (§13.4) |
 
 ## 8. Alternatives considered
 
@@ -1262,3 +1262,134 @@ The composer pill, the subscription push and the metadata marker are all
 host-visible behaviour: `paseo plugin logs bunny-search` shows the
 `session_open … [mode]` lines and the status stream's push failures, which is the
 first place to look if a host build renders the control but never answers.
+
+## 21. Paseo 0.17.1 — compatibility pass (2026-11-22)
+
+Verified against the **stable 0.17.1** release
+(<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>, published 2026-11-21).
+**No code change was needed and no deprecated API exists in this plugin.** What
+moved is the SDK pin (`^0.16.0` → `^0.17.1`, lockfile refreshed), the test
+counts in the docs and this section, so the plugin takes a patch release
+**0.7.7** (tag `bunny-search@0.7.7`). `requirements.paseo` stays `>=0.15.0`:
+no API adopted here is newer than 0.15.0, and a floor records the API promise,
+not the newest host tested.
+
+### 21.1 What 0.17.0 / 0.17.1 changed, as far as a plugin can see
+
+0.17.0 has no published release body; 0.17.1's notes list the plugin-facing
+changes. Both were read from the release pages and confirmed against the SDK
+declarations (`§21.2`), not inferred from the changelog wording:
+
+| Release item | Shape in the SDK | Relevance here |
+| --- | --- | --- |
+| *Plugin control of worktree creation, removal, and restoration* (#10278) | new `registerWorktreeManager` on `PluginServerContext` + `dist/server/worktree.*` types | **not used** — this plugin never creates worktrees |
+| *Plugin agent instructions* (#9781) | `appendSystemPrompt?: string[]` on the `agent.open.before` **request** (“Instructions appended for this open; not saved on the agent”) | **not used today**; the only genuinely useful new capability for this plugin — see §21.5 item 1 |
+| *A `focusHost` navigation option* (#5574) | `navigation.supportsFocusHost` + `focusHost?` on `openAgent`/`openWorkspace` | **not used today**; §21.5 item 2 |
+| *Update providers in Paseo* (#9568, #9661), *quota forecasts* (#10289, #10385) | `ProviderRegistration.installation` (`installUrl`, `updateUrl`, `inspect`, `checkForUpdates`, `update`), `UsageWindow.durationSeconds`, `UsageReport.observedAt`, `UsageScope.launch` | **not applicable** — the plugin registers no provider (its search providers are internal adapters) and no usage source (decision recorded in §10.2 item 4) |
+| Skills in `/` suggestions (#10383) | `ProviderSlashCommand.kind?: "command" \| "skill"` | not used — no provider registration |
+| *Fixed plugin screens and settings failing to use plugin state hooks* (#10049), *Fixed plugin agents failing to reopen after their provider closes the session* (#10153) | host fixes, no declaration change | improves this plugin without changes: its screen and settings screen register through `addScreen`/`addSettingsScreen` and use the host hooks `useSettings`/`useRpc`/`useSubscription`/`useComposer` |
+
+0.17.1 itself is otherwise provider work (Antigravity approvals/history, goose
+models, PR watching, heartbeats) with no plugin-API change.
+
+### 21.2 The SDK diff `0.16.0 → 0.17.1`
+
+Both packages were unpacked (`npm pack @getpaseo/plugin@0.17.1`) and the
+`dist/**/*.d.ts` trees diffed. **Nothing was removed and no declaration the
+plugin uses changed shape** — the diff is additive only:
+
+| Declaration file | Change | Used here |
+| --- | --- | --- |
+| `server/index.d.ts` | re-exports the new worktree types | no (additive) |
+| `server/contracts.d.ts` | `registerWorktreeManager(manager): () => void` on `PluginServerContext` | no (additive) |
+| `server/lifecycle.d.ts` | `PluginSessionOpenRequest.appendSystemPrompt?: string[]`; `baseRef` branch gained `startPoint?` | no (additive; `appendSystemPrompt` is a candidate, §21.5) |
+| `server/provider.d.ts` | `installation?: ProviderInstallation` and its context/inspection/update types; `ProviderSlashCommand.kind` | no (no provider registration) |
+| `server/usage.d.ts` | `durationSeconds`, `observedAt`, `UsageScope.launch`, `UsageSourceRegistration.provider` | no (no usage source) |
+| `server/acp.d.ts` | new optional ACP harness options (`loadReplayQuietPeriodMs`, `deferTurnOnRunningTools`, `autoAcceptMode`) plus widened provider type imports | no — ACP harness internals; this plugin registers no provider |
+| `server/worktree.d.ts` | new file | no |
+| `client/contracts.d.ts` | `navigation.supportsFocusHost`, `focusHost?` on `openAgent`/`openWorkspace` | no (additive; candidate, §21.5) |
+| everything else (`index`, `contracts`, `settings`, `server/agent-tools`, `client/ui`, `client/host`, `client/composer`, refs, rpc, icons, text, attachments) | **identical** | — |
+
+So `addHook`, `registerSettings`, `handle`, `addScreen`, `addSidebarHeaderItem`,
+`addSettingsScreen`, `addCommandCenterItem`, `addComposerItem`,
+`defineSubscription`/`useSubscription`, `usePaseo`/`useRpc`/`useSettings`/
+`useComposer`, `paseo.agents.ref().refresh()/reload()/setMetadata()`,
+`SidebarRow`, `SettingsCard`/`SettingsSection`/`SettingsSelect`/`SettingsSwitch`/
+`SettingsInput`/`SettingsAction` and `Action` all keep the signatures this plugin
+compiles against.
+
+### 21.3 Deprecated APIs on 0.17.1 — none are used
+
+`grep -rn "@deprecated"` over the 0.17.1 `dist/**/*.d.ts` yields exactly the
+same set as 0.16.0 (no new marks, no removal versions added). Each one, and the
+verdict for this plugin:
+
+| Deprecated member | Where | Used here? |
+| --- | --- | --- |
+| `addSurface`, `addSidebarItem`, `openSurface` | `client/contracts.d.ts` | **no** — the plugin uses `addScreen`, `addSidebarHeaderItem`, `openScreen` (§13.2) |
+| `PluginSidebarContribution` | `client/contracts.d.ts` | **no** — uses `PluginSidebarItemContribution` via `addSidebarHeaderItem` |
+| `SettingsGroup` (**use `SettingsSection`**) | `client/ui.d.ts` | **no** — every heading is `SettingsSection` |
+| `context: "workspace"` / `context: "agent"` + `agentId` on panel props, `addWorkspacePanel` with `context: "agent"` | `client/contracts.d.ts` | **no** — the plugin registers no panel |
+| the `@getpaseo/plugin/client/react-native` entry and its `useRevealedText` (removal after 2027-04-20) | `client/react-native.d.ts` | **no** — every UI symbol comes from `@getpaseo/plugin/client/ui` (`SidebarRow`, `Settings*`, `Action`) |
+| `server.on(...)`, `server.before(...)` (renamed to `addHook`) | `server/lifecycle.d.ts` (removal after 2027-04-30) | **no** — migrated in 0.5.3; only comments mention the old names |
+| `providerOptions`/`settings`/`controls`/`toolCallMode` provider-report fields | `server/provider.d.ts` | **no** — no provider registration |
+
+The audit command used:
+
+```bash
+grep -rnE "addSurface|addSidebarItem|openSurface|SettingsGroup|addWorkspacePanel|server\.before|server\.on\(|client/react-native" \
+  index.server.ts index.client.tsx server client shared tests
+```
+
+Two matches are prose only (`index.server.ts:71` and `tests/agent-hooks.test.ts:32`
+explain the 0.15.0 rename) — nothing executable. `PluginSurfaceProps` is *not*
+deprecated: it stays the prop type of settings-screen components, so
+`client/settings-screen.tsx` and `client/open-search-ui.ts` keep it (§13.1).
+
+### 21.4 Verification (2026-11-22, this machine)
+
+| Check | Result |
+| --- | --- |
+| Installed Paseo CLI | `paseo --version` → **0.17.1** |
+| SDK diff `@getpaseo/plugin@0.16.0 → 0.17.1` | additive only, table in §21.2; no removed or reshaped declaration |
+| Deprecated scan | table in §21.3, **no live deprecation** |
+| `npm install --save-dev @getpaseo/plugin@^0.17.1` | exit 0, `node_modules` at 0.17.1, `package.json` pin `^0.17.1` |
+| `npm run typecheck` (`tsc -b`, three projects) against SDK 0.17.1 | **exit 0** |
+| `npm test` (`pretest` rebuilds `dist/mcp-server.js`) | **13 suites / 183 tests pass**, 1 suite / 2 tests skipped (`tests/live-ddgs.test.ts`, needs `BUNNY_LIVE=1`) |
+| Live daemon | **not run**: no daemon is up on this machine (`paseo plugin logs bunny-search` → “Daemon is not running for /home/sirafim/.paseo”), and the pass had no reason to start one. Nothing in the 0.17.1 diff touches the hooks or the RPC transport, so the 0.16.0 live evidence (§18.3) and the hook/tool suites carry the runtime behaviour |
+
+### 21.5 Recommendations for improvement (recorded 2026-11-22, not implemented)
+
+Ordered by value/effort. Items 1–2 use 0.17.x capabilities; 3–6 are older
+prospects that this pass re-scoped. None of them changes the plugin's floor
+above `>=0.15.0` unless noted.
+
+1. **Agent instructions via `appendSystemPrompt` (0.17.x, #9781) — small, high value.**
+   `agent.open.before` may now append instructions for that open without saving
+   them on the agent. One setting (`Agent instructions`, on by default) could add
+   something like *“When a question depends on current library versions, APIs or
+   error messages, call `web_search` (or `bunny_web_search`) instead of relying on
+   memory.”* Today every agent has to discover the tool by itself, which is the
+   main reason a working MCP server still goes unused. Same hook, same return
+   object, one new field; the degraded (`tool`-only) mode keeps working because
+   the instruction can name whichever surface it actually contributed.
+2. **`focusHost` deep links from *Recent agents* (0.17.x, #5574) — small.**
+   The provisioning list currently shows `agentId · provider · mode`. Making a row
+   pressable (`navigation.openAgent({ agentId, serverId, focusHost: true })`, gated
+   on `navigation.supportsFocusHost`) turns “agent X got no tools” into a jump to
+   that agent, which is what the row is for.
+3. **`/bunny-search` slash command (0.13 surface, still open) — small.**
+   `addSlashCommand` with the query as the argument would complement the composer
+   control for users who never open the screen: run the search, insert the
+   formatted text into the composer.
+4. **Sidebar footer status row (0.11 surface, open since §10.2 item 2) — medium.**
+   `addSidebarFooterItem` with a `SidebarRow` and a `trailing` dot would put the
+   green/red indicator beside the sidebar instead of behind one click, reusing the
+   existing `statusStream` snapshot.
+5. **Per-agent results panel (0.16 `addAgentPanel`) — medium.**
+   A small panel holding the last N searches of the current agent would keep the
+   global screen for configuration and make the result history per agent. Useful
+   only if the user wants results visible after the composer insertion.
+6. **Host-managed probe processes (`spawnProcess`/`terminateProcess`) — unchanged prospect.**
+   Still only about Windows `.cmd` launching; Linux is the priority platform and
+   the current `node:child_process` path works there (§10.2 item 1, §18.4 item 8).

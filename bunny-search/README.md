@@ -35,7 +35,7 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.15.0 (verified against the stable release of 2026-11-16;
+Requires Paseo ≥ 0.15.0 (verified against the stable release 0.17.1 of 2026-11-21;
 uses the plugin SDK screen/sidebar API, settings screens and `server.addHook`). Node ≥ 18 on the daemon host (global `fetch`).
 
 ### Python requirement (for the DDGS Python service)
@@ -73,7 +73,7 @@ The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugi
 ```bash
 npm install
 npm run bundle   # dist/mcp-server.js — standalone stdio server (esbuild)
-npm test         # vitest: 12 hermetic suites / 179 tests (providers, cache, provisioning, discovery, settings, probe, tools, hooks, stdio e2e)
+npm test         # vitest: 13 hermetic suites / 183 tests (providers, cache, provisioning, discovery, settings, probe, tools, hooks, stdio e2e)
 BUNNY_LIVE=1 npx vitest run tests/live-ddgs.test.ts   # live smoke: real Python + PyPI ddgs + network
 npm run typecheck   # tsc -b: three projects — server, client (react-native), tests
 ```
@@ -103,6 +103,6 @@ The host keeps the authoritative settings in its own store (exposed to the plugi
 
 ## Compatibility
 
-Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.16.0` — compatible with no API migration; 0.16.0's one breaking change (`agent.turn.after.timeline` removed) is not used, and the shared OpenCode-service guard is still required by the 0.16.0 host. 0.7.5 adds no API dependency: the status subscription, composer control, metadata marker, background policy and deep links all use capabilities the same 0.16.0 SDK already exposes. Current version: **0.7.6** — a patch over 0.7.5 that keeps `metadata` out of the `agent.open.before` result (the 0.16.0 host rejects it and fails every prompt) and writes the marker through the SDK instead.
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**. The 0.16.0 → 0.17.1 SDK diff is additive for every declaration file this plugin touches (worktree management, provider installation metadata, `appendSystemPrompt`, `focusHost`), nothing was removed, and every `@deprecated` member left in the 0.17.1 SDK is unused here (`addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, panel `context`, `server.before`/`server.on`). The shared OpenCode-service guard is still required by the 0.17.1 host. Current version: **0.7.7** — a maintenance patch over 0.7.6: the 0.17.1 compatibility verification, the SDK pin and the documentation, with no behaviour change. 0.7.6 fixed the `agent.open.before` result (`metadata` is written through the SDK instead, because the host lets that hook change only `env`, `tools` and `mcpServers`).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

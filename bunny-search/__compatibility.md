@@ -1,11 +1,54 @@
 # Compatibility — bunny-search
 
-Current: plugin **0.7.6**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.16.0`.
-Verified against **Paseo 0.16.0 (2026-11-16)** — compatible, no API migration
-needed; see *Plugin 0.7.6 — `agent.open.before` metadata fix*, *Plugin 0.7.5 —
+Current: plugin **0.7.7**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
+Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration
+needed and **no deprecated API in use**; see *Plugin 0.7.7 — Paseo 0.17.1 pass*,
+*Plugin 0.7.6 — `agent.open.before` metadata fix*, *Plugin 0.7.5 —
 0.16.0 capabilities adopted* and *Plugin 0.6.5 — Paseo 0.16.0 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.7.7 — Paseo 0.17.1 pass (2026-11-22)
+
+Maintenance patch (0.7.6 → 0.7.7): verification, SDK pin and documentation only —
+**no source file changed, no new functionality, no deprecation found**. Releases:
+0.17.1 (<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>) and 0.17.0
+(no published body); evidence in [`__doc.md`](./__doc.md) §21.
+
+- **SDK diff `@getpaseo/plugin@0.16.0 → 0.17.1`: additive only.** New
+  `registerWorktreeManager` (+ `server/worktree.*`), `appendSystemPrompt` on the
+  `agent.open.before` request, provider `installation` metadata (install/update
+  URLs, `inspect`/`checkForUpdates`/`update`), usage `durationSeconds` /
+  `observedAt` / `UsageScope.launch`, `ProviderSlashCommand.kind`,
+  `navigation.supportsFocusHost` + `focusHost`, and new ACP harness options.
+  Nothing was removed; every declaration this plugin compiles against is
+  unchanged (`addHook`, `registerSettings`, `handle`, `addScreen`,
+  `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem`,
+  `addComposerItem`, `usePaseo`/`useRpc`/`useSettings`/`useSubscription`/
+  `useComposer`, `paseo.agents.ref()` — `refresh`/`reload`/`setMetadata`,
+  `SidebarRow`, `Settings*`, `Action`).
+- **Deprecated APIs on 0.17.1: none used.** The mark set is identical to
+  0.16.0. Not used here: `addSurface`, `addSidebarItem`, `openSurface`,
+  `PluginSidebarContribution`, `SettingsGroup`, panel `context`/`agentId` and
+  `addWorkspacePanel`, `server.on`, `server.before`, the
+  `@getpaseo/plugin/client/react-native` entry, and the deprecated provider
+  report fields. Two grep hits are comments explaining the 0.15.0 rename.
+  `PluginSurfaceProps` is not deprecated and stays as the settings-screen prop
+  type.
+- **Floor unchanged (`requirements.paseo >=0.15.0`)** — no adopted API is newer
+  than 0.15.0, and a floor records the API promise, not the newest host tested.
+  The dev-dependency pin moved to `^0.17.1` so the build type-checks against the
+  current SDK declarations; the host still supplies the runtime instance.
+- **Verified:** `npm run typecheck` (`tsc -b`, server / client / tests projects)
+  exit 0 and `npm test` **13 suites / 183 tests** pass (1 suite / 2 live tests
+  skipped without `BUNNY_LIVE=1`) against SDK 0.17.1; local `paseo --version`
+  reports 0.17.1. **Not verified live:** no daemon was running on this machine,
+  so no plugin `running` / hook firing is claimed for this pass — nothing in the
+  0.17.1 diff touches the hooks or the RPC transport (§18.3 live evidence stands).
+- **Open improvement proposals** (not implemented, decision pending): agent
+  instructions via `appendSystemPrompt`, `focusHost` links from *Recent agents*,
+  a `/bunny-search` slash command, a sidebar-footer status row, a per-agent
+  results panel. Detail and effort: [`__doc.md`](./__doc.md) §21.5.
 
 ## Summary (former root README row)
 
