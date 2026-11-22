@@ -9,6 +9,7 @@ import type { AgentSession, SessionTarget } from "../shared/session-manager";
 import { compactStore, deleteSessions, exportSession, listSessions } from "../shared/session-manager";
 import { DEFAULT_SETTINGS, sessionManagerSettings } from "../shared/settings";
 import { formatBytes, isOldEnough, needsForce } from "../shared/session-summary";
+import { ageLabel, errorMessage, sessionKey, sortSessions } from "./present";
 import {
   clearSessionManagerIntent,
   getSessionManagerIntent,
@@ -72,41 +73,12 @@ interface Progress {
   total: number;
 }
 
-function ageLabel(iso: string | null): string {
-  if (!iso) return "unknown";
-  const ms = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(ms)) return "unknown";
-  const days = Math.floor(ms / 86_400_000);
-  if (days > 0) return `${days}d ago`;
-  const hours = Math.floor(ms / 3_600_000);
-  if (hours > 0) return `${hours}h ago`;
-  return `${Math.max(1, Math.floor(ms / 60_000))}m ago`;
-}
-
-function sessionKey(session: AgentSession): string {
-  return `${session.provider}:${session.id}`;
-}
-
 function filterSessions(sessions: AgentSession[], filters: Filters): AgentSession[] {
   return sessions.filter(
     (session) =>
       (filters.providerFilter === "all" || session.provider === filters.providerFilter) &&
       isOldEnough(session, filters.ageDays) &&
       (!filters.archivedOnly || session.paseoAgent?.archived === true),
-  );
-}
-
-/** Oldest sessions first by default: that is the order deletion work needs. */
-function sortSessions(sessions: AgentSession[], oldestFirst: boolean): AgentSession[] {
-  const timestamp = (value: string | null): number => {
-    if (!value) return oldestFirst ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
-    const parsed = new Date(value).getTime();
-    return Number.isNaN(parsed) ? (oldestFirst ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY) : parsed;
-  };
-  return [...sessions].sort((a, b) =>
-    oldestFirst
-      ? timestamp(a.updatedAt) - timestamp(b.updatedAt)
-      : timestamp(b.updatedAt) - timestamp(a.updatedAt),
   );
 }
 
@@ -130,10 +102,6 @@ function chunk<T>(items: T[], size: number): T[][] {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }
 
 export function SessionManagerPanel({
@@ -846,9 +814,16 @@ export function SessionManagerPanel({
               ) : null}
 
               {linkedAgent && navigation ? (
+                /* 0.7.0: `focusHost` selects the agent's host and clears the sidebar
+                   filters that could hide it; older clients navigate plainly. */
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => navigation.openAgent({ agentId: linkedAgent.id })}
+                  onPress={() =>
+                    navigation.openAgent({
+                      agentId: linkedAgent.id,
+                      ...(navigation.supportsFocusHost ? { focusHost: true } : {}),
+                    })
+                  }
                 >
                   <Text style={styles.success}>Open agent in Paseo</Text>
                 </Pressable>

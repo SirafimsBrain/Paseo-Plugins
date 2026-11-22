@@ -1,5 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { AgentSessionsPanel } from "./client/agent-sessions-panel";
 import { SessionManagerPanel } from "./client/session-manager-panel";
+import { parseSessionArgs } from "./client/session-slash";
 import { SessionManagerSettingsScreen } from "./client/settings-screen";
 import { setSessionManagerIntent } from "./client/intent";
 import { SessionManagerSidebarItem } from "./client/sidebar-item";
@@ -14,6 +16,32 @@ export default function contribute(client: PluginClientContext) {
     icon: "Database",
     locations: ["workspace", "explorer"],
     Component: SessionManagerPanel,
+  });
+  // 0.7.0: the same listing, scoped to one agent. `params.agentId` is the only
+  // target it can act on, so it cannot delete another agent's transcripts.
+  client.addAgentPanel({
+    id: "session-manager-agent",
+    title: "Agent sessions",
+    icon: "Database",
+    Component: AgentSessionsPanel,
+  });
+  // 0.7.0: `/sessions [old [days]] | archived | settings` — the chat-side entry
+  // point. It writes the same intent the Command Center items use, so the panel
+  // applies the filter with one code path (see `client/session-slash.ts`).
+  client.addSlashCommand({
+    name: "sessions",
+    description: "Open the agent session cleanup panel, filtered",
+    argumentHint: "[old [days]] | archived | settings",
+    context: "workspace",
+    onSubmit({ args, openPanel, openSettings }) {
+      const parsed = parseSessionArgs(args);
+      if (parsed.openSettings) {
+        openSettings(SETTINGS_SCREEN_ID);
+        return;
+      }
+      if (parsed.intent) setSessionManagerIntent(parsed.intent);
+      openPanel("session-manager");
+    },
   });
   client.addSettingsScreen({
     id: SETTINGS_SCREEN_ID,

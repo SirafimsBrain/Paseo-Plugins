@@ -7,6 +7,13 @@ connected to Paseo, so old transcripts stop filling the disk.
 
 - **Workspace panel** titled "Agent sessions" (available in the `workspace` and
   `explorer` panel locations).
+- **Per-agent panel** titled "Agent sessions" — opened on an agent, it lists only that
+  agent's transcripts (every session the agent record links to), with the same export and
+  two-step delete, and a force step while the session is running or the agent still
+  references it. It can never act on another agent's sessions.
+- **`/sessions` slash command** — `/sessions` opens the panel, `/sessions old [days]`
+  (default 30) and `/sessions archived` open it pre-filtered with matching rows selected,
+  `/sessions settings` opens the cleanup settings.
 - **Command Center item** ("Open agent sessions") that opens the panel on demand.
 - **Sidebar status row** — a footer entry point ("Agent sessions") that opens a
   summary popover: session counts per provider, whole-store sizes, the number of
@@ -16,7 +23,9 @@ connected to Paseo, so old transcripts stop filling the disk.
 - **One list per agent** — Cline, OpenCode, Kilo, Qwen Code, Kimi Code, and the standalone
   `acpx` ACP store are scanned in one pass and labelled per provider.
 - **Filtering** — by provider and by age (`> 1 day`, `> 7 days`, `> 30 days`),
-  with an "Archived Paseo agents" view and an oldest-first default order.
+  with an "Archived Paseo agents" view and an oldest-first default order. A session that an
+  open Paseo agent references links to that agent, and the link selects the agent's host
+  (Paseo 0.17 `focusHost`) so sidebar filters cannot hide it.
 - **Deletion** — single session or a multi-select batch, with a two-step confirm,
   a batch preview (counts, expected freed space, risky items), live progress,
   and toast feedback. Sizes are shown when the store exposes them; otherwise
@@ -114,6 +123,6 @@ installation. Updates: `paseo plugin update session-manager`.
 
 ## Compatibility
 
-Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**: the 0.16.0 → 0.17.1 SDK diff is additive only, and `agent.turn.after.timeline` (removed in 0.16.0) was never used here. The floor stays `>=0.15.0` because no 0.17-only API is adopted. Current plugin version: **0.6.1** (0.6.1: Paseo 0.17.1 verification, SDK pin and docs only; SQLite compaction since 0.6.0; sidebar status row since 0.5.0; Kimi Code provider since 0.4.0).
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**: the 0.16.0 → 0.17.1 SDK diff is additive only, and `agent.turn.after.timeline` (removed in 0.16.0) was never used here. The floor stays `>=0.15.0`: the per-agent panel (`addAgentPanel`) and `/sessions` (`addSlashCommand`) exist from 0.15.0, and the only 0.17-only field (`focusHost`) is gated at runtime on `navigation.supportsFocusHost`. Current plugin version: **0.7.1** (0.7.1: per-agent panel, `/sessions`, agent link via `focusHost`; 0.6.1: Paseo 0.17.1 verification; SQLite compaction since 0.6.0; sidebar status row since 0.5.0; Kimi Code provider since 0.4.0).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

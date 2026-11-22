@@ -1,10 +1,29 @@
 # Compatibility — session-manager
 
-Current: plugin **0.6.1**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.7.1**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
 Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration,
 **no deprecated API in use**; see *Plugin 0.6.1 — Paseo 0.17.1 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.7.1 — agent panel, `/sessions`, `focusHost` (2026-11-22)
+
+Feature release (0.6.1 → 0.7.1, second digit +1), implementing §23.4 items 1–3. Full
+design: [`__doc.md`](./__doc.md) §24.
+
+| Capability | Contract used | Notes |
+| --- | --- | --- |
+| Per-agent sessions panel | `addAgentPanel` (0.15.0) | Filters the existing listing to `paseoAgent.id === params.agentId`; export, two-step delete, force step for a running/referenced session |
+| `/sessions` slash command | `addSlashCommand` (0.15.0) | `[old [days]]` / `archived` / `settings`; writes the same intent the Command Center items use |
+| `focusHost` on the agent link | `navigation.supportsFocusHost` (0.17.0) | Selects the agent's host and clears filters; omitted on older clients |
+
+**Floor unchanged at `>=0.15.0`** — every adopted client API exists from 0.15.0, and the
+only 0.17-only field is gated at runtime on `supportsFocusHost`. Item 4 (a sidebar view)
+stays deferred and item 5 rejected.
+
+**Verified:** `npm run typecheck` exit 0 and `npm test` **15 suites / 116 tests** pass
+(10 new: the slash grammar and the per-agent filter). **Not verified:** no daemon was
+running, so neither panel, the slash command nor the navigation was exercised live.
 
 ## Plugin 0.6.1 — Paseo 0.17.1 pass (2026-11-22)
 

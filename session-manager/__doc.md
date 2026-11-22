@@ -473,6 +473,42 @@ Ranked by value per unit of risk. None is implemented yet; each is a decision fo
    due count on every workspace row, which misleads because session stores are not
    per-workspace. Both are recorded as considered-and-rejected.
 
+## 24. Version 0.7.1 — the §23.4 recommendations, items 1–3 (2026-11-22)
+
+Items 1, 2 and 3 of §23.4 are shipped; item 4 (a real sidebar view) stays deferred and
+item 5 stays rejected. New functionality → second digit (0.6.1 → 0.7.1), floor unchanged
+(`>=0.15.0`: `addAgentPanel` and `addSlashCommand` exist from 0.15.0, and `focusHost` is
+gated at runtime).
+
+### 24.1 What was built
+
+| # | Capability | Where | Behaviour |
+| --- | --- | --- | --- |
+| 1 | `focusHost` on the agent link | `client/session-manager-panel.tsx` | The “Open agent in Paseo” link on a referenced session now passes `focusHost: true` when `navigation.supportsFocusHost` is set, so the destination host is selected and sidebar filters cannot hide the agent. Clients without it navigate exactly as before |
+| 2 | Per-agent sessions panel (`addAgentPanel`) | `client/agent-sessions-panel.tsx`, registered as `session-manager-agent` | `params.agentId` is the only target: the panel filters the existing listing to sessions whose `paseoAgent.id` is that agent (`shared/agent-sessions.ts`), newest/oldest by the user's order setting, with Export, a two-step delete and the same force step for a running session or one the agent still references. No second RPC: the listing already carries the link, so the panel reuses the workspace panel's query cache |
+| 3 | `/sessions` slash command | `client/session-slash.ts`, registered with `addSlashCommand` (`context: "workspace"`) | `/sessions` opens the panel, `/sessions old [days]` (default 30) and `/sessions archived` open it pre-filtered with matching rows selected, `/sessions settings` opens the cleanup settings. It writes the same intent the Command Center items write, so the panel's application path is unchanged |
+
+The display helpers the two panels share (`ageLabel`, `sessionKey`, `sortSessions`,
+`errorMessage`) moved from the workspace panel to `client/present.ts` in the same change,
+so the per-agent panel cannot drift from the wording of the main list.
+
+### 24.2 Why items 4 and 5 were not built
+
+Item 4 (a real sidebar view instead of the popover) is a rewrite of the existing
+read-only row, not an addition, and the summary popover has not been shown to be too
+small — it stays deferred until that is known. Item 5 stays rejected for the reasons
+recorded in §23.4.
+
+### 24.3 Verification (2026-11-22)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` against SDK 0.17.1 | **exit 0** |
+| `npm test` | **15 suites / 116 tests pass** (10 new) |
+| `tests/slash.test.ts` | the whole `/sessions` grammar: no args, `old` → 30, `old 7`, `older 90`, a bare number, `archived`, `archived old 30`, `settings`, an unknown word opening plainly, and `old 0` falling back to 30 |
+| `tests/agent-sessions.test.ts` | only the agent's linked sessions, an archived agent still included, an empty id matching nothing |
+| Live daemon | **not run** — no daemon was up, so neither panel, the slash command nor `focusHost` navigation was exercised in a real 0.17.1 client |
+
 ## Limitations
 
 - Deletion happens on the **daemon host**; a remote daemon deletes its own
