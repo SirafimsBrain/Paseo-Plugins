@@ -45,7 +45,14 @@ import {
 import { ensureStableEntry, healStaleSavedEntries } from "./server/mcp-stable";
 import { createWebSearchTool } from "./server/agent-tools";
 import { readSavedMcpServers } from "./server/agent-record";
-import { decideSessionOpen, needsCapabilityProbe, providerExcluded } from "./server/session-open";
+import {
+  decideSessionOpen,
+  injectionGateBlockReason,
+  instructionToolName,
+  needsCapabilityProbe,
+  providerExcluded,
+} from "./server/session-open";
+import { renderAgentInstructions } from "./shared/agent-instructions";
 import { sharedOpenCodeMcpBlockFor } from "./server/opencode-service";
 import { probeMcpServer } from "./server/probe";
 import { parseSettingsFile } from "./server/settings-file";
@@ -370,7 +377,27 @@ export default function contribute(server: PluginServerContext) {
           });
       }
 
-      if (!decision.injectMcp && !decision.attachTool) return request;
+      // Agent instructions (0.8.7, Paseo 0.17.x). `appendSystemPrompt` is appended to
+      // this session only and never saved on the agent; the 0.17.x daemon lets this hook
+      // change exactly it, next to `env`, `tools` and `mcpServers`. The text names the
+      // tool the agent actually ends up with, and an empty setting switches it off.
+      const instructionTool = instructionToolName({
+        purpose: request.purpose,
+        gatedOff: injectionGateBlockReason(base) !== null,
+        serverName: INJECTED_SERVER_NAME,
+        decide: decision,
+        knownMode: known?.mode ?? null,
+        lookup: base.lookup,
+      });
+      const instruction =
+        instructionTool === null
+          ? null
+          : renderAgentInstructions(values?.agentInstructions ?? "", instructionTool);
+      if (instruction !== null) {
+        console.log(`[bunny-search] session_open instructions for '${instructionTool}'`);
+      }
+
+      if (!decision.injectMcp && !decision.attachTool && instruction === null) return request;
 
       const tools = decision.attachTool ? [...request.tools, webSearchTool] : request.tools;
       let mcpServers = request.mcpServers;
@@ -386,7 +413,14 @@ export default function contribute(server: PluginServerContext) {
         console.log(`[bunny-search] session_open MCP injected: ${command} ${args.join(" ")}`);
       }
 
-      return { ...request, tools, mcpServers };
+      return {
+        ...request,
+        tools,
+        mcpServers,
+        ...(instruction === null
+          ? {}
+          : { appendSystemPrompt: [...(request.appendSystemPrompt ?? []), instruction] }),
+      };
     },
   );
 

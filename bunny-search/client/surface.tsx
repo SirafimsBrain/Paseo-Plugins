@@ -31,7 +31,7 @@ import { interfaceFontFamily, scaledFont, useHostTypography } from "./use-host-t
  */
 
 export function BunnySearchSurface(props: PluginScreenProps) {
-  const { theme } = props;
+  const { theme, navigation } = props;
   const paseo = usePaseo();
   const typography = useHostTypography();
   const font = (base: number) => scaledFont(base, typography);
@@ -203,7 +203,19 @@ export function BunnySearchSurface(props: PluginScreenProps) {
             Recent agents
           </Text>
           {provisioning.slice(0, 5).map((event) => (
-            <View key={`${event.agentId}-${event.at}`} style={styles.historyRow}>
+            // 0.8.7: a row jumps to the agent it names (Paseo 0.17.x `focusHost`), so
+            // "agent X got no tools" is one press away from the agent itself.
+            <Pressable
+              key={`${event.agentId}-${event.at}`}
+              style={styles.historyRow}
+              disabled={!navigation?.openAgent}
+              onPress={() =>
+                navigation?.openAgent({
+                  agentId: event.agentId,
+                  ...(navigation.supportsFocusHost ? { focusHost: true } : {}),
+                })
+              }
+            >
               <Text
                 style={{ color: fg, fontSize: font(10), ...uiFontStyle }}
                 numberOfLines={1}
@@ -217,7 +229,7 @@ export function BunnySearchSurface(props: PluginScreenProps) {
               >
                 {event.reason}
               </Text>
-            </View>
+            </Pressable>
           ))}
         </View>
       ) : null}

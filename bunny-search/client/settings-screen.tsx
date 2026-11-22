@@ -397,6 +397,15 @@ export function BunnySearchSettingsScreen(props: PluginSurfaceProps) {
             placeholder="(none)"
             onChangeText={(text: string) => patch({ skipProviders: text })}
           />
+          {/* 0.8.7: the instruction appended on every session open that gets search.
+              A `{tool}` placeholder is replaced with the tool the agent received. */}
+          <SettingsInput
+            label="Agent instructions"
+            hint="Appended on every session open that leaves the agent with search, for that session only. {tool} becomes the contributed tool: web_search (MCP) or bunny_web_search (attached tool). Empty = no instruction. Max 2000 characters."
+            initialValue={values.agentInstructions}
+            placeholder="(none)"
+            onChangeText={(text: string) => patch({ agentInstructions: text })}
+          />
         </SettingsSection>
       </SettingsCard>
     </ScrollView>

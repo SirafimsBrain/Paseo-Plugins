@@ -25,6 +25,7 @@
  * The rules below are pure so the whole matrix is unit-testable without a daemon.
  */
 
+import type { SearchToolName } from "../shared/agent-instructions";
 import type { AgentRecordLookup } from "./agent-record";
 
 /** Values that mean "this agent is opted out" when the label gate is configured. */
@@ -141,6 +142,7 @@ export function injectionGateBlockReason(
     Partial<Pick<SessionOpenInput, "background" | "skipBackgroundAgents">>,
 ): string | null {
   if (!input.injectIntoAgents) return "injectIntoAgents is off";
+  // (the values below are the gate; `appendSystemPrompt` rides on the same decision)
   if (input.skipBackgroundAgents === true && input.background === true) {
     return "background agent excluded by skipBackgroundAgents";
   }
@@ -174,10 +176,55 @@ export function needsCapabilityProbe(input: SessionOpenInput): boolean {
   return true;
 }
 
-function savedHasServer(input: SessionOpenInput): boolean {
+function savedHasServer(
+  input: Pick<SessionOpenInput, "lookup" | "serverName">,
+): boolean {
   return (
     input.lookup.status === "found" && input.lookup.savedServers.includes(input.serverName)
   );
+}
+
+/**
+ * Input of the agent-instruction decision (0.8.7, Paseo 0.17.x `appendSystemPrompt`).
+ */
+export interface InstructionTargetInput {
+  /** `interactive` | `history` */
+  purpose: string;
+  /** `injectionGateBlockReason(...) !== null` — a gated-off agent gets no instruction. */
+  gatedOff: boolean;
+  /** Name the MCP server is registered under. */
+  serverName: string;
+  /** Contribution decided for this open. */
+  decide: SessionOpenDecision;
+  /** Provisioning mode recorded on the agent by a previous open. */
+  knownMode: SessionOpenInput["knownMode"];
+  /** Saved `config.mcpServers` of the agent about to open. */
+  lookup: AgentRecordLookup;
+}
+
+/**
+ * Which search tool this open leaves the agent with, or `null` when it gets none.
+ *
+ * The instruction must name a tool the agent actually has, so the answer is the
+ * contributed one (`web_search` for the MCP server, `bunny_web_search` for the attached
+ * tool) and falls back to what the agent already carries: a recorded provisioning
+ * marker, or a server saved in its configuration — the case of an agent created by the
+ * `agent.create.before` hook, whose open is otherwise a no-op here.
+ *
+ * `history` opens get nothing (they never run a turn), and neither does an agent the
+ * gate excluded: advertising a tool the user switched off would be worse than silence.
+ */
+export function instructionToolName(
+  input: InstructionTargetInput,
+): SearchToolName | null {
+  if (input.gatedOff) return null;
+  if (input.purpose === "history") return null;
+  if (input.decide.injectMcp) return "web_search";
+  if (input.decide.attachTool) return "bunny_web_search";
+  if (input.knownMode === "mcp") return "web_search";
+  if (input.knownMode === "tool") return "bunny_web_search";
+  if (savedHasServer(input)) return "web_search";
+  return null;
 }
 
 /**

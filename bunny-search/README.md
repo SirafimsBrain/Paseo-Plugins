@@ -22,6 +22,10 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 - **Live status stream (0.7.5)** — the screen subscribes to `bunny-search.status-stream` (Paseo 0.16.0 `addSubscription`), so the dot, latency and provider update on their own after a connection test or a settings change, and a new *Recent agents* list shows which agents were provisioned since the screen opened, including the ones that received only the attached tool. Each pushed event is a complete snapshot (status, the event itself, the last 20 decisions), so a missed event cannot leave the screen stale.
 - **Search-the-draft composer control (0.7.5)** — a `Search` action sits with the composer controls in every agent: it takes the prompt you already typed (up to 512 characters), runs the configured search and inserts the formatted results at the cursor, so the agent starts from real sources and you can edit what was added before sending.
 - **Deep-linked quick search (0.7.5)** — `Command Center → Search the web for this agent's task` opens the screen with the agent's title already in the search box (`params.q`); opening the item never runs a query by itself.
+- **Agent instructions (0.8.7)** — a working tool does not make an agent use it, so every session open that leaves the agent with search also appends one instruction through Paseo 0.17's `appendSystemPrompt` (that session only, never saved on the agent): *when a task depends on current versions, APIs, documentation or error messages outside this repository, search with `{tool}` and cite the URLs*. `{tool}` is replaced with what the agent actually got — `web_search` for the MCP server, `bunny_web_search` for the attached tool — gated-off agents and `history` opens get nothing, and the text is editable (or emptied to switch it off) in settings.
+- **Slash command (0.8.7)** — `/bunny-search <query>` runs the configured service and inserts the formatted results into the current agent's composer, for the keyboard-only route.
+- **Agent panel (0.8.7)** — a `Bunny Search` panel scoped to one agent: search there, then insert into that agent's prompt. Results stay in the panel until inserted; nothing is sent automatically.
+- **Sidebar status dot (0.8.7)** — the sidebar row now carries the connection dot (green/red/muted) from the same live status stream, so the verdict is visible without opening the screen; the *Recent agents* rows jump to the agent they name (Paseo 0.17 `focusHost`, when the client supports it).
 - **Per-agent provisioning marker (0.7.5, fixed in 0.7.6)** — the plugin records `bunny-search: { mode: "mcp" | "tool" | "skipped", reason, at }` in the agent's `metadata` (Paseo 0.16.0), so the daemon itself records how each agent was provisioned. `agent.create.before` returns it; `agent.open.before` writes it through the SDK (`setMetadata`, fire-and-forget) rather than returning it, because the host lets that hook change only `env`, `tools` and `mcpServers` and fails the open otherwise. An agent whose marker says `mcp` also skips the capability probe on later opens: the provider's answer cannot have changed for it.
 - **Response cache (0.7.5)** — identical searches are answered from a small in-process LRU (`Cache TTL`, default 300 s, 0 disables, max 64 entries) instead of hitting the upstream service again. The formatted answer says `Query: … (cached)`, empty results are never cached, and every settings change clears it.
 - **Background agents (0.7.5)** — by default background agents (hidden from tabs and notifications) get search like any other agent, because that is what they exist for. `Skip background agents` in settings excludes them at session open for users who do not want it.
@@ -35,7 +39,7 @@ Paseo orchestrates agents but has no built-in web search. Bunny Search closes th
 paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search
 ```
 
-Requires Paseo ≥ 0.15.0 (verified against the stable release 0.17.1 of 2026-11-21;
+Requires Paseo ≥ 0.17.0 (verified against the stable release 0.17.1 of 2026-11-21;
 uses the plugin SDK screen/sidebar API, settings screens and `server.addHook`). Node ≥ 18 on the daemon host (global `fetch`).
 
 ### Python requirement (for the DDGS Python service)
@@ -73,7 +77,7 @@ The plugin is installed into the Paseo home and runs from there: `~/.paseo/plugi
 ```bash
 npm install
 npm run bundle   # dist/mcp-server.js — standalone stdio server (esbuild)
-npm test         # vitest: 13 hermetic suites / 183 tests (providers, cache, provisioning, discovery, settings, probe, tools, hooks, stdio e2e)
+npm test         # vitest: 14 hermetic suites / 199 tests (providers, cache, provisioning, discovery, settings, probe, tools, hooks, instructions, stdio e2e)
 BUNNY_LIVE=1 npx vitest run tests/live-ddgs.test.ts   # live smoke: real Python + PyPI ddgs + network
 npm run typecheck   # tsc -b: three projects — server, client (react-native), tests
 ```
@@ -103,6 +107,6 @@ The host keeps the authoritative settings in its own store (exposed to the plugi
 
 ## Compatibility
 
-Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**. The 0.16.0 → 0.17.1 SDK diff is additive for every declaration file this plugin touches (worktree management, provider installation metadata, `appendSystemPrompt`, `focusHost`), nothing was removed, and every `@deprecated` member left in the 0.17.1 SDK is unused here (`addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, panel `context`, `server.before`/`server.on`). The shared OpenCode-service guard is still required by the 0.17.1 host. Current version: **0.7.7** — a maintenance patch over 0.7.6: the 0.17.1 compatibility verification, the SDK pin and the documentation, with no behaviour change. 0.7.6 fixed the `agent.open.before` result (`metadata` is written through the SDK instead, because the host lets that hook change only `env`, `tools` and `mcpServers`).
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.17.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**. The floor moved to `>=0.17.0` with **0.8.7**: `appendSystemPrompt` and `focusHost` exist only from 0.17.0, and a 0.16.x daemon rejects an `agent.open.before` result that carries `appendSystemPrompt` (the same failure mode 0.7.6 fixed for `metadata`), so the plugin must not load there. Every `@deprecated` member in the 0.17.1 SDK is unused here (`addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, panel `context`, `server.before`/`server.on`, the `client/react-native` entry). The shared OpenCode-service guard is still required by the 0.17.1 host. Current version: **0.8.7** — implements the five 0.17.x improvements: agent instructions via `appendSystemPrompt`, `focusHost` links from *Recent agents*, a `/bunny-search` slash command, an agent panel and the sidebar status dot (no new dependency; 0.7.7 was the 0.17.1 verification patch, 0.7.6 fixed the `agent.open.before` `metadata` result).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

@@ -17,6 +17,7 @@ bunny-search/
 ├── shared/
 │   ├── contracts.ts           # zod schemas, RPC contracts (defineRpc), shared types
 │   ├── settings.ts            # host-scoped settings definition (defineSettings)
+│   ├── agent-instructions.ts  # `appendSystemPrompt` template + tool names (0.8.7)
 │   └── host-fonts.ts          # host Appearance settings parsing (client-safe)
 ├── server/
 │   ├── cjs-globals.ts         # __dirname/__filename globals for the host bundle evaluator
@@ -33,6 +34,9 @@ bunny-search/
 │   └── paths.ts               # $PASEO_HOME resolution
 ├── client/
 │   ├── surface.tsx            # status card (dot indicator) + quick search + Open button
+│   ├── sidebar-item.tsx       # sidebar row + live status dot (0.8.7)
+│   ├── agent-panel.tsx        # per-agent search panel, inserts into that agent's composer (0.8.7)
+│   ├── screen-id.ts           # the one screen id shared by the registrations
 │   ├── settings-screen.tsx    # Settings → Plugins screen: Test connection + Open interface
 │   ├── open-search-ui.ts      # opens the interface in Paseo's browser tab (external fallback)
 │   └── use-host-typography.ts # host font scale/family hook
@@ -94,7 +98,7 @@ Shared plumbing:
 
 ## 4. Settings and configuration
 
-**Host settings** (`shared/settings.ts`, `defineSettings`, scope `host`): `injectIntoAgents` (bool, default true), `mcpServerName` (default `bunny-search`), `searchService` (enum, default `duckduckjs` since 0.3.0; `ddgs`, `searxng`, `duckduckgo`, `brave`, `custom-json` remain), `duckduckjsEngine` (enum `auto`/`duckduckgo`/`brave`/`google`/`mojeek`/`yahoo`, default `auto`), `proxyUrl` (optional proxy for DuckDuckJS — http(s), and for DDGS Python — http(s)/socks5; empty = direct), `ddgsPythonPath` (explicit interpreter for the `ddgs` service; empty = auto-discovery), `searxngBaseUrl` (default `http://127.0.0.1:8888/search` — the reference MCP default), `customBaseUrl`, `searchUiUrl` (web interface URL; empty = derive from the API base URL's origin), `apiKey`, `timeoutMs` (1000–60000, default 20000), `maxResults` (1–30, default 10), `categories` (default `general,web`), `language` (default auto). The settings screen shows the engine selector and proxy field only when DuckDuckJS is the selected service, and the Python-path and proxy fields when DDGS Python is. Existing installs keep their stored `searchService`; the new default applies to fresh configurations.
+**Host settings** (`shared/settings.ts`, `defineSettings`, scope `host`): `agentInstructions` (string, 2000 max, default `DEFAULT_AGENT_INSTRUCTIONS` with a `{tool}` placeholder; empty switches the instruction off — 0.8.7), `injectIntoAgents` (bool, default true), `mcpServerName` (default `bunny-search`), `searchService` (enum, default `duckduckjs` since 0.3.0; `ddgs`, `searxng`, `duckduckgo`, `brave`, `custom-json` remain), `duckduckjsEngine` (enum `auto`/`duckduckgo`/`brave`/`google`/`mojeek`/`yahoo`, default `auto`), `proxyUrl` (optional proxy for DuckDuckJS — http(s), and for DDGS Python — http(s)/socks5; empty = direct), `ddgsPythonPath` (explicit interpreter for the `ddgs` service; empty = auto-discovery), `searxngBaseUrl` (default `http://127.0.0.1:8888/search` — the reference MCP default), `customBaseUrl`, `searchUiUrl` (web interface URL; empty = derive from the API base URL's origin), `apiKey`, `timeoutMs` (1000–60000, default 20000), `maxResults` (1–30, default 10), `categories` (default `general,web`), `language` (default auto). The settings screen shows the engine selector and proxy field only when DuckDuckJS is the selected service, and the Python-path and proxy fields when DDGS Python is. Existing installs keep their stored `searchService`; the new default applies to fresh configurations.
 
 **Interface URL derivation** (`server/ui-url.ts`): explicit `searchUiUrl` wins; otherwise the origin of `searxngBaseUrl` / `customBaseUrl` (API `http://omnirouter/search` → interface `http://omnirouter`, port preserved); DuckDuckGo and Brave fall back to their public front pages (`https://duckduckgo.com`, `https://search.brave.com`). `bunny-search.status` reports the derived `uiUrl` (never a secret) to the UI.
 
@@ -132,7 +136,7 @@ to the agent config and logs `[bunny-search] MCP injected: …` (visible in `pas
 
 | Item | Value |
 | --- | --- |
-| Paseo | verified against 0.17.1 (2026-11-21, §21), 0.16.0 (2026-11-16, §18) and 0.15.0 (2026-11-03, §16); requirement `>=0.15.0` — `server.addHook` exists only from 0.15.0 (§16). Earlier: 0.14.0 (2026-10-30, §15), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
+| Paseo | verified against 0.17.1 (2026-11-21, §21 and §22), 0.16.0 (2026-11-16, §18) and 0.15.0 (2026-11-03, §16); requirement `>=0.17.0` since 0.8.7 — `appendSystemPrompt` and `focusHost` exist only from 0.17.0 and a 0.16.x daemon rejects the field (§22.3). Earlier: `>=0.15.0` (`server.addHook` exists only from 0.15.0, §16), 0.14.0 (2026-10-30, §15), 0.12.0 (2026-10-21), stable 0.11.0 and 0.10.3. |
 | SDK | `@getpaseo/plugin@^0.17.1` (pin raised from `^0.16.0` for the 2026-11-22 pass; the host supplies the runtime instance, the pin only types the build) |
 | Node | ≥ 18 (global `fetch`; daemon verified on Node 24) |
 | Install | `paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:bunny-search` — the daemon clones into `~/.paseo/plugins/bunny-search/<revision>/checkout/bunny-search` and runs the manifest build step `[["npm", "ci"], ["npm", "run", "bundle"]]` there, so the dependencies are installed and `dist/mcp-server.js` is rebuilt in the Paseo home (both commands need registry access). A local-directory source is not used: it would execute the plugin straight from the working copy and run no build commands at all. |
@@ -1393,3 +1397,77 @@ above `>=0.15.0` unless noted.
 6. **Host-managed probe processes (`spawnProcess`/`terminateProcess`) — unchanged prospect.**
    Still only about Windows `.cmd` launching; Linux is the priority platform and
    the current `node:child_process` path works there (§10.2 item 1, §18.4 item 8).
+
+## 22. Plugin 0.8.7 — the 0.17.x improvements, implemented (2026-11-22)
+
+Items 1–5 of §21.5 are shipped. This is new functionality, so the version moves on
+the second digit with the third preserved (0.7.7 → 0.8.7) and the requirement floor
+moves with the API actually used (`>=0.15.0` → `>=0.17.0`, §22.3).
+
+### 22.1 What was built
+
+| # | Capability | Where | Behaviour |
+| --- | --- | --- | --- |
+| 1 | Agent instructions (`appendSystemPrompt`) | `shared/agent-instructions.ts`, `server/session-open.ts` (`instructionToolName`), `index.server.ts`, settings `agentInstructions` | Every session open that leaves the agent with search also appends one instruction for that open. `{tool}` is substituted with `web_search` (MCP) or `bunny_web_search` (attached tool), so the text never names a tool the agent does not have. Gated-off agents, `history` opens and an empty setting add nothing |
+| 2 | `focusHost` links | `client/surface.tsx` (*Recent agents* rows) | A row opens the agent it names with `navigation.openAgent({ agentId, focusHost: true })`, gated on `navigation.openAgent` and `navigation.supportsFocusHost`; the row is inert when the client cannot navigate |
+| 3 | `/bunny-search <query>` | `index.client.tsx` (`addSlashCommand`, agent context) | Runs `bunny-search.search`, then inserts the formatted block into the agent's own composer (`composers({ agentId })`). An empty argument or a provider error throws, so the host shows it instead of inserting nothing |
+| 4 | Sidebar status dot | `client/sidebar-item.tsx` | The existing sidebar row now carries the green/red/muted dot in `SidebarRow.trailing`, fed by `statusStream` plus one `connectionStatus` read on mount. Deliberately *not* a second footer row: two identical rows would compete for the same press |
+| 5 | Agent panel | `client/agent-panel.tsx` (`addAgentPanel`) | Search scoped to `params.agentId`; explicit *Insert into the prompt* writes into that agent's composer. Nothing is sent automatically and results stay in the panel until inserted |
+
+Item 6 (`spawnProcess`/`terminateProcess` for the probe) stays a prospect: its only
+benefit is Windows `.cmd` launching, and Linux is the priority platform.
+
+### 22.2 The `appendSystemPrompt` contract, read out of the 0.17.1 host
+
+The SDK types say the field exists; the daemon decides whether a hook may change it.
+Both were checked against the installed 0.17.1 app bundle (`/opt/Paseo/resources/app.asar`),
+not guessed:
+
+```js
+// validateBeforeResult, "agent.open.before"
+if (changesSessionOpenTarget(previous, next)) {
+    throw new Error("agent.open.before hooks can only change env, tools, mcpServers, and appendSystemPrompt");
+}
+return {
+    ...result,
+    background: previous.background,
+    metadata: previous.metadata,
+    ...(next.appendSystemPrompt === undefined && previous.appendSystemPrompt !== undefined
+        ? { appendSystemPrompt: previous.appendSystemPrompt }
+        : {}),
+};
+```
+
+Two consequences drove the implementation:
+
+1. **It is allowed** — `appendSystemPrompt` is explicitly in the allowed set, unlike
+   `metadata` (§20). This is the one hook result field this plugin adds in 0.8.7.
+2. **An omitted field means "unchanged"** — so the hook appends to
+   `request.appendSystemPrompt` instead of replacing it, and an instruction written by
+   another plugin or by the agent's own configuration survives. `changesSessionOpenTarget`
+   does not compare the field at all, so changing it never fails the open.
+
+AGENTS.md-style caveat from §20 still applies to `metadata`: the marker keeps going
+through `paseo.agents.ref(id).setMetadata(...)`, never through the hook result.
+
+### 22.3 Why the floor is now `>=0.17.0`
+
+`appendSystemPrompt` and `navigation.supportsFocusHost` do not exist in the 0.16.x
+SDK (checked on the packed `0.16.0` and `0.16.2` declarations), and a 0.16.x daemon
+rejects an `agent.open.before` result whose extra field it does not know — the exact
+failure mode that made 0.7.6 a patch release. Since the instruction is on by default,
+such a host would fail **every** session open, so the plugin must not load on 0.16.x:
+`requirements.paseo` is `>=0.17.0`. The client registrations added here are older
+(`addSlashCommand` and `addAgentPanel` exist in 0.15.0), so the floor is set by the
+server-side field, not by the UI.
+
+### 22.4 Verification (2026-11-22, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc -b`, server / client / tests) against SDK 0.17.1 | **exit 0** |
+| `npm test` | **14 suites / 199 tests pass**, 1 suite / 2 tests skipped (`BUNNY_LIVE=1` needed) |
+| New `tests/agent-instructions.test.ts` | renderer (placeholder substitution, empty template, trimming) and the `instructionToolName` matrix (contributed MCP, attached tool, recorded marker, saved server, gated-off, history, nothing at all) |
+| Extended `tests/agent-hooks.test.ts` | the hook appends exactly one instruction naming the contributed tool; appends to instructions the host already carries; names `bunny_web_search` in tool-only mode; still instructs a create-owned open whose server is already saved; adds nothing for an empty setting, a gated-off agent or a `history` open |
+| Host contract | allowed-field set, merge semantics and the 0.17.0 availability read from the 0.17.1 `app.asar` / packed declarations (§22.2, §22.3) |
+| Live daemon | **not run** — no daemon is up on this machine, so nothing here proves the instruction reaches a real agent turn or that the panel, slash command and dot render in a real 0.17.1 client. The hook path is covered by tests with the host's own result shape; the UI paths are unverified visually |

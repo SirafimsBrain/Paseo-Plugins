@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { defineSettings } from "@getpaseo/plugin";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "./agent-instructions";
 
 /**
  * Plugin settings (host-scoped, edited in Paseo Settings → Plugins →
@@ -137,6 +138,17 @@ export const bunnySearchSettings = defineSettings({
      * as such in the formatted text.
      */
     cacheTtlSeconds: z.number().int().min(0).max(3600).default(300),
+    /**
+     * Instruction appended to every session open that leaves the agent with search
+     * (Paseo 0.17.x `appendSystemPrompt`, 0.8.7). `{tool}` is replaced with the tool the
+     * agent actually received — `web_search` for the MCP server, `bunny_web_search` for
+     * the attached tool. Empty disables it. The text is appended for that open only and
+     * is never saved on the agent.
+     */
+    agentInstructions: z
+      .string()
+      .max(2000)
+      .default(DEFAULT_AGENT_INSTRUCTIONS),
   }),
 });
 

@@ -16,6 +16,7 @@ import {
   type SessionOpenInput,
 } from "../server/session-open";
 import { createWebSearchTool } from "../server/agent-tools";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "../shared/agent-instructions";
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from "../server/mcp-tools";
 import {
   PROVISIONING_METADATA_KEY,
@@ -442,6 +443,7 @@ function defaults(): Record<string, unknown> {
     language: "",
     skipBackgroundAgents: false,
     cacheTtlSeconds: 0,
+    agentInstructions: DEFAULT_AGENT_INSTRUCTIONS,
   };
 }
 
@@ -612,6 +614,94 @@ describe("agent.open.before hook (contribution wiring)", () => {
 });
 
 // ---------------------------------------------------------------------------
+
+describe("agent instructions in the session-open result (0.17.x appendSystemPrompt)", () => {
+  it("appends one instruction naming the MCP tool", async () => {
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook(openRequest());
+    expect(Object.keys(request.mcpServers as Record<string, unknown>)).toEqual(["bunny-search"]);
+    const instructions = request.appendSystemPrompt as string[];
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0]).toContain("`web_search`");
+    expect(instructions[0]).not.toContain("{tool}");
+    cleanup();
+  });
+
+  it("appends to instructions the host already carries instead of replacing them", async () => {
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook(
+      openRequest({ appendSystemPrompt: ["host instruction"] }),
+    );
+    const instructions = request.appendSystemPrompt as string[];
+    expect(instructions).toHaveLength(2);
+    expect(instructions[0]).toBe("host instruction");
+    cleanup();
+  });
+
+  it("names bunny_web_search when only the attached tool is contributed", async () => {
+    writeAgentRecord(AGENT, { provider: "weird" });
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook(
+      openRequest({ provider: "weird" }),
+      fakeContext(false),
+    );
+    const instructions = request.appendSystemPrompt as string[];
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0]).toContain("`bunny_web_search`");
+    cleanup();
+  });
+
+  it("adds the instruction for a create-owned open whose server is already saved", async () => {
+    // No label gate: the create hook injected the server, so this open contributes
+    // nothing itself — the instruction still has to reach the agent.
+    writeAgentRecord(AGENT, { provider: "opencode", mcpServers: { "bunny-search": {} } });
+    const server = createFakeServer(defaults());
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook(openRequest({ reason: "create" }));
+    expect(request.mcpServers).toEqual({});
+    const instructions = request.appendSystemPrompt as string[];
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0]).toContain("`web_search`");
+    cleanup();
+  });
+
+  it("adds nothing when the instruction setting is empty", async () => {
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    const server = createFakeServer({ ...defaults(), agentInstructions: "" });
+    const cleanup = contribute(server);
+
+    const request = await server.runSessionOpenHook(openRequest());
+    expect(Object.keys(request.mcpServers as Record<string, unknown>)).toEqual(["bunny-search"]);
+    expect(request.appendSystemPrompt).toBeUndefined();
+    cleanup();
+  });
+
+  it("adds nothing for gated-off agents and history opens", async () => {
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    const gated = createFakeServer({ ...defaults(), injectIntoAgents: false });
+    const cleanupGated = contribute(gated);
+    const gatedRequest = await gated.runSessionOpenHook(openRequest());
+    expect(gatedRequest.appendSystemPrompt).toBeUndefined();
+    cleanupGated();
+
+    const history = createFakeServer(defaults());
+    const cleanupHistory = contribute(history);
+    const historyRequest = await history.runSessionOpenHook(
+      openRequest({ purpose: "history" }),
+    );
+    expect(historyRequest.appendSystemPrompt).toBeUndefined();
+    cleanupHistory();
+  });
+});
 
 describe("shared OpenCode service (0.15.0 #7435)", () => {
   it("skips the agent.create injection for the opencode provider", async () => {

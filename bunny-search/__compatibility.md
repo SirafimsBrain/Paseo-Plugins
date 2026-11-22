@@ -1,12 +1,43 @@
 # Compatibility — bunny-search
 
-Current: plugin **0.7.7**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.8.7**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
 Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration
-needed and **no deprecated API in use**; see *Plugin 0.7.7 — Paseo 0.17.1 pass*,
+needed and **no deprecated API in use**; see *Plugin 0.8.7 — the 0.17.x improvements*,
+*Plugin 0.7.7 — Paseo 0.17.1 pass*,
 *Plugin 0.7.6 — `agent.open.before` metadata fix*, *Plugin 0.7.5 —
 0.16.0 capabilities adopted* and *Plugin 0.6.5 — Paseo 0.16.0 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.8.7 — the 0.17.x improvements (2026-11-22)
+
+Feature release (0.7.7 → 0.8.7, second digit +1, third preserved). It implements
+the five recommendations recorded in §21.5 of [`__doc.md`](./__doc.md); the sixth
+(`spawnProcess` probe) stays a Windows-oriented prospect. Full design and evidence:
+[§22](./__doc.md).
+
+| Improvement | Contract used | Notes |
+| --- | --- | --- |
+| Agent instructions | `appendSystemPrompt` in the `agent.open.before` **result** (0.17.0) | One instruction per open, that session only; `{tool}` becomes `web_search` or `bunny_web_search`; empty setting, gated-off agents and `history` opens add nothing; appends to instructions the host already carries |
+| `focusHost` links | `navigation.supportsFocusHost` + `focusHost` (0.17.0) | *Recent agents* rows open the agent; inert when the client has no `openAgent` |
+| `/bunny-search` | `addSlashCommand` (0.15.0) | Runs the search RPC, inserts into that agent's composer, throws on an empty query or provider error |
+| Agent panel | `addAgentPanel` (0.15.0) | Scoped to `params.agentId`; explicit insert into that agent's composer |
+| Sidebar status dot | `SidebarRow.trailing` (0.11+) + `statusStream` | Green/red/muted dot on the existing row; no duplicate footer row |
+
+**Floor raised to `>=0.17.0`.** `appendSystemPrompt` is absent from the 0.16.0 and
+0.16.2 declarations, and a 0.16.x daemon rejects an `agent.open.before` result that
+carries it — since the instruction is on by default, loading there would fail every
+session open (the failure class 0.7.6 fixed for `metadata`). The host allows the field
+explicitly (`agent.open.before hooks can only change env, tools, mcpServers, and
+appendSystemPrompt`, read from the 0.17.1 app bundle) and treats an omitted field as
+"unchanged".
+
+**Verified:** `npm run typecheck` exit 0 and `npm test` **14 suites / 199 tests** pass
+(1 suite / 2 live tests skipped) against SDK 0.17.1, including the new instruction
+renderer/decision suite and six hook-level cases. **Not verified:** no daemon was
+running, so the instruction reaching a real agent turn and the new UI surfaces
+(panel, slash command, sidebar dot, `focusHost` press) were not exercised in a live
+0.17.1 client.
 
 ## Plugin 0.7.7 — Paseo 0.17.1 pass (2026-11-22)
 
