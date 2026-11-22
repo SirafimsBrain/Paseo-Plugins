@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { defineSettings } from "@getpaseo/plugin";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "./agent-instructions";
 
 /**
  * Plugin settings (host-scoped, edited in Paseo Settings → Plugins →
@@ -35,6 +36,15 @@ export const memoryFlashSettings = defineSettings({
     httpHost: z.string().trim().min(1).max(64).default("127.0.0.1"),
     /** Port for the HTTP MCP endpoint. */
     httpPort: z.number().int().min(1).max(65535).default(8787),
+    /**
+     * Instruction appended to every session open that leaves the agent with the
+     * full memory MCP server (Paseo 0.17.x `appendSystemPrompt`). Appended for
+     * that open only and never saved on the agent. Empty disables it.
+     */
+    agentInstructions: z
+      .string()
+      .max(2000)
+      .default(DEFAULT_AGENT_INSTRUCTIONS),
   }),
 });
 

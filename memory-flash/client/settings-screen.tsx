@@ -469,6 +469,15 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
               }
             }}
           />
+          {/* 0.14.0: the instruction appended on every session open that leaves
+              the agent with the full memory server, for that session only. */}
+          <SettingsInput
+            label="Agent instructions"
+            hint="Appended on every session open that leaves the agent with the memory MCP server, for that session only (Paseo 0.17 appendSystemPrompt). Empty = no instruction. Max 2000 characters."
+            initialValue={values.agentInstructions}
+            placeholder="(none)"
+            onChangeText={(text: string) => patch({ agentInstructions: text })}
+          />
         </SettingsSection>
       </SettingsCard>
 

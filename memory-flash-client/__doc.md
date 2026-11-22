@@ -719,3 +719,68 @@ stays valid).
   and no daemon is running, so `paseo plugin update` and a live session open under
   0.17.1 were not exercised. All its imports are host-supplied, so the install
   path needs no build step — but this is not the same as a live run.
+
+## 21. Implementing the 0.17.x recommendation (2026-11-22, 0.7.0)
+
+0.7.0 implements the highest-value recommendation of §20.3 and corrects one item
+that Paseo 0.17.1 does not expose to a plugin screen. Feature release (second
+digit). `requirements.paseo` moves `>=0.15.0` → **`>=0.17.0`**, because
+`appendSystemPrompt` does not exist on a 0.16.x daemon and a session-open result
+carrying it fails the open.
+
+### 21.1 Agent instructions via `appendSystemPrompt` (implemented)
+
+A working remote `memory_*` tool does not make an agent use it: the skill is a
+separate install, and the servers can even be withheld (shared OpenCode v2
+service, §18). `agent.open.before` may now return `appendSystemPrompt`, appended to
+that session only, so the plugin states what the injected remote tools are for.
+
+- `shared/agent-instructions.ts` — default text and the pure decision.
+- `shared/settings.ts` — `agentInstructions` (max 2000 characters, default text),
+  editable or empty in Settings → Plugins → Memory Flash Client. It never contains
+  a key: it is an instruction, not a credential.
+- `index.server.ts` — appends to `request.appendSystemPrompt`, preserving
+  instructions the host already carries.
+
+| Open state | Instruction |
+| --- | --- |
+| This open contributes at least one remote server | appended |
+| The saved configuration already carries a configured name (host launches it) | appended |
+| Nothing is contributed (injection off, no connection, gated, unreadable record) | none |
+| `purpose: "history"` | none |
+
+### 21.2 `useTabState` — not possible on a screen in 0.17.1 (correction)
+
+The §20.3 item 2 recommendation (persist the add-connection draft) is withdrawn.
+`addScreen` receives `PluginScreenProps`, which has `params`, `theme`, `host`,
+`layout` and `navigation` — **no `tab`**. `useTabState` requires a `PluginTab`, and
+that type appears only on `PluginPanelProps` (`addWorkspacePanel`,
+`addAgentPanel`, file panels). Persisting a screen's draft is therefore not
+available in 0.17.1; converting this global screen into a workspace panel for it
+would change the plugin's model. The draft (label, URL — never the secret) stays
+in plain `useState`. If Paseo exposes `tab` to screens, `useTabState` is a
+drop-in change with no floor move; the key must still stay out of the persisted
+state.
+
+### 21.3 `focusHost` — still nothing to attach to
+
+Unchanged from §20.3 item 3: the screen opens no agent or workspace, so there is
+no link to focus. It is recorded for a future "open the agent wired to this
+connection" action, to be gated on `navigation.supportsFocusHost` (#5574).
+
+### 21.4 `registerWorktreeManager` — still rejected
+
+Unchanged: this plugin is about remote memory and has no worktree policy.
+
+### 21.5 Verification
+
+- `npm run typecheck` exit 0 against `@getpaseo/plugin@0.17.1`.
+- `npm test` **8 suites / 92 tests** pass. New
+  `tests/agent-instructions.test.ts` covers rendering and the decision matrix;
+  `tests/server-contribution.test.ts` asserts the appended array on a real hook
+  run and its absence for an empty setting, a `history` open and a gated-off
+  agent; `tests/settings-schema.test.ts` includes the new default in the
+  daemon-defaults round trip.
+- **Not verified live:** the plugin is `disabled` on this machine and no daemon is
+  running, so the real `appendSystemPrompt` round trip and the settings input were
+  not exercised.

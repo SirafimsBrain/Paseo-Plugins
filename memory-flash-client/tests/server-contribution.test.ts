@@ -14,6 +14,7 @@ import {
   saveConnection,
 } from "../shared/contracts";
 import { saveConnection as persistConnection } from "../server/connections";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "../shared/agent-instructions";
 
 /**
  * Server contribution tests: the agent.create hook is the heart of the
@@ -130,6 +131,7 @@ function defaults(): Record<string, unknown> {
     hostname: "",
     mcpServerName: "memory-flash",
     sendIdentityHeaders: true,
+    agentInstructions: DEFAULT_AGENT_INSTRUCTIONS,
   };
 }
 
@@ -426,7 +428,48 @@ describe("agent.session_open injection (0.3.2)", () => {
     });
     const injectedHeaders = servers["memory-flash"].headers as Record<string, string>;
     expect(injectedHeaders["X-Memory-Flash-Client-Id"]).toMatch(uuid);
+    // 0.7.0: the same open also carries one instruction for the session.
+    expect(out.appendSystemPrompt).toEqual([DEFAULT_AGENT_INSTRUCTIONS]);
     cleanup();
+  });
+
+  it("appends no instruction when the setting is empty, the open is history or nothing is injected", async () => {
+    addConnection({ label: "office", url: "https://office.example/mcp", secret: "mf_live_aaa" });
+    writeAgentRecord("agent-1", {});
+    const off = createFakeServer({ ...defaults(), agentInstructions: "" });
+    const offCleanup = contribute(off);
+    const offRequest = await off.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    expect(Object.keys(offRequest.mcpServers as object)).toEqual(["memory-flash"]);
+    expect(offRequest.appendSystemPrompt).toBeUndefined();
+    offCleanup();
+
+    const history = createFakeServer(defaults());
+    const historyCleanup = contribute(history);
+    const historyRequest = await history.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "resume",
+      purpose: "history",
+      mcpServers: {},
+    });
+    expect(historyRequest.appendSystemPrompt).toBeUndefined();
+    historyCleanup();
+
+    // Injection off: the agent keeps no remote server and gets no instruction.
+    const gated = createFakeServer({ ...defaults(), injectIntoAgents: false });
+    const gatedCleanup = contribute(gated);
+    const gatedRequest = await gated.runSessionOpenHook({
+      agentId: "agent-1",
+      reason: "resume",
+      purpose: "interactive",
+      mcpServers: {},
+    });
+    expect(gatedRequest.appendSystemPrompt).toBeUndefined();
+    gatedCleanup();
   });
 
   it("suffixes names with the connection id when several connections are enabled", async () => {

@@ -1,5 +1,6 @@
 import { defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "./agent-instructions";
 
 /**
  * Plugin settings for memory-flash-client (host-scoped, edited in
@@ -76,6 +77,16 @@ export const memoryFlashClientSettings = defineSettings({
      * always sufficient for authentication.
      */
     sendIdentityHeaders: z.boolean().default(true),
+    /**
+     * Instruction appended to every session open that leaves the agent with at
+     * least one remote memory server (Paseo 0.17.x `appendSystemPrompt`).
+     * Appended for that open only and never saved on the agent. Empty disables
+     * it. Never includes a key: it is an instruction, not a credential.
+     */
+    agentInstructions: z
+      .string()
+      .max(2000)
+      .default(DEFAULT_AGENT_INSTRUCTIONS),
   }),
 });
 

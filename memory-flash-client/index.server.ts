@@ -40,6 +40,10 @@ import {
 } from "./server/identity";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideClientSessionOpen } from "./server/session-open";
+import {
+  instructionApplies,
+  renderAgentInstructions,
+} from "./shared/agent-instructions";
 import { sharedOpenCodeMcpBlockFor } from "./server/opencode-service";
 
 /**
@@ -243,12 +247,14 @@ export default function contribute(server: PluginServerContext) {
 
       const entries =
         values === null ? [] : buildServerEntries(values, resolveIdentity(values));
+      const serverNames = entries.map((entry) => entry.name);
+      const lookup = readSavedMcpServers(request.agentId);
       const decision = decideClientSessionOpen({
         reason: request.reason,
         purpose: request.purpose,
         injectIntoAgents,
-        serverNames: entries.map((entry) => entry.name),
-        lookup: readSavedMcpServers(request.agentId),
+        serverNames,
+        lookup,
         supportsMcpServers,
         openCodeMcpBlock,
       });
@@ -256,7 +262,30 @@ export default function contribute(server: PluginServerContext) {
         `[memory-flash-client] session_open ${request.agentId} (${request.reason}/${request.purpose}): ${decision.why}`,
       );
 
-      if (decision.injectNames.length === 0) return request;
+      // Agent instructions (0.7.0, Paseo 0.17.x `appendSystemPrompt`). Appended
+      // only when the agent is left with at least one remote server — contributed
+      // by this open or already saved — because the instruction promises tools it
+      // can call. `history` opens never run a turn, and a gated-off agent gets
+      // nothing.
+      const instruction =
+        values !== null &&
+        instructionApplies({
+          injectIntoAgents,
+          purpose: request.purpose,
+          injectedNames: decision.injectNames.length,
+          savedHasServer:
+            lookup.status === "found" &&
+            serverNames.some((name) => lookup.savedServers.includes(name)),
+        })
+          ? renderAgentInstructions(values.agentInstructions)
+          : null;
+      if (instruction !== null) {
+        console.log(
+          `[memory-flash-client] session_open instructions appended (${request.reason})`,
+        );
+      }
+
+      if (decision.injectNames.length === 0 && instruction === null) return request;
 
       const allowed = new Set(decision.injectNames);
       let mcpServers = request.mcpServers;
@@ -267,7 +296,13 @@ export default function contribute(server: PluginServerContext) {
           `[memory-flash-client] session_open MCP injected: ${entry.name} → ${entry.url}`,
         );
       }
-      return { ...request, mcpServers };
+      return {
+        ...request,
+        mcpServers,
+        ...(instruction === null
+          ? {}
+          : { appendSystemPrompt: [...(request.appendSystemPrompt ?? []), instruction] }),
+      };
     },
   );
 

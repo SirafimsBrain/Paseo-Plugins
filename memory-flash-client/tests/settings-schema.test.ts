@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { memoryFlashClientSettings } from "../shared/settings";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "../shared/agent-instructions";
 
 /**
  * Settings schema regression tests.
@@ -23,6 +24,7 @@ describe("memory-flash-client settings schema", () => {
       hostname: "",
       mcpServerName: "memory-flash",
       sendIdentityHeaders: true,
+      agentInstructions: DEFAULT_AGENT_INSTRUCTIONS,
     });
   });
 

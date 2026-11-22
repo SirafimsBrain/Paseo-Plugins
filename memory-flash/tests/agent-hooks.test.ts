@@ -10,6 +10,7 @@ import { decideSessionOpen, type SessionOpenInput } from "../server/session-open
 import { createMemoryRecallTool } from "../server/agent-tools";
 import { MemoryStore } from "../server/store";
 import { handleJsonRpcRequest, MCP_INSTRUCTIONS, PROTOCOL_VERSION } from "../server/mcp-jsonrpc";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "../shared/agent-instructions";
 
 /**
  * 0.9.4 coverage: the `agent.session_open` contribution, the read-only recall
@@ -319,6 +320,7 @@ function defaults(): Record<string, unknown> {
     httpEnabled: false,
     httpHost: "127.0.0.1",
     httpPort: 8787,
+    agentInstructions: DEFAULT_AGENT_INSTRUCTIONS,
   };
 }
 
@@ -348,7 +350,52 @@ describe("agent.session_open hook (contribution wiring)", () => {
     expect(Object.keys(servers)).toEqual(["memory-flash"]);
     expect(servers["memory-flash"]).toMatchObject({ type: "stdio", alwaysLoad: true });
     expect(request.tools).toEqual([]);
+    // 0.14.0: the same open also carries one instruction for the session.
+    expect(request.appendSystemPrompt).toEqual([DEFAULT_AGENT_INSTRUCTIONS]);
     cleanup();
+  });
+
+  it("appends no instruction to a recall-only open or when the setting is empty", async () => {
+    // No record on disk → only the read-only recall tool is contributed, and an
+    // instruction to save a bugfix would name an ability the agent lacks.
+    const recallOnly = createFakeServer(defaults());
+    const recallCleanup = contribute(recallOnly);
+    const recallRequest = await recallOnly.runSessionOpenHook({
+      agentId: AGENT,
+      workspaceId: "ws",
+      provider: "opencode",
+      cwd: "/tmp/x",
+      reason: "resume",
+      purpose: "interactive",
+      title: null,
+      labels: {},
+      tools: [],
+      env: {},
+      mcpServers: {},
+    });
+    expect(recallRequest.appendSystemPrompt).toBeUndefined();
+    recallCleanup();
+
+    // Empty setting switches the instruction off without affecting injection.
+    writeAgentRecord(AGENT, { provider: "opencode" });
+    const off = createFakeServer({ ...defaults(), agentInstructions: "   " });
+    const offCleanup = contribute(off);
+    const offRequest = await off.runSessionOpenHook({
+      agentId: AGENT,
+      workspaceId: "ws",
+      provider: "opencode",
+      cwd: "/tmp/x",
+      reason: "resume",
+      purpose: "interactive",
+      title: null,
+      labels: {},
+      tools: [],
+      env: {},
+      mcpServers: {},
+    });
+    expect(Object.keys(offRequest.mcpServers as object)).toEqual(["memory-flash"]);
+    expect(offRequest.appendSystemPrompt).toBeUndefined();
+    offCleanup();
   });
 
   it("leaves the request untouched when the saved configuration already carries the server", async () => {
@@ -372,6 +419,9 @@ describe("agent.session_open hook (contribution wiring)", () => {
     const request = await server.runSessionOpenHook(original);
     expect(request.mcpServers).toEqual({});
     expect(request.tools).toEqual([]);
+    // The saved server is launched by the host, so memory is still reachable and
+    // the instruction still applies — nothing is duplicated, only explained.
+    expect(request.appendSystemPrompt).toEqual([DEFAULT_AGENT_INSTRUCTIONS]);
     cleanup();
   });
 

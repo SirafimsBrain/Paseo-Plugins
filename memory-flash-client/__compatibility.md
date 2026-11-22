@@ -1,6 +1,28 @@
 # Compatibility — memory-flash-client
 
-Current: plugin **0.6.4**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.7.0**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+
+## Plugin 0.7.0 — 0.17.x recommendation implemented (2026-11-22)
+
+Feature release. `requirements.paseo` rises `>=0.15.0` → **`>=0.17.0`**.
+
+| Feature | Surface | Behaviour |
+| --- | --- | --- |
+| Agent instructions | `appendSystemPrompt` in the `agent.open.before` result (0.17.0) | One instruction per open telling the agent what the remote `memory_*` tools are for. Appended only when the agent is left with at least one remote server (contributed or already saved); `history` opens and gated-off agents get nothing. Setting `agentInstructions`, empty switches it off, never contains a key |
+| Screen draft state | `useTabState` (panel-only in 0.17.1) | **Not implementable for a screen**: `PluginScreenProps` has no `tab`, and `useTabState` requires a `PluginTab` from `PluginPanelProps`. The recommendation is withdrawn; the draft stays in `useState` |
+| `focusHost` | `navigation.supportsFocusHost` + `focusHost` (0.17.0) | Nothing to attach to — the screen opens no agent or workspace |
+| Worktree manager | `registerWorktreeManager` (0.17.0) | Still rejected |
+
+**Floor raised because of `appendSystemPrompt`:** a 0.16.x daemon rejects the field
+in a session-open result and fails the open.
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `vitest` | exit 0 / **8 suites, 92 tests** pass |
+| Instruction decision | unit-tested, plus hook tests for append, empty setting, `history` and gated-off |
+| Live host 0.17.1 | not exercised — plugin `disabled`, no daemon running |
+
+Full reasoning: [__doc.md](./__doc.md) §21.
 
 ## Plugin 0.6.4 — Paseo 0.17.1 pass: the deprecated lifecycle hooks replaced (2026-11-22)
 

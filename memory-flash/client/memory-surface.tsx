@@ -31,7 +31,7 @@ const KINDS: MemoryKind[] = ["decision", "procedure", "handoff", "bugfix", "patt
 /** A skill status row as returned by the RPC (SkillStatusTarget). */
 type SkillRow = SkillStatusTarget;
 
-export function MemorySurface({ theme }: PluginScreenProps) {
+export function MemorySurface({ theme, navigation }: PluginScreenProps) {
   const typography = useHostTypography();
   const font = (base: number) => scaledFont(base, typography);
   const uiFont = interfaceFontFamily(typography);
@@ -141,6 +141,18 @@ export function MemorySurface({ theme }: PluginScreenProps) {
   const [hostUser, setHostUser] = useState("");
   const [hostPort, setHostPort] = useState("22");
   const [hostMessage, setHostMessage] = useState<string | null>(null);
+
+  // 0.14.0 (Paseo 0.17 `focusHost`): a memory row can jump to the agent that
+  // wrote it, so "where did this note come from" is one press away. `focusHost`
+  // only selects the destination host in the sidebar and is gated on the client
+  // advertising support; older clients simply open the agent as before.
+  const openAgentFor = (agentId: string | null) => {
+    if (!agentId || !navigation?.openAgent) return;
+    navigation.openAgent({
+      agentId,
+      ...(navigation.supportsFocusHost ? { focusHost: true } : {}),
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -415,6 +427,15 @@ export function MemorySurface({ theme }: PluginScreenProps) {
                   <View style={styles.cardActions}>
                     <ActionButton label="Open" onPress={() => void openHistory(memory)} accent={accent} font={font} uiFontStyle={uiFontStyle} />
                     <ActionButton label="Edit" onPress={() => openEditor(memory)} accent={accent} font={font} uiFontStyle={uiFontStyle} />
+                    {memory.agentId && navigation?.openAgent ? (
+                      <ActionButton
+                        label="Open agent"
+                        onPress={() => openAgentFor(memory.agentId)}
+                        accent={accent}
+                        font={font}
+                        uiFontStyle={uiFontStyle}
+                      />
+                    ) : null}
                     <ActionButton label="Delete" onPress={() => void removeMemory(memory)} accent={danger} font={font} uiFontStyle={uiFontStyle} />
                   </View>
                 </View>

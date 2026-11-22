@@ -89,6 +89,10 @@ import { startChangeFeed } from "./server/changes";
 import { saveWorkspaceNameMap } from "./server/workspace-map";
 import { readSavedMcpServers } from "./server/agent-record";
 import { decideSessionOpen } from "./server/session-open";
+import {
+  instructionApplies,
+  renderAgentInstructions,
+} from "./shared/agent-instructions";
 import { sharedOpenCodeMcpBlockFor } from "./server/opencode-service";
 import { createMemoryRecallTool } from "./server/agent-tools";
 import { skillStatuses, skillMarkdown, installSkill as installSkillOnDisk, uninstallSkill as uninstallSkillOnDisk } from "./server/skill";
@@ -372,6 +376,8 @@ export default function contribute(server: PluginServerContext) {
       // 0.13.5: keep the workspace id → name map current for the default project.
       void refreshWorkspaceNames(paseo);
 
+      const savedHasServer =
+        lookup.status === "found" && lookup.savedServers.includes(serverName);
       const decision = decideSessionOpen({
         reason: request.reason,
         purpose: request.purpose,
@@ -404,7 +410,28 @@ export default function contribute(server: PluginServerContext) {
         })
         .catch(() => {});
 
-      if (!decision.injectMcp && !decision.attachTool) return request;
+      // Agent instructions (0.14.0, Paseo 0.17.x `appendSystemPrompt`). The
+      // instruction goes only with a full memory server — injected, saved on the
+      // agent, or registered in its own config file. A recall-only open gets
+      // nothing: the attached tool cannot write, so "save a bugfix" would name an
+      // ability the agent does not have. `history` opens never run a turn, and a
+      // gated-off agent must not be advertised the tools the user switched off.
+      const instruction =
+        values !== null &&
+        instructionApplies({
+          injectIntoAgents,
+          purpose: request.purpose,
+          injectMcp: decision.injectMcp,
+          configCovered: cover.covered,
+          savedHasServer,
+        })
+          ? renderAgentInstructions(values.agentInstructions)
+          : null;
+      if (instruction !== null) {
+        console.log(`[memory-flash] session_open instructions appended (${request.reason})`);
+      }
+
+      if (!decision.injectMcp && !decision.attachTool && instruction === null) return request;
 
       const tools = decision.attachTool ? [...request.tools, memoryRecallTool] : request.tools;
       let mcpServers = request.mcpServers;
@@ -424,7 +451,14 @@ export default function contribute(server: PluginServerContext) {
         );
       }
 
-      return { ...request, tools, mcpServers };
+      return {
+        ...request,
+        tools,
+        mcpServers,
+        ...(instruction === null
+          ? {}
+          : { appendSystemPrompt: [...(request.appendSystemPrompt ?? []), instruction] }),
+      };
     },
   );
 

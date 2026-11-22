@@ -1,6 +1,31 @@
 # Compatibility — memory-flash
 
-Current: plugin **0.13.8**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.14.0**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+
+## Plugin 0.14.0 — 0.17.x recommendations implemented (2026-11-22)
+
+Feature release. Implements the 0.17.x recommendation that a plugin screen can act
+on and adds the deferred `focusHost` link; corrects one item 0.17.1 does not expose
+to screens. `requirements.paseo` rises `>=0.16.0` → **`>=0.17.0`**.
+
+| Feature | Surface | Behaviour |
+| --- | --- | --- |
+| Agent instructions | `appendSystemPrompt` in the `agent.open.before` result (0.17.0) | One instruction per open, that session only, never saved on the agent. Appended only when the agent is left with the full memory server (contributed, saved, or config-file covered); recall-only opens, `history` opens and gated-off agents get nothing. Text is a setting (`agentInstructions`), empty switches it off |
+| `focusHost` link | `navigation.supportsFocusHost` + `focusHost` (0.17.0) | Every memory carrying an `agentId` gets an **Open agent** action; the option is passed only when the client supports it, and the action is hidden without `openAgent` |
+| Screen tab state | `useTabState` (panel-only in 0.17.1) | **Not implementable for a screen**: `PluginScreenProps` has no `tab`, and `useTabState` requires a `PluginTab`, which only `PluginPanelProps` carries. The earlier recommendation is withdrawn; the tab stays in `useState` |
+| Worktree manager | `registerWorktreeManager` (0.17.0) | Still rejected — memory is workspace-agnostic by design |
+
+**Floor raised because of `appendSystemPrompt`:** a 0.16.x daemon rejects an
+`agent.open.before` result that carries the field and fails the open, so the plugin
+must not load there.
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `vitest` | exit 0 / **20 suites, 239 tests** pass |
+| Instruction decision | six-state matrix unit-tested; hook tests assert append, recall-only silence, empty-setting silence and the saved-server case |
+| Live host 0.17.1 | not exercised — no daemon is running; the field was verified against the SDK types only |
+
+Full reasoning: [__doc.md](./__doc.md) §23.
 
 ## Plugin 0.13.8 — Paseo 0.17.1 pass: the deprecated lifecycle hooks replaced (2026-11-22)
 

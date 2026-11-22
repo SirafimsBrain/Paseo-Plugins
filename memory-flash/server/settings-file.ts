@@ -66,6 +66,9 @@ export function parseSettingsFile(filePath: string = settingsFilePath()): Parsed
       httpEnabled: values.httpEnabled === true,
       httpHost: rawHttpHost,
       httpPort: Math.max(1, Math.min(65535, rawHttpPort)),
+      // Not used by the spawned MCP server; present because the parsed value is
+      // typed as the full plugin settings object.
+      agentInstructions: "",
     };
     return {
       mcpServerName: parsed.mcpServerName,

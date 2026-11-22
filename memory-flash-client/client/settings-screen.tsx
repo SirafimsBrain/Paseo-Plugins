@@ -181,6 +181,15 @@ export function ConnectionsSettingsScreen({ theme }: PluginSurfaceProps) {
             initialValue={values.mcpServerName}
             onChangeText={(text: string) => patch({ mcpServerName: text })}
           />
+          {/* 0.7.0: the instruction appended on every session open that leaves
+              the agent with a remote memory server. Never contains the key. */}
+          <SettingsInput
+            label="Agent instructions"
+            hint="Appended on every session open that leaves the agent with at least one remote memory server, for that session only (Paseo 0.17 appendSystemPrompt). Empty = no instruction. Max 2000 characters."
+            initialValue={values.agentInstructions}
+            placeholder="(none)"
+            onChangeText={(text: string) => patch({ agentInstructions: text })}
+          />
         </SettingsSection>
       </SettingsCard>
 

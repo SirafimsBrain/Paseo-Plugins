@@ -1518,3 +1518,98 @@ still refuses custom MCP servers on a shared service).
   open under 0.17.1 were not exercised. The evidence is the SDK diff, typecheck,
   tests and the unchanged hook contract; the next live session is the first
   end-to-end run of the `addHook` spelling.
+
+## 23. Implementing the 0.17.x recommendations (2026-11-22, 0.14.0)
+
+0.14.0 implements the recommendation from §22.3 that a plugin screen can actually
+act on, adds the `focusHost` link the same section deferred, and corrects one item
+that Paseo 0.17.1 does not expose to a screen. Feature release (second digit): the
+plugin now says *when* to use memory, and a memory row can jump to the agent that
+wrote it. `requirements.paseo` moves `>=0.16.0` → **`>=0.17.0`**, because
+`appendSystemPrompt` does not exist on a 0.16.x daemon and a session-open result
+carrying it fails the open — the same failure mode 0.7.6 fixed for the metadata
+field.
+
+### 23.1 Agent instructions via `appendSystemPrompt` (implemented)
+
+The one case where memory reaches an agent but nothing tells it to use the base is
+the one this release fixes: a shared OpenCode v2 service or a config-file
+registration deliberately withholds the plugin's session-level injection, and the
+skill is a separate install. `agent.open.before` may now return
+`appendSystemPrompt`, which Paseo appends to that session only and never saves on
+the agent.
+
+- `shared/agent-instructions.ts` — the default text and the decision, pure and
+  shared with the settings screen. No Node APIs, no imports.
+- `shared/settings.ts` — `agentInstructions` (max 2000 characters, default text),
+  editable (or empty to switch off) in Settings → Plugins → Memory Flash.
+- `index.server.ts` — the session-open hook appends
+  `[...(request.appendSystemPrompt ?? []), instruction]`, so instructions the host
+  already carries are preserved.
+
+The instruction is appended only when this open leaves the agent with the **full
+memory server**:
+
+| Open state | Instruction |
+| --- | --- |
+| This open injects `memory-flash` | appended |
+| The saved configuration already carries it (host launches it) | appended |
+| `agentConfigCoversProvider` — the agent's own config file carries it (0.8.2) | appended |
+| Recall-only: the attached read-only `memory_flash_recall` instead of the server | **none** — the tool cannot write, so "save a bugfix" would name an ability the agent lacks |
+| `purpose: "history"` | none — the open never runs a turn |
+| `injectIntoAgents` off | none — a gated-off agent gets no advertised tools |
+
+The text names `memory_search`, `memory_save` and `memory_handoff` — the bare MCP
+tool names, not a provider-prefixed form, so it stays correct whatever transport
+delivered the tools. It is appended per open, never persisted, and costs no file
+write.
+
+### 23.2 `focusHost` on memory rows (implemented)
+
+`client/memory-surface.tsx` adds an **Open agent** action to every memory that
+carries an `agentId`. It calls
+`navigation.openAgent({ agentId, focusHost: true })` when the client advertises
+`navigation.supportsFocusHost` (#5574) and omits the option otherwise, so an older
+client simply opens the agent. The action is hidden when the client has no
+`openAgent` at all — the same degradation rule the SDK documents for
+`PluginNavigableHostProps.navigation`.
+
+### 23.3 `useTabState` on the screen — not possible in 0.17.1 (correction)
+
+The §22.3 item 2 recommendation (persist the screen's active tab) is withdrawn:
+the 0.17.1 client API does not expose tab state to a plugin **screen**.
+
+- `addScreen` receives `PluginScreenProps`, which is `PluginHostProps` (theme,
+  host, layout) + `params` + the optional `navigation` object. There is no `tab`.
+- `useTabState(tab, schema, defaultState)` takes a `PluginTab` (`state`,
+  `setState`, `setModified`), and `PluginTab` appears only on
+  `PluginPanelProps` — i.e. `addWorkspacePanel` / `addAgentPanel` / file panels.
+
+So state persistence is available to panels, not screens. Converting Memory Flash
+from a global screen into a workspace panel to obtain it would change the plugin's
+model (memory is shared across workspaces, §21) for a convenience the 0.17.0
+#10049 fix does not extend this far; the tab stays in plain `useState`. Should
+Paseo add `tab` to `PluginScreenProps`, `useTabState` is a drop-in change with no
+floor move.
+
+### 23.4 `registerWorktreeManager` — still rejected
+
+Unchanged from §22.3 item 4: memory is workspace-agnostic on purpose, so owning
+worktree layout would make one plugin silently redefine how every workspace of
+every project is created.
+
+### 23.5 Verification
+
+- `npm run typecheck` exit 0 against `@getpaseo/plugin@0.17.1`.
+- `npm test` **20 suites / 239 tests** pass (MCP bundle rebuilt by the real
+  `scripts/bundle-mcp-server.mjs`). New `tests/agent-instructions.test.ts` covers
+  rendering, the empty setting and the six-row decision matrix;
+  `tests/agent-hooks.test.ts` asserts the appended array on a real hook run, its
+  absence for a recall-only open and for an empty setting, and that a saved server
+  still gets the instruction.
+- `server/settings-file.ts` carries the new field so the parsed object still
+  matches `MemoryFlashSettings`; the spawned MCP server does not read it.
+- **Not verified live:** no Paseo daemon is running, so the real
+  `appendSystemPrompt` round trip (daemon accepting the field into a session), the
+  **Open agent** press and the settings input were not exercised. The floor raise
+  is the protective part: a 0.16.x host cannot load the plugin at all.
