@@ -22,7 +22,7 @@ import { interfaceFontFamily, monoFontFamily, scaledFont, useHostTypography } fr
  * note, shows freshness, and can rebuild the index. Configuration lives in the
  * plugin's settings screen, where every setting belongs.
  */
-export function KnowledgeSurface({ theme }: PluginScreenProps) {
+export function KnowledgeSurface({ theme, params }: PluginScreenProps) {
   const typography = useHostTypography();
   const font = (base: number) => scaledFont(base, typography);
   const uiFont = interfaceFontFamily(typography);
@@ -43,7 +43,7 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
   const openRpc = useRpc(openInObsidian);
 
   const [status, setStatus] = useState<VaultStatus | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(params.query ?? "");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [noteText, setNoteText] = useState<string | null>(null);
   const [notePath, setNotePath] = useState<string | null>(null);
@@ -67,20 +67,32 @@ export function KnowledgeSurface({ theme }: PluginScreenProps) {
   // read above stays as the first paint and for a host without subscriptions.
   useSubscription(statusStream, {}, (event) => setStatus(event.status));
 
-  const runSearch = useCallback(async () => {
-    const trimmed = query.trim();
-    setBusy(true);
-    setMessage(null);
-    try {
-      const result = await searchRpc({ query: trimmed.length > 0 ? trimmed : " " });
-      setHits(result.hits);
-      setMessage(result.hits.length === 0 ? (result.note ?? "No results.") : null);
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [query, searchRpc]);
+  const runSearch = useCallback(
+    async (term?: string) => {
+      const trimmed = (term ?? query).trim();
+      setBusy(true);
+      setMessage(null);
+      try {
+        const result = await searchRpc({ query: trimmed.length > 0 ? trimmed : " " });
+        setHits(result.hits);
+        setMessage(result.hits.length === 0 ? (result.note ?? "No results.") : null);
+      } catch (cause) {
+        setMessage(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [query, searchRpc],
+  );
+
+  // `/obsidian <query>` (0.22.18) opens this screen with `params.query`: run it
+  // once so the slash command lands on results, not an empty box.
+  useEffect(() => {
+    const initial = (params.query ?? "").trim();
+    if (initial.length > 0) void runSearch(initial);
+    // Deliberately once per mount: later typing owns the query state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openNote = useCallback(
     async (path: string) => {

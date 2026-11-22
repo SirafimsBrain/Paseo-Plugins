@@ -2,6 +2,33 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.22.18 — instructions, tab state, file panel, badge and slash command (2026-11-22)
+
+Feature release (0.21.18 → 0.22.18) adopting the 0.17.x plugin surface this plugin can use. **Host floor rises to
+`>=0.17.0`** because `agent.open.before` now returns `appendSystemPrompt`, a 0.17 field that a 0.16 daemon rejects; the SDK
+dev pin stays `@getpaseo/plugin ^0.17.1` (verified on 0.17.3). Settings schema stays version 4 (one new key with a
+default), the MCP catalogue and every tool input are unchanged.
+
+| Change | Behaviour |
+| --- | --- |
+| agent instruction (0.22.18) | `agent.open.before` appends one instruction when the open leaves the agent a working vault surface — MCP injection, attached fallback tools, a provider config file, a saved server, or `reason: create` — and `purpose` is not `history`. Text is the new `agentInstructions` setting (max 2000, empty switches it off); `{server}` is replaced with `obsidian-bridge` for the MCP server and `obsidian_bridge` for the attached tools, so the tool names match the transport. Never saved on the agent, never contains a secret |
+| injection switch honoured on open | the open hook now reads `injectIntoAgents` from the host store; previously it treated "settings readable" as "on". Off now stands both hooks down consistently |
+| workspace panel keeps its state | `useTabState` persists the query and the previewed note path across tab switches; the preview text is re-read from the index when the tab returns |
+| Markdown file panel | `addFilePanel` registers `obsidian-note` for `.md` and `.markdown`: an opened note becomes a read-only Paseo file tab rendered by `Markdown`, with its path and requested line range in the header. Editing stays in Obsidian or `obsidian_edit` |
+| workspace row badge | `addWorkspaceRowBadgeItem` renders `Indexing` while a scan runs and `Obsidian error` on a failed index; a healthy idle vault renders nothing |
+| `/obsidian <query>` | `addSlashCommand` (workspace context) opens the knowledge-base screen with the query and runs the search once |
+
+Known limits: the file panel claims every `.md`/`.markdown` file Paseo opens, not only notes inside the configured vault (it is
+a plain read-only Markdown view either way). The badge holds one `status-stream` subscription per workspace row, and the
+slash command needs a workspace context. The instruction is not added on the very first turn of an agent created through
+`saved configuration` when the agent record is not written yet; the next open carries it.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **48 suites / 423 tests** pass, including the new
+`tests/agent-instructions.test.ts` (rendering for both prefixes, the gating matrix, setting default and empty value).
+`pretest` rebuilt `dist/mcp-server.js`. **Not live-checked:** the Paseo daemon is not running on this machine, so the
+instruction round-trip, the file panel, the badge, the slash command and the persisted panel state were not observed in a
+running app. Linux remains the primary target; macOS and Windows remain future work.
+
 ## Plugin 0.21.18 — Paseo 0.17.1 compatibility pass (2026-11-22)
 
 Patch release (0.21.17 → 0.21.18). The [0.17.1 release notes](https://github.com/getpaseo/paseo/releases/tag/v0.17.1)
@@ -511,4 +538,7 @@ when it is closed every capability above falls back to the disk index and status
 | `defineRpc` / `server.handle` | `shared/contracts.ts`, `index.server.ts` | 0.15.0 |
 | `client.addScreen`, `addSidebarHeaderItem`, `addSettingsScreen`, `addCommandCenterItem` | `index.client.tsx` | 0.15.0 |
 | `client.addWorkspacePanel`, `client.addAttachmentSource` | `index.client.tsx` | 0.15.0 |
+| `client.addFilePanel`, `addWorkspaceRowBadgeItem`, `addSlashCommand` | `index.client.tsx` | 0.15.0 |
+| `useTabState` | `client/workspace-panel.tsx` | 0.15.0 |
+| `appendSystemPrompt` on `agent.open.before` | `index.server.ts` | 0.17.0 |
 | `useSettings`, `useRpc`, `SidebarRow`, settings UI primitives | `client/*` | 0.15.0 |

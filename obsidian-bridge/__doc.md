@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.21.18**.
+Version covered: **0.22.18**.
 
 ## 1. Purpose and scope
 
@@ -493,7 +493,34 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18)
+
+### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
+
+Feature release (0.21.18 → 0.22.18): the five 0.17.x capabilities this plugin can actually use. The host floor rises to
+`>=0.17.0` because `agent.open.before` now returns `appendSystemPrompt`; a 0.16 daemon rejects that field. Settings schema
+stays version 4 (the new key has a default), and the MCP catalogue and tool inputs are unchanged.
+
+| Capability | Where | Contract |
+| --- | --- | --- |
+| `appendSystemPrompt` on `agent.open.before` | `index.server.ts`, `shared/agent-instructions.ts` | one instruction per open, only when the agent ends up with a working surface (MCP, attached tools, config file, saved server or `create`) and `purpose !== "history"`; never saved, never contains a secret |
+| `{server}` placeholder | `shared/agent-instructions.ts` | rendered with `obsidian-bridge` for the MCP server or `obsidian_bridge` for the attached tools, matching the names Paseo exposes |
+| setting `agentInstructions` | `shared/settings.ts`, `client/settings-screen.tsx` | default text, max 2000, empty switches the instruction off; host-only, not mirrored to the MCP process |
+| `useTabState(tab, …)` | `client/workspace-panel.tsx` | persists `{ query, previewPath }`; the preview text is re-read from the index. Screens and settings still have no `tab` in 0.17.3 |
+| `addFilePanel` | `client/file-panel.tsx`, `index.client.tsx` | read-only Markdown view for `.md`/`.markdown`, with path and line range; `useFileText` follows disk changes |
+| `addWorkspaceRowBadgeItem` | `client/workspace-badge.tsx` | `Indexing` while a scan runs, `Obsidian error` on a failed index, nothing when healthy and idle |
+| `addSlashCommand` | `index.client.tsx`, `client/surface.tsx` | `/obsidian <query>` opens the screen with `params.query` and runs that search once |
+
+One behavioural fix rides along: the open hook now honours `injectIntoAgents` from the host store instead of treating
+"settings readable" as "enabled", so the switch stands down both hooks consistently.
+
+Limits: the file panel matches every Markdown file Paseo opens, not only notes under `vaultPath`; the badge subscribes to
+`status-stream` per workspace row; the slash command is workspace-scoped; the instruction can miss the first turn of an
+agent created from saved configuration when its record is not yet on disk.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **48 suites / 423 tests** pass (new: `tests/agent-instructions.test.ts`,
+9 cases). Not live-checked: no Paseo daemon is running, so the instruction round-trip and the three new UI surfaces were not
+seen in an app. Linux is the primary target; macOS and Windows remain future work.
 
 ### 0.21.18 — Paseo 0.17.1 compatibility pass
 

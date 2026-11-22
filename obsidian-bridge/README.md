@@ -12,12 +12,19 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.21.18)
+## What it does (0.22.18)
 
+- **The agent is told when the vault matters (0.22.18).** Every session open that leaves the agent with the vault tools also
+  appends one short instruction — search before answering from memory, cite the note path, write only when asked — for that
+  session only (Paseo 0.17 `appendSystemPrompt`). The text is a setting, `{server}` expands to the prefix the tools carry,
+  and an empty value switches it off.
+- **A note as a Paseo file tab (0.22.18).** `.md`/`.markdown` files open in a read-only Markdown panel with their path and
+  line range; the workspace tab keeps its query and preview across tab switches, a workspace-row badge shows a running
+  index or an index error, and `/obsidian <query>` opens the knowledge base with the search already run.
 - **Paseo 0.17.1 compatibility pass (0.21.18).** Reviewed against the 0.17.1 release and typechecked on SDK 0.17.3: no
   deprecated plugin API is used (the plugin calls `addHook`, `addScreen`, `addSidebarHeaderItem`, `openScreen` and
   `SettingsSection`, not their deprecated predecessors), so nothing had to be replaced. The dev pin is
-  `@getpaseo/plugin ^0.17.1`; the host floor stays `>=0.15.0` because no 0.17-only API is used.
+  `@getpaseo/plugin ^0.17.1`.
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
 - **Hybrid search.** Full-text over heading chunks, fused (Reciprocal Rank Fusion) with title/alias matches, one-hop
@@ -214,8 +221,8 @@ the normal lexical + graph + semantic path and is reported in the panel and `obs
 
 ## Requirements
 
-- Paseo `>= 0.15.0`; verified against the 0.17.1 release (typecheck and tests on SDK 0.17.3) — see
-  [__compatibility.md](./__compatibility.md).
+- Paseo `>= 0.17.0` (the agent instruction uses `appendSystemPrompt`, which older daemons reject); verified against the
+  0.17.1 release (typecheck and tests on SDK 0.17.3) — see [__compatibility.md](./__compatibility.md).
 - Node.js `>= 22.5` on the daemon host (the index uses the built-in `node:sqlite` with FTS5; verified on Node 24).
 - Semantic search downloads a model once (~118 MB for the default q8 e5-small) into
   `$PASEO_HOME/plugins/obsidian-bridge/models`, then runs offline. ~0.5 GB RAM while the model is loaded; up to 2 GB is

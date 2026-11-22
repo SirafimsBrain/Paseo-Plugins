@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { defineSettings } from "@getpaseo/plugin";
+import { DEFAULT_AGENT_INSTRUCTIONS } from "./agent-instructions";
 
 /**
  * Default exclude list: the vault's own configuration directory, its trash,
@@ -155,6 +156,14 @@ export const obsidianBridgeSettings = defineSettings({
     obsidianApiKey: z.string().trim().max(512).default(""),
     /** Inject the MCP server (or the fallback agent tools) into agents. */
     injectIntoAgents: z.boolean().default(true),
+    /**
+     * Instruction appended to every session open that leaves the agent with a
+     * working vault surface (0.22.18, Paseo 0.17 `appendSystemPrompt`).
+     * `{server}` is replaced with the MCP prefix the agent's tools carry; an
+     * empty value switches the instruction off. Not mirrored to the settings
+     * file: only this plugin process appends it.
+     */
+    agentInstructions: z.string().trim().max(2000).default(DEFAULT_AGENT_INSTRUCTIONS),
     /**
      * Register the MCP server in OpenCode's and Kilo's own config files
      * (`mcp.obsidian-bridge`). Paseo 0.15.x refuses custom MCP servers on an

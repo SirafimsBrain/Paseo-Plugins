@@ -6,6 +6,8 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { KnowledgeSurface } from "./client/surface";
 import { ObsidianCiteComposerItem } from "./client/composer-item";
 import { KnowledgeWorkspacePanel } from "./client/workspace-panel";
+import { ObsidianFilePanel } from "./client/file-panel";
+import { ObsidianWorkspaceBadge } from "./client/workspace-badge";
 import { ObsidianBridgeSettingsScreen } from "./client/settings-screen";
 import { notesAttachmentSource } from "./shared/attachments";
 
@@ -47,6 +49,23 @@ export default function contribute(client: PluginClientContext) {
     Component: KnowledgeWorkspacePanel,
   });
 
+  // 0.22.18: a note opened from Paseo (or from a search hit) as a file tab.
+  client.addFilePanel({
+    id: "obsidian-note",
+    title: "Obsidian note",
+    icon: "FileText",
+    files: { extensions: ["md", "markdown"] },
+    Component: ObsidianFilePanel,
+  });
+
+  // Index state on the workspace row, only while there is something to say.
+  client.addWorkspaceRowBadgeItem({
+    id: "obsidian-index-state",
+    title: "Obsidian index",
+    icon: "BookOpen",
+    Component: ObsidianWorkspaceBadge,
+  });
+
   // Attach one note to a prompt as an explicit text snapshot.
   client.addAttachmentSource(notesAttachmentSource);
 
@@ -61,6 +80,18 @@ export default function contribute(client: PluginClientContext) {
     title: "Obsidian Bridge",
     icon: "BookOpen",
     Component: ObsidianBridgeSettingsScreen,
+  });
+
+  // `/obsidian <query>` opens the knowledge base with the search already run.
+  client.addSlashCommand({
+    name: "obsidian",
+    description: "Search the Obsidian knowledge base",
+    argumentHint: "<query>",
+    context: "workspace",
+    onSubmit({ args, openScreen }) {
+      const query = args.trim();
+      openScreen({ screenId: SCREEN_ID, params: query.length > 0 ? { query } : {} });
+    },
   });
 
   client.addCommandCenterItem({

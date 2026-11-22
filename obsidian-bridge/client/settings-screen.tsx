@@ -514,6 +514,13 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             value={values.injectIntoAgents}
             onValueChange={(enabled: boolean) => patch({ injectIntoAgents: enabled })}
           />
+          <SettingsInput
+            label="Agent instructions"
+            hint="Appended on every session open that leaves the agent with the vault tools, for that session only (Paseo 0.17 appendSystemPrompt). {server} is replaced with the MCP prefix the tools carry. Empty = no instruction. Max 2000 characters."
+            initialValue={values.agentInstructions}
+            placeholder="Search the vault before answering from memory…"
+            onChangeText={(text: string) => patch({ agentInstructions: text })}
+          />
           <SettingsSwitch
             label="Register in the OpenCode and Kilo config files"
             hint="Writes an `obsidian-bridge` entry into the agents' own MCP config, so OpenCode and Kilo sessions get the tools even where Paseo cannot inject a server. Removed again when this switch is off or the plugin stops."

@@ -15,7 +15,12 @@ import {
 } from "./shared/contracts";
 import { searchNotesForAttachment } from "./shared/attachments";
 import { obsidianBridgeSettings, runtimeSettingsOf, type RuntimeSettings } from "./shared/settings";
-import { readSavedMcpServers } from "./server/agent-record";
+import { readSavedMcpServers, savedServersInclude } from "./server/agent-record";
+import {
+  DEFAULT_AGENT_INSTRUCTIONS,
+  instructionApplies,
+  renderAgentInstructions,
+} from "./shared/agent-instructions";
 import { createObsidianTools } from "./server/agent-tools";
 import { normalizeRoleDir } from "./server/dirs";
 import { embedQuery } from "./server/embed/query";
@@ -299,6 +304,14 @@ export default function contribute(server: PluginServerContext) {
 
   const removeOpenHook = server.addHook("agent.open.before", async ({ request }, { paseo }) => {
     const values = await readRuntimeSettings().catch(() => null);
+    // The host store is read a second time for the two UI-only values the
+    // mirrored runtime settings do not carry: the injection switch and the
+    // instruction text. An unreadable store keeps the default (on), matching
+    // the create hook.
+    const stored = await settings.read().catch(() => null);
+    const injectEnabled = stored?.status === "ready" ? stored.values.injectIntoAgents : true;
+    const instructionTemplate =
+      stored?.status === "ready" ? stored.values.agentInstructions : DEFAULT_AGENT_INSTRUCTIONS;
     // How an earlier open provisioned this agent (0.9.11). A recorded `mcp` mode
     // makes the capability probe unnecessary: the provider already accepted a
     // server for this agent, and that answer cannot have changed.
@@ -307,7 +320,7 @@ export default function contribute(server: PluginServerContext) {
       reason: request.reason,
       purpose: request.purpose,
       provider: request.provider,
-      injectIntoAgents: values !== null,
+      injectIntoAgents: values !== null && injectEnabled,
       serverName: INJECTED_SERVER_NAME,
       lookup: readSavedMcpServers(request.agentId),
       configCovered: agentConfigCoversProvider(request.provider).covered,
@@ -362,7 +375,31 @@ export default function contribute(server: PluginServerContext) {
         });
     }
 
-    if (!decision.injectMcp && !decision.attachTool) return request;
+    // 0.22.18: one instruction for the session, only when this open leaves the
+    // agent with a working surface (or the create hook just saved one). The
+    // prefix follows the transport: the attached tools are named
+    // `obsidian_bridge_obsidian_*`, the MCP server is `obsidian-bridge`.
+    const serverPrefix = decision.attachTool ? "obsidian_bridge" : INJECTED_SERVER_NAME;
+    const instruction = instructionApplies({
+      injectIntoAgents: values !== null && injectEnabled,
+      purpose: request.purpose,
+      reason: request.reason,
+      injectMcp: decision.injectMcp,
+      attachTool: decision.attachTool,
+      configCovered: base.configCovered === true,
+      savedHasServer: savedServersInclude(base.lookup, INJECTED_SERVER_NAME),
+    })
+      ? renderAgentInstructions(instructionTemplate, serverPrefix)
+      : null;
+    const withInstruction = (result: typeof request) =>
+      instruction
+        ? {
+            ...result,
+            appendSystemPrompt: [...(result.appendSystemPrompt ?? []), instruction],
+          }
+        : result;
+
+    if (!decision.injectMcp && !decision.attachTool) return withInstruction(request);
 
     const tools = decision.attachTool
       ? [...request.tools, ...agentTools]
@@ -375,7 +412,7 @@ export default function contribute(server: PluginServerContext) {
         [INJECTED_SERVER_NAME]: { type: "stdio", command, args, alwaysLoad: true } as const,
       };
     }
-    return { ...request, tools, mcpServers };
+    return withInstruction({ ...request, tools, mcpServers });
   });
 
   // -------------------------------------------------------------------------

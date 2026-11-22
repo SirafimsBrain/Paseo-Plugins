@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc, useSubscription } from "@getpaseo/plugin/client";
+import { useRpc, useSubscription, useTabState } from "@getpaseo/plugin/client";
+import { z } from "zod";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   openInObsidian,
@@ -19,18 +20,32 @@ import {
  * query, hits, a short preview and "Open in Obsidian". The full screen remains
  * the place for the role map and reindexing.
  */
-export function KnowledgeWorkspacePanel({ theme, layout }: PluginWorkspacePanelProps) {
+/** The panel's persisted state (Paseo 0.17 `useTabState`): survives a tab switch. */
+const panelStateSchema = z.object({
+  query: z.string().max(1000),
+  previewPath: z.string().nullable(),
+});
+
+const PANEL_DEFAULT_STATE = { query: "", previewPath: null };
+
+export function KnowledgeWorkspacePanel({ theme, layout, tab }: PluginWorkspacePanelProps) {
   const statusRpc = useRpc(vaultStatus);
   const searchRpc = useRpc(searchVaultRpc);
   const noteRpc = useRpc(readNote);
   const openRpc = useRpc(openInObsidian);
 
   const [status, setStatus] = useState<VaultStatus | null>(null);
-  const [query, setQuery] = useState("");
+  const [tabState, setTabState] = useTabState(tab, panelStateSchema, PANEL_DEFAULT_STATE);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [message, setMessage] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ path: string; text: string } | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const query = tabState.query;
+  const previewPath = tabState.previewPath;
+  const setQuery = useCallback(
+    (text: string) => setTabState({ ...tabState, query: text }),
+    [setTabState, tabState],
+  );
 
   const font = (base: number) => (layout.compact ? base : base + 1);
 
@@ -67,13 +82,28 @@ export function KnowledgeWorkspacePanel({ theme, layout }: PluginWorkspacePanelP
     async (path: string) => {
       try {
         const note = await noteRpc({ path });
-        setPreview({ path: note.path, text: note.content.slice(0, 6000) });
+        setPreviewText(note.content.slice(0, 6000));
+        setTabState({ ...tabState, previewPath: note.path });
       } catch (cause) {
         setMessage(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [noteRpc],
+    [noteRpc, setTabState, tabState],
   );
+
+  // Restored tab: the path is persisted, the text is re-read from the index.
+  useEffect(() => {
+    if (!previewPath) {
+      setPreviewText(null);
+      return;
+    }
+    if (previewText !== null) return;
+    void noteRpc({ path: previewPath })
+      .then((note) => setPreviewText(note.content.slice(0, 6000)))
+      .catch(() => setPreviewText(null));
+  }, [noteRpc, previewPath, previewText]);
+
+  const preview = previewPath ? { path: previewPath, text: previewText ?? "" } : null;
 
   const openInApp = useCallback(
     async (path: string) => {
@@ -211,7 +241,10 @@ export function KnowledgeWorkspacePanel({ theme, layout }: PluginWorkspacePanelP
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              onPress={() => setPreview(null)}
+              onPress={() => {
+                setPreviewText(null);
+                setTabState({ ...tabState, previewPath: null });
+              }}
               style={{
                 paddingHorizontal: 12,
                 paddingVertical: 8,
