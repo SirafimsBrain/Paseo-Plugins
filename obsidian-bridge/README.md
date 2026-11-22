@@ -12,8 +12,12 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.21.17)
+## What it does (0.21.18)
 
+- **Paseo 0.17.1 compatibility pass (0.21.18).** Reviewed against the 0.17.1 release and typechecked on SDK 0.17.3: no
+  deprecated plugin API is used (the plugin calls `addHook`, `addScreen`, `addSidebarHeaderItem`, `openScreen` and
+  `SettingsSection`, not their deprecated predecessors), so nothing had to be replaced. The dev pin is
+  `@getpaseo/plugin ^0.17.1`; the host floor stays `>=0.15.0` because no 0.17-only API is used.
 - **Indexes a directory from disk.** Notes, YAML frontmatter, tags, `[[wikilinks]]` and heading structure go into a local
   SQLite index with FTS5. Obsidian does not have to be running.
 - **Hybrid search.** Full-text over heading chunks, fused (Reciprocal Rank Fusion) with title/alias matches, one-hop
@@ -210,7 +214,7 @@ the normal lexical + graph + semantic path and is reported in the panel and `obs
 
 ## Requirements
 
-- Paseo `>= 0.15.0`; verified against the 0.16.0 release (0.16.1 host) — see
+- Paseo `>= 0.15.0`; verified against the 0.17.1 release (typecheck and tests on SDK 0.17.3) — see
   [__compatibility.md](./__compatibility.md).
 - Node.js `>= 22.5` on the daemon host (the index uses the built-in `node:sqlite` with FTS5; verified on Node 24).
 - Semantic search downloads a model once (~118 MB for the default q8 e5-small) into

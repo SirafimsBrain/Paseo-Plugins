@@ -2,6 +2,48 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.21.18 — Paseo 0.17.1 compatibility pass (2026-11-22)
+
+Patch release (0.21.17 → 0.21.18). The [0.17.1 release notes](https://github.com/getpaseo/paseo/releases/tag/v0.17.1)
+were reviewed change by change, the plugin was typechecked and tested against the current SDK, and every Paseo API call in
+it was checked against the SDK's `@deprecated` markers. **No deprecated method or function is used, so nothing had to be
+replaced.** The only change is the dev pin `@getpaseo/plugin ^0.16.0` → `^0.17.1` (resolved and verified on **0.17.3**,
+the installed Paseo CLI); the host floor stays `>=0.15.0`, because the plugin uses no 0.17-only API. Tool catalogue,
+settings schema version, MCP server and every tool input are unchanged.
+
+### Deprecation audit (SDK 0.17.3)
+
+| Deprecated API | State in the plugin |
+| --- | --- |
+| `server.before(name, …)` | not used — both hooks register through `server.addHook("agent.create.before")` / `("agent.open.before")` |
+| `server.on(name, …)` with legacy event names (`agent.created`, `agent.session_open`, …) | not used — no event-style lifecycle registration at all |
+| `client.addSurface` | not used — `client.addScreen` |
+| `client.addSidebarItem` | not used — `client.addSidebarHeaderItem` with a `PluginSidebarItemProps` component |
+| `client.openSurface` | not used — `openScreen({ screenId })` in the sidebar item and both Command Center entries |
+| `PluginWorkspacePanelContribution.context` | not used — `addWorkspacePanel` passes no `context`, and the component does not read the deprecated `context` prop |
+| `SettingsGroup` | not used — the settings screen imports `SettingsSection` |
+| `@getpaseo/plugin/client/react-native` | not used — UI imports come from `@getpaseo/plugin/client/ui`; `react-native` primitives are imported from the `react-native` package itself |
+| provider `options` / `settings` deprecations | not applicable — the plugin registers no provider |
+
+### 0.17.1 changes and their impact here
+
+| 0.17.1 change | Impact |
+| --- | --- |
+| **Plugin agent instructions** (`appendSystemPrompt` on `agent.open.before`, #9781) | not used yet; an additive opportunity — the plugin already decides on every open whether the agent actually gets the server |
+| **`focusHost` navigation option** (#5574) | none — the plugin opens screens, not agents or workspaces, so there is no destination to focus |
+| **Plugin control of worktree creation, removal and restoration** (#10278) | none — the plugin does not create or manage worktrees |
+| Fixed plugin screens and settings failing to use plugin state hooks (#10049) | no code change; relevant only if the plugin adopts state. `PluginScreenProps` still has no `tab` in 0.17.3, so `useTabState` remains usable from a panel (`PluginWorkspacePanelProps.tab`), not from the screen or the settings screen |
+| Fixed plugin agents failing to reopen after their provider closes the session (#10153), Antigravity approvals/history, provider updates and quota views | host-side fixes; the plugin's `agent.open.before` path benefits without a change |
+
+The 0.16.0 contract this plugin relies on is unchanged: `agent.open.before` may still change only `env`, `tools` and
+`mcpServers`, and the OpenCode shared-service guard around config-file registration is still required.
+
+Evidence: `npm run typecheck` (three-project `tsc -b`) exit 0 against SDK **0.17.3**; `npm test` **47 suites / 414 tests**
+pass, `pretest` rebuilt `dist/mcp-server.js`. **Not live-checked:** the Paseo daemon on this machine is not running
+(`paseo plugin ls` answers "Daemon is not running"), so the plugin was not reloaded on a 0.17.1+ host in this pass and no
+settings screen or tool was exercised in a running app. Linux remains the primary target; macOS and Windows remain
+future work.
+
 ## Plugin 0.21.15 — fixes from the second live plan test (2026-11-20)
 
 Patch release (0.21.14 → 0.21.15). A second full plan (71 live nodes) was written through the installed `plan_*` tools on

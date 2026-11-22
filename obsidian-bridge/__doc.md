@@ -3,7 +3,7 @@
 Internal design, verified behaviour and the roadmap of the `obsidian-bridge` plugin. User-facing description:
 [README.md](./README.md). Research and decisions: [__research.md](./__research.md).
 
-Version covered: **0.21.16**.
+Version covered: **0.21.18**.
 
 ## 1. Purpose and scope
 
@@ -493,7 +493,31 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18)
+
+### 0.21.18 — Paseo 0.17.1 compatibility pass
+
+Patch release (0.21.17 → 0.21.18). The 0.17.1 release notes were reviewed, the plugin was typechecked and tested against the
+current SDK, and every Paseo API call was checked against the SDK's `@deprecated` markers. **No deprecated API is used**, so
+no call was replaced; the only change is the dev pin `@getpaseo/plugin ^0.16.0` → `^0.17.1` (resolved to **0.17.3**). The
+host floor stays `>=0.15.0` because no 0.17-only API is used. Tool catalogue, settings schema and MCP server are unchanged.
+
+| Deprecated surface (SDK 0.17.3) | Plugin state |
+| --- | --- |
+| `server.before` / `server.on` and legacy event names | not used; both hooks use `addHook` |
+| `client.addSurface` / `addSidebarItem` / `openSurface` | not used; `addScreen` / `addSidebarHeaderItem` / `openScreen` |
+| `PluginWorkspacePanelContribution.context` | not used; the panel is registered and written without `context` |
+| `SettingsGroup` / `client/react-native` entry | not used; `SettingsSection` and `client/ui` |
+| provider `options` / `settings` deprecations | not applicable; the plugin registers no provider |
+
+0.17.1 itself adds plugin agent instructions (`appendSystemPrompt`), `focusHost` and worktree control, and fixes plugin state
+hooks on screens and settings. None of that changes this plugin: it opens screens rather than agents, has no worktree role,
+and uses no state hook. `PluginScreenProps` still has no `tab` in 0.17.3, so `useTabState` would apply only to the workspace
+panel. The 0.16.0 `agent.open.before` contract (only `env`, `tools`, `mcpServers` may change) still holds.
+
+Evidence: `npm run typecheck` exit 0; `npm test` **47 suites / 414 tests** pass. Not live-checked: the Paseo daemon on this
+machine is not running, so the plugin was not reloaded on a 0.17.1+ host. Linux remains the primary target; macOS and
+Windows remain future work.
 
 ### 0.21.17 — one writer at a time, and four answers a live run misread
 
