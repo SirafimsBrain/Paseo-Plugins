@@ -16,6 +16,8 @@ import {
 import { createSchedule } from "./shared/schedules";
 import { SCREEN_ID, screenParams, screenTitle, toOpenScreenParams } from "./shared/screen-params";
 import { CommandCenterComposerItem } from "./client/composer-item";
+import { CommandCenterAgentPanel } from "./client/agent-panel";
+import { CommandCenterWorkspaceBadge } from "./client/workspace-badge";
 
 /**
  * Sidebar header row for the Command Center screen.
@@ -130,6 +132,24 @@ export default function contribute(client: PluginClientContext) {
       search: searchCommandsForAttachment,
     }),
   );
+
+  // Per-agent panel (0.14.4): the last runs that targeted this agent, plus its prompt
+  // commands, which run straight into it.
+  client.addAgentPanel({
+    id: "command-center-agent",
+    title: "Command Center",
+    icon: "TerminalSquare",
+    Component: CommandCenterAgentPanel,
+  });
+
+  // Workspace row badge (0.14.4): the last run that targeted that workspace and whether
+  // it succeeded. Renders nothing for a workspace Command Center never touched.
+  client.addWorkspaceRowBadgeItem({
+    id: "command-center-workspace-status",
+    title: "Command Center run status",
+    icon: "TerminalSquare",
+    Component: CommandCenterWorkspaceBadge,
+  });
 
   client.addSettingsScreen({
     id: "command-center-settings",

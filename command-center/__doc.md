@@ -1449,3 +1449,54 @@ requires raising the floor above `>=0.16.0` except where noted.
    hook may annotate a request; whether a useful field is changeable besides
    `repoRoot`/`sourceCheckout`/`startPoint` was not established, so this is recorded as
    “investigate”, not “do”.
+
+## 24. Version 0.14.4 — the §23.5 recommendations, implemented (2026-11-22)
+
+Items 1, 2, 3 and 5 of §23.5 are shipped; item 4 could not be built as proposed and
+item 6 stays “investigate”. New functionality → second digit (0.13.4 → 0.14.4), and the
+floor moves with the API actually used: `requirements.paseo` is now `>=0.17.0` (§24.3).
+
+### 24.1 What was built
+
+| # | Capability | Where | Behaviour |
+| --- | --- | --- | --- |
+| 1 | Agent panel (`addAgentPanel`) | `client/agent-panel.tsx`, registered as `command-center-agent` | Scoped to `params.agentId`. Lists every **prompt** command of the library and runs it into this agent with its stored provider and template defaults (`runCommand` with `agentId`, no dialog); lists the last five history entries whose `targetAgentId` is this agent, each repeatable with its recorded `values`. Refreshes from the live event feed. It has no way to pick another target: no workspace picker, no new agents |
+| 2 | History target links (`focusHost`) | `client/command-center-surface.tsx` (`openHistoryTarget` + a *Show agent* / *Show workspace* action per entry) | Resolves the entry's `targetAgentId` first, then `targetWorkspaceId`, against the loaded lists (which is where `serverId` comes from); calls `navigation.openAgent`/`openWorkspace` with `focusHost: true` when `navigation.supportsFocusHost` is set, and navigates without it otherwise. Entries whose target is unknown keep the old actions |
+| 3 | Workspace row badge (`addWorkspaceRowBadgeItem`) | `client/workspace-badge.tsx`, registered as `command-center-workspace-status` | The latest history entry whose `targetWorkspaceId` is that workspace, as `WorkspaceRowBadge` with the command name, a success/danger tone and an accessible label. Nothing is rendered for an untouched workspace, so the row looks exactly as before. Follows `command-center.events` and reloads once on mount |
+| 5 | Provenance instruction (`appendSystemPrompt`) | `shared/agent-instructions.ts`, `index.server.ts` session-open hook | On an interactive open, an agent that carries the `command-center` run stamp gets one instruction naming the command and the run id. Appended to `request.appendSystemPrompt` (never replacing what the host already carries), never persisted on the agent, and skipped for `history` opens and agents without the stamp |
+
+### 24.2 Why item 4 (a header button) was not built
+
+`addHeaderButton` is registered *per workspace* — the contribution requires a
+`workspaceId` at registration time
+(`PluginHeaderButtonContribution { id, workspaceId, button }`, and `addComposerPill`
+adds an `agentId` on top). The plugin's client contribution runs once at load, and the
+SDK exposes no client-side event that fires when a workspace is created, so a button
+registered for the workspaces known at load would silently be missing on every
+workspace created afterwards — a worse answer than none. The same applies to composer
+pills, which is why the existing code already registers none (see the comment in
+`index.client.tsx`). The workflow the proposal targeted — one press from a workspace to
+a run — is instead served by the existing *Open Command Center (this workspace)* item
+plus the new history target link; if a per-workspace header button is still wanted, the
+accepted limitation has to be “workspaces known at plugin load only”, and that is a
+decision for the user.
+
+### 24.3 The floor moves to `>=0.17.0`
+
+`appendSystemPrompt` exists only from 0.17.0, and the 0.17.1 daemon allows it explicitly
+(`agent.open.before hooks can only change env, tools, mcpServers, and appendSystemPrompt`,
+read from `app.asar`). A 0.16.x daemon rejects an `agent.open.before` result carrying an
+unknown field — the failure class 0.13.3 fixed for `metadata` — and the instruction is sent
+for every interactive open of a stamped agent, so a 0.16.x host would fail those opens.
+The manifest therefore requires `>=0.17.0`. `focusHost` is additionally gated at runtime
+on `navigation.supportsFocusHost`, so an older client degrades to plain navigation.
+
+### 24.4 Verification (2026-11-22, this machine)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) against SDK 0.17.1 | **exit 0** |
+| `npm test` | **22 suites / 215 tests pass** (6 new) |
+| New `tests/agent-instructions.test.ts` | provenance text: names command and run id, falls back to the id on an old stamp, returns `null` for nothing to say |
+| Extended `tests/server-rpc.test.ts` | the session-open hook appends one instruction for a stamped agent, appends to instructions the host already carries, and adds nothing without a stamp or for `history` |
+| Live daemon | **not run** — no daemon is up on this machine, so plugin `running`, the two new client contributions rendering and the instruction reaching a real agent turn are not claimed. The hook path is covered by tests with the host's result shape; the UI paths were not rendered |

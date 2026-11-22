@@ -1,10 +1,35 @@
 # Compatibility — command-center
 
-Current: plugin **0.13.4**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.17.1`, `@getpaseo/client ^0.17.1`.
+Current: plugin **0.14.4**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`, `@getpaseo/client ^0.17.1`.
 Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration and
-**no deprecated API in use**; see *Plugin 0.13.4 — Paseo 0.17.1 pass* below.
+**no deprecated API in use**; see *Plugin 0.14.4 — the 0.17.x improvements* and
+*Plugin 0.13.4 — Paseo 0.17.1 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.14.4 — the 0.17.x improvements (2026-11-22)
+
+Feature release (0.13.4 → 0.14.4, second digit +1, third preserved). It implements
+items 1, 2, 3 and 5 of the §23.5 recommendations; item 4 (a per-workspace header
+button) has no viable registration path and stays a decision, and item 6 stays a
+spike. Full design and evidence: [`__doc.md`](./__doc.md) §24.
+
+| Improvement | Contract used | Notes |
+| --- | --- | --- |
+| Agent panel | `addAgentPanel` (0.15+) | Scoped to `params.agentId`: prompt commands run into that agent, last five runs repeatable; cannot retarget |
+| History target links | `navigation.supportsFocusHost` + `focusHost` (0.17.0) | `openAgent`/`openWorkspace` for the entry's target, host selected; degrades when the client lacks it |
+| Workspace row badge | `addWorkspaceRowBadgeItem` + `WorkspaceRowBadge` (0.16+) | Latest run of that workspace, success/danger, fed by `command-center.events`; nothing when untouched |
+| Provenance instruction | `appendSystemPrompt` in the `agent.open.before` result (0.17.0) | Names the command and run id for agents a command created; appended, never persisted, skipped for `history` |
+
+**Floor raised to `>=0.17.0`** because of `appendSystemPrompt`: a 0.16.x daemon rejects
+an `agent.open.before` result carrying it and every interactive open of a stamped agent
+would fail (the 0.13.3 `metadata` failure class). The 0.17.1 host allows the field
+explicitly, and `focusHost` is gated on `supportsFocusHost` at runtime.
+
+**Verified:** `npm run typecheck` exit 0 and `npm test` **22 suites / 215 tests** pass
+against SDK 0.17.1, including the new instruction suite and three hook-level cases.
+**Not verified:** no daemon was running, so the two new client contributions, the
+history target links and the instruction reaching a live agent turn were not exercised.
 
 ## Plugin 0.13.4 — Paseo 0.17.1 pass (2026-11-22)
 

@@ -357,6 +357,7 @@ describe("0.6.0: session-open hook and the agent-reload RPC", () => {
     return (await hook({ request } as never, { paseo } as never)) as {
       tools: { name: string }[];
       mcpServers: Record<string, unknown>;
+      appendSystemPrompt?: string[];
     };
   }
 
@@ -401,6 +402,55 @@ describe("0.6.0: session-open hook and the agent-reload RPC", () => {
     expect(setMetadata.mock.calls[0]?.[0]).toMatchObject({
       "command-center.provisioning": { mode: "tool" },
     });
+  });
+
+  it("appends a provenance instruction for an agent a command created", async () => {
+    const result = await runHook(
+      sessionOpenRequest({
+        metadata: {
+          "command-center": {
+            commandId: "cmd_1",
+            commandName: "Nightly Review",
+            runId: "r_42",
+            at: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      hookPaseo(),
+    );
+    expect(result.appendSystemPrompt).toHaveLength(1);
+    expect(result.appendSystemPrompt?.[0]).toContain("Nightly Review");
+    expect(result.appendSystemPrompt?.[0]).toContain("r_42");
+  });
+
+  it("appends to instructions the host already carries", async () => {
+    const result = await runHook(
+      sessionOpenRequest({
+        appendSystemPrompt: ["host instruction"],
+        metadata: {
+          "command-center": { commandId: "cmd_1", commandName: "Deploy", runId: "r_7" },
+        },
+      }),
+      hookPaseo(),
+    );
+    expect(result.appendSystemPrompt).toHaveLength(2);
+    expect(result.appendSystemPrompt?.[0]).toBe("host instruction");
+  });
+
+  it("adds no instruction without a run stamp or for a history open", async () => {
+    const plain = await runHook(sessionOpenRequest(), hookPaseo());
+    expect(plain.appendSystemPrompt).toBeUndefined();
+
+    const history = await runHook(
+      sessionOpenRequest({
+        purpose: "history",
+        metadata: {
+          "command-center": { commandId: "cmd_1", commandName: "Deploy", runId: "r_7" },
+        },
+      }),
+      hookPaseo(),
+    );
+    expect(history.appendSystemPrompt).toBeUndefined();
   });
 
   it("adds no tool and no servers for purpose history", async () => {

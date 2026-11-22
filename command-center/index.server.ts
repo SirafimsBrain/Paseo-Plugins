@@ -63,10 +63,12 @@ import {
   PROVISIONING_METADATA_KEY,
   provisioningMarker,
   readProvisioningMarker,
+  readRunStamp,
   readWorkspaceStamp,
   workspaceStamp,
   type ProvisioningMode,
 } from "./server/metadata";
+import { provenanceInstruction } from "./shared/agent-instructions";
 import { renderTemplate } from "./shared/template";
 import { browseFiles } from "./shared/variables";
 import { getDaemonClient } from "./server/daemon-connection";
@@ -297,9 +299,25 @@ export default function contribute(server: PluginServerContext) {
       }
     }
 
+    // Provenance (0.14.4, Paseo 0.17.x `appendSystemPrompt`): a prompt command hands
+    // the agent a rendered template with no visible origin. The stamp the run already
+    // wrote into the agent's metadata names the command and the run, so the instruction
+    // is appended for interactive opens only — a history replay never runs a turn, and
+    // an agent without a stamp gets nothing. Appended, never replacing what the host or
+    // another plugin already put there.
+    const stamp = readRunStamp(request.metadata);
+    const instruction = request.purpose === "interactive" ? provenanceInstruction(stamp) : null;
+    const withProvenance = <T extends Record<string, unknown>>(result: T): T =>
+      instruction === null
+        ? result
+        : ({
+            ...result,
+            appendSystemPrompt: [...(request.appendSystemPrompt ?? []), instruction],
+          } as T);
+
     const tools = attachTool ? [...request.tools, commandCenterTool] : request.tools;
     if (decision.contribute.length === 0) {
-      return { ...request, tools };
+      return withProvenance({ ...request, tools });
     }
 
     const contributed = Object.fromEntries(
@@ -308,11 +326,11 @@ export default function contribute(server: PluginServerContext) {
     console.log(
       `[command-center] session_open MCP contributed: ${decision.contribute.join(", ")}`,
     );
-    return {
+    return withProvenance({
       ...request,
       tools,
       mcpServers: { ...request.mcpServers, ...contributed } as typeof request.mcpServers,
-    };
+    });
   });
 
   server.handle(listCommands, () => ({

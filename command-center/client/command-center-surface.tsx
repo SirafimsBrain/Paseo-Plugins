@@ -70,7 +70,7 @@ export function splitWorkspaceKey(key: string): { serverId: string; workspaceId:
   return { serverId: '', workspaceId: key };
 }
 
-export function CommandCenterSurface({ theme, host, params }: PluginScreenProps) {
+export function CommandCenterSurface({ theme, host, params, navigation }: PluginScreenProps) {
   const paseo = usePaseo();
   const toast = useToast();
   const listRpc = useRpc(listCommands);
@@ -228,6 +228,37 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
       setRunning(command);
     },
     [commands, workspaces, agents, toast],
+  );
+
+  /**
+   * Jump to a history entry's target (0.14.4, Paseo 0.17 `focusHost`): the agent a run
+   * was sent to, else the workspace it ran in. `focusHost` makes the sidebar select the
+   * destination host and drop the filters that could hide it, which is what makes the
+   * jump work on a multi-host setup; clients without it still navigate.
+   */
+  const openHistoryTarget = useCallback(
+    (entry: HistoryEntry) => {
+      if (!navigation) return;
+      const focusHost = navigation.supportsFocusHost ? { focusHost: true } : {};
+      const agent = entry.targetAgentId
+        ? (agents.find((candidate) => candidate.id === entry.targetAgentId) ?? null)
+        : null;
+      if (agent) {
+        navigation.openAgent({ agentId: agent.id, serverId: agent.serverId, ...focusHost });
+        return;
+      }
+      const workspace = entry.targetWorkspaceId
+        ? (workspaces.find((candidate) => candidate.id === entry.targetWorkspaceId) ?? null)
+        : null;
+      if (workspace) {
+        navigation.openWorkspace({
+          workspaceId: workspace.id,
+          serverId: workspace.serverId,
+          ...focusHost,
+        });
+      }
+    },
+    [navigation, agents, workspaces],
   );
 
   useEffect(() => {
@@ -1055,6 +1086,14 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
               ? (agents.find((candidate) => candidate.id === entry.targetAgentId) ?? null)
               : null;
             const agentLabel = agent ? (agent.title ?? agent.id.slice(0, 10)) : entry.targetAgentId?.slice(0, 10);
+            // A target the loaded lists know is one the navigation API can open.
+            const targetAgent = entry.targetAgentId
+              ? (agents.find((candidate) => candidate.id === entry.targetAgentId) ?? null)
+              : null;
+            const targetWorkspace = entry.targetWorkspaceId
+              ? (workspaces.find((candidate) => candidate.id === entry.targetWorkspaceId) ?? null)
+              : null;
+            const canOpenTarget = Boolean(navigation && (targetAgent ?? targetWorkspace));
             return (
               <View key={entry.id} style={[styles.card, { borderColor: theme.colors.border }]}>
                 <View style={styles.cardHeader}>
@@ -1097,6 +1136,18 @@ export function CommandCenterSurface({ theme, host, params }: PluginScreenProps)
                       onPress={() => applyParams(screenParams("library", { commandId: entry.commandId }))}
                     >
                       <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>Show command</Text>
+                    </Pressable>
+                  ) : null}
+                  {canOpenTarget ? (
+                    // 0.14.4: open the agent (else the workspace) this run targeted,
+                    // selecting its host — the answer to "where did this go?".
+                    <Pressable
+                      style={styles.actionButton}
+                      onPress={() => openHistoryTarget(entry)}
+                    >
+                      <Text style={[styles.actionText, { color: foreground, fontSize: font(12) }]}>
+                        {targetAgent ? "Show agent" : "Show workspace"}
+                      </Text>
                     </Pressable>
                   ) : null}
                 </View>
