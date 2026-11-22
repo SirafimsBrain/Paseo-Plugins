@@ -391,6 +391,88 @@ paseo plugin reload session-manager
 paseo plugin logs session-manager
 ```
 
+## 23. Paseo 0.17.1 — compatibility pass (2026-11-22, plugin 0.6.1)
+
+Verified against the **stable Paseo 0.17.1** release
+(<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>) on this machine
+(`paseo --version` → 0.17.1). Patch bump 0.6.0 → 0.6.1: SDK pin and documentation
+only — **no source file changed and no deprecated API was found**.
+
+### 23.1 Surface this plugin uses, re-checked against 0.17.1
+
+| Plugin usage | 0.17.1 contract | Verdict |
+| --- | --- | --- |
+| `server.addHook("agent.close.after")` + `agent.archive.after` / `workspace.archive.after` | `HookHandlers` unchanged | unchanged, not deprecated |
+| `server.handle` × 6 (`list`, `delete`, `delete-batch`, `export`, `refresh`, `compact`) | `defineRpc` / handler contracts unchanged | unchanged |
+| `client.addWorkspacePanel({ id, title, icon, locations, Component })` | `PluginWorkspacePanelContribution`; `context` stays optional and deprecated | already migrated (0.2.3); **no `context` passed** |
+| `client.addSettingsScreen` + `defineSettings` | unchanged | unchanged |
+| `client.addSidebarFooterItem` → `openPopover` | unchanged | unchanged |
+| `client.addCommandCenterItem` × 4 (three `context: "workspace"`, one `context: "agent"`) | `context` is a **required** union discriminant, not a deprecated field | correct as-is |
+| `useRpc`, `useSettings`, `useTabState` | unchanged | unchanged; see 23.2 for `#10049` |
+| `ScrollView`, `useToast`, `SidebarRow` from `client/ui` | unchanged | unchanged; the deprecated `client/react-native` entry is still not imported |
+| `refreshSession` → `paseo.agents.ref(id).reload()` | `agents.ref().reload()` unchanged | unchanged |
+| `PluginPopoverProps`, `PluginWorkspacePanelProps`, `PluginSurfaceProps` | unchanged, not deprecated | unchanged |
+
+### 23.2 What 0.17.1 actually changes for this plugin
+
+**The SDK diff 0.16.0 → 0.17.1 is additive only for `@getpaseo/plugin`.** New:
+`registerWorktreeManager` and the `worktree.*` hooks, `appendSystemPrompt` on the
+`agent.open.before` request, provider `installation` metadata, usage
+`durationSeconds`/`observedAt`/`launch`, `ProviderSlashCommand.kind`,
+`navigation.supportsFocusHost` + `focusHost`, and new ACP harness options. Nothing this
+plugin calls was removed or re-typed, which is why typecheck and the full suite pass with
+no source change.
+
+One host fix lands on this plugin directly: **#10049, “Fixed plugin screens and settings
+failing to use plugin state hooks”**. The panel keeps its provider filter, age filter and
+archived view in `useTabState`, so the fix that makes plugin state hooks work inside plugin
+screens is the reason those filters can now be trusted on 0.17.1 (18.5 and §21 introduced
+them on 0.15.0/0.16.0).
+
+The floor stays `requirements.paseo >=0.15.0`: no 0.17-only API is adopted, and the
+plugin's imports are all host-supplied, so it still needs no install-time build step. The
+dev pin moved to `^0.17.1` so the build type-checks against the current SDK.
+
+### 23.3 Verification (2026-11-22)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (`tsc --noEmit`) against SDK 0.17.1 | **exit 0** |
+| `npm test` | **13 suites / 106 tests pass** |
+| Deprecated-API scan (`addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, `addWorkspacePanel` with `context`, `server.on(`, `server.before`, `client/react-native`) | **no hits** |
+| Live daemon | **not run** — no daemon was up, so the panel, the summary popover, the six RPCs and the filters were not exercised against 0.17.1 by hand |
+
+### 23.4 Recommendations for improvement
+
+Ranked by value per unit of risk. None is implemented yet; each is a decision for the user.
+
+1. **Make the “referenced by an open agent” link jump to that agent, with `focusHost`.**
+   The panel already renders that link and calls `navigation.openAgent({ agentId })`
+   (`client/session-manager-panel.tsx`), but on 0.17 it does not select the agent's host,
+   so on a multi-host setup the jump can land on the wrong sidebar filter. Adding
+   `navigation.supportsFocusHost ? { focusHost: true } : {}` is a three-line change with
+   no new API surface. *Small.*
+2. **A per-agent sessions panel (`addAgentPanel`).** “The transcripts of *this* agent” is
+   the question a user actually asks before deleting; today the panel is workspace-scoped
+   and the agent link only shows the reference. A `Sessions` agent panel could scope the
+   list to the agent's provider + working directory, keep the guard/export flow, and
+   delete only sessions no open agent references. The RPCs already take the filters —
+   this is client surface, not new server logic. *Medium; the most useful of the five.*
+3. **A `/sessions` slash command.** `addSlashCommand` exists since 0.15.0 and the plugin
+   already has the intent channel (`setSessionManagerIntent`) that the Command Center
+   items use; `/sessions`, `/sessions old 30`, `/sessions archived` would open the panel
+   pre-filtered without going through ⌘K. Cheap, but duplicates existing entry points.
+   *Small.*
+4. **A sidebar view instead of the popover (`addSidebarView`).** The footer row opens a
+   read-only summary popover; a real sidebar view could host the provider breakdown with
+   actions. Only worth it if the popover proves too small — it is a rewrite of the row,
+   not an addition. *Medium, low priority.*
+5. **Do not adopt `appendSystemPrompt` or a workspace row badge here.** The provenance
+   instruction is for agents a plugin *created*; this plugin deletes files and must not
+   put text into unrelated agent sessions. A row badge would have to show a store-wide
+   due count on every workspace row, which misleads because session stores are not
+   per-workspace. Both are recorded as considered-and-rejected.
+
 ## Limitations
 
 - Deletion happens on the **daemon host**; a remote daemon deletes its own

@@ -90,7 +90,12 @@ installation. Updates: `paseo plugin update session-manager`.
   panel imports `ScrollView` / `useToast` from `@getpaseo/plugin/client/ui`.
   The real host enforces it (a manifest with a higher floor is rejected by
   `assertPluginCompatibility` before the plugin loads).
-- Verified against Paseo `0.16.0` (2026-11-16, SDK `@getpaseo/plugin@^0.16.0`,
+- Verified against Paseo `0.17.1` (2026-11-22, SDK `@getpaseo/plugin@^0.17.1`): the
+  0.16.0 → 0.17.1 diff is additive only, no deprecated API is used (the workspace panel
+  passes no `context`, the Command Center `context` fields are required discriminants),
+  and `npm run typecheck` / `npm test` (13 suites / 106 tests) pass. Paseo 0.17.1's
+  #10049 fix (“plugin screens and settings failing to use plugin state hooks”) is what
+  makes the panel's `useTabState` filters reliable. Earlier: Paseo `0.16.0` (2026-11-16, SDK `@getpaseo/plugin@^0.16.0`,
   installed with `npm install` so the lockfile carries it): the plugin is
   `running` in an isolated 0.16.0 daemon with `[paseo] Plugin ready` and all
   nine methods registered, including `session-manager.compact`. As of 0.6.0
@@ -109,6 +114,6 @@ installation. Updates: `paseo plugin update session-manager`.
 
 ## Compatibility
 
-Paseo **0.16.0 (2026-11-16)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.16.0` — compatible with no API migration (`agent.turn.after.timeline`, removed in 0.16.0, is not used by this plugin). Current plugin version: **0.6.0** (SQLite compaction since 0.6.0; sidebar status row since 0.5.0; Kimi Code provider since 0.4.0).
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**: the 0.16.0 → 0.17.1 SDK diff is additive only, and `agent.turn.after.timeline` (removed in 0.16.0) was never used here. The floor stays `>=0.15.0` because no 0.17-only API is adopted. Current plugin version: **0.6.1** (0.6.1: Paseo 0.17.1 verification, SDK pin and docs only; SQLite compaction since 0.6.0; sidebar status row since 0.5.0; Kimi Code provider since 0.4.0).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

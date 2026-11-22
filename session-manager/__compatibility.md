@@ -1,10 +1,45 @@
 # Compatibility — session-manager
 
-Current: plugin **0.6.0**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.16.0`.
-Verified against **Paseo 0.16.0 (2026-11-16)** — compatible, no API migration
-needed; see *Plugin 0.6.0 — Paseo 0.16.0 pass* below.
+Current: plugin **0.6.1**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
+Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration,
+**no deprecated API in use**; see *Plugin 0.6.1 — Paseo 0.17.1 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.6.1 — Paseo 0.17.1 pass (2026-11-22)
+
+Patch release (0.6.0 → 0.6.1): verification, SDK pin and documentation only — **no
+source file changed, no new functionality, no deprecation found**. Release:
+<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>; evidence in
+[`__doc.md`](./__doc.md) §23.
+
+- **SDK diff `@getpaseo/plugin@0.16.0 → 0.17.1`: additive only.** New
+  `registerWorktreeManager` and worktree hooks, `appendSystemPrompt` on the
+  `agent.open.before` request, provider `installation` metadata, usage
+  `durationSeconds`/`observedAt`/`launch`, `ProviderSlashCommand.kind`,
+  `navigation.supportsFocusHost` + `focusHost`, and new ACP harness options. Nothing
+  was removed; `addHook`, `registerSettings`, `handle`, `defineRpc`/`defineSettings`,
+  `addWorkspacePanel`, `addSettingsScreen`, `addSidebarFooterItem`,
+  `addCommandCenterItem`, `openPanel`/`openSettings`, `useRpc`, `useSettings`,
+  `useTabState`, `useToast`/`ScrollView`/`SidebarRow` and `PluginPopoverProps` keep
+  their signatures.
+- **Deprecated APIs on 0.17.1: none used.** The mark set is identical to 0.16.0.
+  `addWorkspacePanel` is registered **without** the deprecated `context` field (dropped
+  in 0.2.3); the `context: "workspace"` / `context: "agent"` literals on the four
+  Command Center items are the required discriminants of `addCommandCenterItem`; the
+  panel imports `ScrollView`/`useToast` from `client/ui`, not the deprecated
+  `client/react-native` entry; the lifecycle hook is `addHook("agent.close.after")`,
+  not `server.on`/`server.before`.
+- **`#10049` improves this plugin without a change:** *“Fixed plugin screens and
+  settings failing to use plugin state hooks”* — the panel keeps its provider, age and
+  archived filters in `useTabState`, which is exactly the hook that fix covers.
+- **Floor unchanged (`requirements.paseo >=0.15.0`)** — no 0.17-only API is adopted.
+  The pin moved to `^0.17.1` so the build type-checks against the current SDK; the host
+  still supplies the runtime instance, and the plugin still has no install-time build
+  step.
+- **Verified:** `npm run typecheck` exit 0 and `npm test` **13 suites / 106 tests**
+  pass against 0.17.1; local `paseo --version` → 0.17.1. **Not verified:** no daemon was
+  running, so the panel, the popover and the six RPCs were not exercised live.
 
 ## Summary (former root README row)
 
