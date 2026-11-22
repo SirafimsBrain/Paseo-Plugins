@@ -1,14 +1,14 @@
 {
   "name": "memory-flash-client",
   "private": true,
-  "version": "0.6.3",
+  "version": "0.6.4",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "^0.16.1",
+    "@getpaseo/plugin": "^0.17.1",
     "@types/node": "^22.0.0",
     "@types/react": "~19.2.0",
     "react": "19.1.0",

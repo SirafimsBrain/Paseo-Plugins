@@ -628,3 +628,94 @@ uses.
    are identical across workspaces, which makes logs and agent records ambiguous.
    Including a short workspace key keeps them unique and stable. Cost: small, but
    it changes injected names and needs a migration note.
+
+## 20. Paseo 0.17.1 — compatibility pass and the deprecated hook migration (2026-11-22, 0.6.4)
+
+Verified against the stable **0.17.1** release (2026-11-21,
+<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>). Verdict: **compatible**;
+one live deprecation was found and replaced. Shipped as **0.6.4** (bugfix-level:
+no behaviour changes, no new functionality). The SDK pin moves `^0.16.1` →
+`^0.17.1`, and `requirements.paseo` moves `>=0.14.0` → **`>=0.15.0`**, because the
+replacement API (`addHook`) does not exist on a 0.14.x host.
+
+### 20.1 What 0.17.1 changed in the plugin SDK
+
+The SDK diff `0.16.0 → 0.17.1` is additive only: `navigation.focusHost` /
+`supportsFocusHost`, `registerWorktreeManager` with the `PluginWorktree*` types,
+`appendSystemPrompt` on the `agent.open.before` request, and provider-author /
+usage-author fields. The `@deprecated` set is identical to 0.16.0's — **no new
+deprecation**. The full inventory and the file-level diff are in
+[memory-flash §22.1](../memory-flash/__doc.md#221-what-0171-changed-in-the-plugin-sdk);
+both plugins run against the same SDK and neither registers a provider, a usage
+source or a worktree manager, so those additions do not reach this plugin.
+
+### 20.2 The deprecated `server.before` calls — replaced
+
+Both hooks used the **`@deprecated`** `server.before` (deprecated in 0.15.0,
+removed after 2027-04-30) — the debt recorded in §19 and in
+[__compatibility.md](./__compatibility.md). They now use `server.addHook`:
+
+| Before | After | Where |
+| ------ | ----- | ----- |
+| `server.before("agent.create", …)` | `server.addHook("agent.create.before", …)` | `index.server.ts`, the saved remote HTTP server injection |
+| `server.before("agent.session_open", …)` | `server.addHook("agent.open.before", …)` | `index.server.ts`, the per-open re-contribution |
+
+The equivalence is the SDK's own: one registry behind both spellings, the handler
+receives `{ request }` and returns the request or `void`, both names are
+`waits: true` in `pluginHookRegistry`, so the host still blocks on them. Hook
+bodies, paths and the `decideClientSessionOpen` matrix are unchanged. The fake
+server in `tests/server-contribution.test.ts` now implements `addHook` and the
+suites address `agent.create.before` / `agent.open.before`.
+
+The failure being avoided is silent, not loud: without the hooks the agent is
+created and opened with no remote HTTP server, i.e. it simply has no shared
+memory tools. That is why the migration was made now rather than at the deadline.
+
+### 20.3 New 0.17.x surface — recommendations (recorded, not implemented)
+
+1. **`appendSystemPrompt` in `agent.open.before` — highest value.**
+   The remote servers are contributed launch-only and can be withheld entirely
+   (a shared OpenCode v2 service, §18) or replaced by the agent's own config.
+   A one-line instruction per open ("the servers `memory-flash*` are a shared
+   remote base; search it before the first edit, save a bugfix when it is fixed,
+   hand off before stopping") tells the agent what the injected tools are for
+   without another skill install. Per-open, never saved, no file writes. Cost:
+   small; needs `requirements.paseo >=0.17.0` because a 0.16.x daemon rejects the
+   field. A second-digit release.
+2. **`useTabState` for the connections screen's draft.** `client/connections-surface.tsx`
+   keeps the add-connection draft (`label`, `url`, `secret`, …) in plain
+   `useState`, so switching screens loses a half-typed connection.
+   `useTabState(tab, schema, default)` (0.16.0; state hooks fixed for plugin
+   screens in the 0.17.0 #10049 fix) persists a schema-validated draft per tab.
+   Cost: small; no floor change. The secret must stay out of it — persist the URL
+   and label, never the key.
+3. **`focusHost` — nothing to attach to yet.** The screen opens no agent or
+   workspace, so the option is recorded for a future "open the agent wired to
+   this connection" link, gated on `navigation.supportsFocusHost` (#5574).
+4. **`registerWorktreeManager` — evaluated and rejected.** This plugin is about
+   remote memory, has no worktree policy, and should not acquire one.
+
+The three recommendations of §19.3 (composer citation, host provenance in agent
+metadata, `PASEO_WORKSPACE_ID`-aware server names) stay open and are unaffected by
+0.17.1; the first is now cheaper to build than the new item 1 and can be shipped
+together with it.
+
+Relevant 0.17.1 host fixes: **#10153** (a plugin agent reopens after its provider
+closes the session — that reopen is where the re-contribution runs), **#10390**
+(resumed Codex sessions use their current directory for configuration and MCP
+servers), **#10187** (shared OpenCode service turns no longer stay running; the
+shared-service refusal of custom MCP servers is still in force in 0.17.1, so §18
+stays valid).
+
+### 20.4 Verification
+
+- `npm run typecheck` exit 0 against `@getpaseo/plugin@0.17.1`.
+- `npm test` **7 suites / 84 tests** pass, including the session-open matrix and
+  the reload action, which run through the `addHook` double.
+- No deprecated plugin API remains in `*.ts`/`*.tsx`: no `server.before`, no
+  `server.on`, no `addSurface` / `addSidebarItem` / `openSurface` /
+  `SettingsGroup` / `client/react-native`.
+- **Not verified live:** the plugin is installed but `disabled` on this machine
+  and no daemon is running, so `paseo plugin update` and a live session open under
+  0.17.1 were not exercised. All its imports are host-supplied, so the install
+  path needs no build step — but this is not the same as a live run.

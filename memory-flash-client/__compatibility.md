@@ -1,6 +1,38 @@
 # Compatibility — memory-flash-client
 
-Current: plugin **0.6.3**, `requirements.paseo >=0.14.0`, `@getpaseo/plugin ^0.16.1`.
+Current: plugin **0.6.4**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
+
+## Plugin 0.6.4 — Paseo 0.17.1 pass: the deprecated lifecycle hooks replaced (2026-11-22)
+
+Verified against the stable **0.17.1** (2026-11-21). Verdict: **compatible**; the
+SDK diff is additive only and adds no deprecation — but the pass found one
+deprecation still live in the plugin and replaced it:
+
+| Deprecated in use (since 0.15.0, removed after 2027-04-30) | Replaced with |
+| --- | --- |
+| `server.before("agent.create", …)` | `server.addHook("agent.create.before", …)` |
+| `server.before("agent.session_open", …)` | `server.addHook("agent.open.before", …)` |
+
+Same registry, same `{ request }` payload, same awaited `waits: true` policy, so
+behaviour is unchanged; without the hooks an agent would be created and opened
+with no remote HTTP server, i.e. without its shared memory tools. The hook
+bodies and the `decideClientSessionOpen` matrix are untouched; the test double
+implements `addHook` and the suites use the new names. Because `addHook` is
+0.15.0 API, `requirements.paseo` moves `>=0.14.0` → `>=0.15.0`; the pin moves to
+`^0.17.1`.
+
+| Check | Result |
+| --- | --- |
+| 0.17.1 SDK diff (`0.16.0 → 0.17.1`) | additive only; no provider/usage/worktree registration here, so none of it applies |
+| New `@deprecated` entries | none |
+| `typecheck` / `vitest` | exit 0 / **7 suites, 84 tests** pass |
+| Live host 0.17.1 | not exercised — the plugin is `disabled` here and no daemon is running |
+
+Recommendations recorded, not implemented: `appendSystemPrompt` announcing the
+remote base, `useTabState` for the connection draft (never the key), `focusHost`
+for a future agent link, and `registerWorktreeManager` rejected. The §19.3 list
+composer citation / provenance metadata / workspace-aware names stays open. Full
+reasoning: [__doc.md](./__doc.md) §20.
 
 ## Plugin 0.6.3 — Paseo 0.16.0/0.16.1 verification (2026-11-17)
 

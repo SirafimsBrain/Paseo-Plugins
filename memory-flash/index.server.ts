@@ -235,7 +235,10 @@ export default function contribute(server: PluginServerContext) {
     };
   };
 
-  const removeCreateHook = server.before("agent.create", async ({ request }) => {
+  // `addHook` (Paseo 0.15.0) replaces the `@deprecated` `server.before`,
+  // which is scheduled for removal after 2027-04-30. The payload and the
+  // returned request are identical, so the hook body is unchanged.
+  const removeCreateHook = server.addHook("agent.create.before", async ({ request }) => {
     // Async hooks are awaited by the host before the request proceeds, so the
     // mutation below is guaranteed to be applied to agent creation.
     const state = await settings.read().catch(() => null);
@@ -330,8 +333,8 @@ export default function contribute(server: PluginServerContext) {
 
   const memoryRecallTool = createMemoryRecallTool(store);
 
-  const removeSessionOpenHook = server.before(
-    "agent.session_open",
+  const removeSessionOpenHook = server.addHook(
+    "agent.open.before",
     async ({ request }, { paseo }) => {
       const state = await settings.read().catch(() => null);
       const values = state?.status === "ready" ? state.values : null;

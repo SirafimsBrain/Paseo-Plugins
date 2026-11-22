@@ -163,7 +163,10 @@ export default function contribute(server: PluginServerContext) {
     });
   };
 
-  const removeCreateHook = server.before("agent.create", async ({ request }) => {
+  // `addHook` (Paseo 0.15.0) replaces the `@deprecated` `server.before`,
+  // which is scheduled for removal after 2027-04-30. The payload and the
+  // returned request are identical, so the hook body is unchanged.
+  const removeCreateHook = server.addHook("agent.create.before", async ({ request }) => {
     const values = await readSettings();
     if (!values?.injectIntoAgents) return request;
 
@@ -213,8 +216,8 @@ export default function contribute(server: PluginServerContext) {
   // server/session-open.ts for the full matrix.
   // -------------------------------------------------------------------------
 
-  const removeSessionOpenHook = server.before(
-    "agent.session_open",
+  const removeSessionOpenHook = server.addHook(
+    "agent.open.before",
     async ({ request }, { paseo }) => {
       const values = await readSettings();
       const injectIntoAgents = values?.injectIntoAgents ?? false;

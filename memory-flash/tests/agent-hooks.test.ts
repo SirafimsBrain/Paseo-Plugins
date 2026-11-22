@@ -266,7 +266,7 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
     handle(contract: { name: string }, handler: (input: never, context: never) => unknown) {
       handlers.set(contract.name, handler);
     },
-    before(name: string, handler: (input: never, context: never) => unknown) {
+    addHook(name: string, handler: (input: never, context: never) => unknown) {
       hooks.set(name, handler);
       return () => {
         hooks.delete(name);
@@ -285,8 +285,8 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
       provider?: string;
       mcpServers?: Record<string, unknown>;
     }) {
-      const hook = hooks.get("agent.create");
-      if (!hook) throw new Error("agent.create hook not registered");
+      const hook = hooks.get("agent.create.before");
+      if (!hook) throw new Error("agent.create.before hook not registered");
       const request = { config: { ...config } };
       const result = await hook({ request } as never, fakeContext() as never);
       return (result ?? request) as {
@@ -297,8 +297,8 @@ function createFakeServer(initial: Record<string, unknown>): FakeServer {
       request: Record<string, unknown>,
       context?: unknown,
     ): Promise<Record<string, unknown>> {
-      const hook = hooks.get("agent.session_open");
-      if (!hook) throw new Error("agent.session_open hook not registered");
+      const hook = hooks.get("agent.open.before");
+      if (!hook) throw new Error("agent.open.before hook not registered");
       const result = await hook({ request } as never, (context ?? fakeContext()) as never);
       return (result ?? request) as Record<string, unknown>;
     },

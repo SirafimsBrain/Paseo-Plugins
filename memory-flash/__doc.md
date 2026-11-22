@@ -1391,3 +1391,130 @@ comes from.
 - Not exercised live: the subscription event itself (it fires while the screen
   is open), the composer control's rendering, and a background child creation
   (it needs a provider that accepts a provider-only config on this host).
+
+## 22. Paseo 0.17.1 — compatibility pass and the deprecated hook migration (2026-11-22, 0.13.8)
+
+Verified against the stable **0.17.1** release (2026-11-21,
+<https://github.com/getpaseo/paseo/releases/tag/v0.17.1>). Verdict: **compatible**;
+one live deprecation was found and replaced. Shipped as **0.13.8** (bugfix-level:
+no behaviour changes, no new functionality). `requirements.paseo` stays
+`>=0.16.0`, the SDK pin moves `^0.16.1` → `^0.17.1`.
+
+### 22.1 What 0.17.1 changed in the plugin SDK
+
+The comparison is `diff -rq` / `diff -u` between the unpacked
+`@getpaseo/plugin` tarballs of **0.16.0** (still installed under
+`obsidian-bridge/`) and **0.17.1** (installed here). The 0.16.1 patch release
+changed no declarations, so the two results are the same.
+
+Files that differ: `dist/client/contracts.d.ts`, `dist/server/contracts.d.ts`,
+`dist/server/lifecycle.d.ts`, `dist/server/index.d.ts`, `dist/server/acp.d.ts`,
+`dist/server/usage.d.ts`, `dist/server/provider.d.ts` (+ `provider.js`),
+`dist/server/usage.js`, `dist/server/acp-internal/connection.js`, and the new
+`dist/server/worktree.d.ts` / `worktree.js`. **Every change is additive:**
+
+| New surface | What it gives a plugin |
+| ----------- | ---------------------- |
+| `navigation.focusHost` + `navigation.supportsFocusHost` | Agent/workspace navigation can select only the destination host in the sidebar; `supportsFocusHost` is the host's opt-in flag (#5574) |
+| `registerWorktreeManager` + `PluginWorktree*` / `WorktreeManagerRegistration` | A plugin may own worktree creation, removal and restoration (#10278) |
+| `appendSystemPrompt?: string[]` on the `agent.open.before` request | Per-open instructions for one agent, never saved on it (#9781) |
+| ACP options: `loadReplayQuietPeriodMs`, `deferTurnOnRunningTools`, `autoAcceptMode`; `AcpRequest`, `catalog()`, `apply()`, `config?`, `command?`, `sessionOpen?`, richer `toolCall` | Provider-author surface only — this plugin registers no provider |
+| Usage: `durationSeconds`, `observedAt`, `launch` scope, `provider` on a source | Usage-report authors only |
+
+**No deprecation was added.** The `@deprecated` set in 0.17.1 is identical to
+0.16.0's — same lines, same files. The deprecation this pass had to act on is the
+one 0.15.0 introduced (below), and both plugins of this pair still carried it.
+
+### 22.2 The deprecated `server.before` calls — replaced
+
+Both lifecycle hooks were registered through the **`@deprecated`** `server.before`
+(deprecated in 0.15.0, *removed after 2027-04-30*), and `memory-flash` records
+that debt in §19/its compatibility file. They now use `server.addHook`:
+
+| Before | After | Where |
+| ------ | ----- | ----- |
+| `server.before("agent.create", …)` | `server.addHook("agent.create.before", …)` | `index.server.ts`, the MCP injection hook |
+| `server.before("agent.session_open", …)` | `server.addHook("agent.open.before", …)` | `index.server.ts`, the re-derivation hook |
+
+Why it mattered more here than the tag suggests: this plugin's memory wiring is
+*entirely* in those two hooks. A host that dropped `before` would not fail
+loudly — the agent would simply be created and opened without the MCP server and
+without the attached `memory_flash_recall` tool, which is the documented
+"No tool named `memory-flash_memory_save`" failure (§13) arriving silently on
+every agent at once.
+
+Equivalence was checked in the SDK, not assumed:
+
+- `addHook` is the same lifecycle registration (`createLifecycleRegistration`
+  maps both spellings into one registry); the handler receives `{ request }` and
+  returns the request or `void`, awaited before the request proceeds.
+- Both names are `waits: true` in `pluginHookRegistry`, i.e. the host still
+  blocks on them, so the injection cannot race agent creation or session open.
+- The hook bodies, gates and returned objects are unchanged apart from the name;
+  only the two comments describing the registration changed.
+- Test doubles follow the new surface: the fake servers in
+  `tests/agent-hooks.test.ts` implement `addHook`, and the suites address
+  `agent.create.before` / `agent.open.before`. Nothing else in the fixtures
+  changed.
+
+The alternative — staying on `before` until the 2027-04-30 removal — was
+rejected: the shim is exactly the kind of thing that disappears in a host minor
+release, and this reach is server-side only (no client bundle change), so the
+migration is not observable to users.
+
+`requirements.paseo` stays **`>=0.16.0`**, not 0.15.0: the plugin still needs
+0.16.0's `useSubscription`, `addComposerItem`, background agents and metadata,
+which is the stricter floor. A 0.14.x host cannot run the screen either way.
+
+### 22.3 New 0.17.x surface — recommendations (recorded, not implemented)
+
+1. **`appendSystemPrompt` in `agent.open.before` — the strongest fit.**
+   The one case where memory cannot reach an agent is when the MCP server is
+   deliberately withheld (a shared OpenCode v2 service, §19) or supplied by the
+   agent's own config file: the agent then has the tools but nothing tells it
+   *when* to use them, and the skill is a separate install. Returning one or two
+   instructions on the open ("this host has a shared memory base; search it
+   before the first edit and save a bugfix when it is fixed") reaches every
+   agent, is re-derived per open like the rest of the wiring, is never saved on
+   the agent, and needs no file writes. Cost: small (one array built from the
+   settings already read in the hook); floor must move to `>=0.17.0` because a
+   0.16.x daemon rejects the field. A second-digit release.
+2. **`useTabState` for the screen's tab.** `client/memory-surface.tsx` keeps
+   `tab` in a plain `useState`, so reopening the screen returns to *Memories*
+   and loses a filter context. `useTabState(tab, schema, default)` (available
+   since 0.16.0; the 0.17.0 fix #10049 made state hooks work in plugin screens
+   and settings) persists it per tab. Cost: small; no floor change.
+3. **`focusHost` — only when navigation appears.** The screen has no agent or
+   workspace links today, so the option has nothing to attach to; it is recorded
+   here for the day a memory row links to the agent that wrote it
+   (`PluginNavigableHostProps.navigation.openAgent({ agentId, focusHost })`,
+   gated on `supportsFocusHost`).
+4. **`registerWorktreeManager` — evaluated and rejected.** Memory is
+   workspace-agnostic on purpose (it is shared *across* workspaces, §21); owning
+   worktree layout would make one plugin silently redefine how every workspace of
+   every project is created. Not a fit, no matter the cost.
+
+Host fixes in 0.17.1 that reach this plugin without code changes: **#10153**
+plugin agents reopen after their provider closes the session (the reopen is where
+`agent.open.before` re-injects), **#10390** resumed Codex sessions use their
+current working directory for configuration and MCP servers (this plugin writes
+`~/.codex/config.toml` *and* injects the stdio server), **#10049** plugin screens
+use plugin state hooks, **#10187** OpenCode turns no longer stay running when a
+shared service stops (the shared-service skip in §19 is unchanged by it: 0.17.1
+still refuses custom MCP servers on a shared service).
+
+### 22.4 Verification
+
+- `npm run typecheck` exit 0 against `@getpaseo/plugin@0.17.1`.
+- `npm test` **19 suites / 230 tests** pass, with the MCP bundle rebuilt by the
+  real `scripts/bundle-mcp-server.mjs` (pretest). Both hook suites exercise the
+  new hook names end to end through the `addHook` double.
+- `grep` over `*.ts`/`*.tsx` finds no remaining deprecated plugin API: no
+  `server.before`, no `server.on` (the only `server.on` hits are Node's HTTP
+  server events in `server/http-server.ts`), no `addSurface` / `addSidebarItem` /
+  `openSurface` / `SettingsGroup` / `client/react-native` import.
+- **Not verified live:** no Paseo daemon is running on this machine, so the
+  update path (`paseo plugin update`), a real agent creation, and a real session
+  open under 0.17.1 were not exercised. The evidence is the SDK diff, typecheck,
+  tests and the unchanged hook contract; the next live session is the first
+  end-to-end run of the `addHook` spelling.

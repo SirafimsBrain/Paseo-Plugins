@@ -1,6 +1,38 @@
 # Compatibility — memory-flash
 
-Current: plugin **0.13.7**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.16.1`.
+Current: plugin **0.13.8**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.17.1`.
+
+## Plugin 0.13.8 — Paseo 0.17.1 pass: the deprecated lifecycle hooks replaced (2026-11-22)
+
+Verified against the stable **0.17.1** (2026-11-21). Verdict: **compatible**; the
+SDK diff is additive only and **adds no deprecation** — but the pass found one
+deprecation still live in the plugin and replaced it:
+
+| Deprecated in use (since 0.15.0, removed after 2027-04-30) | Replaced with |
+| --- | --- |
+| `server.before("agent.create", …)` | `server.addHook("agent.create.before", …)` |
+| `server.before("agent.session_open", …)` | `server.addHook("agent.open.before", …)` |
+
+Those two hooks are the plugin's entire memory wiring (MCP injection at creation,
+launch-only server + `memory_flash_recall` re-derived on every open), so a host
+that dropped the shim would leave every agent without memory tools, silently. The
+hook bodies and every gate are unchanged; only the registration call, two comments
+and the test doubles moved, and both hook names are `waits: true`, so the host
+still blocks on them exactly as before. `requirements.paseo` stays `>=0.16.0`
+(0.16.0 features are the stricter floor), the pin moves to `^0.17.1`.
+
+| Check | Result |
+| --- | --- |
+| 0.17.1 SDK diff (`0.16.0 → 0.17.1`) | additive only — `focusHost`, `registerWorktreeManager`, `appendSystemPrompt`, ACP/usage author fields; `dist/client` changes are the two navigation fields |
+| New `@deprecated` entries | none (the set is identical to 0.16.0's) |
+| `typecheck` / `vitest` | exit 0 / **19 suites, 230 tests** pass |
+| Live host 0.17.1 | not exercised — no daemon is running, so update + agent create/open were compiler- and test-level only |
+
+Recommendations recorded, not implemented (no version change): `appendSystemPrompt`
+per open so memory instructions reach agents whose server is withheld,
+`useTabState` for the screen tab, `focusHost` once a memory row links to its
+agent, and `registerWorktreeManager` explicitly rejected. Full reasoning:
+[__doc.md](./__doc.md) §22.
 
 ## Plugin 0.13.6/0.13.7 — the 0.16.0 surface adopted (2026-11-17)
 
