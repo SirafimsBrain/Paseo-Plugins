@@ -1,6 +1,6 @@
 # Compatibility — remote-control
 
-Current: plugin **1.1.2**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **1.2.0**, `requirements.paseo >=0.16.0`, `@getpaseo/plugin ^0.17.1`.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
 
@@ -9,6 +9,25 @@ This file holds the extended compatibility information that no longer lives in t
 | [remote-control](./README.md) | **0.15.0 (2026-11-03)** ⁵ | `@getpaseo/plugin` (dev pin, deliberately older than the runtime; `requirements.paseo >=0.11.0`) | **0.15.0: compatible as-is — no deprecated API is used anywhere in this plugin, so nothing was migrated and the version stays 0.24.11** (documentation-only pass: no bump, no tag; floor and pin stay where they are, because the host supplies the SDK and no 0.15.0 API is needed). It was checked against the **SDK version the plugin pins for development**, which trails the runtime, so the diff spans two minor versions: `@getpaseo/plugin`'s `dist/client/` is **byte-identical** across them, and `@getpaseo/client`'s `terminals/` declarations did not move either — the seven RPCs, both `addWorkspacePanel` registrations, `addScreen`, the Command Center item and the console's HTTP surface are untouched by construction. The deprecations the other plugins had to migrate do not reach it: it registers **no lifecycle hooks** (only `server.handle(...)` ×7, so `server.before` / `server.on` are simply absent) and uses no deprecated client registration or option. The one **breaking type change** in the range — `TerminalStreamEvent`'s `snapshot`/`restore` replaced by `replay` — does not reach it either, because the plugin creates and kills terminals but never subscribes to their output. Evidence: typecheck (both projects) + vitest **14 suites / 137 tests** against SDK 0.15.0, zero deprecated markers in both compiled bundles (negative control included), and `running` in an **isolated 0.15.0 daemon** with `[remote-control] plugin ready (version 0.24.11)`, all seven RPC methods and an end-to-end console check (`/` 200 HTML, `/health` reporting 0.24.11, `/api/*` 200 with the token and **401 without it**). **0.15.0 also works in its favour:** its SSH tabs are `paseo.terminals.create` terminals, so they now survive daemon restarts and restore up to 10 000 scrollback lines on reconnect. Recommendations recorded, not implemented: a read-only terminal mirror through `terminals.ref(id).capture()`, a "restart host and keep terminals" action on the new `keepTerminals` option, dropping two now-unnecessary `as any` casts, and registering or deleting the orphaned sidebar item — [evidence](./__doc.md#paseo-0150--compatibility-pass-2026-11-03). The plugin has since shipped **1.0.0** (the release that froze the scope: fixes only from here on) (H3 `~/.ssh/config` + public-key deployment, the G1–G3 console tails, the ghostty Apply fix, a read-only terminal *peek* and the sidebar row from the recorded recommendations, then stages E1–E3: FreeRDP 3 discovery with the `REMOTE_CONTROL_RDP_BIN` override and `wlfreerdp3`, exit codes for closed RDP/VNC windows, and RD Gateway with its password piped on stdin) — new functionality, not compatibility changes, so the 0.15.0 verdict stands. |
 
 ## Details moved from this plugin's README.md
+
+## Plugin 1.2.0 — the 0.17.1 recommendations implemented (2026-11-22)
+
+Minor release: new functionality, no compatibility change. `__doc.md` “Stage 1.2.0 —
+the 0.17.1 recommendations implemented” has the evidence.
+
+- **Destination rows** (`client/session-list.tsx`, `client/entity-ref.ts`): sidebar-view
+  session rows call `navigation.openTerminal` / `navigation.openWorkspace`. The refs are
+  built with the SDK's own identity (`key = JSON.stringify([hostId, id])`, frozen), since
+  the host only hands out refs for what it displays and `createEntityRefs` is a
+  host-implementer export (`@getpaseo/plugin/client/host`).
+- **Agent-location panel** (`client/agent-panel.tsx`, `addAgentPanel`): shares
+  `RemoteControlPanel` through a narrowed prop type plus a `scope` flag; it reads neither
+  deprecated prop (`context`, `agentId`).
+- **Remembered panel view** (`useTabState`): Connections / Sessions, zod-validated with a
+  Connections fallback.
+- **Verified:** `npm run typecheck` (both projects) exit 0, `npm test` **21 suites / 232
+  tests**. **Not verified:** no daemon was running, so the rows, the agent panel and the
+  remembered view were not exercised on a 0.17.1 host.
 
 ## Plugin 1.1.2 — Paseo 0.17.1 pass (2026-11-22)
 

@@ -67,8 +67,30 @@ warnings in the plugin log were traced to the host runtime, not this plugin.
 up in `paseo plugin ls`, the cookie trade and cookie-authenticated `/api/state`
 worked, and the new RPCs (including the binary export and its status) answered.
 
+## Version 1.2.0 — the Paseo 0.17.1 recommendations (2026-11-22)
+
+The three actionable improvements recorded after the 0.17.1 pass:
+
+- **Live sessions are destinations** — in the sidebar view an ssh session row
+  focuses its Paseo terminal tab (`navigation.openTerminal`) and an RDP/VNC row
+  moves to the workspace it was launched from (`navigation.openWorkspace`),
+  instead of printing the sessions as text. With no active workspace the rows
+  stay inert rather than guessing a host.
+- **Remote Control beside an agent** (`addAgentPanel`) — the same connections,
+  vault form, launch buttons and console in the agent location, scoped to the
+  agent's workspace and saying plainly that sessions belong to the workspace,
+  not to the agent.
+- **The panel's view is remembered** — Connections / Sessions buttons whose
+  selection lives in the panel tab (`useTabState`), so a remount, a plugin
+  reload or a workspace reopen comes back to the same view; the Sessions view
+  lists the workspace's live sessions.
+
+**Verification:** typecheck clean (plugin + `console/`), vitest **21 suites /
+232 tests**. The new navigation rows, the agent panel and the remembered view
+were **not** clicked through live — no daemon was running.
+
 ## Compatibility
 
-Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible, with **no deprecated API in use** and no source change needed: the 0.16.0 → 0.17.1 SDK diff is additive only, and every registration, subscription, binary payload and `paseo.*` call this plugin makes kept its signature. The floor stays `>=0.16.0` because the APIs it relies on (subscriptions, binary RPC payloads, sidebar views, composer items, New-workspace items, workspace metadata) all arrive in 0.16.0 and nothing 0.17-only is adopted; 1.1.1 was the release that adopted the 0.16.0 surface. Version **1.1.2**.
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.16.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible, with **no deprecated API in use** and no source change needed: the 0.16.0 → 0.17.1 SDK diff is additive only, and every registration, subscription, binary payload and `paseo.*` call this plugin makes kept its signature. The floor stays `>=0.16.0` because the APIs it relies on (subscriptions, binary RPC payloads, sidebar views, composer items, New-workspace items, workspace metadata) all arrive in 0.16.0 and nothing 0.17-only is adopted; 1.1.1 was the release that adopted the 0.16.0 surface; 1.2.0 implements the pass's recommendations (destination rows, an agent-location panel, a remembered panel view). Version **1.2.0**.
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

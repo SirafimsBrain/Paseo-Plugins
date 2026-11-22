@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useWorkspace } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
 import { openExternalUrl } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { z } from "zod";
 import { openConsoleUrl } from "./open-console";
+import { SessionList } from "./session-list";
 import {
   connectionTarget,
   orderedGroups,
@@ -11,6 +13,7 @@ import {
   type GroupRow,
 } from "./connection-tree";
 import { useRemoteActivity } from "./use-activity";
+import type { ExternalSessionView, TerminalView } from "../shared/activity";
 import {
   consoleUrl,
   connectionLaunch,
@@ -21,8 +24,38 @@ import {
   vaultUnlock,
 } from "../shared/rpc";
 
-export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
-  const { theme, workspaceId } = props;
+/**
+ * Which location is rendering the panel. The agent location (stage 1.1.2)
+ * shows the same remote surface, because sessions belong to the workspace.
+ */
+export type RemoteControlPanelScope = "workspace" | "agent";
+
+export interface RemoteControlPanelProps
+  extends Pick<PluginWorkspacePanelProps, "theme" | "workspaceId" | "navigation" | "tab"> {
+  scope?: RemoteControlPanelScope;
+}
+
+/**
+ * The panel's view survives a remount, a plugin reload and a workspace reopen
+ * (stage 1.1.2, Paseo 0.17.1 recommendation 3): `useTabState` keeps it in the
+ * panel tab, with the schema falling back to Connections for a missing or
+ * foreign value.
+ */
+const panelViewSchema = z.object({
+  view: z.enum(["connections", "sessions"]),
+});
+
+type PanelView = z.infer<typeof panelViewSchema>;
+
+const DEFAULT_PANEL_VIEW: PanelView = { view: "connections" };
+
+export function RemoteControlPanel({
+  theme,
+  workspaceId,
+  navigation,
+  tab,
+  scope = "workspace",
+}: RemoteControlPanelProps) {
   const projectRootPath = useWorkspace(workspaceId, (workspace) => workspace.projectRootPath);
   const activity = useRemoteActivity();
   const consoleUrlRpc = useRpc(consoleUrl);
@@ -45,6 +78,11 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [panelView, setPanelView] = useTabState<PanelView>(
+    tab,
+    panelViewSchema,
+    DEFAULT_PANEL_VIEW,
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -64,12 +102,13 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
 
   const listening = activity?.listening ?? false;
   const vault = activity?.vault ?? null;
-  const sessions = (activity?.terminals ?? [])
-    .filter((terminal) => terminal.kind === "ssh" && terminal.workspaceId === workspaceId)
-    .length +
-    (activity?.sessions ?? []).filter(
-      (session) => session.state === "running" && session.workspaceId === workspaceId,
-    ).length;
+  const sshTerminals: TerminalView[] = (activity?.terminals ?? []).filter(
+    (terminal) => terminal.kind === "ssh" && terminal.workspaceId === workspaceId,
+  );
+  const windows: ExternalSessionView[] = (activity?.sessions ?? []).filter(
+    (session) => session.state === "running" && session.workspaceId === workspaceId,
+  );
+  const sessions = sshTerminals.length + windows.length;
 
   // Binary export (stage 1.1.0): the daemon writes the bundle and hands back
   // its bytes as `Uint8Array`, so the panel only shows where it landed.
@@ -97,14 +136,14 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
       const result = await consoleUrlRpc({});
       if (!result.url) return;
       await openConsoleUrl(result.url, {
-        openBrowser: (input) => props.navigation?.openBrowser?.(input),
+        openBrowser: (input) => navigation?.openBrowser?.(input),
         openExternal: (u) => openExternalUrl(u),
         listWorkspaceIds: async () => [workspaceId],
       }, workspaceId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [consoleUrlRpc, props.navigation, workspaceId]);
+  }, [consoleUrlRpc, navigation, workspaceId]);
 
   // First run creates the master password; later visits only unlock. Once the
   // storage is open nothing asks for anything again (auto-lock is off).
@@ -211,6 +250,11 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
         sessions here: {sessions}
       </Text>
       <Text style={{ color: muted, fontSize: 12 }}>Project: {projectRootPath ?? "(none)"}</Text>
+      {scope === "agent" ? (
+        <Text style={{ color: muted, fontSize: 11 }}>
+          Remote sessions here belong to this workspace, not to this agent.
+        </Text>
+      ) : null}
       {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
       {message ? <Text style={{ color: theme.colors.statusSuccess, fontSize: 12 }}>{message}</Text> : null}
       <View style={{ flexDirection: "row", gap: 8 }}>
@@ -281,7 +325,42 @@ export function RemoteControlPanel(props: PluginWorkspacePanelProps) {
         </View>
       ) : null}
 
-      {open_ ? (
+      <View style={{ flexDirection: "row", gap: 6 }}>
+        {([
+          { view: "connections" as const, label: "Connections" },
+          { view: "sessions" as const, label: `Sessions (${sessions})` },
+        ]).map(({ view, label }) => (
+          <Pressable
+            key={view}
+            onPress={() => setPanelView({ view })}
+            style={[
+              styles.button,
+              styles.viewButton,
+              { borderColor: panelView.view === view ? accent : theme.colors.border },
+            ]}
+          >
+            <Text
+              style={{
+                color: panelView.view === view ? accent : muted,
+                fontSize: 11,
+                fontWeight: panelView.view === view ? "600" : "400",
+              }}
+            >
+              {label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {panelView.view === "sessions" ? (
+        <SessionList
+          theme={theme}
+          terminals={sshTerminals}
+          windows={windows}
+          emptyLabel="Nothing running in this workspace."
+          onOpenWorkspace={(id) => navigation?.openWorkspace({ workspaceId: id })}
+        />
+      ) : open_ ? (
         groups.length === 0 && connections.length === 0 ? (
           <Text style={{ color: muted, fontSize: 11 }}>
             No connections yet — create one in the console.
@@ -321,6 +400,7 @@ const styles = StyleSheet.create({
   container: { padding: 12, gap: 6 },
   button: { borderWidth: 1, borderRadius: 6, padding: 8, alignSelf: "flex-start" },
   launchButton: { paddingVertical: 5, paddingHorizontal: 10 },
+  viewButton: { paddingVertical: 4, paddingHorizontal: 9 },
   row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
   rowInfo: { flex: 1, gap: 1 },
   tree: { gap: 2 },

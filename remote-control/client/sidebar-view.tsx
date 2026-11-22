@@ -4,6 +4,8 @@ import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SCREEN_ID } from "./console-screen";
 import { connectionTarget, orderedGroups, type ConnectionRow, type GroupRow } from "./connection-tree";
+import { terminalRef, workspaceRef } from "./entity-ref";
+import { SessionList } from "./session-list";
 import { useRemoteActivity } from "./use-activity";
 import { consoleUrl, connectionLaunch, connectionsList } from "../shared/rpc";
 
@@ -24,7 +26,12 @@ import { consoleUrl, connectionLaunch, connectionsList } from "../shared/rpc";
  * mounts — the console is where connections are created, and it is one press
  * away.
  */
-export function RemoteControlSidebarView({ theme, active, dismiss }: PluginSidebarViewProps) {
+export function RemoteControlSidebarView({
+  theme,
+  active,
+  navigation,
+  dismiss,
+}: PluginSidebarViewProps) {
   const connectionsRpc = useRpc(connectionsList);
   const launchRpc = useRpc(connectionLaunch);
   const consoleRpc = useRpc(consoleUrl);
@@ -36,6 +43,18 @@ export function RemoteControlSidebarView({ theme, active, dismiss }: PluginSideb
   const [error, setError] = useState<string | null>(null);
 
   const workspaceId = active.workspace?.id ?? null;
+  // Stage 1.1.2 (recommendation 1): a live session is a destination, not a
+  // line of text. The terminal of an ssh session is a Paseo tab, and an
+  // RDP/VNC window belongs to the workspace it was launched from; the refs
+  // come from `./entity-ref`. Without an active workspace there is no host id,
+  // and the rows stay unpressable.
+  const hostId = active.workspace?.hostId ?? null;
+  const focusTerminal = hostId
+    ? (terminalId: string) => navigation.openTerminal(terminalRef(hostId, terminalId))
+    : undefined;
+  const focusWorkspace = hostId
+    ? (id: string) => navigation.openWorkspace(workspaceRef(hostId, id))
+    : undefined;
 
   const refresh = useCallback(async () => {
     try {
@@ -127,22 +146,14 @@ export function RemoteControlSidebarView({ theme, active, dismiss }: PluginSideb
       <Text style={[styles.section, { color: muted }]}>
         Sessions in this workspace ({sshTerminals.length + windows.length})
       </Text>
-      {sshTerminals.length + windows.length === 0 ? (
-        <Text style={{ color: muted, fontSize: 11 }}>Nothing running here.</Text>
-      ) : (
-        <>
-          {sshTerminals.map((terminal) => (
-            <Text key={terminal.id} style={{ color: fg, fontSize: 11 }} numberOfLines={1}>
-              SSH · {terminal.name}
-            </Text>
-          ))}
-          {windows.map((session) => (
-            <Text key={session.id} style={{ color: fg, fontSize: 11 }} numberOfLines={1}>
-              {session.kind.toUpperCase()} · {session.name} · {session.target}
-            </Text>
-          ))}
-        </>
-      )}
+      <SessionList
+        theme={theme}
+        terminals={sshTerminals}
+        windows={windows}
+        emptyLabel="Nothing running here."
+        {...(focusTerminal ? { onOpenTerminal: (terminal) => focusTerminal(terminal.id) } : {})}
+        {...(focusWorkspace ? { onOpenWorkspace: focusWorkspace } : {})}
+      />
 
       <Text style={[styles.section, { color: muted }]}>Connections</Text>
       {connections.length === 0 ? (

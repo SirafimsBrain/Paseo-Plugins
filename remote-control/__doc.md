@@ -1707,3 +1707,66 @@ Not implemented; each is a decision for the user.
    provenance instruction fits), does not manage worktrees, and its RDP/VNC/ssh binary
    discovery is its own concern (`server/probe.ts`), not a Paseo provider installation.
    Recorded as considered-and-rejected.
+
+## Stage 1.2.0 — the 0.17.1 recommendations implemented (2026-11-22)
+
+All three actionable recommendations from the pass above are in; the fourth was a
+considered-and-rejected list and stays unimplemented by design. Minor bump
+1.1.2 → 1.2.0 (new functionality).
+
+### 1. Live sessions are destinations (`client/session-list.tsx`, `client/entity-ref.ts`)
+
+The sidebar view used to print its sessions as text. It now renders `SessionList`, whose
+rows are buttons:
+
+- an ssh terminal row calls `navigation.openTerminal(terminalRef(hostId, id))` — the
+  Paseo tab of that session gets focus, instead of the user hunting the tab strip;
+- an RDP/VNC window row calls `navigation.openWorkspace(workspaceRef(hostId, workspaceId))`
+  — the window belongs to the workspace it was launched from;
+- with no active workspace there is no host id, so the rows render unpressable rather
+  than calling into navigation with a fabricated host.
+
+`PluginSidebarViewProps.navigation` addresses entities by `WorkspaceRef` / `TerminalRef`
+(`{ kind, key, hostId, id }`) and the host only hands out refs for what it displays, so
+`client/entity-ref.ts` builds them with the SDK's own identity: `key` is
+`JSON.stringify([hostId, id])` exactly as `dist/client/refs.js` does, and the object is
+frozen. `createEntityRefs` itself is exported only through `@getpaseo/plugin/client/host`
+(the host implementer's entry point), so it is not imported by the plugin.
+
+A panel's navigation is narrower (0.17.1 `PluginNavigableHostProps`: `openBrowser`,
+`openAgent`, `openWorkspace` — no `openTerminal`), so in the panel rows the window and
+terminal entries open their workspace and nothing pretends to focus a tab there.
+
+### 2. Remote Control next to an agent (`client/agent-panel.tsx`)
+
+`client.addAgentPanel({ id: "remote-control-agent", title: "Remote Control", icon: "Terminal" })`
+registers the same remote surface in the agent location: connections, vault form, launch
+buttons, console. `RemoteControlPanel` was narrowed to the props it actually reads
+(`theme`, `workspaceId`, `navigation`, `tab`) plus a `scope` flag, so the workspace and
+agent locations share one implementation instead of a fork. With `scope: "agent"` the
+panel says in one line that remote sessions belong to the workspace, not to the agent —
+they are launched from a workspace and stay there. Neither deprecated prop is touched:
+`params.agentId` is simply not needed, since nothing in the panel is per-agent.
+
+### 3. The panel's view is remembered (`useTabState`)
+
+The Explorer panel now has two view buttons — **Connections** and **Sessions (n)** — and
+the selection lives in the panel tab via `useTabState(tab, panelViewSchema,
+DEFAULT_PANEL_VIEW)`: it survives a panel remount, a plugin reload and a workspace reopen.
+The zod schema falls back to Connections for a missing or foreign value. The Sessions view
+lists this workspace's live sessions through the same `SessionList`, which is where the
+session rows first become useful in the panel.
+
+### Verification (2026-11-22)
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (both projects) | **exit 0** |
+| `npm test` (bundles both entry points first, then runs vitest) | **21 suites / 232 tests pass** |
+| Live daemon | **not run** — no daemon was up, so the new rows, the agent panel and the remembered view were not clicked through on a 0.17.1 host; every navigation call and the tab state are compile- and bundle-checked only |
+
+### Considered and not used (unchanged from 1.1.2)
+
+Worktree manager, `appendSystemPrompt` and provider `installation` metadata: this plugin
+opens terminals and external windows, never agents, does not manage worktrees, and finds
+its own RDP/VNC/ssh binaries in `server/probe.ts`.

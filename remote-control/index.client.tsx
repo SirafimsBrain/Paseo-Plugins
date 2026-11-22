@@ -1,4 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { RemoteControlAgentPanel } from "./client/agent-panel";
 import { RemoteControlPanel } from "./client/console-panel";
 import { RemoteControlSidebarItem } from "./client/console-sidebar-item";
 import { RemoteControlSettingsPanel } from "./client/console-settings-panel";
@@ -18,6 +19,17 @@ export default function contribute(client: PluginClientContext): () => void {
     icon: "Terminal",
     locations: ["explorer"],
     Component: RemoteControlPanel,
+  });
+
+  // Agent location (stage 1.1.2, Paseo 0.17.1 recommendation 2, `addAgentPanel`):
+  // the same remote surface next to an agent, scoped to its workspace — the
+  // place a user actually is while working. It never claims per-agent scope:
+  // sessions belong to the workspace, and the panel says so.
+  client.addAgentPanel({
+    id: "remote-control-agent",
+    title: "Remote Control",
+    icon: "Terminal",
+    Component: RemoteControlAgentPanel,
   });
 
   // Workspace tab (workspace location): settings & configuration.
