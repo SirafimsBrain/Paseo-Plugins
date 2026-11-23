@@ -17,6 +17,7 @@ import {
  */
 
 const previousXdg = process.env.XDG_CONFIG_HOME;
+const previousPaseo = process.env.PASEO_HOME;
 let root = "";
 
 const opencode = {
@@ -28,11 +29,29 @@ const opencode = {
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "obb-opencode-"));
   process.env.XDG_CONFIG_HOME = root;
+  // The launch command is resolved from the daemon config, and `upToDate` also
+  // requires the entry to exist on disk. Both are host state: on a developer
+  // machine `~/.paseo/config.json` points at a real checkout and the test passed
+  // by accident, while a clean runner has no Paseo home at all (it failed
+  // there). A temporary home with a real bundle makes the case self-contained.
+  const checkout = path.join(root, "checkout");
+  fs.mkdirSync(path.join(checkout, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(checkout, "dist", "mcp-server.js"), "// test bundle\n", "utf-8");
+  const home = path.join(root, "paseo-home");
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(
+    path.join(home, "config.json"),
+    JSON.stringify({ plugins: { "obsidian-bridge": { path: checkout } } }),
+    "utf-8",
+  );
+  process.env.PASEO_HOME = home;
 });
 
 afterEach(() => {
   if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = previousXdg;
+  if (previousPaseo === undefined) delete process.env.PASEO_HOME;
+  else process.env.PASEO_HOME = previousPaseo;
   fs.rmSync(root, { recursive: true, force: true });
 });
 

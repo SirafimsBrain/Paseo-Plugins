@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.23.20)
+## What it does (0.23.21)
 
 - **The server also installs without Paseo (0.23.18).** `obsidian-bridge-install.sh` builds the same bundle into
   `~/.agents/obsidian-bridge-mcp`, with its own settings file, index and `AGENT-SETUP.md`, for an agent runtime that has

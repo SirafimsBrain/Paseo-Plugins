@@ -154,7 +154,7 @@ signals — expected, not an error.
 ```bash
 # Update to the latest release
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \
-  | bash -s -- --version 0.23.20
+  | bash -s -- --version 0.23.21
 
 # Remove the installation and its skills
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \

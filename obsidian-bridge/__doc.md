@@ -493,7 +493,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2166,3 +2166,26 @@ local runs were green.
 
 **Lesson the second time:** a package's postinstall is part of the install, and a workstation that blocks scripts proves
 nothing about a runner that executes them.
+
+The 0.23.20 run then reached the tests and failed two cases of `tests/opencode-mcp.test.ts`:
+
+```
+FAIL  tests/opencode-mcp.test.ts > agent config registration > creates the entry and reports it as installed
+AssertionError: expected { detected: true, installed: true, upToDate: false } to match { …, upToDate: true }
+FAIL  tests/opencode-mcp.test.ts > agent config registration > refreshes an entry that points at an old install
+AssertionError: expected false to be true
+```
+
+**Diagnosis.** `configStatus()` builds the expected entry from `mcpServerCommand()`, which resolves `dist/mcp-server.js`
+through `$PASEO_HOME/config.json` → `plugins.obsidian-bridge.path`, and `upToDate` additionally requires that file to
+exist. The workstation has a real `~/.paseo/config.json` naming this checkout, so the resolution found the built bundle
+and the assertion passed for the wrong reason; the runner has no Paseo home, the fallback candidate does not exist, and
+`upToDate` is `false` for every registration.
+
+**Fix (0.23.21).** The test now owns its host state: `beforeEach` writes a temporary `$PASEO_HOME` whose `config.json`
+points at a temporary checkout containing a `dist/mcp-server.js`, and `afterEach` restores `PASEO_HOME`. Verified with
+`~/.paseo/config.json` moved aside and `PASEO_HOME` unset — 7/7 in that file, then 49 suites / 425 tests for the whole
+suite with the real home back in place.
+
+**Lesson the third time:** a test that reads the developer's home directory is not a test until it fails on a machine
+without it.

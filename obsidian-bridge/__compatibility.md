@@ -2,6 +2,24 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.23.21 — host-independent OpenCode/Kilo config tests (2026-11-23)
+
+Bugfix release (0.23.20 → 0.23.21). No plugin or server code changed; one test file became self-contained.
+
+The 0.23.20 run reached the test step and failed two cases of `tests/opencode-mcp.test.ts`
+(`configStatus().upToDate` expected `true`, received `false`). The launch command is resolved from
+`$PASEO_HOME/config.json` → `plugins.obsidian-bridge.path` → `dist/mcp-server.js`, and `upToDate` also requires that
+file to exist. On this workstation `~/.paseo/config.json` names the repository and the bundle is built, so the cases
+passed by accident; a runner has no Paseo home, the fallback path does not exist, and `upToDate` is `false`.
+
+| Change | Behaviour |
+| --- | --- |
+| `tests/opencode-mcp.test.ts` | `beforeEach` writes a temporary `$PASEO_HOME` whose `config.json` points at a temporary checkout with a real `dist/mcp-server.js`, and restores `PASEO_HOME` in `afterEach`. The case now describes the launch command instead of inheriting it |
+
+Evidence (Linux, Node 24.20.0): with `~/.paseo/config.json` moved aside and `PASEO_HOME` unset — the runner's situation —
+`tests/opencode-mcp.test.ts` passes (7/7), and the full suite passes again (49 suites / 425 tests) with the real home
+restored afterwards.
+
 ## Plugin 0.23.20 — release workflow install fix (2026-11-23)
 
 Bugfix release (0.23.19 → 0.23.20). No plugin or server code changed.
