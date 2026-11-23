@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RuntimeSettings } from "../../shared/settings";
 import { normalizeRoleDir } from "../dirs";
-import { resolveVaultRoot } from "../paths";
+import { resolveVaultRoot, vaultPathHint } from "../paths";
 import { PLAN_SYSTEM_DIRS, isPlanSystemPath, resolveInsideVault } from "../vault";
 import { currentProject } from "./project";
 
@@ -77,7 +77,7 @@ export function resolvePlanRoot(
       reason: "not_configured",
       error:
         "The Obsidian directory is not configured, so there is no planning directory either. " +
-        "Ask the user to set it in Settings → Plugins → Obsidian Bridge.",
+        `Ask the user to set it: ${vaultPathHint()}`,
     };
   }
 

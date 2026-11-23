@@ -52,6 +52,7 @@ const DEFAULTS: RuntimeSettings = {
   excludeGlobs: ".obsidian/**, .trash/**, .git/**, .smart-env/**",
   ftsStemming: false,
   reconcileMinutes: 10,
+  indexRefreshSeconds: 15,
   maxResults: 10,
   searchBudgetChars: 8000,
   snippetChars: 600,
@@ -122,6 +123,8 @@ function parseValues(values: Record<string, unknown>): Partial<RuntimeSettings> 
   if (typeof values.ftsStemming === "boolean") parsed.ftsStemming = values.ftsStemming;
   const reconcile = optionalInt(values.reconcileMinutes, 1, 240);
   if (reconcile !== undefined) parsed.reconcileMinutes = reconcile;
+  const refresh = optionalInt(values.indexRefreshSeconds, 1, 3600);
+  if (refresh !== undefined) parsed.indexRefreshSeconds = refresh;
   const maxResults = optionalInt(values.maxResults, 1, 50);
   if (maxResults !== undefined) parsed.maxResults = maxResults;
   const budget = optionalInt(values.searchBudgetChars, 500, 60000);
@@ -210,6 +213,27 @@ function parseEnv(): Partial<RuntimeSettings> {
   if (includeFolders) parsed.includeFolders = includeFolders;
   const excludeGlobs = optionalString(process.env.OBSIDIAN_EXCLUDE_GLOBS);
   if (excludeGlobs) parsed.excludeGlobs = excludeGlobs;
+  for (const [name, key] of [
+    ["OBSIDIAN_INDEXING_ENABLED", "indexingEnabled"],
+    ["OBSIDIAN_FTS_STEMMING", "ftsStemming"],
+    ["OBSIDIAN_READ_ONLY", "readOnly"],
+  ] as const) {
+    const value = process.env[name];
+    if (value === "0" || value === "false") parsed[key] = false;
+    if (value === "1" || value === "true") parsed[key] = true;
+  }
+  const reconcile = process.env.OBSIDIAN_RECONCILE_MINUTES
+    ? optionalInt(Number(process.env.OBSIDIAN_RECONCILE_MINUTES), 1, 240)
+    : undefined;
+  if (reconcile !== undefined) parsed.reconcileMinutes = reconcile;
+  const maxWrite = process.env.OBSIDIAN_MAX_WRITE_CHARS
+    ? optionalInt(Number(process.env.OBSIDIAN_MAX_WRITE_CHARS), 1000, 400_000)
+    : undefined;
+  if (maxWrite !== undefined) parsed.maxWriteChars = maxWrite;
+  const snippet = process.env.OBSIDIAN_SNIPPET_CHARS
+    ? optionalInt(Number(process.env.OBSIDIAN_SNIPPET_CHARS), 120, 4000)
+    : undefined;
+  if (snippet !== undefined) parsed.snippetChars = snippet;
   const maxResults = process.env.OBSIDIAN_MAX_RESULTS
     ? optionalInt(Number(process.env.OBSIDIAN_MAX_RESULTS), 1, 50)
     : undefined;
@@ -218,6 +242,10 @@ function parseEnv(): Partial<RuntimeSettings> {
     ? optionalInt(Number(process.env.OBSIDIAN_SEARCH_BUDGET_CHARS), 500, 60000)
     : undefined;
   if (budget !== undefined) parsed.searchBudgetChars = budget;
+  const indexRefresh = process.env.OBSIDIAN_INDEX_REFRESH_SECONDS
+    ? optionalInt(Number(process.env.OBSIDIAN_INDEX_REFRESH_SECONDS), 1, 3600)
+    : undefined;
+  if (indexRefresh !== undefined) parsed.indexRefreshSeconds = indexRefresh;
   if (process.env.OBSIDIAN_SEMANTIC_SEARCH === "0") parsed.semanticSearch = false;
   if (process.env.OBSIDIAN_SEMANTIC_SEARCH === "1") parsed.semanticSearch = true;
   const model = optionalString(process.env.OBSIDIAN_EMBEDDING_MODEL);

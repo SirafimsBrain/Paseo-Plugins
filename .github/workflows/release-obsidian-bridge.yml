@@ -80,7 +80,7 @@ jobs:
           version="${{ steps.version.outputs.version }}"
           pkg="$RUNNER_TEMP/pkg"
           mkdir -p "$pkg"
-          cp -R dist skills AGENT-SETUP.md README.md obsidian-bridge-install.sh package.json "$pkg/"
+          cp -R dist skills AGENT-SETUP.md README.md obsidian-bridge-install.sh package.json settings.example.json "$pkg/"
           # `install.json` is the marker that tells the server it is a standalone
           # installation and where its home is, so the archive is complete.
           printf '{"version":"%s","ref":"%s","installedAt":"%s","semantic":false,"source":"release"}\n' \
@@ -112,16 +112,20 @@ jobs:
             ```
 
             `obsidian-bridge-mcp-${{ steps.version.outputs.version }}.tar.gz` is the same build, prebuilt. Extract it into
-            the directory you want and add `dist/mcp-server.js` to your MCP client:
+            the directory you want, create `settings.json` from `settings.example.json`, and add `dist/mcp-server.js`
+            to your MCP client:
 
             ```bash
             mkdir -p ~/.agents/obsidian-bridge-mcp
             tar -xzf obsidian-bridge-mcp-${{ steps.version.outputs.version }}.tar.gz -C ~/.agents/obsidian-bridge-mcp
+            cp ~/.agents/obsidian-bridge-mcp/settings.example.json ~/.agents/obsidian-bridge-mcp/settings.json
+            # edit vaultPath in settings.json
             ```
 
-            Both forms need Node.js 22.13 or newer. `SHA256SUMS` covers the archive and the installer. Setup, settings
-            and troubleshooting: `AGENT-SETUP.md` in the archive and in the repository. Linux is the primary target;
-            macOS is expected to work; Windows is not supported yet.
+            The archive does not copy skills into `~/.agents/skills`; the installer does. Both forms need Node.js
+            22.13+ (or 23.4+). `SHA256SUMS` covers the archive and the installer. Setup, settings and troubleshooting:
+            `AGENT-SETUP.md` in the archive and in the repository. Linux is the primary target; macOS is expected to
+            work; Windows is not supported yet.
           files: |
             obsidian-bridge/obsidian-bridge-mcp-${{ steps.version.outputs.version }}.tar.gz
             obsidian-bridge/obsidian-bridge-install.sh

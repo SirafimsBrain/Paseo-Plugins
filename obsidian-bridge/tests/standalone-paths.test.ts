@@ -8,7 +8,10 @@ import {
   indexPathFor,
   isStandaloneBridge,
   pluginDataDir,
+  readOnlyHint,
+  settingsKeyHint,
   settingsMirrorPath,
+  vaultPathHint,
 } from "../server/paths";
 
 /**
@@ -40,6 +43,25 @@ describe("standalone bridge home", () => {
     expect(settingsMirrorPath()).toBe(path.join(path.resolve(home), "settings.json"));
     expect(bridgeDataDir()).toBe(path.join(path.resolve(home), "data"));
     expect(indexPathFor("/vault/notes")).toContain(path.join(path.resolve(home), "data", "vaults"));
+  });
+
+  it("expands ~ in OBSIDIAN_BRIDGE_HOME instead of using a literal tilde", () => {
+    vi.stubEnv("OBSIDIAN_BRIDGE_HOME", "~/.agents/obsidian-bridge-mcp");
+    expect(bridgeHome()).toBe(path.join(os.homedir(), ".agents", "obsidian-bridge-mcp"));
+    expect(isStandaloneBridge()).toBe(true);
+  });
+
+  it("names settings.json in standalone hints and the Paseo screen otherwise", () => {
+    const home = tempDir("ob-hints-");
+    vi.stubEnv("OBSIDIAN_BRIDGE_HOME", home);
+    expect(vaultPathHint()).toContain(path.join(path.resolve(home), "settings.json"));
+    expect(settingsKeyHint("allowedExtensions")).toContain(path.join(path.resolve(home), "settings.json"));
+    expect(readOnlyHint()).toContain("readOnly");
+
+    vi.stubEnv("OBSIDIAN_BRIDGE_HOME", "");
+    vi.stubEnv("PASEO_HOME", tempDir("ob-hints-paseo-"));
+    expect(vaultPathHint()).toContain("Settings → Plugins → Obsidian Bridge");
+    expect(settingsKeyHint("allowedExtensions")).toContain("Settings → Plugins → Obsidian Bridge");
   });
 
   it("keeps the Paseo locations when the variable is unset", () => {

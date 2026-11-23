@@ -41,7 +41,7 @@ export function pluginDataDir(): string {
  */
 export function bridgeHome(): string {
   const configured = (process.env.OBSIDIAN_BRIDGE_HOME ?? "").trim();
-  if (configured.length > 0) return path.resolve(configured);
+  if (configured.length > 0) return resolveVaultRoot(configured);
   return standaloneHomeFromEntry() ?? pluginDataDir();
 }
 
@@ -62,16 +62,56 @@ export function bridgeDataDir(): string {
 /**
  * Installation root inferred from the running bundle (`dist/mcp-server.js`),
  * or `null`. Only a directory the installer created carries `install.json`.
+ *
+ * Resolved once: a long-lived MCP process must not switch between the Paseo
+ * and standalone layouts if the file disappears while it is running. A
+ * symlinked launcher is resolved to the real bundle first.
  */
+let cachedStandaloneHome: string | null | undefined;
 function standaloneHomeFromEntry(): string | null {
+  if (cachedStandaloneHome !== undefined) return cachedStandaloneHome;
   const entry = process.argv[1];
-  if (!entry) return null;
-  const home = path.dirname(path.dirname(path.resolve(entry)));
+  if (!entry) return (cachedStandaloneHome = null);
+  let resolved = path.resolve(entry);
   try {
-    return fs.statSync(path.join(home, "install.json")).isFile() ? home : null;
+    resolved = fs.realpathSync(resolved);
   } catch {
-    return null;
+    // A vanished or unreadable entry is handled by the stat below.
   }
+  const home = path.dirname(path.dirname(resolved));
+  try {
+    cachedStandaloneHome = fs.statSync(path.join(home, "install.json")).isFile() ? home : null;
+  } catch {
+    cachedStandaloneHome = null;
+  }
+  return cachedStandaloneHome;
+}
+
+/**
+ * Where a setting should be changed: the standalone `settings.json` or the
+ * Paseo settings screen. Every refusal names the surface that actually exists.
+ */
+export function settingsKeyHint(key: string, paseoLabel?: string): string {
+  if (isStandaloneBridge()) {
+    return `Set \`${key}\` in \`${settingsMirrorPath()}\`.`;
+  }
+  return `Open Settings → Plugins → Obsidian Bridge and set ${paseoLabel ?? `\`${key}\``}.`;
+}
+
+/** The one setting every tool refuses without. */
+export function vaultPathHint(): string {
+  if (isStandaloneBridge()) {
+    return (
+      `Set \`vaultPath\` in \`${settingsMirrorPath()}\`, or run the installer again with ` +
+      "`--vault <path>`."
+    );
+  }
+  return "Open Settings → Plugins → Obsidian Bridge and set the directory available to Paseo.";
+}
+
+/** Read-only refusals, whose Paseo label is the switch, not the key. */
+export function readOnlyHint(): string {
+  return settingsKeyHint("readOnly", "`readOnly` (the Refuse writes switch)");
 }
 
 /**

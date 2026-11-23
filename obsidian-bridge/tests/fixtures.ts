@@ -66,6 +66,7 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     excludeGlobs: ".obsidian/**, .trash/**, .git/**, .smart-env/**",
     ftsStemming: false,
     reconcileMinutes: 10,
+    indexRefreshSeconds: 15,
     maxResults: 10,
     searchBudgetChars: 8000,
     snippetChars: 600,
@@ -92,6 +93,7 @@ export function runtimeSettings(vault: string, overrides: Partial<Record<string,
     excludeGlobs: string;
     ftsStemming: boolean;
     reconcileMinutes: number;
+    indexRefreshSeconds: number;
     maxResults: number;
     searchBudgetChars: number;
     snippetChars: number;

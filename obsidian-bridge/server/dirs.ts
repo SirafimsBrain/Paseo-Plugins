@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RuntimeSettings } from "../shared/settings";
+import { settingsKeyHint } from "./paths";
 import { resolveInsideVault } from "./vault";
 
 /**
@@ -115,8 +116,8 @@ export function resolveRolePath(
   if (dir === null) {
     return {
       error:
-        `The ${role} directory is not configured. Ask the user to set it in ` +
-        "Settings → Plugins → Obsidian Bridge.",
+        `The ${role} directory is not configured. Ask the user to set it: ` +
+        settingsKeyHint(`${role}Dir`, `the ${role} directory`),
     };
   }
   const fileName = normalizeDocumentName(name);

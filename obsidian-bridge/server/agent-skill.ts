@@ -15,9 +15,9 @@ import { configuredPluginPath } from "./mcp-launch";
  *
  * The plugin ships four skills rather than one because they answer four
  * different questions an agent asks: how to read and write the vault
- * (`obsidian-bridge`), how to grow a plan (`planning-create`), how to carry a
- * plan through the work (`planning-execute`) and how to review plan against
- * fact afterwards (`planning-review`). All of them live in the repository
+ * (`obsidian-bridge`), how to grow a plan (`obsidian-planning-create`), how to carry a
+ * plan through the work (`obsidian-planning-execute`) and how to review plan against
+ * fact afterwards (`obsidian-planning-review`). All of them live in the repository
  * (`skills/<name>/SKILL.md`), are reviewed with the code, are rewritten only
  * when their content differs, and are removed when the switch is turned off —
  * the same contract the single skill had, applied to a list.
@@ -37,9 +37,9 @@ export interface SkillDefinition {
  */
 export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
   { name: "obsidian-bridge", purpose: "Read and write the vault" },
-  { name: "planning-create", purpose: "Grow a plan tree" },
-  { name: "planning-execute", purpose: "Carry a plan through the work" },
-  { name: "planning-review", purpose: "Review plan against fact" },
+  { name: "obsidian-planning-create", purpose: "Grow a plan tree" },
+  { name: "obsidian-planning-execute", purpose: "Carry a plan through the work" },
+  { name: "obsidian-planning-review", purpose: "Review plan against fact" },
 ];
 
 export const SKILL_NAME = SKILL_DEFINITIONS[0].name;
@@ -53,7 +53,7 @@ export interface SkillRoot {
 }
 
 export interface SkillTargetStatus {
-  /** Skill directory name, e.g. `planning-execute`. */
+  /** Skill directory name, e.g. `obsidian-planning-execute`. */
   skill: string;
   purpose: string;
   label: string;

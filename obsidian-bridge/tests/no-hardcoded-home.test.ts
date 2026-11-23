@@ -15,22 +15,30 @@ import { describe, expect, it } from "vitest";
  */
 
 const root = path.resolve(__dirname, "..");
-const SOURCE_DIRS = ["server", "shared", "client"];
+const SOURCE_DIRS = ["server", "shared", "client", "scripts"];
+const ROOT_SOURCE_FILES = ["index.server.ts", "index.client.tsx"];
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx"]);
 
 /**
- * `/home/<name>` with a literal name. A template (`/home/${user}`) or a value
- * that is only a comment placeholder for documentation is still a literal path
- * in the source, so it is reported as well — the fix is `~/…` or `os.homedir()`.
+ * A literal home directory on Linux, macOS or Windows. A template
+ * (`/home/${user}`) or a value that is only a comment placeholder is still a
+ * literal path in the source, so it is reported as well — the fix is `~/…` or
+ * `os.homedir()`.
  */
-const HARDCODED_HOME = /\/home\/([A-Za-z0-9._-]+)/g;
+const HARDCODED_HOME_PATTERNS = [
+  /\/home\/([A-Za-z0-9._-]+)/g,
+  /\/Users\/([A-Za-z0-9._-]+)/g,
+  /[A-Za-z]:\\Users\\([A-Za-z0-9._-]+)/g,
+];
 
 /** Matches with their 1-based line number, for a readable failure message. */
 export function findHardcodedHome(text: string): Array<{ line: number; match: string }> {
   const found: Array<{ line: number; match: string }> = [];
   text.split("\n").forEach((content, index) => {
-    for (const match of content.matchAll(HARDCODED_HOME)) {
-      found.push({ line: index + 1, match: match[0] });
+    for (const pattern of HARDCODED_HOME_PATTERNS) {
+      for (const match of content.matchAll(pattern)) {
+        found.push({ line: index + 1, match: match[0] });
+      }
     }
   });
   return found;
@@ -55,6 +63,12 @@ describe("home paths", () => {
     expect(findHardcodedHome('const vault = "/home/alice/.obsidian/Main/Paseo";')).toEqual([
       { line: 1, match: "/home/alice" },
     ]);
+    expect(findHardcodedHome('const vault = "/Users/alice/Obsidian/Main";')).toEqual([
+      { line: 1, match: "/Users/alice" },
+    ]);
+    expect(findHardcodedHome('const vault = "C:\\Users\\alice\\Obsidian";')).toEqual([
+      { line: 1, match: "C:\\Users\\alice" },
+    ]);
     expect(findHardcodedHome("const vault = path.join(os.homedir(), '.obsidian');")).toEqual([]);
     expect(findHardcodedHome('resolveVaultRoot("~/.obsidian/Main/Paseo")')).toEqual([]);
     expect(findHardcodedHome('placeholder="~/.obsidian/Main/Paseo"')).toEqual([]);
@@ -63,16 +77,21 @@ describe("home paths", () => {
     expect(findHardcodedHome("// see /homes/example")).toEqual([]);
   });
 
-  it("keeps /home/<name> out of server, shared and client", () => {
+  it("keeps a literal home out of the shipped server, shared, client and scripts", () => {
     const offenders: string[] = [];
+    const files: string[] = [];
     for (const dir of SOURCE_DIRS) {
       const absolute = path.join(root, dir);
-      if (!fs.existsSync(absolute)) continue;
-      for (const file of walk(absolute)) {
-        const text = fs.readFileSync(file, "utf-8");
-        for (const hit of findHardcodedHome(text)) {
-          offenders.push(`${path.relative(root, file)}:${hit.line}: ${hit.match}`);
-        }
+      if (fs.existsSync(absolute)) files.push(...walk(absolute));
+    }
+    for (const name of ROOT_SOURCE_FILES) {
+      const file = path.join(root, name);
+      if (fs.existsSync(file)) files.push(file);
+    }
+    for (const file of files) {
+      const text = fs.readFileSync(file, "utf-8");
+      for (const hit of findHardcodedHome(text)) {
+        offenders.push(`${path.relative(root, file)}:${hit.line}: ${hit.match}`);
       }
     }
     // Resolve the home directory instead of naming one: `os.homedir()`,

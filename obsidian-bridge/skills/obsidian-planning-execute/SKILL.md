@@ -1,7 +1,9 @@
 ---
-name: planning-execute
+name: obsidian-planning-execute
 description: Carry an existing plan through the work with the `plan_*` tools — `plan_read` before a change, `plan_set_status` to move a leaf's lifecycle, `plan_update_node` for a brief or payload, `plan_link` for influences, `plan_incident` for blockers, `plan_growth` to record progress, `plan_move_node`/`plan_archive_node` to restructure. Use when the user asks you to work on a planned task, mark progress, record a blocker or decision, or reorganise the plan while the work is happening.
 ---
+
+<!-- installed-by: obsidian-bridge -->
 
 # Planning: executing a plan
 

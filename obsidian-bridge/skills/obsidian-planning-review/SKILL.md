@@ -1,7 +1,9 @@
 ---
-name: planning-review
+name: obsidian-planning-review
 description: Review a plan against what actually happened with the `plan_*` tools — `plan_read` for the current state, `plan_history` for the snapshots, `plan_restore` to bring one back as a new revision, `plan_growth` for the running record, `plan_validate` for integrity, and `plan_incident`/`plan_link` for what the review found. Use when the user asks for a plan review, a plan-vs-fact check, what changed and why, or to restore or roll back a node.
 ---
+
+<!-- installed-by: obsidian-bridge -->
 
 # Planning: reviewing plan against fact
 

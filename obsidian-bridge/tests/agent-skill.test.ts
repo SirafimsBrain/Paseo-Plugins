@@ -23,7 +23,7 @@ import {
  */
 
 const repoSkill = path.join(__dirname, "..", "skills", SKILL_NAME, "SKILL.md");
-const PLANNING_SKILLS = ["planning-create", "planning-execute", "planning-review"];
+const PLANNING_SKILLS = ["obsidian-planning-create", "obsidian-planning-execute", "obsidian-planning-review"];
 
 function skillFile(name: string): string {
   return path.join(__dirname, "..", "skills", name, "SKILL.md");
@@ -194,12 +194,12 @@ describe("agent skill", () => {
     const [root] = roots();
     makeRoot(root);
     installAgentSkill();
-    const target = path.join(root, "planning-execute", "SKILL.md");
+    const target = path.join(root, "obsidian-planning-execute", "SKILL.md");
     fs.writeFileSync(target, "old instructions", "utf-8");
     expect(agentSkillStatus().stale).toEqual([target]);
     expect(verifyAgentSkill().repaired).toEqual([target]);
     expect(fs.readFileSync(target, "utf-8")).toBe(
-      fs.readFileSync(skillFile("planning-execute"), "utf-8"),
+      fs.readFileSync(skillFile("obsidian-planning-execute"), "utf-8"),
     );
   });
 

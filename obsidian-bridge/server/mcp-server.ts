@@ -79,7 +79,7 @@ function respondError(id: number | string | null, code: number, message: string)
 }
 
 function main(): void {
-  const settings = parseSettingsFile();
+  const startupSettings = parseSettingsFile();
   const serverInfo = { name: "obsidian-bridge", version: SERVER_VERSION };
 
   // `paseo plugin update` does not restart the plugin host, so the stable copy
@@ -102,7 +102,7 @@ function main(): void {
 
   process.stderr.write(
     `[obsidian-bridge] MCP server ready (vault: ${
-      settings.vaultPath.length > 0 ? settings.vaultPath : "not configured"
+      startupSettings.vaultPath.length > 0 ? startupSettings.vaultPath : "not configured"
     })\n`,
   );
 
@@ -122,7 +122,7 @@ function main(): void {
         respondError(null, -32700, "Parse error");
         continue;
       }
-      void handleRequest(request, settings, serverInfo);
+      void handleRequest(request, serverInfo);
     }
   });
 
@@ -134,10 +134,13 @@ function main(): void {
 
 async function handleRequest(
   request: JsonRpcRequest,
-  settings: ReturnType<typeof parseSettingsFile>,
   serverInfo: { name: string; version: string },
 ): Promise<void> {
   const id = request.id ?? null;
+  // Read settings per request: the file is the standalone UI, and a user who
+  // edits it (or the plugin host that mirrors it) should not have to restart
+  // the agent's MCP process.
+  const settings = parseSettingsFile();
   switch (request.method) {
     case "initialize":
       respond(id, {

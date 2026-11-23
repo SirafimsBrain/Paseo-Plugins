@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseNote, type ParsedNote } from "./parse";
-import { resolveVaultRoot } from "./paths";
+import { resolveVaultRoot, settingsKeyHint } from "./paths";
 
 /**
  * Vault filesystem helpers: path validation, bounded walking with the
@@ -143,8 +143,8 @@ export function extensionRefusal(relPath: string, allowedExtensions: string): st
     `'${relPath}' is not a document this plugin reads: only ${allowed} files inside the ` +
     "configured directory are available. Dot files and configuration (`.env`, `.git/config`, " +
     "`.obsidian/…`) and extensionless files are never readable, whatever the allowlist says. " +
-    "Ask the user to add an extension in Settings → Plugins → Obsidian Bridge if this file is " +
-    "really part of the knowledge base."
+    `Ask the user to add the extension: ${settingsKeyHint("allowedExtensions", "the document extensions")} ` +
+    "Use it only if this file is really part of the knowledge base."
   );
 }
 

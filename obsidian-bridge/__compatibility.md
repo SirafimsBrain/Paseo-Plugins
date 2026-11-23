@@ -2,6 +2,32 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.25.22 — standalone installation hardening (2026-11-23)
+
+Feature/bugfix release (0.24.22 → 0.25.22). The Paseo plugin, the 31 MCP tool names and their inputs are unchanged; the
+standalone installer, its settings surface, the skill names and the server's standalone-only behaviour change.
+
+| Change | Behaviour |
+| --- | --- |
+| installer exit status | `--dry-run` and `--uninstall` now exit 0 on success; the EXIT trap no longer returns the status of an empty variable |
+| explicit source | `--source` conflicts with `--ref`/`--version`; `--version`/`--ref` skip checkout autodetection and build the requested ref |
+| uninstall safety | requires `install.json` (or `--force`), canonicalises the path, refuses `/`, `$HOME`, ancestors of `$HOME`, the skills root and a vault; install refuses a non-empty foreign directory without `--force` |
+| settings | atomic write, always `0600`, foreign file backed up; `semanticSearch` is preserved on update and only defaults to `false` in a new standalone file; settings are re-read per request |
+| skills | `obsidian-bridge` by default; planning skills are `obsidian-planning-{create,execute,review}` and opt-in with `--with-planning-skills`; `installed-skills.txt` records them and uninstall removes only marked copies; legacy `planning-*` needs `--force` |
+| semantic | no `--with-semantic`: the standalone server is lexical + graph and rejects the flag; `--no-semantic` is accepted for older scripts |
+| paths | `OBSIDIAN_BRIDGE_HOME` expands `~`; `--dir`/`--skills-dir` are absolute; standalone detection is resolved once through `realpath` |
+| freshness | automatic scan only standalone, bounded by `indexRefreshSeconds` (default 15) / `OBSIDIAN_INDEX_REFRESH_SECONDS` |
+| search paging | `offset` beyond the last hit answers with a paging message instead of "No notes matched" |
+| build | exact build-tool versions, `--ignore-scripts`; `install.json` is written last |
+| archive | ships `settings.example.json`; the archive still needs a manual `settings.json` and does not copy skills into `~/.agents/skills` |
+
+The four skill directories in the repository were renamed from `planning-*` to `obsidian-planning-*`; the Paseo plugin
+installs the new names and leaves existing generic `planning-*` copies untouched. Existing Paseo installations keep
+working, but the old skill directories are not removed automatically.
+
+Evidence (Linux, Node 24.20.0): `npm run typecheck` exit 0; `npm test` 52 suites / 440 tests pass, including
+`tests/installer.test.ts`; `bash -n obsidian-bridge-install.sh` exit 0.
+
 ## Plugin 0.24.22 — no machine-specific home paths in the sources (2026-11-23)
 
 Bugfix release (0.24.21 → 0.24.22). No plugin behaviour, tool or setting changed: one test was neutralised, one UI

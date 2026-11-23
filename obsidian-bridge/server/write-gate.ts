@@ -1,3 +1,5 @@
+import { readOnlyHint } from "./paths";
+
 /**
  * The one write gate.
  *
@@ -16,8 +18,7 @@ export interface WriteLimits {
 export function writeRefusal(limits: WriteLimits, chars: number): string | null {
   if (limits.readOnly) {
     return (
-      "Writes are disabled (readOnly is on). Ask the user to turn them off in " +
-      "Settings → Plugins → Obsidian Bridge."
+      `Writes are disabled (readOnly is on). Ask the user to turn them off: ${readOnlyHint()}`
     );
   }
   if (chars > limits.maxWriteChars) {

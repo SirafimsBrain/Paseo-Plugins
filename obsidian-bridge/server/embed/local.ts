@@ -1,3 +1,5 @@
+import { bridgeHome, isStandaloneBridge, settingsMirrorPath } from "../paths";
+
 /**
  * The local embedding provider: `@huggingface/transformers` + ONNX Runtime,
  * in-process, no daemon and no Python (spike results: `__research.md` §12).
@@ -49,10 +51,14 @@ export async function createLocalProvider(options: LocalProviderOptions): Promis
   try {
     transformers = (await import(TRANSFORMERS_SPECIFIER)) as unknown as typeof transformers;
   } catch (cause) {
+    const remedy = isStandaloneBridge()
+      ? `Run \`npm install @huggingface/transformers\` in \`${bridgeHome()}\`, or set ` +
+        `\`semanticSearch: false\` in \`${settingsMirrorPath()}\`.`
+      : "Run npm install in the plugin directory, or turn semantic search off in " +
+        "Settings → Plugins → Obsidian Bridge.";
     throw new Error(
       "Semantic search needs the '@huggingface/transformers' package, which is not " +
-        `installed (${cause instanceof Error ? cause.message : String(cause)}). Run npm install ` +
-        "in the plugin directory, or turn semantic search off in Settings → Plugins → Obsidian Bridge.",
+        `installed (${cause instanceof Error ? cause.message : String(cause)}). ${remedy}`,
     );
   }
 

@@ -3,6 +3,8 @@ name: obsidian-bridge
 description: Read and write the user's Obsidian vault through the obsidian-bridge tools — `obsidian_search` finds notes by meaning or title, `obsidian_read` reads a whole note or one heading, `obsidian_outline`/`obsidian_list`/`obsidian_links` inspect them, `obsidian_edit`/`obsidian_write_document`/`obsidian_write_scratch`/`obsidian_append_inbox` write Obsidian Flavored Markdown (frontmatter, wikilinks, callouts, tags, embeds). Use when the user asks about their Obsidian notes, documents, plans or research, or asks you to create, append to or edit a note in the vault.
 ---
 
+<!-- installed-by: obsidian-bridge -->
+
 # Obsidian Bridge Skill
 
 The vault is a **reference library**, not your memory: nothing here is read or written unless the user

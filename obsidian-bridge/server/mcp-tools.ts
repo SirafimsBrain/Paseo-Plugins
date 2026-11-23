@@ -23,7 +23,7 @@ import { embedQuery, queryProviderStatus } from "./embed/query";
 import { fuzzySearch } from "./enrichment";
 import { createObsidianApi } from "./obsidian-api";
 import { memoryReport } from "./memory";
-import { indexPathFor, isStandaloneBridge, resolveVaultRoot, settingsMirrorPath } from "./paths";
+import { indexPathFor, isStandaloneBridge, readOnlyHint, resolveVaultRoot, vaultPathHint } from "./paths";
 import { planRootSummary } from "./plan/paths";
 import { PLAN_TOOLS, dispatchPlanTool } from "./plan/tools";
 import { scanVault } from "./scan";
@@ -128,8 +128,8 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "ten seconds, re-read the node and repeat it. `plan_history` is the change log of one node; " +
     "`<project>/_journal.md` is the change log of the project and is read like a note.\n\n" +
     "Four skills document these workflows in more detail; load the one that matches the task: " +
-    "`obsidian-bridge` (read → cite → write), `planning-create` (grow a tree), " +
-    "`planning-execute` (carry a plan through the work), `planning-review` (plan against fact, " +
+    "`obsidian-bridge` (read → cite → write), `obsidian-planning-create` (grow a tree), " +
+    "`obsidian-planning-execute` (carry a plan through the work), `obsidian-planning-review` (plan against fact, " +
     "history and growth)."
   );
 }
@@ -467,15 +467,9 @@ export function openRuntime(
 ): { runtime: ToolRuntime } | { error: string } {
   const root = resolveVaultRoot(settings.vaultPath);
   if (root.length === 0) {
-    // The place to configure a vault is the one difference a standalone
-    // installation has in this file: there is no Paseo settings screen (0.23.18).
     return {
-      error: isStandaloneBridge()
-        ? "The Obsidian directory is not configured. Ask the user to set `vaultPath` in " +
-            `\`${settingsMirrorPath()}\` (or to run the installer again with \`--vault <path>\`); ` +
-            "do not guess it."
-        : "The Obsidian directory is not configured. Ask the user to open Settings → Plugins → " +
-            "Obsidian Bridge and set the directory available to Paseo; do not guess it.",
+      error:
+        `The Obsidian directory is not configured. ${vaultPathHint()} Do not guess it.`,
     };
   }
   let isDirectory = false;
@@ -497,8 +491,8 @@ export function openRuntime(
   }
 }
 
-/** How often one search may re-walk the vault (0.23.18). */
-const INDEX_SCAN_INTERVAL_MS = 15_000;
+/** Fallback when a test fixture predates the setting (0.25.22). */
+const DEFAULT_INDEX_SCAN_INTERVAL_MS = 15_000;
 
 /** State of the index when a search was answered. */
 export interface IndexState {
@@ -549,11 +543,20 @@ function refreshIndex(runtime: ToolRuntime, settings: RuntimeSettings): IndexSta
   };
 
   let lastScanAt = readLastScanAt();
+  // The Paseo plugin already owns the index: its watcher and reconcile timer
+  // make a scan here redundant, and two writers for one SQLite file only add
+  // lock contention. Automatic freshness belongs to the standalone layout.
+  if (!isStandaloneBridge()) {
+    return { lastScanAt, scannedNow: false, notes: readNotes() };
+  }
   const lastScanMs = lastScanAt === null ? null : Date.parse(lastScanAt);
+  const intervalMs =
+    (settings.indexRefreshSeconds > 0 ? settings.indexRefreshSeconds : 15) * 1000 ||
+    DEFAULT_INDEX_SCAN_INTERVAL_MS;
   const recent =
     lastScanMs !== null &&
     Number.isFinite(lastScanMs) &&
-    Date.now() - lastScanMs < INDEX_SCAN_INTERVAL_MS;
+    Date.now() - lastScanMs < intervalMs;
   if (recent || !settings.indexingEnabled) {
     return { lastScanAt, scannedNow: false, notes: readNotes() };
   }
@@ -572,9 +575,9 @@ function refreshIndex(runtime: ToolRuntime, settings: RuntimeSettings): IndexSta
 }
 
 /** Adds the explanation an empty result needs, so "not found" is not a dead end. */
-function describeIndex(index: IndexState, hits: number): IndexReport {
+function describeIndex(index: IndexState, hits: number, total = 0): IndexReport {
   const hint =
-    hits > 0
+    hits > 0 || total > 0
       ? null
       : index.notes === 0
         ? "The index holds no notes. Check `vaultPath`, `includeFolders`/`excludeGlobs` and the " +
@@ -864,11 +867,15 @@ export async function dispatchTool(
           fuzzy: fuzzy.hits,
           enrichment: { enabled: fuzzy.enabled, error: fuzzy.error },
         });
-        const indexInfo = describeIndex(index, result.hits.length);
+        const indexInfo = describeIndex(index, result.hits.length, result.total ?? 0);
+        const emptyNote =
+          result.hits.length === 0 && (result.total ?? 0) > 0
+            ? "This page is beyond the last result; use a smaller offset."
+            : (result.note ?? "No results.");
         const text =
           result.text.length > 0
             ? result.text
-            : [result.note ?? "No results.", indexInfo.hint].filter(Boolean).join("\n\n");
+            : [emptyNote, indexInfo.hint].filter(Boolean).join("\n\n");
         const remaining = Math.max(0, (result.total ?? 0) - offset - result.hits.length);
         const omitted = result.omitted ?? 0;
         const nextArgs: Record<string, unknown> = { query };
@@ -978,8 +985,7 @@ export async function dispatchTool(
       case "obsidian_edit": {
         if (settings.readOnly) {
           return fail(
-            "Writes are disabled (readOnly is on). Ask the user to turn them off in " +
-              "Settings → Plugins → Obsidian Bridge.",
+            `Writes are disabled (readOnly is on). Ask the user to turn them off: ${readOnlyHint()}`,
           );
         }
         const relPath = typeof input.path === "string" ? input.path.trim() : "";
@@ -1229,7 +1235,9 @@ export async function dispatchTool(
             error: provider.error,
             note:
               vectors.chunks > 0 && vectors.embedded < vectors.chunks
-                ? "The plugin host is still embedding the vault; lexical search works meanwhile."
+                ? isStandaloneBridge()
+                  ? "This standalone installation does not build embeddings; lexical search uses the index as it is."
+                  : "The plugin host is still embedding the vault; lexical search works meanwhile."
                 : null,
           },
           memory,

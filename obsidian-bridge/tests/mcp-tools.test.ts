@@ -74,9 +74,9 @@ describe("tool catalogue", () => {
     expect(instructions).toContain("`obsidian_search`");
     // The planning boundary and the skill names arrive with the same block.
     expect(instructions).toContain("`planRoot`");
-    expect(instructions).toContain("planning-create");
-    expect(instructions).toContain("planning-execute");
-    expect(instructions).toContain("planning-review");
+    expect(instructions).toContain("obsidian-planning-create");
+    expect(instructions).toContain("obsidian-planning-execute");
+    expect(instructions).toContain("obsidian-planning-review");
     for (const name of ["plan_read", "plan_create_node", "plan_validate", "plan_import"]) {
       expect(instructions).toContain(`\`${name}\``);
     }
@@ -191,6 +191,20 @@ describe("dispatchTool", () => {
     expect(structured.hits.length).toBeGreaterThan(0);
     expect(structured.hits[0].path).toContain("queue.md");
     expect(structured.hits[0].heading).toBe("Queue");
+  });
+
+  it("does not call an offset beyond the last hit a missing note", async () => {
+    const { settings } = indexed();
+    const outcome = await dispatchTool("obsidian_search", { query: "bounded retries", offset: 99 }, settings);
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.text).toContain("beyond the last result");
+    expect(outcome.text).not.toContain("No notes matched");
+    const structured = outcome.structuredContent as {
+      index: { hint: string | null };
+      hits: unknown[];
+    };
+    expect(structured.hits).toHaveLength(0);
+    expect(structured.index.hint).toBeNull();
   });
 
   it("filters by folder and tags", async () => {

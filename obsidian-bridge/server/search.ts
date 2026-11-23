@@ -1,5 +1,6 @@
 import type { SearchHit, SearchResult } from "../shared/contracts";
 import { roleOfPath, type Role, type RoleDirs } from "./dirs";
+import { vaultPathHint } from "./paths";
 import type { FuzzyHit } from "./obsidian-api";
 import type { BridgeStore } from "./store";
 
@@ -226,7 +227,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
   const note =
     hits.length === 0
       ? query.length === 0
-        ? "The index is empty. Set the vault path in Settings → Plugins → Obsidian Bridge."
+        ? `The index is empty. ${vaultPathHint()}`
         : "No notes matched. Try fewer words, or drop the folder/tag filters."
       : null;
 

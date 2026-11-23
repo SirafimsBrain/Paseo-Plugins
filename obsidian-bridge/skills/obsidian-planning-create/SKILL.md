@@ -1,7 +1,9 @@
 ---
-name: planning-create
+name: obsidian-planning-create
 description: Grow a project plan as a tree of Markdown documents with the `plan_*` tools — `plan_scope` finds the planning root, `plan_read`/`plan_search` read it, `plan_create_node` adds a root, trunk, branch, sub-branch or leaf, `plan_goal` records a goal with its steps, `plan_growth` tracks how a node or goal grew, and `plan_import` imports a legacy project archive. Use when the user asks you to start or extend a plan, break work into branches and leaves, or turn a goal or an existing plan into a tree.
 ---
+
+<!-- installed-by: obsidian-bridge -->
 
 # Planning: creating a plan
 

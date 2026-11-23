@@ -372,6 +372,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `excludeGlobs` | `.obsidian/**, .trash/**, .git/**, .smart-env/**` | Comma-separated globs, `*`/`**` supported. |
 | `ftsStemming` | `false` | `porter` tokenizer (English-only); changing it triggers a rebuild. |
 | `reconcileMinutes` | `10` | Background reconcile interval. |
+| `indexRefreshSeconds` | `15` | Minimum interval between automatic standalone scans (1–3600). |
 | `maxResults` | `10` | Default hit limit. |
 | `searchBudgetChars` | `8000` | Packed answer budget. |
 | `snippetChars` | `600` | Snippet length per hit. |
@@ -385,7 +386,7 @@ stays idle without a path; the hook itself only reads settings and the agent rec
 | `obsidianApiUrl` | `https://127.0.0.1:27124` | Local REST API base URL. Self-signed TLS is accepted for loopback hosts only. |
 | `obsidianApiKey` | `""` | Bearer token for that API. Mirrored in a `0600` settings file; never logged. |
 | `injectIntoAgents` | `true` | Contribute MCP server or attached tools. |
-| `installAgentSkill` | `true` | Install the four shipped skills (`obsidian-bridge`, `planning-create`, `planning-execute`, `planning-review`) into every agent skills directory that exists; verify and repair them on load, on a settings change and every five minutes; remove them when off. |
+| `installAgentSkill` | `true` | Install the four shipped skills (`obsidian-bridge`, `obsidian-planning-create`, `obsidian-planning-execute`, `obsidian-planning-review`) into every agent skills directory that exists; verify and repair them on load, on a settings change and every five minutes; remove them when off. |
 | `registerClineMcp` | `true` | Register the MCP server in `~/.cline/data/settings/cline_mcp_settings.json` (Cline ignores a stdio server from the session payload). |
 | `registerOpencodeMcp` | `true` | Write an `obsidian-bridge` entry into the OpenCode and Kilo config files (only for a config directory that exists); keep it across plugin restarts and remove it when the switch is off. |
 
@@ -493,7 +494,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -754,7 +755,7 @@ task.
 
 Patch release (0.17.11 → 0.17.12). No tool, schema, host floor or runtime behaviour changes: the edit is confined to agent-
 and user-facing descriptions. `CONTRACT_SENTENCE` already named `plan_*` as the planning destination; the `initialize`
-block, the `mcp-tools.ts` contract comment, the README introduction and the `obsidian-bridge` / `planning-create` skills
+block, the `mcp-tools.ts` contract comment, the README introduction and the `obsidian-bridge` / `obsidian-planning-create` skills
 now agree with it. A legacy archive remains importable through `plan_import`; the `luck-planner-export` format identifier
 is a compatibility literal, not a live dependency.
 
@@ -770,16 +771,16 @@ how many skill directories the plugin keeps current.
 
 | Part | Behaviour |
 | --- | --- |
-| `skills/planning-create/SKILL.md` | the shape of a tree (root → one trunk level → branches → sub-branches → leaves), create in order, goals before work, `plan_import` instead of retyping, and the rule that only `plan_*` writes a plan file |
-| `skills/planning-execute/SKILL.md` | the working loop: `plan_scope` → `plan_read` → `plan_set_status`/`plan_update_node`/`plan_growth`, `plan_link` and `plan_incident`, `plan_move_node`/`plan_archive_node` with `op_id`, `expected_revision` and `accept_external`, and a second agent's view of the same node |
-| `skills/planning-review/SKILL.md` | plan against fact: `plan_history` and snapshot diffs, what a review must answer, growth as the fact and status as the summary, incidents and cycles, `plan_restore` as a content restore rather than a rollback |
+| `skills/obsidian-planning-create/SKILL.md` | the shape of a tree (root → one trunk level → branches → sub-branches → leaves), create in order, goals before work, `plan_import` instead of retyping, and the rule that only `plan_*` writes a plan file |
+| `skills/obsidian-planning-execute/SKILL.md` | the working loop: `plan_scope` → `plan_read` → `plan_set_status`/`plan_update_node`/`plan_growth`, `plan_link` and `plan_incident`, `plan_move_node`/`plan_archive_node` with `op_id`, `expected_revision` and `accept_external`, and a second agent's view of the same node |
+| `skills/obsidian-planning-review/SKILL.md` | plan against fact: `plan_history` and snapshot diffs, what a review must answer, growth as the fact and status as the summary, incidents and cycles, `plan_restore` as a content restore rather than a rollback |
 | `server/agent-skill.ts` | `SKILL_DEFINITIONS` list (name + purpose), `resolveSkillSources()`, `skillStatuses()` one row per root per skill, install/verify/remove over the whole list, `SKILL_NAME` still pointing at `obsidian-bridge` |
 | `CONTRACT_SENTENCE` and `mcpInstructions` | the `planRoot` boundary and the ban on `obsidian_edit`/`obsidian_write_*`/`shell`/`write`/`patch` against plan files now arrive with every tool description and with the `initialize` block, together with the names of the four skills |
 
 Evidence: `npm run typecheck` exit 0; `npm test` **42 suites / 348 tests** pass. `agent-skill.test.ts` now checks that
 every skill has Agent Skills frontmatter, names its tools and carries no machine-specific absolute path; that installing
 a root writes four directories, that removing a root removes all four and spares another plugin's skill, that a drifted
-`planning-execute` is the only thing repaired, and that the settings list has one row per skill per root.
+`obsidian-planning-execute` is the only thing repaired, and that the settings list has one row per skill per root.
 `mcp-tools.test.ts` checks the `planRoot` boundary and the skill names in the `initialize` instructions. Linux stays the
 primary target; macOS and Windows remain future work, as `__compatibility.md` records.
 
@@ -1702,9 +1703,9 @@ The plugin teaches four workflows, each a real Agent Skills file reviewed with t
 | Skill | Answers |
 | --- | --- |
 | `obsidian-bridge` | how to find a note, read one heading, write in the right role and edit an exact fragment |
-| `planning-create` | how to grow a tree: one root, trunks, branches, leaves with briefs, goals, import |
-| `planning-execute` | how to carry the plan through the work and keep its state honest |
-| `planning-review` | how to compare plan with fact using snapshots, growth and `plan_validate` |
+| `obsidian-planning-create` | how to grow a tree: one root, trunks, branches, leaves with briefs, goals, import |
+| `obsidian-planning-execute` | how to carry the plan through the work and keep its state honest |
+| `obsidian-planning-review` | how to compare plan with fact using snapshots, growth and `plan_validate` |
 
 `server/agent-skill.ts` holds `SKILL_DEFINITIONS` (directory name plus a one-line purpose for the settings screen) and
 works over that list everywhere: `resolveSkillSources()` finds each `skills/<name>/SKILL.md` in the checkout (configured
@@ -2041,6 +2042,10 @@ Decision: `obsidian_search` refreshes the index itself before answering.
 
 ### 19.6 Semantic search: opt-in, and never a useless model load
 
+> 0.25.22 removed `--with-semantic` and the embedding stack from the standalone installer: a standalone installation
+> has no vector builder, so the flag only installed runtime that search could not use. The history below describes the
+> 0.23.18 release.
+
 Without the plugin process, nothing builds vectors: `scanVault` does not embed, `EmbedJob` runs in the plugin host.
 A standalone install therefore has an index with zero vectors, and the server used to load a ~118 MB model on the first
 `obsidian_search` to compute a query embedding it could not compare with anything.
@@ -2258,3 +2263,36 @@ outside the scan, so a fixture may still use a synthetic home; the one that did 
 export carried `/home/sirafim/projects/helios`) now uses `/home/user/projects/helios`. The same rule changed one visible
 string: the settings screen's vault-path placeholder was `/home/you/.obsidian/Main/Paseo` and now reads
 `~/.obsidian/Main/Paseo`, the form the field already accepted.
+
+### 0.25.22 — a clean standalone installation
+
+The 0.23.18 installer was the first path for a runtime without Paseo, and a review of it found defects that a successful
+build hid: `--dry-run` and `--uninstall` exited 1 because the EXIT trap returned the status of an empty `[ -n "$work" ]`;
+an explicit `--version`/`--ref` was ignored while standing in a checkout; `--uninstall` would `rm -rf` any directory;
+an existing `settings.json` kept a group-writable mode and was then rejected by the server; every update overwrote
+`semanticSearch`; and the global `planning-*` skills could overwrite or delete another plugin's copy.
+
+The standalone surface is now closed around those cases:
+
+| Area | 0.25.22 behaviour |
+| --- | --- |
+| exit status | `cleanup()` always returns 0; `--dry-run` and `--uninstall` exit 0 on success |
+| source precedence | `--source` conflicts with `--ref`/`--version`; explicit refs skip checkout autodetection and are recorded truthfully |
+| uninstall | requires `install.json` (or `--force`), resolves the path with `realpath`/`pwd -P`, refuses `/`, `$HOME`, ancestors of `$HOME`, the skills root and a vault |
+| install target | refuses a non-empty directory that is not an earlier installation unless `--force` |
+| settings | atomic temp + rename, always `0600`, foreign files copied to a timestamped backup; `semanticSearch` preserved on update and only `false` in a new file |
+| skills | `obsidian-bridge` by default; `--with-planning-skills` adds `obsidian-planning-{create,execute,review}`; the manifest is `installed-skills.txt`, uninstall removes only marked recorded copies; legacy `planning-*` needs `--force` |
+| build | exact `esbuild`/`zod`/`yaml` versions and `--ignore-scripts`, so one installer produces the same bundle; `install.json` is written last |
+| paths | `OBSIDIAN_BRIDGE_HOME` expands `~`; `--dir` and `--skills-dir` become absolute; a symlinked entry is resolved once |
+| server text | every refusal names `settings.json` standalone and the Paseo screen only under Paseo; `obsidian_status` no longer claims a plugin host is embedding a standalone vault |
+| settings reload | `initialize` and every `tools/call` re-read `settings.json`; an edit applies to the next call without restarting the client |
+| index freshness | the automatic scan is standalone-only and bounded by `indexRefreshSeconds` (default 15, `OBSIDIAN_INDEX_REFRESH_SECONDS`); Paseo keeps its watcher |
+| search paging | an offset beyond the last hit no longer reports "No notes matched" or an exclusion hint |
+| semantic | the standalone server is lexical + graph; `--with-semantic` is rejected with that explanation, and no 380 MB runtime is installed for vectors nothing builds |
+
+The no-hardcoded-home guard now also covers macOS `/Users/<name>`, Windows `C:\Users\<name>`, `scripts/` and the two
+root entry points. `tests/installer.test.ts` runs the script as a shell user and covers help, dry-run exit status, relative
+`--dir`, argument conflicts, `--no-semantic`, uninstall, the missing-`install.json` refusal, and the skills manifest
+without building the bundle.
+
+Still true: Linux first; macOS expected; Windows needs WSL until the installer is exercised there.

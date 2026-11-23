@@ -147,8 +147,9 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
 - **Agent-facing descriptions (0.17.12).** The tool contract, the `initialize` instructions and the shipped skills now
   point to this plugin's `plan_*` tools as the place for project planning; they no longer name the retired planning
   plugin. The behaviour of every tool is unchanged.
-- **Four agent skills, three of them for planning (0.17.11).** `skills/planning-create`, `skills/planning-execute` and
-  `skills/planning-review` teach an agent to grow a plan tree, carry it through the work and review plan against fact;
+- **Four agent skills, three of them for planning (0.17.11).** `skills/obsidian-planning-create`,
+  `skills/obsidian-planning-execute` and `skills/obsidian-planning-review` teach an agent to grow a plan tree, carry it
+  through the work and review plan against fact;
   `obsidian-bridge` keeps the read → cite → write workflow. `server/agent-skill.ts` installs, verifies and removes a
   list of skills instead of one, and the `initialize` instructions now state the `planRoot` boundary and forbid direct
   file operations on plan files.
@@ -266,33 +267,41 @@ agent can be pointed at without further instructions:
 | File | Purpose |
 | --- | --- |
 | `dist/mcp-server.js` | The stdio server; the only file an MCP client launches. |
-| `settings.json` | `vaultPath`, directory roles and search settings, in the same `writtenBy` format the plugin mirrors. |
-| `install.json` | Version, git ref and install time. Also how the server recognises its own home. |
+| `settings.json` | `vaultPath`, directory roles and search settings, in the same `writtenBy` format the plugin mirrors. Written `0600` and read on every request. |
+| `settings.example.json` | An empty settings document for the prebuilt archive. |
+| `settings.example.json` | An empty settings document for the prebuilt archive. |
+| `install.json` | Version, git ref, install time and installed skills. Also how the server recognises its own home. |
+| `installed-skills.txt` | The skills the installer copied; `--uninstall` removes only these marked directories. |
 | `AGENT-SETUP.md` | The agent-facing document: client blocks, settings, the tool list, troubleshooting. |
-| `data/` | Per-vault SQLite indexes and, with semantic search, the model cache. |
+| `data/` | Per-vault SQLite indexes. |
 
-The installer prints the ready-to-paste `mcpServers` block, copies the four Agent Skills into `~/.agents/skills` unless
-`--no-skills` is given, and runs on Node 22.13 or newer. `--dry-run`, `--ref`, `--version`, `--skills-dir` and
-`--uninstall` are listed in `--help`.
+The installer prints the ready-to-paste `mcpServers` block, copies only the `obsidian-bridge` Agent Skill by default
+(`--with-planning-skills` adds the three prefixed planning skills, `--no-skills` copies none), and runs on Node 22.13+
+(or 23.4+). `--dry-run`, `--ref`, `--version`, `--dir`, `--force`, `--skills-dir` and `--uninstall` are listed in
+`--help`.
 
-**The script installs the release it belongs to (0.24.22).** A copy fetched from a tag URL carries that tag's version and
+**The script installs the release it belongs to (0.25.22).** A copy fetched from a tag URL carries that tag's version and
 builds it, so the bundle, `version` and `ref` in `install.json` all describe the installer that was read — not whatever
 `main` happens to be now. The `main` URL installs the latest release; `--version <x.y.z>` moves between releases, and
-`--ref <branch>` builds a branch. A local checkout or `--source` is recorded as `ref: "local"`.
+`--ref <branch>` builds a branch. An explicit `--version`/`--ref` wins over checkout autodetection, and `--source`
+cannot be combined with either. A local checkout or `--source` is recorded as `ref: "local"`.
 
 What differs from the plugin, and why:
 
 - **Data root.** The index, model cache and locks live under the installation instead of
   `$PASEO_HOME/plugins/obsidian-bridge`, so an install without Paseo never creates a `~/.paseo` directory.
 - **Freshness.** No process watches the vault here, so `obsidian_search` runs an incremental scan when the last one is
-  older than 15 seconds and reports `index: {lastScanAt, scannedNow, notes, hint}`. A note written a moment ago is
-  visible without calling `obsidian_index`, and an empty result explains whether the index is empty or the note is
-  likely excluded.
-- **Semantic search is opt-in.** Lexical search (FTS5, titles, tags) needs nothing beyond Node. `--with-semantic`
-  installs `@huggingface/transformers` and its ONNX runtime (~380 MB) and the default model (~118 MB) is downloaded on
-  the first search. Without it, a query is never embedded: the answer says so instead of loading a model it cannot use.
-- **Settings have no plugin screen.** `settings.json` is the whole surface, and every key also has an `OBSIDIAN_*`
-  environment variable that wins over the file.
+  older than `indexRefreshSeconds` (default 15) and reports `index: {lastScanAt, scannedNow, notes, hint}`. A note
+  written a moment ago is visible without calling `obsidian_index`, and an empty result explains whether the index is
+  empty or the note is likely excluded. The Paseo plugin does not run this scan; its watcher owns the index.
+- **Semantic search is Paseo-only.** Lexical search (FTS5, titles, tags, the wikilink graph) needs nothing beyond Node.
+  A standalone installation has no job that builds vectors, so a query is never embedded: the answer says so instead
+  of installing ~380 MB of runtime and loading a model it cannot use.
+- **Settings have no plugin screen.** `settings.json` is the whole surface, and every runtime key also has an
+  `OBSIDIAN_*` environment variable that wins over the file.
+- **Skills are namespaced and opt-in.** The default copy is `obsidian-bridge`; `--with-planning-skills` adds
+  `obsidian-planning-{create,execute,review}`, which cannot collide with a generic `planning-*` skill. `--uninstall`
+  removes only directories recorded in `installed-skills.txt` and marked by the installer.
 
 The Paseo plugin's hooks, screens, slash command and injection are Paseo-only and absent; the `server/` behaviour —
 tools, boundaries, planning, write semantics — is identical.
@@ -363,9 +372,9 @@ skills directories that exist: `~/.agents/skills` first, then OpenCode, Cline, K
 | Skill | For |
 | --- | --- |
 | [`obsidian-bridge`](./skills/obsidian-bridge/SKILL.md) | reading the vault, citing a heading, writing in the right role, the exact-fragment edit |
-| [`planning-create`](./skills/planning-create/SKILL.md) | growing a plan tree: project, trunks, branches, first leaves, goals, import |
-| [`planning-execute`](./skills/planning-execute/SKILL.md) | carrying a plan through the work: status, briefs, growth, links, incidents, moves |
-| [`planning-review`](./skills/planning-review/SKILL.md) | plan against fact: snapshots, revisions, growth, integrity, restore |
+| [`obsidian-planning-create`](./skills/obsidian-planning-create/SKILL.md) | growing a plan tree: project, trunks, branches, first leaves, goals, import |
+| [`obsidian-planning-execute`](./skills/obsidian-planning-execute/SKILL.md) | carrying a plan through the work: status, briefs, growth, links, incidents, moves |
+| [`obsidian-planning-review`](./skills/obsidian-planning-review/SKILL.md) | plan against fact: snapshots, revisions, growth, integrity, restore |
 
 Each lands as `<root>/<skill>/SKILL.md`. Unchanged copies are not rewritten; the switch in the settings screen removes
 all four directories. A runtime that only scans skills at startup needs a restart to pick them up.

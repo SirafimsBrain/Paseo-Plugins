@@ -109,6 +109,12 @@ export const obsidianBridgeSettings = defineSettings({
     ftsStemming: z.boolean().default(false),
     /** Background reconcile interval, in minutes (watch events are immediate). */
     reconcileMinutes: z.number().int().min(1).max(240).default(10),
+    /**
+     * How often a standalone `obsidian_search` may re-walk the vault before it
+     * answers (0.25.22). The Paseo plugin ignores it: its watcher keeps the
+     * index current. 1–3600 seconds; 15 keeps a burst of searches to one walk.
+     */
+    indexRefreshSeconds: z.number().int().min(1).max(3600).default(15),
     /** Default result limit for `obsidian_search`. */
     maxResults: z.number().int().min(1).max(50).default(10),
     /** Character budget for one search answer's packed text. */
@@ -207,6 +213,7 @@ export interface RuntimeSettings {
   excludeGlobs: string;
   ftsStemming: boolean;
   reconcileMinutes: number;
+  indexRefreshSeconds: number;
   maxResults: number;
   searchBudgetChars: number;
   snippetChars: number;
@@ -234,6 +241,7 @@ export function runtimeSettingsOf(values: ObsidianBridgeSettings): RuntimeSettin
     excludeGlobs: values.excludeGlobs,
     ftsStemming: values.ftsStemming,
     reconcileMinutes: values.reconcileMinutes,
+    indexRefreshSeconds: values.indexRefreshSeconds,
     maxResults: values.maxResults,
     searchBudgetChars: values.searchBudgetChars,
     snippetChars: values.snippetChars,
