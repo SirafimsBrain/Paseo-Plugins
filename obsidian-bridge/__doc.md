@@ -493,7 +493,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2094,8 +2094,9 @@ The archive is a convenience for a machine without a build: it is the same tree 
   has to be rerun to refresh them.
 - **Linux first.** The script is POSIX-ish Bash and the paths are platform-neutral, but macOS and Windows were not
   exercised; Windows needs WSL for this installer.
-- **The workflow has not run on GitHub yet.** The YAML mirrors commands that pass locally; the first tag after merge is
-  its first real run.
+- **The workflow's first run failed.** The tag `obsidian-bridge@0.23.18` run stopped at `Install`: the lockfile still
+  described `esbuild@0.25.12` only, while `vite@8.3.8` (through `vitest@4.1.12`) peers on `^0.27.0 || ^0.28.0`. npm 10
+  rejects that; npm 12 installs it and hides the drift. 0.23.19 carries the regenerated lock and the same workflow.
 
 ### 19.12 Verification recorded for this release
 
@@ -2109,4 +2110,35 @@ Linux, Node 24.20.0, this checkout:
   vault path from the installation's `settings.json`; the first `obsidian_search` answered with `index.scannedNow: true`,
   `notes: 1`, and the hit; a second query found nothing and appended the index hint to "No notes matched"; the index was
   created under `/tmp/ob-test-home/data/vaults/<hash>/index.db`; `~/.paseo` was not written.
-- Not checked: `curl | bash` (run from a local checkout), a real model download, and the GitHub Actions run.
+- Not checked: `curl | bash` (run from a local checkout) and a real model download.
+
+### 19.13 The first workflow run, and what it caught (0.23.19)
+
+The tag `obsidian-bridge@0.23.18` did start the workflow (run #1, `.github/workflows/release-obsidian-bridge.yml`), and
+every step before `npm ci` passed: checkout, `setup-node` with the npm cache keyed on `obsidian-bridge/package-lock.json`,
+and the tag-versus-`package.json` check. `Install` then failed in two seconds:
+
+```
+npm error code EUSAGE
+npm error `npm ci` can only install packages when your package.json and package-lock.json … are in sync
+npm error Missing: esbuild@0.28.2 from lock file
+npm error Missing: @esbuild/linux-x64@0.28.2 from lock file
+…
+```
+
+**Diagnosis.** The failure is not about the version bump: it reproduces locally under the same npm major
+(`npx npm@10 ci --dry-run` → exit 1, identical message) and does not reproduce under npm 12, which is what this
+workstation runs. The lockfile listed `vitest@4.1.12`, which brings `node_modules/vitest/node_modules/vite@8.3.8`; that
+`vite` declares a peer range `esbuild: ^0.27.0 || ^0.28.0`, but the lock held only the root `esbuild@0.25.12` (the plugin's
+own dev dependency) and no `0.28` entry for `vite`. npm 12 tolerates the incomplete tree and installs it, so local
+`npm ci --dry-run` said “up to date”; npm 10 — the version Node 22 ships, and therefore the one in CI — validates the
+lock against the manifest and refuses. `dist/` builds were unaffected because nothing that runs used `vite`.
+
+**Fix.** Regenerate the lock with the npm that gates the release (`npx npm@10 install --package-lock-only`, exit 0), which
+adds `esbuild@0.28.2` and its platform binaries as a nested dependency of `vite@8.3.8` and leaves the root
+`esbuild@0.25.12` for the bundler; `npx npm@10 ci --dry-run` then exits 0. No source, dependency range or installer
+changed. Version 0.23.19 exists so the tag matches `package.json` again — retagging 0.23.18 would have rewritten a
+published tag.
+
+**Lesson recorded for the next release:** run `npx npm@10 ci --dry-run` before pushing a version tag, since the local npm
+is newer than the one in CI and silently accepts a lockfile CI rejects.

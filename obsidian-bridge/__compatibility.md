@@ -2,6 +2,25 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.23.19 — release workflow lockfile fix (2026-11-23)
+
+Bugfix release (0.23.18 → 0.23.19). No plugin or server code changed: settings schema, the MCP catalogue (31 tools),
+every tool input and the host floor are as in 0.23.18.
+
+The first tag run of `.github/workflows/release-obsidian-bridge.yml` failed at its `Install` step with
+`npm error code EUSAGE … Missing: esbuild@0.28.2 from lock file`. `package-lock.json` was stale: the locked
+`vitest@4.1.12` resolves `vite@8.3.8`, whose `esbuild` peer range is `^0.27.0 || ^0.28.0`, while the lock still carried
+only the root `esbuild@0.25.12` and no nested 0.28 entry. npm 12 (this workstation) installs such a tree anyway; npm 10,
+which Node 22 ships in CI, validates the tree and refuses.
+
+| Change | Behaviour |
+| --- | --- |
+| `package-lock.json` | regenerated with npm 10. `npx npm@10 ci --dry-run` now exits 0; the added packages are the `esbuild@0.28.2` binary set that `vite@8.3.8` needs |
+| version | 0.23.19, so the new tag matches `package.json` again |
+
+Evidence (Linux, Node 24.20.0): `npx npm@10 ci --dry-run` exit 0 (was the CI error above); `npx npm@10 install
+--package-lock-only` exit 0; the workflow run on tag `obsidian-bridge@0.23.19` is the end-to-end check.
+
 ## Plugin 0.23.18 — standalone MCP installation (2026-11-23)
 
 Feature release (0.22.18 → 0.23.18). The MCP server now also installs **without Paseo**, through
