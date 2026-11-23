@@ -20,6 +20,12 @@ Evidence (Linux, Node 24.20.0): with `~/.paseo/config.json` moved aside and `PAS
 `tests/opencode-mcp.test.ts` passes (7/7), and the full suite passes again (49 suites / 425 tests) with the real home
 restored afterwards.
 
+The tag `obsidian-bridge@0.23.21` run then passed all eleven workflow steps and published GitHub Release
+`obsidian-bridge@0.23.21`: `obsidian-bridge-mcp-0.23.21.tar.gz`, `obsidian-bridge-install.sh` and `SHA256SUMS` (both
+checksums verified after download; the archive carries `install.json` with version 0.23.21). The documented `curl | bash`
+install was also run end to end from the tag URL: exit 0, and the installed server answered `initialize`
+(`2025-06-18`, version 0.23.21, 31 tools) and found a note through `obsidian_search` without any Paseo home.
+
 ## Plugin 0.23.20 — release workflow install fix (2026-11-23)
 
 Bugfix release (0.23.19 → 0.23.20). No plugin or server code changed.

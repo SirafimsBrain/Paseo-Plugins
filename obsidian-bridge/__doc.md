@@ -2094,9 +2094,10 @@ The archive is a convenience for a machine without a build: it is the same tree 
   has to be rerun to refresh them.
 - **Linux first.** The script is POSIX-ish Bash and the paths are platform-neutral, but macOS and Windows were not
   exercised; Windows needs WSL for this installer.
-- **The workflow's first run failed.** The tag `obsidian-bridge@0.23.18` run stopped at `Install`: the lockfile still
-  described `esbuild@0.25.12` only, while `vite@8.3.8` (through `vitest@4.1.12`) peers on `^0.27.0 || ^0.28.0`. npm 10
-  rejects that; npm 12 installs it and hides the drift. 0.23.19 carries the regenerated lock and the same workflow.
+- **The workflow needed three runs to go green**, all three failures caused by the environment rather than by the
+  server: a stale lockfile rejected by npm 10, an `onnxruntime-node` postinstall that downloads a missing CUDA asset, and
+  an OpenCode config test that read the developer's own `~/.paseo`. 0.23.19–0.23.21 fix them in order; the tag
+  `obsidian-bridge@0.23.21` run passed every step and published the release. Details in §19.13.
 
 ### 19.12 Verification recorded for this release
 
@@ -2110,7 +2111,7 @@ Linux, Node 24.20.0, this checkout:
   vault path from the installation's `settings.json`; the first `obsidian_search` answered with `index.scannedNow: true`,
   `notes: 1`, and the hit; a second query found nothing and appended the index hint to "No notes matched"; the index was
   created under `/tmp/ob-test-home/data/vaults/<hash>/index.db`; `~/.paseo` was not written.
-- Not checked: `curl | bash` (run from a local checkout) and a real model download.
+- Not checked: a real model download (`--with-semantic` installs the stack; no search ran with it).
 
 ### 19.13 The first workflow run, and what it caught (0.23.19)
 
@@ -2189,3 +2190,22 @@ suite with the real home back in place.
 
 **Lesson the third time:** a test that reads the developer's home directory is not a test until it fails on a machine
 without it.
+
+**The green run and the release.** Run #4 (`obsidian-bridge@0.23.21`) passed all eleven steps in about four minutes and
+published GitHub Release `obsidian-bridge@0.23.21` with `obsidian-bridge-mcp-0.23.21.tar.gz` (348 652 bytes),
+`obsidian-bridge-install.sh` and `SHA256SUMS`. Downloaded from the release and checked: both files match `SHA256SUMS`;
+the archive contains `dist/mcp-server.js`, `dist/embed-worker.js`, `skills/`, `package.json`, `README.md`,
+`AGENT-SETUP.md`, the installer and `install.json` = `{"version":"0.23.21","ref":"obsidian-bridge@0.23.21",…,"source":"release"}`;
+the archived bundle carries `"0.23.21"`.
+
+**The `curl | bash` path, now exercised for real** (it was not in 0.23.18): the installer was fetched from
+`raw.githubusercontent.com/.../obsidian-bridge@0.23.21/obsidian-bridge/obsidian-bridge-install.sh`, and run with
+`--dir /tmp/ob-curl-home --skills-dir /tmp/ob-curl-skills --vault /tmp/ob-curl-vault --no-semantic`. Exit 0: it built the
+bundle, wrote `settings.json` and `install.json`, copied four skills and printed the client block. A stdio session with
+neither `OBSIDIAN_BRIDGE_HOME` nor `OBSIDIAN_VAULT_PATH` answered `initialize` with `2025-06-18` and version `0.23.21`, the
+standalone paragraph present, 31 tools, and `obsidian_search` found the note in the vault it was pointed at, indexing into
+`/tmp/ob-curl-home/data/vaults/<hash>/index.db`. `~/.paseo` was not written.
+
+One wrinkle worth recording: an installer fetched from a tag does not know the tag, so `ref` defaults to `main` and the
+build follows `main` at run time — `install.json` therefore says `"ref":"main"` while `version` is correct. Today both
+point at the same commit. A caller that needs a pinned build should pass `--ref obsidian-bridge@<version>`.
