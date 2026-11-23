@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pluginDataDir } from "../paths";
+import { bridgeDataDir } from "../paths";
 import type { PlanRoot } from "./paths";
 
 /**
@@ -96,7 +96,7 @@ export type PlanLockResult =
   | { busy: string; holder: LockOwner | null };
 
 function defaultLocksRoot(): string {
-  return path.join(pluginDataDir(), "locks");
+  return path.join(bridgeDataDir(), "locks");
 }
 
 /**

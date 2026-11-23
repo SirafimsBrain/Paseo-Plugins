@@ -3,6 +3,7 @@ import { normalizeTruncation } from "./continuation";
 import { resolveRoleDirs } from "./dirs";
 import { resolveInstalledMcpEntry } from "./mcp-launch";
 import { refreshStableEntry } from "./mcp-stable";
+import { isStandaloneBridge, settingsMirrorPath } from "./paths";
 import { parseSettingsFile } from "./settings-file";
 
 /**
@@ -24,7 +25,41 @@ interface JsonRpcRequest {
   params?: Record<string, unknown>;
 }
 
+/** Version answered when the client asks for nothing this server knows. */
 const PROTOCOL_VERSION = "2024-11-05";
+
+/**
+ * Protocol revisions this server can serve (0.23.18).
+ *
+ * The transport and the tool surface (`tools/list`, `tools/call`, structured
+ * content) are identical in all three, so the client's own revision is echoed
+ * instead of forcing a downgrade a strict client may log as a mismatch. A
+ * revision outside this list gets {@link PROTOCOL_VERSION}, which is what the
+ * server has always answered.
+ */
+const SUPPORTED_PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18"];
+
+function negotiateProtocol(requested: unknown): string {
+  return typeof requested === "string" && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+    ? requested
+    : PROTOCOL_VERSION;
+}
+
+/**
+ * Extra `initialize` instructions for a standalone installation (0.23.18).
+ *
+ * A direct `<user>` prefix says where the settings actually live instead of
+ * pointing at a Paseo settings screen that such an installation does not have.
+ */
+function standaloneInstructions(): string {
+  return (
+    "\n\nThis server is installed standalone, outside Paseo: it reads `vaultPath`, the " +
+    "directory roles and the search settings from `" + settingsMirrorPath() + "`, and any `OBSIDIAN_*` " +
+    "environment variable overrides that file. The same document (`AGENT-SETUP.md`) sits next to the " +
+    "installation. If the vault is not configured, ask the user to run the installer again with " +
+    "`--vault <path>`, or to edit that file; do not guess a path."
+  );
+}
 
 /** Injected at bundle time from package.json (see scripts/bundle-mcp-server.mjs). */
 declare const __OBSIDIAN_BRIDGE_VERSION__: string;
@@ -51,12 +86,18 @@ function main(): void {
   // an agent launches can still hold the previous version. Repair it from the
   // installed checkout before serving anything (0.21.17); this process keeps
   // the code it already loaded, stderr is the only place to say so.
-  const refresh = refreshStableEntry(resolveInstalledMcpEntry(), SERVER_VERSION);
-  if (refresh?.updated) {
-    process.stderr.write(
-      `[obsidian-bridge] stable MCP entry refreshed ${refresh.running} → ${refresh.installed}; ` +
-        "the next agent launch uses the installed version\n",
-    );
+  //
+  // A standalone installation has no Paseo checkout and no stable copy to keep
+  // current — the file this process runs from *is* the installation — so the
+  // refresh is skipped rather than writing into `~/.paseo` (0.23.18).
+  if (!isStandaloneBridge()) {
+    const refresh = refreshStableEntry(resolveInstalledMcpEntry(), SERVER_VERSION);
+    if (refresh?.updated) {
+      process.stderr.write(
+        `[obsidian-bridge] stable MCP entry refreshed ${refresh.running} → ${refresh.installed}; ` +
+          "the next agent launch uses the installed version\n",
+      );
+    }
   }
 
   process.stderr.write(
@@ -100,10 +141,12 @@ async function handleRequest(
   switch (request.method) {
     case "initialize":
       respond(id, {
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion: negotiateProtocol(request.params?.protocolVersion),
         capabilities: { tools: { listChanged: false } },
         serverInfo,
-        instructions: mcpInstructions(resolveRoleDirs(settings)),
+        instructions:
+          mcpInstructions(resolveRoleDirs(settings)) +
+          (isStandaloneBridge() ? standaloneInstructions() : ""),
       });
       return;
     case "notifications/initialized":

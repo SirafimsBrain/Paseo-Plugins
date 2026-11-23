@@ -197,6 +197,9 @@ describe("dispatch with the semantic layer", () => {
 
   it("falls back to lexical results when the model cannot be loaded", async () => {
     const created = workspace();
+    // Vectors exist, so the query is embedded and the provider really fails;
+    // without them the server skips the model altogether (0.23.18).
+    seedVectors(created);
     setEmbeddingProviderFactory(async () => {
       throw new Error("model unavailable in this test");
     });

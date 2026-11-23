@@ -12,8 +12,12 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.22.18)
+## What it does (0.23.18)
 
+- **The server also installs without Paseo (0.23.18).** `obsidian-bridge-install.sh` builds the same bundle into
+  `~/.agents/obsidian-bridge-mcp`, with its own settings file, index and `AGENT-SETUP.md`, for an agent runtime that has
+  no Paseo daemon. The design, the measurements behind it and the rejected alternatives are in
+  [__doc.md §19](./__doc.md); usage is [below](#standalone-mcp-server-no-paseo).
 - **The agent is told when the vault matters (0.22.18).** Every session open that leaves the agent with the vault tools also
   appends one short instruction — search before answering from memory, cite the note path, write only when asked — for that
   session only (Paseo 0.17 `appendSystemPrompt`). The text is a setting, `{server}` expands to the prefix the tools carry,
@@ -223,7 +227,8 @@ the normal lexical + graph + semantic path and is reported in the panel and `obs
 
 - Paseo `>= 0.17.0` (the agent instruction uses `appendSystemPrompt`, which older daemons reject); verified against the
   0.17.1 release (typecheck and tests on SDK 0.17.3) — see [__compatibility.md](./__compatibility.md).
-- Node.js `>= 22.5` on the daemon host (the index uses the built-in `node:sqlite` with FTS5; verified on Node 24).
+- Node.js `>= 22.13` (the index uses the built-in `node:sqlite` with FTS5, which needs no flag from 22.13; verified on
+  Node 24). The same floor applies to the standalone server.
 - Semantic search downloads a model once (~118 MB for the default q8 e5-small) into
   `$PASEO_HOME/plugins/obsidian-bridge/models`, then runs offline. ~0.5 GB RAM while the model is loaded; up to 2 GB is
   treated as normal, 2–4 GB shows a warning in the panel (never a hard limit).
@@ -243,6 +248,49 @@ paseo plugin update obsidian-bridge
 ```
 
 The install runs `npm ci` and `npm run bundle`, which builds the standalone stdio MCP server at `dist/mcp-server.js`.
+
+## Standalone MCP server (no Paseo)
+
+The same server installs on its own, for a runtime that has no Paseo daemon. `obsidian-bridge-install.sh` is the single
+installation path: `curl` and `git clone` are only two ways to reach it, and both build from the same `server/` sources
+with the same bundler, so a standalone installation cannot drift from the plugin.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \
+  | bash -s -- --vault ~/Obsidian/Main
+```
+
+It installs into `~/.agents/obsidian-bridge-mcp` (or `--dir` / `OBSIDIAN_BRIDGE_HOME`) and leaves an installation an
+agent can be pointed at without further instructions:
+
+| File | Purpose |
+| --- | --- |
+| `dist/mcp-server.js` | The stdio server; the only file an MCP client launches. |
+| `settings.json` | `vaultPath`, directory roles and search settings, in the same `writtenBy` format the plugin mirrors. |
+| `install.json` | Version, git ref and install time. Also how the server recognises its own home. |
+| `AGENT-SETUP.md` | The agent-facing document: client blocks, settings, the tool list, troubleshooting. |
+| `data/` | Per-vault SQLite indexes and, with semantic search, the model cache. |
+
+The installer prints the ready-to-paste `mcpServers` block, copies the four Agent Skills into `~/.agents/skills` unless
+`--no-skills` is given, and runs on Node 22.13 or newer. `--dry-run`, `--ref`, `--version`, `--skills-dir` and
+`--uninstall` are listed in `--help`.
+
+What differs from the plugin, and why:
+
+- **Data root.** The index, model cache and locks live under the installation instead of
+  `$PASEO_HOME/plugins/obsidian-bridge`, so an install without Paseo never creates a `~/.paseo` directory.
+- **Freshness.** No process watches the vault here, so `obsidian_search` runs an incremental scan when the last one is
+  older than 15 seconds and reports `index: {lastScanAt, scannedNow, notes, hint}`. A note written a moment ago is
+  visible without calling `obsidian_index`, and an empty result explains whether the index is empty or the note is
+  likely excluded.
+- **Semantic search is opt-in.** Lexical search (FTS5, titles, tags) needs nothing beyond Node. `--with-semantic`
+  installs `@huggingface/transformers` and its ONNX runtime (~380 MB) and the default model (~118 MB) is downloaded on
+  the first search. Without it, a query is never embedded: the answer says so instead of loading a model it cannot use.
+- **Settings have no plugin screen.** `settings.json` is the whole surface, and every key also has an `OBSIDIAN_*`
+  environment variable that wins over the file.
+
+The Paseo plugin's hooks, screens, slash command and injection are Paseo-only and absent; the `server/` behaviour —
+tools, boundaries, planning, write semantics — is identical.
 
 ## First run
 

@@ -1,0 +1,116 @@
+name: Release obsidian-bridge
+
+# A version tag is the release decision (see AGENTS.md): the tag is pushed with
+# the commit that carries the version, and this workflow turns it into a GitHub
+# Release with the bundle it built from exactly that commit.
+on:
+  push:
+    tags:
+      - "obsidian-bridge@*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-obsidian-bridge
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: obsidian-bridge
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: obsidian-bridge/package-lock.json
+
+      - name: Check the tag against package.json
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#obsidian-bridge@}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag '$tag' does not carry a version"
+            exit 1
+          fi
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$version" != "$pkg" ]; then
+            echo "::error::tag $tag does not match the package.json version $pkg"
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # `pretest` rebuilds dist/mcp-server.js, so this is also the bundle build.
+      - name: Test
+        run: npm test
+
+      - name: Check the installer parses
+        run: bash -n obsidian-bridge-install.sh
+
+      - name: Check the bundle carries the released version
+        run: grep -qF "\"${{ steps.version.outputs.version }}\"" dist/mcp-server.js
+
+      - name: Package the prebuilt server
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          pkg="$RUNNER_TEMP/pkg"
+          mkdir -p "$pkg"
+          cp -R dist skills AGENT-SETUP.md README.md obsidian-bridge-install.sh package.json "$pkg/"
+          # `install.json` is the marker that tells the server it is a standalone
+          # installation and where its home is, so the archive is complete.
+          printf '{"version":"%s","ref":"%s","installedAt":"%s","semantic":false,"source":"release"}\n' \
+            "$version" "obsidian-bridge@$version" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$pkg/install.json"
+          tar -czf "obsidian-bridge-mcp-$version.tar.gz" -C "$pkg" .
+          sha256sum "obsidian-bridge-mcp-$version.tar.gz" obsidian-bridge-install.sh >SHA256SUMS
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: obsidian-bridge ${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
+          body: |
+            Obsidian Bridge ${{ steps.version.outputs.version }}.
+
+            The Paseo plugin installs from this tag as usual:
+
+            ```bash
+            paseo plugin add https://github.com/SirafimsBrain/Paseo-Plugins.git:obsidian-bridge
+            paseo plugin update obsidian-bridge
+            ```
+
+            Standalone MCP server (no Paseo):
+
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/${{ github.ref_name }}/obsidian-bridge/obsidian-bridge-install.sh \
+              | bash -s -- --vault ~/Obsidian/Main
+            ```
+
+            `obsidian-bridge-mcp-${{ steps.version.outputs.version }}.tar.gz` is the same build, prebuilt. Extract it into
+            the directory you want and add `dist/mcp-server.js` to your MCP client:
+
+            ```bash
+            mkdir -p ~/.agents/obsidian-bridge-mcp
+            tar -xzf obsidian-bridge-mcp-${{ steps.version.outputs.version }}.tar.gz -C ~/.agents/obsidian-bridge-mcp
+            ```
+
+            Both forms need Node.js 22.13 or newer. `SHA256SUMS` covers the archive and the installer. Setup, settings
+            and troubleshooting: `AGENT-SETUP.md` in the archive and in the repository. Linux is the primary target;
+            macOS is expected to work; Windows is not supported yet.
+          files: |
+            obsidian-bridge/obsidian-bridge-mcp-${{ steps.version.outputs.version }}.tar.gz
+            obsidian-bridge/obsidian-bridge-install.sh
+            obsidian-bridge/SHA256SUMS

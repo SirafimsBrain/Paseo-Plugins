@@ -493,7 +493,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -1900,3 +1900,213 @@ with a next step, never a thrown error: the tool wrote nothing, so repeating it 
 Tests: `tests/plan-lock.test.ts` covers exclusivity and the refusal text, a waiter that gets the lock when the first
 writer finishes, dead-pid recovery, expired cross-host recovery, and the dispatch path (a tool call refused by a held
 lock, then succeeding and leaving no lock directory behind).
+
+## 19. Standalone MCP installation (0.23.18)
+
+**The question.** The bundle at `dist/mcp-server.js` has no runtime dependency on Paseo: it speaks JSON-RPC over stdio,
+opens a SQLite index and answers from it. Can it be installed for an agent runtime that has no Paseo daemon at all —
+`curl … | bash` and `git clone … && ./install.sh` — into `~/.agents/obsidian-bridge-mcp`, with the Markdown documents, a
+configuration file and an interface document an agent can read and configure itself from?
+
+**Answer: yes, with five small changes and one installer.** Everything below is a design record, not a proposal: the
+measurements come from this checkout on Node 24.20.0 (Linux), and the code named here is what 0.23.18 ships.
+
+### 19.1 What the measurements said
+
+| Fact | Number | Consequence |
+| --- | --- | --- |
+| Bundle size (`dist/mcp-server.js` + `embed-worker.js`) | 1.7 MB | Small enough to ship as a release asset; no container, no daemon |
+| Working without `node_modules` | yes | Lexical search, planning and every non-semantic tool run on Node built-ins (`node:sqlite`, `node:fs`) |
+| Build tools needed (`esbuild`, `zod`, `yaml`) | 20 MB install | A build step is affordable; `npm ci` is not |
+| `npm ci --omit=dev` for the plugin | 379 MB | Pulls `@huggingface/transformers` + `onnxruntime-node` (208 MB) that a lexical install never uses |
+| `npm ci` for the plugin | 655 MB | Dev dependencies (Paseo SDK, React Native, vitest, TypeScript) — never needed to produce the bundle |
+| Identical output from the minimal manifest | `cmp` equal | The build from a 3-package manifest produces a byte-identical `dist/mcp-server.js` |
+| `node:sqlite` without a flag | Node ≥ 22.13 / 23.4 | The README claimed 22.5; the floor is the flagless availability, and it is now documented as 22.13 |
+
+The bundle was also run outside Paseo before this release: `initialize`, 31 tools, `obsidian_index`, search and
+`plan_scope` worked, and the process created `~/.paseo/plugins/obsidian-bridge/{mcp-server.js, vaults/<hash>/index.db}`
+on a machine that was not running Paseo. That single observation decided the shape of the work: the server *worked*
+standalone, it just behaved like a plugin.
+
+### 19.2 One code base, one installer, two entry points
+
+`curl` and `git clone` are not two implementations. Both end in `obsidian-bridge-install.sh`, which builds the bundle
+from the same `server/`, `shared/` and `scripts/bundle-mcp-server.mjs` the Paseo plugin builds, then lays out an
+installation directory. A second copy of the server (an npm package, a fork, a vendored `dist/` in the repository) was
+rejected on the repository's own rule: one code base. `dist/` stays out of git for the same reason.
+
+The script detects its own situation, in this order:
+
+1. `--source <path>` — an explicit checkout.
+2. The directory the script itself sits in, when it contains `package.json` and `server/mcp-server.ts` — so
+   `git clone … && ./obsidian-bridge/obsidian-bridge-install.sh` installs what is in the working tree, including an
+   uncommitted fix.
+3. `git clone --depth 1 --branch <ref>` (default `main`, `--version` maps to the tag `obsidian-bridge@<version>`).
+4. `curl https://codeload.github.com/<repo>/tar.gz/<ref>` when git is missing.
+
+The build happens in a scratch directory with a **minimal manifest** (`{name, private, version}` plus the version the
+bundler injects): `npm install --no-save esbuild zod yaml`, then `node scripts/bundle-mcp-server.mjs`. Copying the real
+manifest would have made `npm install` resolve the plugin's dependency tree; the scratch manifest keeps the build at
+20 MB and produces the same bytes. The working tree never gains a `node_modules` or a `dist`.
+
+### 19.3 Installation layout
+
+`~/.agents/obsidian-bridge-mcp` by default (`--dir`, or `OBSIDIAN_BRIDGE_HOME`):
+
+| Path | Purpose | Written by |
+| --- | --- | --- |
+| `dist/mcp-server.js`, `dist/embed-worker.js` | the server and the embedding worker | installer |
+| `settings.json` | `vaultPath`, roles, search settings | installer, then the user |
+| `install.json` | version, ref, install time, semantic flag | installer |
+| `AGENT-SETUP.md`, `README.md` | the interface document and the user-facing one | installer |
+| `skills/<name>/SKILL.md` | the four Agent Skills, also copied to `~/.agents/skills` | installer |
+| `data/vaults/<hash>/index.db` | one SQLite index per configured directory | server |
+| `data/models/` | model cache | server (semantic only) |
+| `data/locks/` | plan write locks | server |
+
+The choice of `~/.agents` is the existing convention this project already uses for skills (`agent-skill.ts` checks
+`~/.agents/skills` first), so the installation sits where agents already look for shared material.
+
+### 19.4 Data root: `bridgeHome()`
+
+`server/paths.ts` had one place where every location was derived from `paseoHome()`. It now exposes:
+
+- `bridgeHome()` — `OBSIDIAN_BRIDGE_HOME` when set, else the directory inferred from the running bundle
+  (`dist/../install.json`), else `pluginDataDir()` exactly as before;
+- `isStandaloneBridge()` — the same two conditions, without a filesystem default;
+- `bridgeDataDir()` — `<bridgeHome>/data` standalone, `<bridgeHome>` under Paseo (whose plugin data directory is already
+  private to the plugin).
+
+`settingsMirrorPath()`, `modelsDir()`, `vaultIndexDir()`, the plan lock directory (`plan/lock.ts`) and the enrichment
+state file (`enrichment-state.ts`) all follow it. `pluginDataDir()` itself is unchanged, so nothing about the Paseo
+plugin's own data moved.
+
+Two properties matter more than the mechanism:
+
+- **Nothing is inferred from the *absence* of Paseo.** A Paseo installation has no `install.json` next to its stable
+  copy, so it keeps its paths even when `OBSIDIAN_BRIDGE_HOME` is unset.
+- **The client block needs no environment variable.** The installer copies `install.json`, and a launched
+  `dist/mcp-server.js` recognises its own parent. A forgotten `env` in a client configuration is then not a silent
+  switch to `~/.paseo` — the failure mode that made the variable-only design unattractive.
+
+### 19.5 Freshness without a watcher
+
+Under Paseo the plugin process owns the index: `fs.watch`, a reconcile timer and `scanNow` keep it current. A standalone
+server has no such process, and the pre-release probe found the consequence: a note created after `obsidian_index` was
+invisible, and the answer was *"No notes matched. Try fewer words, or drop the folder/tag filters."* — a wrong statement
+about a vault that contains the note.
+
+Decision: `obsidian_search` refreshes the index itself before answering.
+
+| Rule | Reason |
+| --- | --- |
+| Incremental `scanVault` (no `force`) | only changed files are re-read; a large vault is not re-parsed per query |
+| At most once per 15 s | a burst of searches costs one walk, so latency does not scale with the agent's curiosity |
+| Skipped when `indexingEnabled` is false | the switch means "do not index", not "index only on search" |
+| A failed scan is reported to stderr and does not fail the search | the existing index is still a useful answer |
+| The result says what happened | `index: {lastScanAt, scannedNow, notes, hint}`; `hint` distinguishes "empty index" from "your note is probably excluded" and is appended to the text of an empty answer |
+
+`obsidian_index` stays as the forced full rebuild, and `obsidian_status` keeps reporting scan times.
+
+### 19.6 Semantic search: opt-in, and never a useless model load
+
+Without the plugin process, nothing builds vectors: `scanVault` does not embed, `EmbedJob` runs in the plugin host.
+A standalone install therefore has an index with zero vectors, and the server used to load a ~118 MB model on the first
+`obsidian_search` to compute a query embedding it could not compare with anything.
+
+Two changes:
+
+1. `obsidian_search` embeds the query only when `embeddingStats(model).embedded > 0`. When the setting asks for semantic
+   search and there are no vectors, the answer carries `semantic.note` saying that only lexical signals ran.
+2. The embedding stack is not installed by default. `--with-semantic` installs `@huggingface/transformers` (and with it
+   `onnxruntime-node`, ~380 MB) into the installation; the model is downloaded into `data/models/` on the first search
+   and runs offline afterwards.
+
+`obsidian_diagnose` already guarded on `embedded > 0`; the search path now agrees with it. The changed test is the one
+that asserted a provider failure was reported: it now seeds vectors first, because without them the provider is
+deliberately never called.
+
+### 19.7 Protocol and texts
+
+- **Version negotiation.** The server answered `2024-11-05` to every client. It now echoes the client's revision when it
+  is `2024-11-05`, `2025-03-26` or `2025-06-18` — the transport and the tool surface are identical in all three — and
+  keeps `2024-11-05` as the answer for anything else. This is what strict clients expect to see.
+- **Instructions.** A standalone `initialize` appends one paragraph naming `settings.json`, `AGENT-SETUP.md` and
+  `OBSIDIAN_*` variables; the Paseo instructions are unchanged.
+- **Refusals.** An unconfigured vault names `settings.json`/`--vault` standalone and the Paseo settings screen under
+  Paseo. A refusal is the whole answer for an agent, so it has to name the surface that actually exists.
+- **Stable-entry refresh.** The call that copies the bundle into `$PASEO_HOME/plugins/obsidian-bridge/mcp-server.js` is
+  skipped when standalone: there is no checkout to follow and no saved Paseo agent to heal, and writing it created a
+  `~/.paseo` tree on a machine that has none.
+
+### 19.8 The interface document
+
+`AGENT-SETUP.md` is copied into the installation and is the document the user's request asked for: the file map, the
+exact `mcpServers` block, how a vault is configured (three ways, in precedence order), the settings table, the tool
+groups, the freshness contract with its JSON shape, the semantic-search expectations, a troubleshooting table
+(`node:sqlite` missing, vault not configured, stale results, read-only, plan lock, index growth), update/uninstall
+commands, and the relationship to the Paseo plugin.
+
+It states the two things an agent typically gets wrong here: that 31 tools is the complete catalogue (not a probe
+result), and that "not configured" means a settings file, not a Paseo screen.
+
+### 19.9 Release workflow
+
+A version tag is the release decision in this repository, so the tag is the trigger. `.github/workflows/release-obsidian-bridge.yml`
+runs on `obsidian-bridge@*` and:
+
+1. fails when the tag is not `obsidian-bridge@x.y.z` or does not match `package.json` — the one mistake a release
+   workflow can catch that a human cannot see;
+2. runs `npm ci`, `npm run typecheck` and `npm test` (whose `pretest` rebuilds the bundle, so the tested artifact and the
+   released one are the same build);
+3. checks `bash -n` on the installer and that the version string is present in `dist/mcp-server.js`;
+4. packages `dist/`, `skills/`, `package.json`, `AGENT-SETUP.md`, `README.md`, the installer and a generated
+   `install.json` — the marker that makes an extracted archive a valid installation — into
+   `obsidian-bridge-mcp-<version>.tar.gz`, with `SHA256SUMS`;
+5. publishes a GitHub Release with the archive, the installer and the checksums, and a body that shows both install
+   forms.
+
+The archive is a convenience for a machine without a build: it is the same tree the installer produces, including
+`install.json`, so extracting it into a directory yields a working installation.
+
+### 19.10 Rejected alternatives
+
+| Alternative | Why not |
+| --- | --- |
+| A separate npm package `obsidian-bridge-mcp` | a second distribution of the same code, published by hand, with its own version to drift; the repository rule is one code base |
+| Committing `dist/` and installing with `curl <raw dist>` | the bundle would have to be committed and kept in sync with every source change; `dist/` is gitignored on purpose |
+| `npm ci` inside the installation | 655 MB of dev dependencies to produce a 1.7 MB bundle; 379 MB even without them |
+| A container or a systemd service | the server is spawned per agent session over stdio; a daemon adds an HTTP layer, a port, authentication and a lifecycle nobody asked for |
+| Copying `$PASEO_HOME/plugins/obsidian-bridge` on first run | creates a Paseo tree on a machine that has none, and makes two writers for one settings file |
+| Auto-building embeddings in the standalone server | a 118 MB download and minutes of embedding triggered by a search; the Paseo plugin already has the job, and a lexical answer is honest in the meantime |
+| A `--prebuilt` installer mode | a second install path to test, for a tarball that the same script can build; the release archive covers "no build tools on this machine" |
+
+### 19.11 Limits, stated rather than hidden
+
+- **stdio only.** No HTTP/SSE transport is shipped; a client that cannot spawn a process needs a third-party bridge.
+- **One vault per installation.** `settings.json` holds one `vaultPath`; two knowledge bases mean two installations
+  (or `OBSIDIAN_VAULT_PATH` per client entry).
+- **No shared index with the plugin.** The Paseo plugin and the standalone installation index into different roots, so
+  the same vault gets two SQLite files if both are used. Sharing a root would put one settings file under two writers.
+- **No semantic index without Paseo.** A standalone installation can embed queries once vectors exist, but nothing
+  produces vectors there; the design leaves embedding to the plugin.
+- **Skills are copies.** The four `SKILL.md` files are copied into the skills root like the plugin does, so an update
+  has to be rerun to refresh them.
+- **Linux first.** The script is POSIX-ish Bash and the paths are platform-neutral, but macOS and Windows were not
+  exercised; Windows needs WSL for this installer.
+- **The workflow has not run on GitHub yet.** The YAML mirrors commands that pass locally; the first tag after merge is
+  its first real run.
+
+### 19.12 Verification recorded for this release
+
+Linux, Node 24.20.0, this checkout:
+
+- `npm run typecheck` exit 0; `npm test` 49 suites / 425 tests pass, including the new `tests/standalone-paths.test.ts`.
+- Installer run into `/tmp/ob-test-home` with `--vault` and a temporary skills root: 20 MB of build tools, 1.8 MB
+  installed, `settings.json` written `0600` with the `writtenBy` marker, `install.json` written, four skills copied.
+- A stdio session with **no `OBSIDIAN_BRIDGE_HOME`**: `initialize` echoed `2025-06-18`, `serverInfo.version` 0.23.18,
+  the standalone paragraph present in `instructions`; `tools/list` returned 31 tools; `obsidian_directories` read the
+  vault path from the installation's `settings.json`; the first `obsidian_search` answered with `index.scannedNow: true`,
+  `notes: 1`, and the hit; a second query found nothing and appended the index hint to "No notes matched"; the index was
+  created under `/tmp/ob-test-home/data/vaults/<hash>/index.db`; `~/.paseo` was not written.
+- Not checked: `curl | bash` (run from a local checkout), a real model download, and the GitHub Actions run.

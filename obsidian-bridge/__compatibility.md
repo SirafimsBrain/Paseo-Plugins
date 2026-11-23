@@ -2,6 +2,39 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.23.18 — standalone MCP installation (2026-11-23)
+
+Feature release (0.22.18 → 0.23.18). The MCP server now also installs **without Paseo**, through
+`obsidian-bridge-install.sh`, into `~/.agents/obsidian-bridge-mcp`. No Paseo API is used by that path, so the host floor
+and the SDK pin are unchanged; settings schema version 4, the MCP tool catalogue (31 tools) and every tool input are
+unchanged.
+
+| Change | Behaviour |
+| --- | --- |
+| `OBSIDIAN_BRIDGE_HOME` (0.23.18) | new root for a standalone installation: settings (`settings.json`), per-vault indexes (`data/vaults/<hash>/index.db`), model cache (`data/models/`) and plan locks (`data/locks/`). Unset, every path is exactly the Paseo one. A bundle that sits next to `install.json` is recognised by its own path, so the client block needs no variable |
+| stable-entry refresh | skipped when the server runs standalone; it used to write `$PASEO_HOME/plugins/obsidian-bridge/mcp-server.js` from a process that has no Paseo checkout, creating a `~/.paseo` tree on a machine that has none |
+| index freshness | `obsidian_search` runs an incremental `scanVault` when `last_scan_ms` is older than 15 s (or absent) and adds `index: {lastScanAt, scannedNow, notes, hint}` to its answer. Under Paseo the watcher already keeps the index current, so the scan is normally skipped. A note added after the last scan is now found instead of `No notes matched` |
+| semantic guard | a query is embedded only when the vault has vectors (`embedded > 0`). Without the embedding stack a standalone search stays lexical and says so in `semantic.note`, instead of downloading the model for a signal it cannot use |
+| protocol negotiation | `initialize` echoes the client's revision when it is `2024-11-05`, `2025-03-26` or `2025-06-18`, and answers `2024-11-05` otherwise. The transport and tool surface are identical in all three |
+| standalone instructions | the `initialize` instructions gain one paragraph naming the settings file when the server runs standalone |
+| refusals | an unconfigured vault names `settings.json`/`--vault` instead of a Paseo settings screen when standalone |
+
+New files: `obsidian-bridge-install.sh` (the installer), `AGENT-SETUP.md` (agent-facing setup document),
+`.github/workflows/release-obsidian-bridge.yml` (tag → release with prebuilt archive and `SHA256SUMS`). The documented
+Node floor rises to `>= 22.13`, which is where `node:sqlite` needs no flag — the code never required 22.5, the docs did.
+
+Evidence (Linux, Node 24.20.0): `npm run typecheck` exit 0; `npm test` **49 suites / 425 tests** pass, including the new
+`tests/standalone-paths.test.ts` and the updated semantic-fallback case. The installer was run end to end into
+`/tmp/ob-test-home` with `--vault` and a temporary skills root: the bundle built (20 MB of build tools, 1.8 MB installed),
+the settings file was written `0600` with the `writtenBy` marker, and four skills were copied. A real stdio session with
+**no `OBSIDIAN_BRIDGE_HOME`** (home inferred from `install.json`) answered `initialize` (echoing `2025-06-18`, version
+`0.23.18`), listed 31 tools, read the vault from the installation's `settings.json`, auto-scanned on the first search
+(`scannedNow: true`, one note found) and explained an empty result. `~/.paseo` was not written.
+
+**Not checked:** the `curl | bash` path (the installer was exercised from a local checkout), a real model download
+(`--with-semantic` installs the stack but no search was run with it), and the GitHub Actions workflow (the YAML has not
+run on GitHub; its steps mirror the local commands above). macOS and Windows remain future work, as before.
+
 ## Plugin 0.22.18 — instructions, tab state, file panel, badge and slash command (2026-11-22)
 
 Feature release (0.21.18 → 0.22.18) adopting the 0.17.x plugin surface this plugin can use. **Host floor rises to

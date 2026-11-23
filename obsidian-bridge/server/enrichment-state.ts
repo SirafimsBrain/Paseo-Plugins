@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { pluginDataDir } from "./paths";
+import { bridgeDataDir } from "./paths";
 
 /**
  * Live vault-event subscription state, shared with the MCP server.
@@ -25,7 +25,7 @@ export const EMPTY_EVENT_STATE: EnrichmentEventState = { events: false, lastEven
 
 /** `$PASEO_HOME/plugins/obsidian-bridge/enrichment-state.json`. */
 export function enrichmentStatePath(): string {
-  return path.join(pluginDataDir(), "enrichment-state.json");
+  return path.join(bridgeDataDir(), "enrichment-state.json");
 }
 
 /** Best effort: a failed write must never break enrichment itself. */

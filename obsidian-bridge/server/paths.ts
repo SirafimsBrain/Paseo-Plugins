@@ -1,4 +1,5 @@
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -24,6 +25,56 @@ export function pluginDataDir(): string {
 }
 
 /**
+ * Root of a standalone installation (0.23.18).
+ *
+ * `obsidian-bridge-install.sh` installs the bundled server outside Paseo, into
+ * `~/.agents/obsidian-bridge-mcp` by default, and sets `OBSIDIAN_BRIDGE_HOME`
+ * to that directory. The settings file, the model cache and the per-vault
+ * indexes then live under the installation, so a standalone server never
+ * creates or writes a Paseo home that the user may not even have.
+ *
+ * The variable is optional: a bundle that sits next to an `install.json` — the
+ * layout the installer writes — is recognised by its own path, so an agent
+ * configuration that forgets the variable still resolves the right home. A
+ * Paseo installation satisfies neither condition and keeps its locations
+ * exactly as they were.
+ */
+export function bridgeHome(): string {
+  const configured = (process.env.OBSIDIAN_BRIDGE_HOME ?? "").trim();
+  if (configured.length > 0) return path.resolve(configured);
+  return standaloneHomeFromEntry() ?? pluginDataDir();
+}
+
+/** True when this process serves a standalone installation, not the Paseo plugin. */
+export function isStandaloneBridge(): boolean {
+  if ((process.env.OBSIDIAN_BRIDGE_HOME ?? "").trim().length > 0) return true;
+  return standaloneHomeFromEntry() !== null;
+}
+
+/**
+ * Where generated data lives: `<bridgeHome>/data` standalone, `<bridgeHome>`
+ * itself under Paseo (whose data directory already is a plugin-private folder).
+ */
+export function bridgeDataDir(): string {
+  return isStandaloneBridge() ? path.join(bridgeHome(), "data") : bridgeHome();
+}
+
+/**
+ * Installation root inferred from the running bundle (`dist/mcp-server.js`),
+ * or `null`. Only a directory the installer created carries `install.json`.
+ */
+function standaloneHomeFromEntry(): string | null {
+  const entry = process.argv[1];
+  if (!entry) return null;
+  const home = path.dirname(path.dirname(path.resolve(entry)));
+  try {
+    return fs.statSync(path.join(home, "install.json")).isFile() ? home : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Where embedding models are cached.
  *
  * Deliberately under plugin data, never inside the checkout:
@@ -32,12 +83,18 @@ export function pluginDataDir(): string {
  * model (118 MB for e5-small q8).
  */
 export function modelsDir(): string {
-  return path.join(pluginDataDir(), "models");
+  return path.join(bridgeDataDir(), "models");
 }
 
-/** Settings mirror the MCP bundle and the plugin both read. */
+/**
+ * Settings file the MCP bundle reads.
+ *
+ * Under Paseo it is the mirror the plugin writes; standalone it is the
+ * installation's own `settings.json`, in the same format and with the same
+ * `writtenBy` marker, so one reader serves both.
+ */
 export function settingsMirrorPath(): string {
-  return path.join(pluginDataDir(), "settings.json");
+  return path.join(bridgeHome(), "settings.json");
 }
 
 /**
@@ -64,7 +121,7 @@ export function vaultId(vaultPath: string): string {
 
 /** Directory holding one vault's index database. */
 export function vaultIndexDir(vaultPath: string): string {
-  return path.join(pluginDataDir(), "vaults", vaultId(vaultPath));
+  return path.join(bridgeDataDir(), "vaults", vaultId(vaultPath));
 }
 
 /** SQLite file of one vault's index. */

@@ -23,7 +23,7 @@ import { embedQuery, queryProviderStatus } from "./embed/query";
 import { fuzzySearch } from "./enrichment";
 import { createObsidianApi } from "./obsidian-api";
 import { memoryReport } from "./memory";
-import { indexPathFor, resolveVaultRoot } from "./paths";
+import { indexPathFor, isStandaloneBridge, resolveVaultRoot, settingsMirrorPath } from "./paths";
 import { planRootSummary } from "./plan/paths";
 import { PLAN_TOOLS, dispatchPlanTool } from "./plan/tools";
 import { scanVault } from "./scan";
@@ -467,10 +467,15 @@ export function openRuntime(
 ): { runtime: ToolRuntime } | { error: string } {
   const root = resolveVaultRoot(settings.vaultPath);
   if (root.length === 0) {
+    // The place to configure a vault is the one difference a standalone
+    // installation has in this file: there is no Paseo settings screen (0.23.18).
     return {
-      error:
-        "The Obsidian directory is not configured. Ask the user to open Settings → Plugins → " +
-        "Obsidian Bridge and set the directory available to Paseo; do not guess it.",
+      error: isStandaloneBridge()
+        ? "The Obsidian directory is not configured. Ask the user to set `vaultPath` in " +
+            `\`${settingsMirrorPath()}\` (or to run the installer again with \`--vault <path>\`); ` +
+            "do not guess it."
+        : "The Obsidian directory is not configured. Ask the user to open Settings → Plugins → " +
+            "Obsidian Bridge and set the directory available to Paseo; do not guess it.",
     };
   }
   let isDirectory = false;
@@ -490,6 +495,95 @@ export function openRuntime(
       error: `Could not open the index: ${cause instanceof Error ? cause.message : String(cause)}`,
     };
   }
+}
+
+/** How often one search may re-walk the vault (0.23.18). */
+const INDEX_SCAN_INTERVAL_MS = 15_000;
+
+/** State of the index when a search was answered. */
+export interface IndexState {
+  /** ISO time of the last completed scan, or `null` when the index was never scanned. */
+  lastScanAt: string | null;
+  /** True when this search ran a scan itself. */
+  scannedNow: boolean;
+  /** Notes in the index after the scan. */
+  notes: number;
+}
+
+/** {@link IndexState} plus the sentence an agent needs when nothing matched. */
+export interface IndexReport extends IndexState {
+  hint: string | null;
+}
+
+/**
+ * Brings the index up to date before a query is answered (0.23.18).
+ *
+ * Under Paseo the plugin process watches the vault and reconciles on a timer,
+ * so the index is current by construction. A standalone server has no such
+ * process: a note created after the last scan stayed invisible, and the answer
+ * said "No notes matched" — a wrong statement about a vault that does contain
+ * the note (measured, see `__doc.md` §19).
+ *
+ * The scan is incremental (only changed files are re-read) and throttled, so a
+ * burst of searches costs one walk and a large vault is not re-walked per call.
+ * A failure is reported to stderr and never fails the search: the existing
+ * index is still a useful answer.
+ */
+function refreshIndex(runtime: ToolRuntime, settings: RuntimeSettings): IndexState {
+  const readLastScanAt = (): string | null => {
+    try {
+      const recorded = runtime.store.getMeta("last_scan_ms");
+      if (recorded === null) return null;
+      const ms = Number(recorded);
+      return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+    } catch {
+      return null;
+    }
+  };
+  const readNotes = (): number => {
+    try {
+      return runtime.store.counts().notes;
+    } catch {
+      return 0;
+    }
+  };
+
+  let lastScanAt = readLastScanAt();
+  const lastScanMs = lastScanAt === null ? null : Date.parse(lastScanAt);
+  const recent =
+    lastScanMs !== null &&
+    Number.isFinite(lastScanMs) &&
+    Date.now() - lastScanMs < INDEX_SCAN_INTERVAL_MS;
+  if (recent || !settings.indexingEnabled) {
+    return { lastScanAt, scannedNow: false, notes: readNotes() };
+  }
+  try {
+    scanVault({ root: runtime.root, store: runtime.store, settings });
+    lastScanAt = readLastScanAt() ?? new Date().toISOString();
+    return { lastScanAt, scannedNow: true, notes: readNotes() };
+  } catch (cause) {
+    process.stderr.write(
+      `[obsidian-bridge] automatic index refresh failed: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }\n`,
+    );
+    return { lastScanAt, scannedNow: false, notes: readNotes() };
+  }
+}
+
+/** Adds the explanation an empty result needs, so "not found" is not a dead end. */
+function describeIndex(index: IndexState, hits: number): IndexReport {
+  const hint =
+    hits > 0
+      ? null
+      : index.notes === 0
+        ? "The index holds no notes. Check `vaultPath`, `includeFolders`/`excludeGlobs` and the " +
+          "document extensions in `obsidian_status`, then call `obsidian_index`."
+        : `The index holds ${index.notes} notes and was last refreshed ${
+            index.lastScanAt ?? "just now"
+          }; a note that is still missing can be excluded by includeFolders/excludeGlobs or by ` +
+          "its extension.";
+  return { ...index, hint };
 }
 
 function json(value: unknown): ToolOutcome {
@@ -741,10 +835,18 @@ export async function dispatchTool(
             ? Math.max(0, Math.trunc(input.offset))
             : 0;
         const scope = parseScope(input.scope);
+        // A standalone server has no plugin process to keep the vault indexed,
+        // so the index is refreshed here before the query is answered.
+        const index = refreshIndex(runtime, settings);
         const semanticWanted =
           input.semantic === undefined ? settings.semanticSearch : input.semantic === true;
+        // Only embed the query when there are vectors to compare it with: a
+        // vault without embeddings used to load a 118 MB model for a signal
+        // that could not be used (0.23.18).
+        const semanticUsable =
+          semanticWanted && runtime.store.embeddingStats(settings.embeddingModel).embedded > 0;
         const queryEmbedding =
-          semanticWanted && query.length > 0 ? await embedQuery(settings, query) : null;
+          semanticUsable && query.length > 0 ? await embedQuery(settings, query) : null;
         const fuzzy = await fuzzySearch(settings, query, 20);
         const result = searchIndex(runtime.store, {
           query,
@@ -762,7 +864,11 @@ export async function dispatchTool(
           fuzzy: fuzzy.hits,
           enrichment: { enabled: fuzzy.enabled, error: fuzzy.error },
         });
-        const text = result.text.length > 0 ? result.text : (result.note ?? "No results.");
+        const indexInfo = describeIndex(index, result.hits.length);
+        const text =
+          result.text.length > 0
+            ? result.text
+            : [result.note ?? "No results.", indexInfo.hint].filter(Boolean).join("\n\n");
         const remaining = Math.max(0, (result.total ?? 0) - offset - result.hits.length);
         const omitted = result.omitted ?? 0;
         const nextArgs: Record<string, unknown> = { query };
@@ -789,12 +895,18 @@ export async function dispatchTool(
             tookMs: result.tookMs,
             note: result.note,
             directories: runtime.dirs,
+            index: indexInfo,
             enrichment: result.enrichment,
             semantic: {
               requested: semanticWanted,
               used: result.signals.includes("semantic"),
               model: settings.embeddingModel,
               error: queryEmbedding?.error ?? null,
+              note:
+                semanticWanted && !semanticUsable
+                  ? "This vault has no embeddings yet, so only lexical signals ran. Embeddings are " +
+                    "built by the plugin in Paseo; `obsidian_status` reports the vector coverage."
+                  : null,
             },
           },
           continuation,
