@@ -46,8 +46,13 @@ jobs:
           fi
           echo "version=$version" >>"$GITHUB_OUTPUT"
 
+      # `--ignore-scripts` is deliberate. `onnxruntime-node` (an optional path of
+      # `@huggingface/transformers`) runs an install script that downloads a CUDA
+      # build of the runtime and fails with 404 on a runner without `nvcc`; no
+      # tool or test needs those native binaries, and `esbuild` ships its binary
+      # in the platform package, so the bundler and vitest work without scripts.
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Typecheck
         run: npm run typecheck

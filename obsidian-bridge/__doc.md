@@ -493,7 +493,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2142,3 +2142,27 @@ published tag.
 
 **Lesson recorded for the next release:** run `npx npm@10 ci --dry-run` before pushing a version tag, since the local npm
 is newer than the one in CI and silently accepts a lockfile CI rejects.
+
+The 0.23.19 run then passed `Install`'s validation and failed while executing install scripts:
+
+```
+npm error path …/node_modules/onnxruntime-node
+npm error command sh -c node ./script/install
+npm error Downloading "…/onnxruntime-linux-x64-gpu-1.21.0.tgz"…
+npm error `nvcc` not found. Assuming CUDA 12.
+npm error Error: Failed to download the binaries: 404 Not Found.
+```
+
+`onnxruntime-node@1.21.0` is an optional path of `@huggingface/transformers`. Its postinstall picks a CUDA build when
+`nvcc` is missing, and that asset does not exist for this version, so a plain `npm ci` cannot finish on a runner. Nothing
+that produces or tests the bundle needs the runtime binary: `esbuild` gets its executable from `@esbuild/linux-x64`, and
+the semantic tests mock the provider. The workflow therefore installs with `npm ci --ignore-scripts` (0.23.20), which is
+also what the workstation's npm 12 does implicitly — it blocks install scripts it has not approved, which is why the
+local runs were green.
+
+**Verified before the retry, in a fresh clone of the repository** (so no inherited `node_modules`): `npx npm@10 ci
+--ignore-scripts` exit 0; `npm run typecheck` exit 0; `node scripts/bundle-mcp-server.mjs` wrote `dist/mcp-server.js`
+(1.4 MB) and `dist/embed-worker.js` (287 KB) with `0.23.19` in the bundle; `npm test` 49 suites / 425 tests pass.
+
+**Lesson the second time:** a package's postinstall is part of the install, and a workstation that blocks scripts proves
+nothing about a runner that executes them.

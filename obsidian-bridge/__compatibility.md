@@ -2,6 +2,24 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.23.20 — release workflow install fix (2026-11-23)
+
+Bugfix release (0.23.19 → 0.23.20). No plugin or server code changed.
+
+The 0.23.19 run got past the lockfile check and then failed inside `npm ci`: the postinstall of
+`onnxruntime-node@1.21.0` (an optional path of `@huggingface/transformers`) found no `nvcc`, assumed CUDA 12 and tried to
+download `onnxruntime-linux-x64-gpu-1.21.0.tgz`, which answers 404, so the whole install exited 1. This never showed up
+locally because the workstation's npm 12 blocks install scripts by default.
+
+| Change | Behaviour |
+| --- | --- |
+| workflow `Install` step | `npm ci --ignore-scripts`. No tool, test or bundle step needs a native runtime binary; `esbuild` resolves its binary from the platform package, so the bundler and vitest work without scripts |
+| version | 0.23.20, so the tag matches `package.json` |
+
+Evidence: a clean clone of the repository, `npx npm@10 ci --ignore-scripts` exit 0, then `npm run typecheck` exit 0, the
+bundle script written (`dist/mcp-server.js` 1.4 MB, `embed-worker.js` 287 KB), and `npm test` **49 suites / 425 tests**
+pass — the same numbers as under the workstation's npm 12 install.
+
 ## Plugin 0.23.19 — release workflow lockfile fix (2026-11-23)
 
 Bugfix release (0.23.18 → 0.23.19). No plugin or server code changed: settings schema, the MCP catalogue (31 tools),
@@ -19,7 +37,7 @@ which Node 22 ships in CI, validates the tree and refuses.
 | version | 0.23.19, so the new tag matches `package.json` again |
 
 Evidence (Linux, Node 24.20.0): `npx npm@10 ci --dry-run` exit 0 (was the CI error above); `npx npm@10 install
---package-lock-only` exit 0; the workflow run on tag `obsidian-bridge@0.23.19` is the end-to-end check.
+--package-lock-only` exit 0. That run then failed one step later inside the same `npm ci`, which is what 0.23.20 fixes.
 
 ## Plugin 0.23.18 — standalone MCP installation (2026-11-23)
 
