@@ -206,7 +206,7 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             label="Directory path"
             hint="Absolute path, a ~ path, or a path relative to your home directory — either a whole vault or a project directory inside one, e.g. ~/.obsidian/Main/Paseo. Saving a valid path starts the first scan."
             initialValue={values.vaultPath}
-            placeholder="/home/you/.obsidian/Main/Paseo"
+            placeholder="~/.obsidian/Main/Paseo"
             onChangeText={(text: string) => patch({ vaultPath: text })}
           />
           <SettingsAction

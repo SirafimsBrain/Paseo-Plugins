@@ -31,7 +31,7 @@ function node(
 ) {
   return {
     id,
-    projectKey: "/home/sirafim/projects/helios",
+    projectKey: "/home/user/projects/helios",
     parentId,
     kind,
     name,
@@ -55,7 +55,7 @@ function exportDocument(): Record<string, unknown> {
     schemaVersion: 1,
     pluginVersion: "0.51.0",
     exportedAt: Date.UTC(2026, 10, 10, 12),
-    projectKey: "/home/sirafim/projects/helios",
+    projectKey: "/home/user/projects/helios",
     nodes: [
       node(ROOT, null, "root", "Helios"),
       node(TRUNK, ROOT, "trunk", "Sessions"),
@@ -70,7 +70,7 @@ function exportDocument(): Record<string, unknown> {
     bees: [
       {
         id: "be000000-0000-4000-8000-000000000001",
-        projectKey: "/home/sirafim/projects/helios",
+        projectKey: "/home/user/projects/helios",
         sourceLeafId: LEAF_A,
         targetLeafId: LEAF_B,
         status: "active",
@@ -85,7 +85,7 @@ function exportDocument(): Record<string, unknown> {
     bugs: [
       {
         id: BUG,
-        projectKey: "/home/sirafim/projects/helios",
+        projectKey: "/home/user/projects/helios",
         title: "Session loss on restart",
         description: "The table is recreated on boot.",
         severity: "high",
@@ -101,7 +101,7 @@ function exportDocument(): Record<string, unknown> {
     goals: [
       {
         id: GOAL,
-        projectKey: "/home/sirafim/projects/helios",
+        projectKey: "/home/user/projects/helios",
         formalText: "Sessions survive a restart",
         plan: [
           { id: "step-1", title: "Move the session table", description: "A migration." },
@@ -119,7 +119,7 @@ function exportDocument(): Record<string, unknown> {
     growth: [
       {
         id: "60000000-0000-4000-8000-000000000001",
-        projectKey: "/home/sirafim/projects/helios",
+        projectKey: "/home/user/projects/helios",
         subjectType: "node",
         subjectId: LEAF_A,
         steps: [

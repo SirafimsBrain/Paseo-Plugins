@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * The installer names the release it belongs to (0.24.21).
+ * The installer names the release it belongs to (0.24.22).
  *
  * A copy fetched from `…/obsidian-bridge@<tag>/obsidian-bridge-install.sh`
  * builds `obsidian-bridge@SCRIPT_VERSION`, so this value has to be the version

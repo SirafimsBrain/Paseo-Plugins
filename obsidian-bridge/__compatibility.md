@@ -2,6 +2,27 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.24.22 — no machine-specific home paths in the sources (2026-11-23)
+
+Bugfix release (0.24.21 → 0.24.22). No plugin behaviour, tool or setting changed: one test was neutralised, one UI
+placeholder now uses `~/`, and a guard test was added.
+
+Every home directory the plugin touches is resolved at run time — `os.homedir()`, `$HOME`, `$PASEO_HOME`,
+`$OBSIDIAN_BRIDGE_HOME`, or a `~/…` value handed to `resolveVaultRoot`. Nothing in `server/`, `shared/` or `client/`
+named a user's home, but the settings screen still showed `/home/you/.obsidian/Main/Paseo` as a placeholder, which read
+as an example of a literal path rather than of the `~` form the field also accepts.
+
+| Change | Behaviour |
+| --- | --- |
+| `tests/no-hardcoded-home.test.ts` | fails on any `/home/<name>` literal in `server/`, `shared/`, `client/`, reporting file, line and match; a second case feeds the detector a literal, an `os.homedir()` call and a `~/…` value so the test cannot pass by matching nothing |
+| `tests/plan-import.test.ts` | the export fixture uses `/home/user/projects/helios` instead of the developer's home |
+| settings screen | the vault-path placeholder is `~/.obsidian/Main/Paseo` |
+
+The guard covers the bundled code only: fixtures, documentation and the installer (which uses `${HOME}`) are out of scope.
+
+Evidence (Linux, Node 24.20.0): `bash -n obsidian-bridge-install.sh` exit 0, `npm run typecheck` exit 0, `npm test`
+51 suites / 429 tests pass.
+
 ## Plugin 0.24.21 — the installer installs the release it belongs to (2026-11-23)
 
 Feature release (0.23.21 → 0.24.21). The plugin, the server and every MCP tool are unchanged; only

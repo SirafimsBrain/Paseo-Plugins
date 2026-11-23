@@ -12,7 +12,7 @@ handled by the `plan_*` tools in this plugin.
 Technical description, design decisions and the roadmap: [__doc.md](./__doc.md). Research that led to this design:
 [__research.md](./__research.md).
 
-## What it does (0.24.21)
+## What it does (0.24.22)
 
 - **The server also installs without Paseo (0.23.18).** `obsidian-bridge-install.sh` builds the same bundle into
   `~/.agents/obsidian-bridge-mcp`, with its own settings file, index and `AGENT-SETUP.md`, for an agent runtime that has
@@ -275,7 +275,7 @@ The installer prints the ready-to-paste `mcpServers` block, copies the four Agen
 `--no-skills` is given, and runs on Node 22.13 or newer. `--dry-run`, `--ref`, `--version`, `--skills-dir` and
 `--uninstall` are listed in `--help`.
 
-**The script installs the release it belongs to (0.24.21).** A copy fetched from a tag URL carries that tag's version and
+**The script installs the release it belongs to (0.24.22).** A copy fetched from a tag URL carries that tag's version and
 builds it, so the bundle, `version` and `ref` in `install.json` all describe the installer that was read — not whatever
 `main` happens to be now. The `main` URL installs the latest release; `--version <x.y.z>` moves between releases, and
 `--ref <branch>` builds a branch. A local checkout or `--source` is recorded as `ref: "local"`.

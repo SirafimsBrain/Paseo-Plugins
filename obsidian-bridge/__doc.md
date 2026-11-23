@@ -493,7 +493,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2241,3 +2241,20 @@ That run also exposed the `ref` wrinkle: an installer fetched from a tag default
 `"ref":"main"` and the build followed `main` at run time rather than the tag whose URL was used. 0.24.21 makes the
 script name its own release (`SCRIPT_VERSION`), which is what the default ref and the recorded `ref` now follow — see
 §19.2.1.
+
+### 0.24.22 — a guard against machine-specific home paths
+
+Every home directory the plugin touches is resolved where the code runs: `os.homedir()` in `server/paths.ts`,
+`server/agent-record.ts`, `server/cline-mcp.ts`, `server/agent-skill.ts` and `server/opencode-mcp.ts`; `${HOME}` in
+`obsidian-bridge-install.sh`; and `~/…` in a configured `vaultPath`, expanded by `resolveVaultRoot`. The shipped sources
+never named a user's home, but nothing stopped a future change from doing so — a path copied from a workstation log or a
+placeholder typed as an example survives into a bundle that every user installs.
+
+`tests/no-hardcoded-home.test.ts` closes that: it walks `server/`, `shared/` and `client/` (the code that ends up in the
+bundle and in the standalone MCP server), matches `/home/<name>` and reports file, line and the matched text. A second
+case proves the detector itself works — it must report a literal, and must stay silent for `os.homedir()`, a `~/…`
+value and `${HOME}` — so a regex that matches nothing cannot make the suite green. Tests, fixtures and documentation are
+outside the scan, so a fixture may still use a synthetic home; the one that did (`tests/plan-import.test.ts`, whose
+export carried `/home/sirafim/projects/helios`) now uses `/home/user/projects/helios`. The same rule changed one visible
+string: the settings screen's vault-path placeholder was `/home/you/.obsidian/Main/Paseo` and now reads
+`~/.obsidian/Main/Paseo`, the form the field already accepted.
