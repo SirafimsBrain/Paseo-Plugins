@@ -2,6 +2,35 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.24.21 — the installer installs the release it belongs to (2026-11-23)
+
+Feature release (0.23.21 → 0.24.21). The plugin, the server and every MCP tool are unchanged; only
+`obsidian-bridge-install.sh` and the release workflow change.
+
+`curl …/obsidian-bridge@<tag>/…/obsidian-bridge-install.sh | bash` used to build `main` and record `"ref":"main"`,
+because a piped script cannot see the URL it came from. The build was correct only while `main` was the release; from an
+older tag it would have installed newer code, and `install.json` described neither the tag the user chose nor the code
+that was built.
+
+| Change | Behaviour |
+| --- | --- |
+| `SCRIPT_VERSION` in the installer | the installer names its own release, so the default source is `obsidian-bridge@$SCRIPT_VERSION` instead of `main`; the header and the summary print `Release: <ref>` |
+| `install.json` | `ref` records the tag that was built, `local` for a working tree (`--source` or the script inside a checkout), or the explicit `--ref`/`--version` value |
+| tag/version guard | with the default ref, a downloaded source whose `package.json` disagrees with `SCRIPT_VERSION` is refused with the version it found, instead of installing quietly |
+| missing tag | a `curl | bash` from `main` before the version is tagged fails at the download and suggests `--ref main` rather than silently falling back |
+| workflow | new step `Check the installer names the released version`: a tag whose installer carries another `SCRIPT_VERSION` is not published |
+| `--help` | states that the default ref is the release the script belongs to, not `main` |
+
+Unchanged: `--version` and `--ref` behave as before, and a local checkout still builds the working tree (it now records
+`ref: "local"` instead of `"main"`).
+
+Evidence (Linux, Node 24.20.0): `bash -n` exit 0. The documented `curl | bash` from the tag URL
+`…/obsidian-bridge@0.24.21/…` installed into `/tmp/ob-tag-home` with `--no-semantic`: exit 0, `install.json` =
+`{"version":"0.24.21","ref":"obsidian-bridge@0.24.21","installedAt":…,"semantic":false}`, the server answered
+`initialize` with version 0.24.21 and 31 tools, and `obsidian_search` found a note. `--ref` and `--dry-run` were rerun to
+confirm they still override and only print the plan. The workflow on tag `obsidian-bridge@0.24.21` passed and published
+the release, including the new installer step.
+
 ## Plugin 0.23.21 — host-independent OpenCode/Kilo config tests (2026-11-23)
 
 Bugfix release (0.23.20 → 0.23.21). No plugin or server code changed; one test file became self-contained.

@@ -12,10 +12,22 @@ set -euo pipefail
 
 REPO="${OBSIDIAN_BRIDGE_REPO:-SirafimsBrain/Paseo-Plugins}"
 PLUGIN_SUBDIR="obsidian-bridge"
+
+# The release this script belongs to (0.24.21).
+#
+# `curl … | bash` from a tag URL fetches this file at that tag, so the version
+# here is the tag the caller asked for. The default source is therefore that
+# tag, not `main`: the build, `install.json`'s `version` and `ref` all describe
+# the release whose installer was run, however much `main` has moved since.
+# The release workflow refuses to publish a tag that disagrees with this value.
+SCRIPT_VERSION="0.24.21"
 DEFAULT_HOME="${HOME}/.agents/obsidian-bridge-mcp"
 SKILL_NAMES="obsidian-bridge planning-create planning-execute planning-review"
 
 ref=""
+ref_explicit=0
+ref_defaulted=0
+build_ref=""
 install_dir="${OBSIDIAN_BRIDGE_HOME:-$DEFAULT_HOME}"
 vault=""
 with_semantic=0
@@ -34,7 +46,8 @@ Usage:
 
 Options:
   --version <x.y.z>     Install the release tagged obsidian-bridge@<x.y.z>.
-  --ref <git-ref>       Install an arbitrary branch, tag or commit (default: main).
+  --ref <git-ref>       Install an arbitrary branch, tag or commit (default: the
+                        release this script belongs to, not main).
   --dir <path>          Install directory (default $OBSIDIAN_BRIDGE_HOME,
                         else ~/.agents/obsidian-bridge-mcp).
   --vault <path>        Vault root to write into settings.json.
@@ -64,12 +77,15 @@ while [ "$#" -gt 0 ]; do
     --version)
       [ "$#" -ge 2 ] || die "--version needs a value"
       ref="obsidian-bridge@$2"
+      ref_explicit=1
       shift 2
       ;;
     --ref)
       [ "$#" -ge 2 ] || die "--ref needs a value"
       ref="$2"
-      shift 2
+      ref_explicit=1
+      shift
+      shift
       ;;
     --dir)
       [ "$#" -ge 2 ] || die "--dir needs a value"
@@ -185,6 +201,7 @@ prepare_source() {
     [ -f "$source_arg/package.json" ] && [ -d "$source_arg/server" ] ||
       die "--source $source_arg is not an obsidian-bridge checkout"
     source_dir="$(cd "$source_arg" && pwd)"
+    build_ref="local"
     info "Using the local checkout: $source_dir"
     return
   fi
@@ -192,11 +209,20 @@ prepare_source() {
   # builds what is in the working tree, so an uncommitted fix can be installed.
   if [ -n "$script_path" ] && [ -f "$script_path/package.json" ] && [ -f "$script_path/server/mcp-server.ts" ]; then
     source_dir="$script_path"
+    build_ref="local"
     info "Using the checkout this script was run from: $source_dir"
     return
   fi
 
-  local target_ref="${ref:-main}"
+  # Nothing local: build the release this script ships with unless the caller
+  # pinned another ref (0.24.21).
+  if [ "$ref_explicit" = 0 ]; then
+    ref="obsidian-bridge@$SCRIPT_VERSION"
+    ref_defaulted=1
+  fi
+  build_ref="$ref"
+  info "Release: $build_ref"
+  local target_ref="$build_ref"
   work="$(mktemp -d)"
   if command -v git >/dev/null 2>&1; then
     info "Cloning $REPO at $target_ref"
@@ -208,7 +234,8 @@ prepare_source() {
     local url="https://codeload.github.com/$REPO/tar.gz/$target_ref"
     info "Downloading $url"
     mkdir -p "$work/archive"
-    curl -fsSL "$url" -o "$work/src.tar.gz" || die "could not download $url"
+    curl -fsSL "$url" -o "$work/src.tar.gz" ||
+      die "could not download $url — if this version has no tag yet, pass --ref main"
     tar -xzf "$work/src.tar.gz" -C "$work/archive" || die "could not extract $url"
     source_dir="$(find "$work/archive" -maxdepth 2 -type d -name "$PLUGIN_SUBDIR" | head -n 1)"
   fi
@@ -219,6 +246,14 @@ prepare_source() {
 read_version() {
   node -e 'process.stdout.write(require(require("node:path").resolve(process.argv[1])).version)' \
     "$source_dir/package.json"
+}
+
+# A tag whose package.json disagrees with the script that carries it would
+# install something other than what the caller asked for.
+check_version() {
+  [ "$ref_defaulted" = 1 ] || return 0
+  [ "$version" = "$SCRIPT_VERSION" ] ||
+    die "$build_ref contains version $version, but this installer ships $SCRIPT_VERSION; use --ref $build_ref explicitly"
 }
 
 build_stage() {
@@ -254,7 +289,7 @@ install_files() {
   fi
   printf '{"name":"obsidian-bridge","private":true,"version":"%s"}\n' "$version" >"$install_dir/package.json"
   printf '{"version":"%s","ref":"%s","installedAt":"%s","semantic":%s}\n' \
-    "$version" "${ref:-main}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$version" "${build_ref:-main}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "$([ "$with_semantic" = 1 ] && echo true || echo false)" >"$install_dir/install.json"
 }
 
@@ -330,7 +365,15 @@ EOF
 
 info "obsidian-bridge standalone installer"
 info "  install directory: $install_dir"
-info "  source:            ${ref:-main (or the local checkout)}"
+if [ "$ref_explicit" = 1 ]; then
+  info "  source:            $ref"
+elif [ -n "$source_arg" ]; then
+  info "  source:            the local checkout $source_arg"
+elif [ -n "$script_path" ] && [ -f "$script_path/package.json" ] && [ -f "$script_path/server/mcp-server.ts" ]; then
+  info "  source:            the checkout this script was run from"
+else
+  info "  source:            obsidian-bridge@$SCRIPT_VERSION (the release this script belongs to)"
+fi
 info "  semantic search:   $([ "$with_semantic" = 1 ] && echo enabled || echo lexical only)"
 info "  skills:            $([ "$with_skills" = 1 ] && echo "$skills_dir" || echo skipped)"
 
@@ -343,6 +386,7 @@ if [ "$dry_run" = 1 ]; then
   check_node
   prepare_source
   version="$(read_version)"
+  check_version
   info "  plugin version:    $version"
   info "Plan: build the bundle, install into $install_dir, write settings.json, install $([ "$with_skills" = 1 ] && echo "skills into $skills_dir" || echo "no skills")."
   exit 0
@@ -351,7 +395,9 @@ fi
 check_node
 prepare_source
 version="$(read_version)"
+check_version
 info "Plugin version: $version"
+info "Release:        ${build_ref:-local}"
 if [ -n "$vault" ] && [ ! -d "$vault" ]; then
   info "warning: '$vault' is not a directory yet; every tool will refuse until it exists."
 fi

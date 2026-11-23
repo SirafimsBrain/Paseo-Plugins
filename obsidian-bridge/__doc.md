@@ -493,7 +493,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -1941,8 +1941,39 @@ The script detects its own situation, in this order:
 2. The directory the script itself sits in, when it contains `package.json` and `server/mcp-server.ts` — so
    `git clone … && ./obsidian-bridge/obsidian-bridge-install.sh` installs what is in the working tree, including an
    uncommitted fix.
-3. `git clone --depth 1 --branch <ref>` (default `main`, `--version` maps to the tag `obsidian-bridge@<version>`).
+3. `git clone --depth 1 --branch <ref>` (default: the tag this script belongs to — see 19.2.1; `--version` maps to the
+   tag `obsidian-bridge@<version>`, `--ref` takes anything).
 4. `curl https://codeload.github.com/<repo>/tar.gz/<ref>` when git is missing.
+
+#### 19.2.1 A tag URL installs that tag (0.24.21)
+
+The first version of the installer defaulted to `main`, which made the documented tag URL misleading: the script came
+from `…/obsidian-bridge@0.23.21/obsidian-bridge/obsidian-bridge-install.sh`, but the build followed `main` at run time and
+`install.json` recorded `"ref":"main"`. `version` happened to be right only because `main` was the release. An install
+from an older tag would have silently produced newer code, and one from a tag with a different `package.json` would have
+produced a version that contradicts the installer the user read.
+
+A `curl | bash` process cannot see the URL it came from, so the tag is recorded in the file itself:
+`SCRIPT_VERSION="<version>"`, kept equal to `package.json` by the release workflow, which refuses a tag whose installer
+names another version (`Check the installer names the released version`). The default source is then
+`obsidian-bridge@$SCRIPT_VERSION`:
+
+| Invocation | Source | `install.json` `ref` |
+| --- | --- | --- |
+| `curl …/obsidian-bridge@X/…/obsidian-bridge-install.sh \| bash` | tag `obsidian-bridge@X`, because the fetched file carries `SCRIPT_VERSION=X` | `obsidian-bridge@X` |
+| `curl …/main/…obsidian-bridge-install.sh \| bash` | the release `main` currently describes, not `main` before the next release | `obsidian-bridge@<that release>` |
+| `--version X`, `--ref <branch>` | exactly what was asked | the same string |
+| `--source <path>`, or the script inside a checkout | that working tree | `local` |
+
+Two guards keep the result honest. A tag whose `package.json` disagrees with `SCRIPT_VERSION` is refused with the
+version it actually found (`use --ref … explicitly`), so a mistyped or moved tag cannot install something else quietly;
+and a `curl | bash` from `main` before the version is tagged fails at the download, naming the missing tag and suggesting
+`--ref main` instead of falling back to it — the fallback is what made the original defect invisible. When no local
+checkout is involved, both the header and the summary print `Release: <ref>`, so the caller sees which tag is being built
+before and after the build.
+
+Consequence for updates: the `main` URL always installs the latest **released** version, and a pinned tag URL reinstalls
+that tag. `--version` remains the explicit way to move between releases.
 
 The build happens in a scratch directory with a **minimal manifest** (`{name, private, version}` plus the version the
 bundler injects): `npm install --no-save esbuild zod yaml`, then `node scripts/bundle-mcp-server.mjs`. Copying the real
@@ -2206,6 +2237,7 @@ neither `OBSIDIAN_BRIDGE_HOME` nor `OBSIDIAN_VAULT_PATH` answered `initialize` w
 standalone paragraph present, 31 tools, and `obsidian_search` found the note in the vault it was pointed at, indexing into
 `/tmp/ob-curl-home/data/vaults/<hash>/index.db`. `~/.paseo` was not written.
 
-One wrinkle worth recording: an installer fetched from a tag does not know the tag, so `ref` defaults to `main` and the
-build follows `main` at run time — `install.json` therefore says `"ref":"main"` while `version` is correct. Today both
-point at the same commit. A caller that needs a pinned build should pass `--ref obsidian-bridge@<version>`.
+That run also exposed the `ref` wrinkle: an installer fetched from a tag defaulted to `main`, so `install.json` said
+`"ref":"main"` and the build followed `main` at run time rather than the tag whose URL was used. 0.24.21 makes the
+script name its own release (`SCRIPT_VERSION`), which is what the default ref and the recorded `ref` now follow — see
+§19.2.1.

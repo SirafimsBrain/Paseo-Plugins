@@ -64,6 +64,13 @@ jobs:
       - name: Check the installer parses
         run: bash -n obsidian-bridge-install.sh
 
+      # The installer is the pin for `curl | bash`: a copy fetched from this
+      # tag's URL builds `obsidian-bridge@<its SCRIPT_VERSION>`, so it has to
+      # name this release or a caller installs a different build than the
+      # script they read.
+      - name: Check the installer names the released version
+        run: grep -qE "^SCRIPT_VERSION=\"${{ steps.version.outputs.version }}\"$" obsidian-bridge-install.sh
+
       - name: Check the bundle carries the released version
         run: grep -qF "\"${{ steps.version.outputs.version }}\"" dist/mcp-server.js
 
