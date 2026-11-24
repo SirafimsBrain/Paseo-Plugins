@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as process from "node:process";
 import { clineMcpStatus } from "./cline-mcp";
 import { mcpServerCommand } from "./mcp-launch";
+import { isPluginOwnedLaunch } from "./owned-entry";
 
 /**
  * Direct MCP registration in the agent's own config file (OpenCode, Kilo).
@@ -197,24 +198,66 @@ export function registerConfig(agent: AgentTarget): { ok: boolean; error: string
   }
 }
 
-/** Removes the entry; every other key is left untouched. */
-export function unregisterConfig(agent: AgentTarget): { ok: boolean; error: string | null } {
+export interface ConfigRemoval {
+  /** One human-readable line per removed registration. */
+  removed: string[];
+  error: string | null;
+}
+
+/** Removes every entry `shouldRemove` selects; every other key is left untouched. */
+function removeConfigEntries(
+  agent: AgentTarget,
+  shouldRemove: (name: string, entry: unknown) => boolean,
+): ConfigRemoval {
   const resolved = resolveTarget(agent);
-  if (!resolved.ok) return { ok: false, error: resolved.error };
+  if (!resolved.ok) return { removed: [], error: resolved.error };
+  const mcp = resolved.document.mcp;
+  if (!mcp || !resolved.exists) return { removed: [], error: null };
+  const names = Object.keys(mcp).filter((name) => shouldRemove(name, mcp[name]));
+  if (names.length === 0) return { removed: [], error: null };
   try {
-    const mcp = resolved.document.mcp;
-    if (!mcp || !(CONFIG_MCP_SERVER_NAME in mcp)) return { ok: true, error: null };
-    if (!resolved.exists) return { ok: true, error: null };
     const remaining = { ...mcp };
-    delete remaining[CONFIG_MCP_SERVER_NAME];
+    for (const name of names) delete remaining[name];
     const next: ConfigDocument = { ...resolved.document };
     if (Object.keys(remaining).length > 0) next.mcp = remaining;
     else delete next.mcp;
     writeDocument(resolved.target, next);
-    return { ok: true, error: null };
+    return {
+      removed: names.map((name) => `${agent.label} mcp.${name}: ${resolved.target}`),
+      error: null,
+    };
   } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+    return { removed: [], error: cause instanceof Error ? cause.message : String(cause) };
   }
+}
+
+/** Removes the entry by name; every other key is left untouched. */
+export function unregisterConfig(agent: AgentTarget): { ok: boolean; error: string | null } {
+  const result = removeConfigEntries(agent, (name) => name === CONFIG_MCP_SERVER_NAME);
+  return { ok: result.error === null, error: result.error };
+}
+
+/**
+ * Removes this plugin's registrations by name or by launch path.
+ *
+ * The path test is what makes removal work after the server was renamed: the
+ * previous version's key no longer matches `CONFIG_MCP_SERVER_NAME`, but its
+ * command still points at the plugin's own data directory.
+ */
+function pruneConfig(agent: AgentTarget): ConfigRemoval {
+  return removeConfigEntries(agent, (name, entry) => {
+    if (name === CONFIG_MCP_SERVER_NAME) return true;
+    const launch = fromEntry(entry);
+    return launch !== null && isPluginOwnedLaunch(launch.command, launch.args);
+  });
+}
+
+export function pruneOpencodeMcp(): ConfigRemoval {
+  return pruneConfig(OPENCODE);
+}
+
+export function pruneKiloMcp(): ConfigRemoval {
+  return pruneConfig(KILO);
 }
 
 export function opencodeMcpStatus(): ConfigMcpStatus {

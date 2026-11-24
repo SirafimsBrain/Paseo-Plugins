@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
 import { mcpServerCommand } from "./mcp-launch";
+import { isPluginOwnedLaunch } from "./owned-entry";
 
 /**
  * Direct MCP registration for Cline.
@@ -136,23 +137,54 @@ export function registerClineMcp(): { ok: boolean; error: string | null } {
   }
 }
 
-/** Removes the entry; other servers are left untouched. */
-export function unregisterClineMcp(): { ok: boolean; error: string | null } {
+export interface ClineRemoval {
+  /** One human-readable line per removed registration. */
+  removed: string[];
+  error: string | null;
+}
+
+/** Removes every server `shouldRemove` selects; other servers are left untouched. */
+function removeEntries(
+  shouldRemove: (name: string, entry: unknown) => boolean,
+): ClineRemoval {
   const target = clineSettingsPath();
   const loaded = readDocument(target);
-  if (!loaded.ok) return { ok: false, error: `${target}: ${loaded.error}` };
-  if (!loaded.exists) return { ok: true, error: null };
+  if (!loaded.ok) return { removed: [], error: `${target}: ${loaded.error}` };
+  if (!loaded.exists) return { removed: [], error: null };
   const servers = loaded.document.mcpServers;
-  if (!servers || !(CLINE_MCP_SERVER_NAME in servers)) return { ok: true, error: null };
+  if (!servers) return { removed: [], error: null };
+  const names = Object.keys(servers).filter((name) => shouldRemove(name, servers[name]));
+  if (names.length === 0) return { removed: [], error: null };
   try {
     const remaining = { ...servers };
-    delete remaining[CLINE_MCP_SERVER_NAME];
+    for (const name of names) delete remaining[name];
     const next: ClineDocument = { ...loaded.document };
     if (Object.keys(remaining).length > 0) next.mcpServers = remaining;
     else delete next.mcpServers;
     writeDocument(target, next);
-    return { ok: true, error: null };
+    return {
+      removed: names.map((name) => `Cline mcpServers.${name}: ${target}`),
+      error: null,
+    };
   } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+    return { removed: [], error: cause instanceof Error ? cause.message : String(cause) };
   }
+}
+
+/** Removes the entry by name; other servers are left untouched. */
+export function unregisterClineMcp(): { ok: boolean; error: string | null } {
+  const result = removeEntries((name) => name === CLINE_MCP_SERVER_NAME);
+  return { ok: result.error === null, error: result.error };
+}
+
+/**
+ * Removes this plugin's registrations by name or by launch path — the path test
+ * catches an entry a renamed version left under its old name.
+ */
+export function pruneClineMcp(): ClineRemoval {
+  return removeEntries((name, entry) => {
+    if (name === CLINE_MCP_SERVER_NAME) return true;
+    const launch = fromEntry(entry);
+    return launch !== null && isPluginOwnedLaunch(launch.command, launch.args);
+  });
 }

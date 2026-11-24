@@ -79,7 +79,9 @@ Technical description, design decisions and the roadmap: [__doc.md](./__doc.md).
   The plugin installs it into every skills directory that exists (`~/.agents/skills` first, then OpenCode, Cline, Kilo,
   Kimi, Qwen, Codex, Claude Code), verifies the copies on load, after a settings change and every five minutes, repairs
   anything that drifted, and removes them when the switch is off. The settings screen shows the state of every agent
-  config entry and skill copy, so "is it installed correctly?" is a visible answer rather than a guess. The official Obsidian skills (Obsidian Flavored Markdown, Bases, JSON Canvas, Obsidian CLI) are a separate,
+  config entry and skill copy, so "is it installed correctly?" is a visible answer rather than a guess, and one
+  *Remove agent integration* action deletes all of it again — config entries, skill directories and the saved MCP server
+  of existing agents — recognising what an older name left behind by the launch path and the file marker. The official Obsidian skills (Obsidian Flavored Markdown, Bases, JSON Canvas, Obsidian CLI) are a separate,
   upstream project — [obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills); this plugin ships its own
   skill so the workflow can be reviewed and versioned together with the tools it describes.
 - **Exact-fragment edit of any existing note below the configured directory.** `obsidian_edit` takes a path, an `old_text` that must occur exactly
@@ -280,7 +282,7 @@ The installer prints the ready-to-paste `mcpServers` block, copies only the `obs
 (or 23.4+). `--dry-run`, `--ref`, `--version`, `--dir`, `--force`, `--skills-dir` and `--uninstall` are listed in
 `--help`.
 
-**The script installs the release it belongs to (0.25.22).** A copy fetched from a tag URL carries that tag's version and
+**The script installs the release it belongs to (0.26.22).** A copy fetched from a tag URL carries that tag's version and
 builds it, so the bundle, `version` and `ref` in `install.json` all describe the installer that was read — not whatever
 `main` happens to be now. The `main` URL installs the latest release; `--version <x.y.z>` moves between releases, and
 `--ref <branch>` builds a branch. An explicit `--version`/`--ref` wins over checkout autodetection, and `--source`
@@ -377,7 +379,8 @@ skills directories that exist: `~/.agents/skills` first, then OpenCode, Cline, K
 | [`obsidian-planning-review`](./skills/obsidian-planning-review/SKILL.md) | plan against fact: snapshots, revisions, growth, integrity, restore |
 
 Each lands as `<root>/<skill>/SKILL.md`. Unchanged copies are not rewritten; the switch in the settings screen removes
-all four directories. A runtime that only scans skills at startup needs a restart to pick them up.
+all four directories, and *Remove agent integration* removes them together with the MCP registrations. A runtime that
+only scans skills at startup needs a restart to pick them up.
 
 The official Obsidian skills are a separate upstream project, kept as the reference for the formats this plugin does not
 cover — [github.com/obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills) (`obsidian-markdown`,

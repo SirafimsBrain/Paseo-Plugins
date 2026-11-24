@@ -13,14 +13,14 @@ set -euo pipefail
 REPO="${OBSIDIAN_BRIDGE_REPO:-SirafimsBrain/Paseo-Plugins}"
 PLUGIN_SUBDIR="obsidian-bridge"
 
-# The release this script belongs to (0.25.22).
+# The release this script belongs to (0.26.22).
 #
 # `curl … | bash` from a tag URL fetches this file at that tag, so the version
 # here is the tag the caller asked for. The default source is therefore that
 # tag, not `main`: the build, `install.json`'s `version` and `ref` all describe
 # the release whose installer was run, however much `main` has moved since.
 # The release workflow refuses to publish a tag that disagrees with this value.
-SCRIPT_VERSION="0.25.22"
+SCRIPT_VERSION="0.26.22"
 
 DEFAULT_HOME="${HOME}/.agents/obsidian-bridge-mcp"
 SKILL_CORE="obsidian-bridge"

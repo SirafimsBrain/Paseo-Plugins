@@ -494,7 +494,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2296,3 +2296,42 @@ root entry points. `tests/installer.test.ts` runs the script as a shell user and
 without building the bundle.
 
 Still true: Linux first; macOS expected; Windows needs WSL until the installer is exercised there.
+
+### 0.26.22 — the agent integration can be removed
+
+The *Installation* card could report where the plugin registered itself, but nothing could take that back. Turning a
+switch off removed one artifact at a time, and an entry written under a name the current version no longer uses was
+invisible to every name-based lookup — exactly the state a rename of the MCP server, of a skill, or of the tool
+namespace leaves behind.
+
+`server/agent-integration-remove.ts` is now the single removal path, exposed as the
+`obsidian-bridge.remove-agent-integration` RPC and as *Remove agent integration* in the Installation card (two presses;
+the first arms the action, the second performs it). One call removes:
+
+- the plugin's entries from `~/.config/opencode/opencode.json` (or `.jsonc`), the Kilo config and
+  `~/.cline/data/settings/cline_mcp_settings.json`;
+- the four shipped skill directories from every skills root that exists;
+- the saved `obsidian-bridge` MCP server from the agent records Paseo persists under
+  `$PASEO_HOME/agents/<workspace>/<agentId>.json`.
+
+**Ownership decides, not the name.** `server/owned-entry.ts` treats an entry as the plugin's when it is registered under
+the plugin's server name *or* when its command/args point inside `$PASEO_HOME/plugins/obsidian-bridge`. The second rule
+is what makes the action work after a rename: the old key is gone from the code, the path the old version wrote is not.
+Skills get the same treatment through the marker every shipped `SKILL.md` already carries
+(`<!-- installed-by: obsidian-bridge -->`), so a renamed skill directory is still removed while another plugin's skill
+is untouched. Both writers keep their previous guarantees: every other key and server is preserved, the write is atomic
+(temp file + rename, mode preserved), and a config file that does not parse is reported rather than rewritten.
+
+The screen turns `injectIntoAgents`, `registerOpencodeMcp`, `registerClineMcp` and `installAgentSkill` off in the same
+step as the RPC call. Without that the loader, the settings listener and the five-minute currency check would install
+the same entries again within minutes, and the button would look broken. Turning a switch back on is the way to
+reinstall that part.
+
+Known limitation, documented in `__compatibility.md`: the agent record is the file Paseo reads on the next open, but a
+live agent's configuration also lives in the daemon's memory, so a later save can write the entry back. A running session
+keeps the tools it started with until it is reopened.
+
+No MCP tool, input, setting or schema version changed (the settings schema stays 4). Tests:
+`tests/agent-integration-remove.test.ts` — removal from all three config files, a renamed server key and a renamed skill
+directory both found, foreign entries preserved, the second call is a no-op, and an unparseable agent record is left
+alone; `tests/agent-skill.test.ts` keeps the switch-off path honest.

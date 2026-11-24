@@ -13,6 +13,7 @@ import {
   agentIntegrationStatus,
   checkPlanDirectory,
   reindexVault,
+  removeAgentIntegration,
   testEnrichment,
   vaultStatus,
   verifyVault,
@@ -47,10 +48,14 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
   const reindexRpc = useRpc(reindexVault);
   const testRpc = useRpc(testEnrichment);
   const integrationRpc = useRpc(agentIntegrationStatus);
+  const removeIntegrationRpc = useRpc(removeAgentIntegration);
   const planRpc = useRpc(checkPlanDirectory);
 
   const [integration, setIntegration] = useState<AgentIntegrationStatus | null>(null);
   const [checkingIntegration, setCheckingIntegration] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  const [removingIntegration, setRemovingIntegration] = useState(false);
+  const [removalMessage, setRemovalMessage] = useState<string | null>(null);
 
   const refreshIntegration = useCallback(async () => {
     setCheckingIntegration(true);
@@ -187,6 +192,41 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
   const values = settings.values;
   const patch = (partial: Partial<typeof values>) => {
     void settings.save({ ...values, ...partial }, settings.revision);
+  };
+
+  /**
+   * Removes every artifact the plugin wrote into agent configuration, in two
+   * presses: the first arms the action, the second performs it. The switches
+   * are turned off in the same step — otherwise the loader, the settings
+   * listener and the five-minute check would install the same entries again.
+   */
+  const removeIntegration = async () => {
+    if (!confirmingRemoval) {
+      setConfirmingRemoval(true);
+      setRemovalMessage(null);
+      return;
+    }
+    setConfirmingRemoval(false);
+    setRemovingIntegration(true);
+    try {
+      const result = await removeIntegrationRpc({});
+      setIntegration(result.status);
+      patch({
+        injectIntoAgents: false,
+        registerOpencodeMcp: false,
+        registerClineMcp: false,
+        installAgentSkill: false,
+      });
+      setRemovalMessage(
+        result.ok
+          ? `Removed ${result.removed.length} item(s). The integration switches are now off.`
+          : `Removed ${result.removed.length} item(s); ${result.errors.length} could not be removed: ${result.errors.join("; ")}`,
+      );
+    } catch (cause) {
+      setRemovalMessage(`Removal failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setRemovingIntegration(false);
+    }
   };
 
   return (
@@ -585,6 +625,24 @@ export function ObsidianBridgeSettingsScreen({ theme }: PluginSurfaceProps) {
             onPress={() => void refreshIntegration()}
             disabled={checkingIntegration}
           />
+          <SettingsAction
+            label="Remove agent integration"
+            hint="Deletes what this plugin wrote into the agents' configuration: the OpenCode, Kilo and Cline MCP entries, the installed skill directories, and the MCP server saved in the agents it created. Turns the four integration switches off so nothing is written back; turn one on to install that part again. Press twice to confirm."
+            actionLabel={
+              removingIntegration
+                ? "Removing…"
+                : confirmingRemoval
+                  ? "Press again to remove"
+                  : "Remove"
+            }
+            onPress={() => void removeIntegration()}
+            disabled={removingIntegration}
+          />
+          {removalMessage ? (
+            <Text style={{ color: fgMuted, fontSize: font(10), ...uiFontStyle }} numberOfLines={4}>
+              {removalMessage}
+            </Text>
+          ) : null}
           {integration
             ? integration.configs.map((row) => (
                 <Text

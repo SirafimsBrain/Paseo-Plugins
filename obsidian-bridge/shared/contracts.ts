@@ -272,6 +272,32 @@ export const agentIntegrationStatus = defineRpc({
   output: agentIntegrationStatusSchema,
 });
 
+/**
+ * Result of removing the plugin's integration from the agents: what was
+ * deleted, what could not be, and the registration state afterwards (so the
+ * screen refreshes without a second round trip).
+ */
+export const agentIntegrationRemovalSchema = z.object({
+  ok: z.boolean(),
+  removed: z.array(z.string()),
+  errors: z.array(z.string()),
+  status: agentIntegrationStatusSchema,
+});
+
+export type AgentIntegrationRemoval = z.infer<typeof agentIntegrationRemovalSchema>;
+
+/**
+ * Removes every entry the plugin wrote into agent configuration: the OpenCode,
+ * Kilo and Cline MCP registrations, the installed skill directories, and the
+ * saved MCP server of the agents this plugin created. The screen turns the
+ * integration switches off at the same time, so nothing is written back.
+ */
+export const removeAgentIntegration = defineRpc({
+  name: "obsidian-bridge.remove-agent-integration",
+  input: z.object({}),
+  output: agentIntegrationRemovalSchema,
+});
+
 /** Runs a retrieval query through the same engine the agents use. */
 export const searchVaultRpc = defineRpc({
   name: "obsidian-bridge.search",

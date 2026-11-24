@@ -286,16 +286,44 @@ export function installAgentSkill(): { ok: boolean; targets: string[]; error?: s
   return { ok: true, targets: result.repaired };
 }
 
-/** Removes the plugin's skills from every root that has a copy. */
+/** Marker every shipped `SKILL.md` carries, so a renamed copy is still recognised. */
+const SKILL_MARKER = "<!-- installed-by: obsidian-bridge -->";
+
+/** True when `dir` holds a `SKILL.md` this plugin installed. */
+function installedByPlugin(dir: string): boolean {
+  const text = readIfExists(path.join(dir, SKILL_FILE));
+  return text !== null && text.includes(SKILL_MARKER);
+}
+
+/**
+ * Removes the plugin's skills from every root that has a copy.
+ *
+ * A directory is removed when its name is one of `SKILL_NAMES` or when its
+ * `SKILL.md` carries the plugin's marker. The marker is what keeps removal
+ * useful after a skill is renamed: the next version no longer knows the old
+ * directory name, but it still recognises the file it wrote. A skill without
+ * the marker and with another name is never touched.
+ */
 export function removeAgentSkill(): { removed: string[]; errors: string[] } {
   const removed: string[] = [];
   const errors: string[] = [];
+  const ownNames = new Set(SKILL_NAMES);
   for (const root of skillRoots()) {
     if (!isDirectory(root.dir)) continue;
-    for (const name of SKILL_NAMES) {
+    let entries: string[];
+    try {
+      entries = fs
+        .readdirSync(root.dir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch (cause) {
+      errors.push(`${root.dir}: ${cause instanceof Error ? cause.message : String(cause)}`);
+      continue;
+    }
+    for (const name of entries) {
       const skillDir = path.join(root.dir, name);
       if (path.basename(skillDir) !== name) continue;
-      if (!isDirectory(skillDir)) continue;
+      if (!ownNames.has(name) && !installedByPlugin(skillDir)) continue;
       try {
         fs.rmSync(skillDir, { recursive: true, force: true });
         removed.push(skillDir);

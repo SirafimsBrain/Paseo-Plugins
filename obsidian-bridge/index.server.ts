@@ -7,6 +7,7 @@ import {
   openInObsidian,
   readNote,
   reindexVault,
+  removeAgentIntegration as removeAgentIntegrationRpc,
   searchVaultRpc,
   statusStream,
   testEnrichment,
@@ -16,6 +17,7 @@ import {
 import { searchNotesForAttachment } from "./shared/attachments";
 import { obsidianBridgeSettings, runtimeSettingsOf, type RuntimeSettings } from "./shared/settings";
 import { readSavedMcpServers, savedServersInclude } from "./server/agent-record";
+import { removeAgentIntegration } from "./server/agent-integration-remove";
 import {
   DEFAULT_AGENT_INSTRUCTIONS,
   instructionApplies,
@@ -451,7 +453,7 @@ export default function contribute(server: PluginServerContext) {
 
   // "Is the plugin actually installed for my agents?" — the settings screen
   // asks this directly instead of leaving the user to inspect config files.
-  server.handle(agentIntegrationStatus, async () => {
+  function integrationStatus() {
     const opencode = opencodeMcpStatus();
     const kilo = kiloMcpStatus();
     const cline = clineMcpStatus();
@@ -485,6 +487,27 @@ export default function contribute(server: PluginServerContext) {
       ],
       skills: skillStatuses(),
       skillSource: agentSkillStatus().source,
+    };
+  }
+
+  server.handle(agentIntegrationStatus, async () => integrationStatus());
+
+  // The Installation card's removal action (0.26.22). The client turns the
+  // integration switches off first, so the loader, the settings listener and
+  // the five-minute check do not install the same entries again.
+  server.handle(removeAgentIntegrationRpc, async () => {
+    const outcome = removeAgentIntegration();
+    for (const line of outcome.removed) {
+      console.log(`[obsidian-bridge] agent integration removed: ${line}`);
+    }
+    for (const line of outcome.errors) {
+      console.warn(`[obsidian-bridge] agent integration not removed: ${line}`);
+    }
+    return {
+      ok: outcome.errors.length === 0,
+      removed: outcome.removed,
+      errors: outcome.errors,
+      status: integrationStatus(),
     };
   });
 

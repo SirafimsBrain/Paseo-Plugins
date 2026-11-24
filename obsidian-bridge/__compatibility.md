@@ -2,6 +2,28 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.26.22 — removing the agent integration (2026-11-24)
+
+Feature release (0.25.22 → 0.26.22). No MCP tool, input or setting is added or changed; the settings screen gains one
+removal action and the Installation card can now undo everything it reports.
+
+| Surface | Behaviour |
+| --- | --- |
+| new RPC | `obsidian-bridge.remove-agent-integration` removes the OpenCode, Kilo and Cline MCP registrations, the four installed skill directories and the saved MCP server of the agents this plugin created; it answers `{ ok, removed, errors, status }`, so the screen refreshes in one round trip |
+| ownership | an entry is removed when it carries the plugin's name **or** its launch points into `$PASEO_HOME/plugins/obsidian-bridge`, so an entry left under an old name by a renamed server is still found; a foreign server under another name is never removed |
+| skills | a directory is removed when its name is one of the shipped skills **or** its `SKILL.md` carries `<!-- installed-by: obsidian-bridge -->`, so a renamed skill is still found; a skill without the marker is untouched |
+| saved agents | `config.mcpServers` in `$PASEO_HOME/agents/<workspace>/<agentId>.json` loses the plugin's entry; every other key, server and metadata stays; an unparseable record is skipped, a write failure is reported |
+| switches | the screen turns `injectIntoAgents`, `registerOpencodeMcp`, `registerClineMcp` and `installAgentSkill` off in the same step, so the loader, the settings listener and the five-minute check do not install the entries again |
+| confirmation | the action takes two presses (`Press again to remove`), and reports how many items were removed or which ones failed |
+
+Limitation, stated in the documentation: the record is the file Paseo reads on the next open. Paseo keeps a live
+agent's configuration in memory, so a later save from the daemon can write the entry back; a running session keeps the
+tools it already started with until it is reopened.
+
+Evidence (Linux, Node 24.20.0): `npm run typecheck` exit 0; full `npm test` green; `tests/agent-integration-remove.test.ts`
+covers removal from all three config files, a renamed skill and a renamed server entry, preservation of foreign entries,
+idempotence and the untouched unparseable record.
+
 ## Plugin 0.25.22 — standalone installation hardening (2026-11-23)
 
 Feature/bugfix release (0.24.22 → 0.25.22). The Paseo plugin, the 31 MCP tool names and their inputs are unchanged; the
