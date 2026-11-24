@@ -64,7 +64,20 @@ import `ddgs`:
 
 Candidates without the library are skipped (a system Python without `ddgs`
 first on `PATH` is no problem), and the resolved interpreter is cached for
-the process lifetime.
+the process lifetime. Run it once: if a search reports *"Python with the
+`ddgs` library was not found"* although the library is installed, repeat the
+search or pin `Python path` to the interpreter that has it (e.g.
+`~/venv/bin/python`) — the discovery walk can miss on a busy host.
+
+### Verified providers (2026-11-24)
+
+Checked live against the real services through this plugin's own adapters:
+**DuckDuckGo** (HTML), **Tavily** (with a key) and **DDGS Python** work;
+DuckDuckJS returned no results from this machine because all five of its
+engines refuse anonymous scraping there, and the configured SearXNG instance
+timed out. DDGS Python works but can intermittently report its library as
+missing (see above). Per-provider notes and the workarounds are in
+[`__status.md`](./__status.md).
 
 After install: open **Settings → Plugins → Bunny Search** — the default **DuckDuckJS** provider works out of the box (no API key, no self-hosted service). To use another backend, pick the search service and configure its URL/key, then press **Test connection**. For SearXNG, point `SearXNG base URL` at your instance's JSON endpoint (e.g. `http://127.0.0.1:8888/search` — the same default as the reference MCP). Optionally set `Search interface URL` to the human-facing page of your instance (defaults to the API URL's origin) and use **Open in browser** to browse it. New agents get the `web_search` tool automatically.
 
@@ -107,6 +120,6 @@ The host keeps the authoritative settings in its own store (exposed to the plugi
 
 ## Compatibility
 
-Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.17.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**. The floor moved to `>=0.17.0` with **0.8.7**: `appendSystemPrompt` and `focusHost` exist only from 0.17.0, and a 0.16.x daemon rejects an `agent.open.before` result that carries `appendSystemPrompt` (the same failure mode 0.7.6 fixed for `metadata`), so the plugin must not load there. Every `@deprecated` member in the 0.17.1 SDK is unused here (`addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, panel `context`, `server.before`/`server.on`, the `client/react-native` entry). The shared OpenCode-service guard is still required by the 0.17.1 host. Current version: **0.8.7** — implements the five 0.17.x improvements: agent instructions via `appendSystemPrompt`, `focusHost` links from *Recent agents*, a `/bunny-search` slash command, an agent panel and the sidebar status dot (no new dependency; 0.7.7 was the 0.17.1 verification patch, 0.7.6 fixed the `agent.open.before` `metadata` result).
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.17.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**. The floor moved to `>=0.17.0` with **0.8.7**: `appendSystemPrompt` and `focusHost` exist only from 0.17.0, and a 0.16.x daemon rejects an `agent.open.before` result that carries `appendSystemPrompt` (the same failure mode 0.7.6 fixed for `metadata`), so the plugin must not load there. Every `@deprecated` member in the 0.17.1 SDK is unused here (`addSurface`, `addSidebarItem`, `openSurface`, `SettingsGroup`, panel `context`, `server.before`/`server.on`, the `client/react-native` entry). The shared OpenCode-service guard is still required by the 0.17.1 host. Current version: **0.9.8** — a documentation patch over **0.9.7** (§23 DDGS engine fallback): it records the 2026-11-24 provider verification. **0.8.7** implements the five 0.17.x improvements: agent instructions via `appendSystemPrompt`, `focusHost` links from *Recent agents*, a `/bunny-search` slash command, an agent panel and the sidebar status dot (no new dependency; 0.7.7 was the 0.17.1 verification patch, 0.7.6 fixed the `agent.open.before` `metadata` result).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

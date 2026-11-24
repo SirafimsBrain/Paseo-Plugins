@@ -1,6 +1,6 @@
 # Compatibility — bunny-search
 
-Current: plugin **0.9.7**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.9.8**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
 Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration
 needed and **no deprecated API in use**; see *Plugin 0.8.7 — the 0.17.x improvements*,
 *Plugin 0.7.7 — Paseo 0.17.1 pass*,
@@ -8,6 +8,16 @@ needed and **no deprecated API in use**; see *Plugin 0.8.7 — the 0.17.x improv
 0.16.0 capabilities adopted* and *Plugin 0.6.5 — Paseo 0.16.0 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.9.8 — provider verification patch (2026-11-24)
+
+Documentation-only patch (0.9.7 → 0.9.8, third digit +1). No SDK surface, host
+contract, settings, argument list or version floor changed, so the Paseo
+compatibility verdict of 0.8.7/0.9.7 stands unmodified. It records which search
+providers were verified live on 2026-11-24 — DuckDuckGo (HTML), Tavily and DDGS
+Python work; DuckDuckJS is blocked upstream from this machine — and the
+intermittent *"ddgs library not found"* report from the Python provider. Details:
+[`__status.md`](./__status.md), technical notes: [`__doc.md`](./__doc.md) §24.
 
 ## Plugin 0.8.7 — the 0.17.x improvements (2026-11-22)
 

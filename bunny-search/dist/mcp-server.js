@@ -71246,7 +71246,7 @@ function parseSettingsFile(filePath = settingsFilePath()) {
 
 // server/mcp-server.ts
 var PROTOCOL_VERSION = "2024-11-05";
-var SERVER_VERSION = "0.9.7";
+var SERVER_VERSION = "0.9.8";
 function writeMessage(message) {
   process.stdout.write(`${JSON.stringify(message)}
 `);

@@ -1520,3 +1520,45 @@ a reachable SearXNG instance, or one of the keyed providers (Tavily, Exa, Kagi,
 Perplexity, Brave). **Not verified:** behaviour on a host where the engines are
 not blocked, and the two-pass walk against a permanently blocked engine set
 beyond the unit-level error mapping.
+
+## 24. Plugin 0.9.8 — provider verification snapshot (2026-11-24)
+
+Documentation-only patch (0.9.7 → 0.9.8, third digit +1): no code, settings,
+argument list, output shape or version floor changed, so §23 remains the
+description of the adapter's behaviour. This section records what was actually
+exercised against real services so a later reader knows which provider paths
+have live evidence and which do not.
+
+**Method.** Provider checks were run through the plugin's own provider code
+(`Test connection` in Settings → Plugins → Bunny Search and real searches from
+the quick-search box), not through mocks, on the same host that ran the
+`tests/providers.test.ts` suite. The suites mock the libraries and therefore
+prove normalisation and error mapping only; they cannot detect an upstream that
+refuses anonymous requests.
+
+**Results.**
+
+| Provider | Live result | Note |
+| -------- | ----------- | ---- |
+| DuckDuckGo (HTML endpoint) | works | real results, redirect links unwrapped |
+| Tavily | works | keyed API, authenticated search returns results |
+| DDGS Python | works, intermittent availability check | real results via the §23 fallback; a search can still report the library as missing |
+| DuckDuckJS | no results | every bundled engine blocked from this IP (§23, *Known issues* in `__status.md`) |
+| SearXNG | not reachable | configured `http://omnirouter/search` times out |
+
+**The intermittent "library not found" report.** `checkDdgsAvailability()` runs
+discovery, which walks the candidate interpreters (§4) and probes each one with
+`import ddgs` under a 15 s timeout; only a successful candidate is cached for
+the process lifetime, and a cached interpreter that later fails to import is
+dropped and rediscovered once. When the walk itself misses — a `PATH` `python3`
+ahead of the venv answering slowly or the venv probe losing its budget on a busy
+host — the call surfaces the discovery failure ("Python with the 'ddgs' library
+was not found … Searched: …") even though an earlier search succeeded. Repeating
+the search normally recovers, and pinning the `Python path` setting to the
+interpreter that has the library (here `~/venv/bin/python`) avoids the symptom
+entirely. 0.9.8 documents this; it does not change the discovery logic.
+
+**Not verified.** The three keyed providers that were not exercised this round
+(Exa, Kagi, Perplexity), the multi-engine providers on an unblocked egress IP,
+and SearXNG against a reachable instance. Those paths are covered by unit tests
+only.
