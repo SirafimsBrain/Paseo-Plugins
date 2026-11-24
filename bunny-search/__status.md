@@ -19,6 +19,21 @@ Compatible; additive-only SDK diff and no deprecated API in use.
 - **0.7.7** — the 0.17.1 verification release (0.17.1 keeps the shared
   OpenCode-service restriction).
 
+## Known issues
+
+- **2026-11-24 — DuckDuckJS returns no results from this machine.** All five engines
+  refuse anonymous scraping: DuckDuckGo answers HTTP 202 with its anti-bot challenge
+  page, Google serves an `enablejs` interstitial whose markup matches none of the
+  library's selectors, Brave returns 429, Mojeek 403 and Yahoo 500. The
+  `@overclockedsenku/duckduckjs` dependency is already at its latest published version
+  (26.1.0, 2026-04-01), so no upgrade fixes this. *Test connection* reports it as
+  "engines answered but returned no results". Workarounds: a `Proxy URL` with a clean
+  egress IP, the user-installed DDGS Python provider (`pip install ddgs`, then select
+  *DDGS Python*), or a reachable SearXNG instance (the configured
+  `http://omnirouter/search` timed out on 2026-11-24). Not a plugin defect — the
+  provider code is unchanged and `tests/providers.test.ts` (49 tests) passes; those
+  tests mock the library, so they do not detect upstream blocking.
+
 ## Maintenance notes
 
 - Keep this file for release-by-release status notes, known gaps and anything a reader
