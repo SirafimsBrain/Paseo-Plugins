@@ -183,7 +183,7 @@ curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/ob
 
 # Pin another release explicitly
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \
-  | bash -s -- --version 0.26.22
+  | bash -s -- --version 0.26.23
 
 # Remove the installation and the skills it recorded
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \

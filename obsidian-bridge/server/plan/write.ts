@@ -582,6 +582,25 @@ export function planCreateNode(
       );
     }
     if (!parent) {
+      // A leaf has no children, so nothing below one can ever resolve a parent.
+      // Answering "create the parent first" sent the caller looking for a
+      // missing node instead of the leaf in the way (live test D11).
+      const parentFolder =
+        kind === "leaf"
+          ? path.posix.dirname(target.relPath)
+          : path.posix.dirname(path.posix.dirname(target.relPath));
+      const blocker =
+        parentFolder.length > 0 && parentFolder !== "."
+          ? tree.nodes.get(`${root.relPath}/${parentFolder}.md`)
+          : undefined;
+      if (blocker && kindOf(blocker) === "leaf") {
+        return fail(
+          `'${blocker.relPath}' is a leaf and cannot have children, so '${target.relPath}' ` +
+            "cannot be created under it. Create the node beside the leaf, or change that " +
+            "leaf's kind first with `plan_update_node`.",
+          { suggestions: [blocker.relPath] },
+        );
+      }
       return fail(
         `'${target.relPath}' would have no parent. Create the parent node first, or pass ` +
           "`parent` explicitly; a tree node is never an orphan.",
@@ -1285,6 +1304,7 @@ export function planHistory(
     names = [];
   }
 
+  const liveKind = kindOf(found.node);
   const snapshots: Array<{
     version: number;
     revision: number;
@@ -1293,6 +1313,10 @@ export function planHistory(
     at: string | null;
     actor: string | null;
     bytes: number;
+    kind: string | null;
+    /** `false` for a snapshot taken under another kind: no restore path exists. */
+    restorable: boolean;
+    restore_blocked: string | null;
   }> = [];
 
   for (const name of names) {
@@ -1310,6 +1334,11 @@ export function planHistory(
     } catch {
       continue;
     }
+    // A kind change is a new version, and `plan_restore` refuses a snapshot of
+    // another kind; saying which entries that affects turns a surprise refusal
+    // into a visible limit of the history (live test D5).
+    const kind = stringField(frontmatter.kind);
+    const restorable = liveKind === null || kind === null || kind === liveKind;
     snapshots.push({
       version: Number.parseInt(match[2], 10),
       revision: Number.parseInt(match[3], 10),
@@ -1318,6 +1347,12 @@ export function planHistory(
       at: stringField(frontmatter.updated),
       actor: stringField(frontmatter.updated_by),
       bytes,
+      kind,
+      restorable,
+      restore_blocked: restorable
+        ? null
+        : `The snapshot is a ${String(kind)} and the live node is a ${String(liveKind)}: a kind ` +
+          "change is a new version, not a revision, so this content is readable but not restorable.",
     });
   }
   snapshots.sort((left, right) => left.version - right.version || left.revision - right.revision);
@@ -1369,7 +1404,9 @@ export function planHistory(
   return json({
     ok: true,
     path: vaultPath,
+    kind: liveKind,
     count: snapshots.length,
+    restorable_count: snapshots.filter((entry) => entry.restorable).length,
     snapshots: window,
     note:
       snapshots.length === 0

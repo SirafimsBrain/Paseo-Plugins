@@ -125,6 +125,42 @@ describe("plan_read overview", () => {
     expect(missing.text).toContain("no plan documents");
   });
 
+  it("counts documents for the filtered project and names a goal's materialised trunk", async () => {
+    const goalPath = "Workspaces/centurion/_goals/session-persistence.md";
+    const approvedGoal = PLAN_FIXTURE[goalPath]
+      .replace("status: proposed", "status: approved")
+      .replace(
+        "materialized: null",
+        'materialized: "[[Workspaces/centurion/backend/backend|backend]]"',
+      );
+    const created = planWorkspace({ ...SECOND_PROJECT, [goalPath]: approvedGoal });
+
+    const full = await read(created.vault, {});
+    const all = full.structuredContent as {
+      documents: number;
+      projects: Array<{ project: string; counts: { nodes: number } }>;
+    };
+    const focused = await read(created.vault, { project: "centurion" });
+    const only = focused.structuredContent as {
+      documents: number;
+      projects: Array<{ project: string; counts: { nodes: number } }>;
+    };
+    const centurion = all.projects.find((row) => row.project === "centurion")!;
+    expect(only.projects.map((row) => row.project)).toEqual(["centurion"]);
+    expect(only.documents).toBe(centurion.counts.nodes);
+    expect(only.documents).toBeLessThan(all.documents);
+
+    const goal = await read(created.vault, {
+      path: "centurion/_goals/session-persistence",
+    });
+    const result = goal.structuredContent as {
+      goal: unknown;
+      materialized: { path: string } | null;
+    };
+    expect(result.goal).toBeNull();
+    expect(result.materialized?.path).toBe("centurion/backend/backend.md");
+  });
+
   it("does not treat `_index.md` or a snapshot as a project node", async () => {
     const created = planWorkspace({ "Workspaces/_index.md": "# Planning\n" });
     const outcome = await read(created.vault, {});

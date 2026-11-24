@@ -1,6 +1,6 @@
 # Status — obsidian-bridge
 
-Current: plugin **0.26.22**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
+Current: plugin **0.26.23**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
 verified against **Paseo 0.17.1 (SDK 0.17.3, 2026-11-23)** — **compatible**.
 
 This file carries the status notes that used to fill the *Status* column of the root
@@ -14,6 +14,13 @@ Compatible.
 
 ## Release notes
 
+- **0.26.23** — fixes what the live planning test of 0.26.22 found: `null` reaches
+  `brief`/`payload`/`plan` schemas, a filtered overview counts only its project,
+  plan notes open with their name and description, incidents show the leaves they
+  block, `notes` is empty instead of `—`, `plan_history` marks snapshots that a
+  kind change made unrestorable, a leaf in the way is named, and semantic search
+  reports `unavailable` instead of `done` when the installation cannot load the
+  model (with correct vector counters and checkout-aware resolution).
 - **0.26.22** — adds a *Remove agent integration* action that deletes the
   OpenCode/Kilo/Cline MCP entries, the installed skill directories and the saved MCP
   server of existing agents (finding entries an older name left behind by launch path and

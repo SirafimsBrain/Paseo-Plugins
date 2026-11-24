@@ -299,6 +299,12 @@ export interface PlanReadResult {
   blockedBy?: Array<{ incident: NodeSummary; status: string | null; blocking: boolean }>;
   blocks?: Array<{ target: NodeSummary }>;
   goal?: NodeSummary | null;
+  /**
+   * The trunk an approved goal was materialised into. `goal` on a goal document
+   * is null (a goal is not a node), so without this a reader of the goal could
+   * not see where its work landed (live test D9).
+   */
+  materialized?: NodeSummary | null;
   /** The goal's own wording and step plan, kept as written in the file. */
   formal_text?: string | null;
   plan?: unknown;
@@ -375,10 +381,17 @@ function overview(tree: PlanTree, projectFilter: string | null): PlanReadResult 
       };
     });
 
+  // `documents` describes the answer: a filtered overview counted the whole
+  // planning root and read as if one project held every node (live test D3).
+  const documents =
+    projectFilter === null
+      ? tree.nodes.size
+      : rows.reduce((total, row) => total + row.counts.nodes, 0);
+
   return {
     planning_available: true,
     root: tree.root.relPath,
-    documents: tree.nodes.size,
+    documents,
     projects: rows,
     skipped: tree.skipped,
   };
@@ -520,6 +533,7 @@ export function planRead(
   }
 
   const goalNode = resolveLink(tree, node.frontmatter.goal);
+  const materializedNode = resolveLink(tree, node.frontmatter.materialized);
 
   return {
     result: {
@@ -548,6 +562,7 @@ export function planRead(
       blockedBy,
       blocks,
       goal: goalNode ? summarize(goalNode) : null,
+      materialized: materializedNode ? summarize(materializedNode) : null,
       formal_text: stringField(node.frontmatter.formal_text),
       plan: node.frontmatter.plan ?? null,
       brief: node.frontmatter.brief ?? null,

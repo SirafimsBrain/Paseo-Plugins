@@ -106,8 +106,9 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
         "which project folder you own and whether writes are enabled, and creates nothing. The " +
         "result carries `planning_available`, `root` (the vault-relative `<planRoot>/<project>`), " +
         "`project.name` — the first segment every other `plan_*` path begins with — " +
-        "`workspaceId` (written into each node's YAML), `writesEnabled`, `projects`, `documents`, " +
-        "`limits` and the hidden `systemDirs`. `empty: true` with `planning_available: true` is a " +
+        "`workspaceId` (written into each node's YAML), `writesEnabled`, `projects`, `documents` " +
+        "(live documents under the whole planning root, every project), `limits` and the hidden " +
+        "`systemDirs`. `empty: true` with `planning_available: true` is a " +
         "normal start: create the root with `plan_create_node`. `planning_available: false` means " +
         "stop and report `reason`/`error`; no planning tool creates a missing planning directory.",
     ),
@@ -123,8 +124,9 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
         "counts, counts by kind, open incidents, proposed and approved goals). With `path` it " +
         "returns one node in context: `node` (kind, name, status, `version`, `revision`), " +
         "`parent`, `ancestors`, `children`, `siblings`, `influences` and `influencedBy`, " +
-        "`blockedBy` and `blocks`, `goal`, `formal_text`, `plan`, `brief`, `payload`, `notes`, " +
-        "`growth`, `beeCycle` and `unresolved`. It does not list snapshots — that is " +
+        "`blockedBy` and `blocks`, `goal`, `materialized`, `formal_text`, `plan`, `brief`, " +
+        "`payload`, `notes`, `growth`, `beeCycle` and `unresolved`. An overview's `documents` " +
+        "counts the nodes of the projects it returns. It does not list snapshots — that is " +
         "`plan_history`. A path that resolves to nothing returns `suggestions` with real node " +
         `paths. ${PATH_FORMS}`,
     ),
@@ -254,8 +256,14 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
         path: { type: "string", description: "Node path relative to the planning root." },
         description: { type: "string", description: "New short description." },
         name: { type: "string", description: "New name." },
-        brief: { type: "object", description: "Replacement leaf brief, or null to remove it." },
-        payload: { type: "object", description: "Replacement payload, or null to remove it." },
+        brief: {
+          type: ["object", "null"],
+          description: "Replacement leaf brief; `null` removes the field.",
+        },
+        payload: {
+          type: ["object", "null"],
+          description: "Replacement payload; `null` removes the field.",
+        },
         notes: { type: "string", description: "Replacement text for `## Заметки`; a change on its own." },
         kind: {
           type: "string",
@@ -307,8 +315,11 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
     title: "List or read plan snapshots",
     description: planned(
       "Read a node's change log: every write left one snapshot, so the list (newest first) is what " +
-        "happened to this node — version, revision, reason, time and actor. Without `version` and " +
-        "`revision` it lists the snapshots of one node; with both it returns that snapshot's full " +
+        "happened to this node — version, revision, kind, reason, time and actor. Each entry says " +
+        "`restorable`, and a snapshot taken under another `kind` carries `restorable: false` with " +
+        "the reason: a kind change is a new version, and `plan_restore` refuses those. Without " +
+        "`version` and `revision` it lists the snapshots of one node; with both it returns that " +
+        "snapshot's full " +
         "content, including `## Заметки`. This is the only tool that reads `__history`: a snapshot " +
         "is immutable, and restoring one is `plan_restore`, not an edit. The path is the live " +
         "node's, in either form (a branching node's folder works); an unknown node is an error " +
@@ -431,7 +442,7 @@ export const PLAN_TOOLS: McpToolDefinition[] = [
         name: { type: "string", description: "Goal title; required when creating." },
         formal_text: { type: "string", description: "The formal statement of the goal." },
         plan: {
-          type: "array",
+          type: ["array", "null"],
           description: "Steps as objects `{id?, title, description?}` or plain titles; null clears them.",
         },
         project: {

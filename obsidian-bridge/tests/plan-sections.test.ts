@@ -69,6 +69,26 @@ describe("renderPlanBody", () => {
     const once = renderPlanBody(document.frontmatter, document.body);
     expect(renderPlanBody(document.frontmatter, once)).toBe(once);
   });
+
+  it("opens with the name and description, so the note reads without Properties", () => {
+    const document = documentOf(LEAF);
+    const body = renderPlanBody(document.frontmatter, document.body);
+    expect(body.startsWith(`# ${String(document.frontmatter.name)}`)).toBe(true);
+    expect(body.indexOf("## Влияния")).toBeGreaterThan(0);
+    expect(body.slice(0, body.indexOf("## Влияния"))).toContain(
+      String(document.frontmatter.description),
+    );
+  });
+
+  it("lists an incident's blocked leaves in ## Блокировки", () => {
+    const body = renderPlanBody({ blocks: ["[[Workspaces/a/b/leaf|leaf]]"], blocked_by: [] }, "");
+    expect(sectionBody(body, "Блокировки")).toContain("- [[Workspaces/a/b/leaf|leaf]]");
+  });
+
+  it("treats the empty-section placeholder as no notes", () => {
+    expect(extractNotes("## Заметки\n\n—")).toBe("");
+    expect(extractNotes("## Заметки\n\nReal text.")).toBe("Real text.");
+  });
 });
 
 describe("bodyMatchesFrontmatter", () => {
@@ -85,6 +105,13 @@ describe("bodyMatchesFrontmatter", () => {
       "— resolved —",
     );
     expect(bodyMatchesFrontmatter({ frontmatter: document.frontmatter, body })).toBe(false);
+  });
+
+  it("accepts a file written before the opening existed", () => {
+    const document = documentOf(LEAF);
+    const rendered = renderPlanBody(document.frontmatter, document.body);
+    const legacy = rendered.slice(rendered.indexOf("## Влияния"));
+    expect(bodyMatchesFrontmatter({ frontmatter: document.frontmatter, body: legacy })).toBe(true);
   });
 
   it("ignores trailing whitespace and blank-line differences", () => {

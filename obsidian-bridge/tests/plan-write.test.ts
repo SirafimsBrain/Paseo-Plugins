@@ -35,6 +35,22 @@ async function call(
 }
 
 describe("plan_create_node", () => {
+  it("names the leaf in the way when a child path points below one", async () => {
+    const created = workspace();
+    await call(created, "plan_create_node", {
+      path: "centurion/backend/auth/extra",
+      kind: "leaf",
+      name: "Extra",
+    });
+    const refused = await call(created, "plan_create_node", {
+      path: "centurion/backend/auth/extra/child",
+      kind: "leaf",
+      name: "Child",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("'centurion/backend/auth/extra.md' is a leaf and cannot have children");
+  });
+
   it("creates a trunk as v1 r1, links it into the root and journals it", async () => {
     const created = workspace();
     const outcome = await call(created, "plan_create_node", {

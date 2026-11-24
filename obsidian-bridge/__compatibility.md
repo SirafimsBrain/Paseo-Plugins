@@ -2,6 +2,35 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.26.23 — planning readability and semantic availability (2026-11-24)
+
+Bugfix release (0.26.22 → 0.26.23). No tool is added or removed; four inputs gain a documented `null` form, four outputs
+gain a field, and the generated note body gains an opening. Everything below comes from the live planning test of
+0.26.22 (`obsidian-bridge-live-test-report.md`).
+
+| Surface | Behaviour |
+| --- | --- |
+| `brief`, `payload` (`plan_update_node`) | the schema accepts `null` (`type: ["object", "null"]`), so a client no longer drops it before the call; the field is then deleted from the frontmatter, which is what 0.26.22 already did once a `null` reached the handler |
+| `plan` (`plan_goal`) | same `null` form, so "clear the steps" reaches the tool |
+| `plan_read` overview | `documents` counts the projects the answer returns; a `project` filter no longer reports the whole planning root (D3). `plan_scope.documents` is unchanged and documented as the whole root |
+| `plan_read` node | new `materialized` (the trunk an approved goal was materialised into), so a goal can be followed from the goal itself (D9) |
+| note body | generated bodies open with `# <name>` and the description paragraph before `## Влияния`; snapshots already wrote the title, so the live file is no longer less readable than its history (D4). `plan_validate` compares from the first generated section, so files written by 0.26.22 are not reported as divergent |
+| `## Блокировки` | lists `blocked_by` and `blocks`, so an incident shows the leaves it blocks instead of `—` (D10) |
+| `plan_read.notes` | the empty-section placeholder `—` is returned as `""`, not as text an agent could mistake for a note (D6) |
+| `plan_history` | each entry carries `kind`, `restorable` and `restore_blocked`, and the list carries `kind`/`restorable_count`: a snapshot taken under another kind is readable but not restorable, and now says so before `plan_restore` refuses it (D5) |
+| `plan_create_node` | a path below a leaf answers "'…' is a leaf and cannot have children" instead of "would have no parent" (D11) |
+| semantic status | `obsidian_status.embedding.state` is `unavailable` (already in the schema) when the installation cannot load `@huggingface/transformers`, with the remedy in `error`; the index being complete no longer reports `done` for a copy that cannot embed a query (D1) |
+| semantic resolution | the package is looked up from the plugin checkout (`plugins.obsidian-bridge.path` in `config.json`) before the bundle's own directory and loaded by absolute path, so the stable copy agents launch no longer fails just because it has no `node_modules` beside it (D1) |
+| vector counters | `embedded`/`stale` count vectors joined to a live chunk, and the embedding worker drops orphan vectors, so `embedded` can no longer exceed `chunks` (D1) |
+
+Not changed, stated as a limit: the archived subtree's root keeps its `parent` link while the live parent no longer lists
+it in `children` (D8, documented archive behaviour), and the Obsidian Local REST API enrichment can still answer 404
+for a note that exists (D7, environment). Existing notes with an incident `blocks` list or a hand-edited body are
+reported by `plan_validate` as `body_divergence` until their next tool write re-renders them — that is the validator
+doing its job, not a lost change.
+
+Evidence (Linux, Node 24.20.0): `npm run typecheck` exit 0; full `npm test` green.
+
 ## Plugin 0.26.22 — removing the agent integration (2026-11-24)
 
 Feature release (0.25.22 → 0.26.22). No MCP tool, input or setting is added or changed; the settings screen gains one

@@ -42,6 +42,9 @@ async function main(): Promise<void> {
 
   try {
     store.clearEmbeddingsExcept(model);
+    // Vectors of chunks a re-index replaced are dead weight; dropping them keeps
+    // `embedded` meaningful (live test D1).
+    store.clearOrphanEmbeddings();
     const pending = store.chunksToEmbed(model);
     const total = pending.length;
     emit({ state: "running", done: 0, total });

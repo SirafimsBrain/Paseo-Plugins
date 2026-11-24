@@ -53,6 +53,32 @@ describe("toFtsQuery", () => {
 });
 
 describe("BridgeStore", () => {
+  it("counts only vectors whose chunk still exists", () => {
+    const { store } = makeStore();
+    add(store, "Projects/a.md", "# A\n\ntext\n");
+    const chunk = store.chunksToEmbed("m")[0];
+    store.putEmbedding({
+      chunkId: chunk.id,
+      path: chunk.path,
+      modelId: "m",
+      dim: 2,
+      textHash: chunkTextHash(chunk.text),
+      vec: new Float32Array([1, 0]),
+    });
+    store.putEmbedding({
+      chunkId: 999_999,
+      path: "Projects/gone.md",
+      modelId: "m",
+      dim: 2,
+      textHash: "orphan",
+      vec: new Float32Array([1, 0]),
+    });
+
+    expect(store.embeddingStats("m")).toMatchObject({ chunks: 1, embedded: 1 });
+    expect(store.clearOrphanEmbeddings()).toBe(1);
+    expect(store.embeddingStats("m")).toMatchObject({ chunks: 1, embedded: 1 });
+  });
+
   it("indexes notes and answers full-text queries", () => {
     const { store } = makeStore();
     add(store, "Projects/orion/Research/queue.md", "# Queue design\n\nA bounded queue with retries.\n");

@@ -20,6 +20,7 @@ import {
 } from "./dirs";
 import { replaceInNote } from "./edit";
 import { embedQuery, queryProviderStatus } from "./embed/query";
+import { transformersAvailability } from "./embed/local";
 import { fuzzySearch } from "./enrichment";
 import { createObsidianApi } from "./obsidian-api";
 import { memoryReport } from "./memory";
@@ -135,7 +136,8 @@ export function mcpInstructions(dirs: RoleDirs): string {
 }
 
 export interface JsonSchemaProperty {
-  type?: string;
+  /** A union (`["object", "null"]`) is how a nullable argument stays accepted by clients. */
+  type?: string | string[];
   description?: string;
   items?: { type?: string; description?: string };
   enum?: string[];
@@ -1183,6 +1185,9 @@ export async function dispatchTool(
         }, {});
         const vectors = runtime.store.embeddingStats(settings.embeddingModel);
         const provider = queryProviderStatus();
+        // A copy with no `node_modules` next to it cannot embed a query, even
+        // when its index already holds vectors (live test D1).
+        const availability = transformersAvailability();
         const memory = memoryReport(process.memoryUsage().rss);
         const obsidianApi = createObsidianApi(settings);
         const probe = obsidianApi ? await obsidianApi.probe() : null;
@@ -1191,11 +1196,13 @@ export async function dispatchTool(
         const events = obsidianApi && probe?.ok ? readEnrichmentState() : EMPTY_EVENT_STATE;
         const semanticState = !settings.semanticSearch
           ? "idle"
-          : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
-            ? "done"
-            : vectors.embedded > 0
-              ? "running"
-              : "idle";
+          : !availability.available
+            ? "unavailable"
+            : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
+              ? "done"
+              : vectors.embedded > 0
+                ? "running"
+                : "idle";
         return json({
           vaultPath: runtime.root,
           directories: runtime.dirs,
@@ -1232,13 +1239,17 @@ export async function dispatchTool(
             total: vectors.chunks,
             modelLoaded: provider.loaded,
             rssMb: provider.rssMb,
-            error: provider.error,
-            note:
-              vectors.chunks > 0 && vectors.embedded < vectors.chunks
-                ? isStandaloneBridge()
-                  ? "This standalone installation does not build embeddings; lexical search uses the index as it is."
-                  : "The plugin host is still embedding the vault; lexical search works meanwhile."
-                : null,
+            error: provider.error ?? availability.error,
+            note: !settings.semanticSearch
+              ? null
+              : !availability.available
+                ? "Semantic ranking is off: this installation cannot load the embedding model. " +
+                  "Lexical search and the link graph work normally."
+                : vectors.chunks > 0 && vectors.embedded < vectors.chunks
+                  ? isStandaloneBridge()
+                    ? "This standalone installation does not build embeddings; lexical search uses the index as it is."
+                    : "The plugin host is still embedding the vault; lexical search works meanwhile."
+                  : null,
           },
           memory,
         });

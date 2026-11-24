@@ -125,7 +125,8 @@ export function planRestore(
   if (liveKind !== null && snapshotKind !== null && liveKind !== snapshotKind) {
     return fail(
       `The snapshot is a ${snapshotKind} and the live file is a ${liveKind}. A kind change is not ` +
-        "a revision, so it is not restored here: create the file again with the kind you want.",
+        "a revision, so it is not restored here: create the file again with the kind you want. " +
+        "`plan_history` marks such snapshots `restorable: false`.",
     );
   }
 

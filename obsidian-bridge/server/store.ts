@@ -685,11 +685,30 @@ export class BridgeStore {
       const row = this.db.prepare(sql).get(...params) as { c: number } | undefined;
       return row?.c ?? 0;
     };
+    // Joined against `chunks`: a vector whose chunk was replaced during a
+    // re-index used to stay in the table and made `embedded` exceed `chunks`
+    // (live test D1). The counter now describes usable vectors only.
     return {
       chunks: one("SELECT COUNT(*) AS c FROM chunks"),
-      embedded: one("SELECT COUNT(*) AS c FROM embeddings WHERE model_id = ?", modelId),
-      stale: one("SELECT COUNT(*) AS c FROM embeddings WHERE model_id <> ?", modelId),
+      embedded: one(
+        "SELECT COUNT(*) AS c FROM embeddings e JOIN chunks c ON c.id = e.chunk_id " +
+          "WHERE e.model_id = ?",
+        modelId,
+      ),
+      stale: one(
+        "SELECT COUNT(*) AS c FROM embeddings e JOIN chunks c ON c.id = e.chunk_id " +
+          "WHERE e.model_id <> ?",
+        modelId,
+      ),
     };
+  }
+
+  /** Removes vectors whose chunk no longer exists; returns how many were dropped. */
+  clearOrphanEmbeddings(): number {
+    const result = this.db
+      .prepare("DELETE FROM embeddings WHERE chunk_id NOT IN (SELECT id FROM chunks)")
+      .run();
+    return Number(result.changes ?? 0);
   }
 
   /** Vectors of one model, joined with the chunk text for snippets. */

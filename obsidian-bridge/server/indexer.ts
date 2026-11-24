@@ -5,6 +5,7 @@ import type { VaultStatus } from "../shared/contracts";
 import type { RuntimeSettings } from "../shared/settings";
 import { resolveRoleDirs } from "./dirs";
 import { EmbedJob } from "./embed/job";
+import { transformersAvailability } from "./embed/local";
 import { EnrichmentService } from "./enrichment";
 import { writeEnrichmentState } from "./enrichment-state";
 import type { VaultEvent } from "./obsidian-api";
@@ -250,17 +251,22 @@ export class VaultIndexer {
     const job = this.embedJob.snapshot();
     const provider = queryProviderStatus();
     const semanticEnabled = this.settings?.semanticSearch ?? false;
+    // Enabled but unloadable is its own state: reporting coverage as `done`
+    // while every query fails is the lie the live test caught (D1).
+    const availability = transformersAvailability();
     const semanticState = !semanticEnabled
       ? "idle"
-      : job.state === "running"
-        ? "running"
-        : job.state === "error"
-          ? "error"
-          : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
-            ? "done"
-            : vectors.embedded > 0
-              ? "running"
-              : "idle";
+      : !availability.available
+        ? "unavailable"
+        : job.state === "running"
+          ? "running"
+          : job.state === "error"
+            ? "error"
+            : vectors.chunks > 0 && vectors.embedded >= vectors.chunks
+              ? "done"
+              : vectors.embedded > 0
+                ? "running"
+                : "idle";
     const emptyCounts = { notes: 0, chunks: 0, links: 0, unresolvedLinks: 0 };
     const counts = this.store ? attempt(() => this.store!.counts(), emptyCounts) : emptyCounts;
     const size = this.store ? attempt(() => this.store!.sizeBytes(), 0) : 0;
@@ -324,11 +330,21 @@ export class VaultIndexer {
         total: job.total > 0 ? job.total : vectors.chunks,
         modelLoaded: provider.loaded,
         rssMb: job.rssMb ?? provider.rssMb,
-        error: job.error ?? provider.error,
-        note:
-          semanticEnabled && vectors.chunks > 0 && vectors.embedded < vectors.chunks
-            ? "Embedding the vault in the background; lexical search works meanwhile."
-            : null,
+        error:
+          job.error ??
+          provider.error ??
+          (semanticEnabled && !availability.available ? availability.error : null),
+        note: !semanticEnabled
+          ? null
+          : !availability.available
+            ? vectors.embedded > 0
+              ? "Vectors are already indexed, but this installation cannot embed a query. " +
+                "Lexical search works; semantic ranking does not."
+              : "This installation cannot load the embedding model; semantic ranking is off. " +
+                "Lexical search works."
+            : vectors.chunks > 0 && vectors.embedded < vectors.chunks
+              ? "Embedding the vault in the background; lexical search works meanwhile."
+              : null,
       },
       memory: memoryReport(process.memoryUsage().rss),
     };
@@ -530,6 +546,11 @@ export class VaultIndexer {
     const root = this.root;
     if (!settings || !store || !root) return;
     if (!settings.semanticSearch) {
+      this.embedJob.stop();
+      return;
+    }
+    // Without the package every run ends in the same error; do not spawn it.
+    if (!transformersAvailability().available) {
       this.embedJob.stop();
       return;
     }

@@ -494,7 +494,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22, 0.26.23)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -894,7 +894,7 @@ ones `plan_read`, `plan_update_node` and `plan_history` will call.
 | --- | --- |
 | `model.ts` | `PLAN_KINDS`, `NODE_KINDS`, `ALLOWED_CHILD_KINDS`, `LEAF_STATUSES` + `LEAF_TRANSITIONS`, bee/incident/goal/growth dictionaries, `BLOCKING_INCIDENT_STATUSES`, `SNAPSHOT_REASONS`, `PLAN_KEY_ORDER`, `linkLabel` — ported from `luck-planner shared/tree.ts` without adding a status |
 | `frontmatter.ts` | `parsePlanDocument` / `serializePlanDocument` on the `yaml` package (new dependency); key order preserved, duplicate keys refused, a file that does not parse never rewritten |
-| `sections.ts` | `renderPlanBody` writes `## Влияния`, `## Блокировки`, `## Дети`, `## Журнал` from frontmatter, keeps `## Заметки`, writes `—` for an empty section; `bodyMatchesFrontmatter` is the divergence check `plan_validate` will use |
+| `sections.ts` | `renderPlanBody` writes `# <name>`, the description and `## Влияния`, `## Блокировки`, `## Дети`, `## Журнал` from frontmatter, keeps `## Заметки`, writes `—` for an empty section; `bodyMatchesFrontmatter` is the divergence check `plan_validate` uses, from the first generated section on |
 | `snapshot.ts` | `snapshotFileName`/`parseSnapshotFileName`/`snapshotPathFor` (`<dir>/__history/<slug>.v<v>.r<r>.md`), `buildSnapshot` (state **before** the write, relation fields dropped), `isSnapshotFrontmatter` |
 
 Evidence: `npm run typecheck` exit 0; `npm test` **28 suites / 241 tests** pass, including round-trip over every fixture
@@ -1493,10 +1493,12 @@ Four modules turn the boundary into a file model, and nothing calls them from a 
   order back with `lineWidth: 0`, so a long description stays readable instead of collapsing into one escaped line.
   A file that does not parse is never rewritten: the writer must surface the error. `withKey` changes or deletes one key
   and keeps the rest untouched.
-- **`sections.ts`** renders the body as a view of the frontmatter: `## Влияния` (target — status — impact — `(vN rM)`),
-  `## Блокировки`, `## Дети`, `## Заметки` (carried through verbatim) and `## Журнал` (the `journal:` array). An empty
+- **`sections.ts`** renders the body as a view of the frontmatter. It opens with `# <name>` and the `description`
+  paragraph (0.26.23), then `## Влияния` (target — status — impact — `(vN rM)`), `## Блокировки` (`blocked_by` plus, on an
+  incident, `blocks`), `## Дети`, `## Заметки` (carried through verbatim) and `## Журнал` (the `journal:` array). An empty
   section is `—`, so a missing heading is a divergence rather than an empty section, and `bodyMatchesFrontmatter` is the
-  comparison `plan_validate` will report. Rendering is idempotent: rendering a rendered body changes nothing.
+  comparison `plan_validate` will report — it compares from the first generated section, so a file written before the
+  opening existed is not reported. Rendering is idempotent: rendering a rendered body changes nothing.
 - **`snapshot.ts`** names and describes a snapshot: `<dir>/__history/<slug>.v<v>.r<r>.md`, counters of the state being
   **replaced**, `is_snapshot`/`snapshot_of`/`snapshot_reason`/`snapshot_op`, and the content fields (`name`,
   `description`, `brief`, `payload`, `plan`, `growth`, …). Relations (`parent`, `children`, `influences`, `blocked_by`,
@@ -2326,6 +2328,67 @@ The screen turns `injectIntoAgents`, `registerOpencodeMcp`, `registerClineMcp` a
 step as the RPC call. Without that the loader, the settings listener and the five-minute currency check would install
 the same entries again within minutes, and the button would look broken. Turning a switch back on is the way to
 reinstall that part.
+
+### 0.26.23 — what the live planning run found
+
+The 0.26.22 rerun of the `session-manager` planning scenario built a 92-node tree and confirmed every deviation of
+0.21.14 that 0.26.x claimed to close. It also left eleven smaller findings; this release fixes the ten that are code and
+documents the eleventh. No tool is added or removed.
+
+**Nulls had no path into the tool.** `plan_update_node` already deleted `brief`/`payload` when it saw `null`, but the
+schema declared `type: "object"`, and a client validating arguments against it removed the key — so `{payload: null}`
+answered "Nothing to update" and `{payload: null, description: …}` reported success while leaving the field in place.
+Both schemas now say `type: ["object", "null"]` (and `plan_goal.plan` says `["array", "null"]`), which is what makes the
+documented removal form reachable. `JsonSchemaProperty.type` accepts the union so the catalogue can state it.
+
+**The body was less readable than its own history.** `takeSnapshot` writes `# <name>`; the live file did not, because
+`renderPlanBody` rendered only the five generated sections. A node opened in Obsidian therefore showed `—` five times
+unless the reader switched to Properties. The renderer now writes `# <name>` and the description paragraph first. The
+divergence check follows: `bodyMatchesFrontmatter` compares from the first generated section, so the change does not
+report every pre-existing file as hand-edited — a real risk, since `plan_validate` reads a mismatch as a fact about the
+file.
+
+**A filtered overview counted everything.** `plan_read({project})` returned `documents: 184` for a project holding 92
+nodes; `documents` was `tree.nodes.size` regardless of the filter. It now sums the rows the answer returns. The same
+field on `plan_scope` keeps counting the whole planning root — its description says so, and it is the only number that
+can describe a root holding several projects.
+
+**`—` travelled as a note.** `extractNotes` returned the empty-section placeholder, so `plan_read.notes` on a node with
+no notes was the string `—`, which an agent can reasonably read as text the user wrote. It is `""` now.
+
+**An incident's body did not name its victims.** `## Блокировки` rendered `blocked_by` only, so an incident with three
+`blocks` entries showed `—`; the direction that answers "what does this stop?" existed only in Properties and
+backlinks. The section renders both directions, de-duplicated.
+
+**A goal could not be followed to its trunk.** `plan_read` returned `goal` (the link from a node to its goal) but not
+`materialized` (the trunk an approved goal created), which lived only in the `plan_approve_goal` result. `plan_read` now
+returns `materialized` for every node.
+
+**Kind changes made history unrestorable, silently.** A snapshot taken before a leaf became a sub-branch keeps its old
+`kind`, and `plan_restore` refuses it — correctly, since a kind change is a new version. The refusal, however, arrived
+only when the restore was attempted. `plan_history` now carries `kind`, `restorable` and `restore_blocked` per entry and
+`restorable_count` for the list, so the limit is visible where the choice is made.
+
+**A leaf in the way was reported as a missing parent.** Creating `…/listing-cache/child` under a leaf answered "would
+have no parent. Create the parent node first" — true about the folder, wrong about the cause. The resolver now looks for
+the leaf at the parent path and names it: "'…/listing-cache.md' is a leaf and cannot have children".
+
+**Semantic search was never usable from the copy agents launch.** The bundle keeps `@huggingface/transformers` external,
+and `paseo plugin update` copies only `dist/mcp-server.js` into `$PASEO_HOME/plugins/obsidian-bridge/`; with no
+`node_modules` beside it, `import("@huggingface/transformers")` always failed, while the same code in the checkout
+worked. Two changes: `resolveTransformers()` looks the package up from `plugins.obsidian-bridge.path` in
+`$PASEO_HOME/config.json` before its own directory and loads it by absolute path; and the result is a cheap probe
+(`createRequire(...).resolve`, no model load) that `obsidian_status` and the indexer use to report
+`state: "unavailable"` — already a schema member — with the remedy in `error`, instead of `done` for an index no query
+can use. The indexer also stops spawning an embedding job that is certain to fail.
+
+**`embedded` could exceed `chunks`.** `embeddings.chunk_id` has no foreign key, and a re-index replaces chunk rows, so
+vectors of replaced chunks stayed behind (2933 chunks, 3061 vectors). `embeddingStats` now joins `chunks`, and the worker
+drops orphans (`clearOrphanEmbeddings`) before it computes the queue.
+
+Left as documented: the archived subtree's root keeps a `parent` link the live parent no longer lists (D8), and the
+Obsidian Local REST API can still answer 404 for a note that exists (D7). Both are environment/design facts, not plan
+data loss.
 
 Known limitation, documented in `__compatibility.md`: the agent record is the file Paseo reads on the next open, but a
 live agent's configuration also lives in the daemon's memory, so a later save can write the entry back. A running session

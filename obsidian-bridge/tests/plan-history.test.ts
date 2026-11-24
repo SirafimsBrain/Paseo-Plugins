@@ -20,6 +20,29 @@ async function history(created: TestWorkspace, input: Record<string, unknown>) {
 }
 
 describe("plan_history", () => {
+  it("marks snapshots taken under another kind as not restorable", async () => {
+    const created = workspace();
+    const changed = await dispatchTool(
+      "plan_update_node",
+      { path: "centurion/backend/auth/session-store", kind: "subbranch", accept_external: true },
+      runtimeSettings(created.vault),
+    );
+    expect(changed.isError).toBeUndefined();
+
+    const outcome = await history(created, { path: "centurion/backend/auth/session-store" });
+    expect(outcome.isError).toBeUndefined();
+    const result = outcome.structuredContent as {
+      kind: string;
+      restorable_count: number;
+      snapshots: Array<{ kind: string | null; restorable: boolean; restore_blocked: string | null }>;
+    };
+    expect(result.kind).toBe("subbranch");
+    const beforeKindChange = result.snapshots.find((entry) => entry.kind === "leaf");
+    expect(beforeKindChange).toMatchObject({ restorable: false });
+    expect(beforeKindChange?.restore_blocked).toContain("kind change");
+    expect(result.restorable_count).toBeLessThan(result.snapshots.length);
+  });
+
   it("lists the snapshots a write produced, oldest first", async () => {
     const created = workspace();
     await dispatchTool(

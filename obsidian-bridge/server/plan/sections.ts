@@ -43,9 +43,15 @@ export function sectionBody(body: string, heading: string): string | null {
   return collected.join("\n").trim();
 }
 
-/** The free-text section, preserved byte for byte by every generated write. */
+/**
+ * The free-text section, preserved byte for byte by every generated write.
+ *
+ * The empty-section placeholder is not a note: returning `—` up to
+ * `plan_read.notes` made an agent believe a node had notes (live test D6).
+ */
 export function extractNotes(body: string): string {
-  return sectionBody(body, NOTES_HEADING) ?? "";
+  const notes = sectionBody(body, NOTES_HEADING) ?? "";
+  return notes === EMPTY ? "" : notes;
 }
 
 function asLinks(value: unknown): string[] {
@@ -88,6 +94,20 @@ function renderLinkList(value: unknown): string {
     .join("\n");
 }
 
+/**
+ * `## Блокировки` lists both directions of a block: `blocked_by` on a blocked
+ * node and `blocks` on the incident itself. Rendering only `blocked_by` left an
+ * incident's section empty although its YAML named the blocked leaves, so the
+ * way from an incident to its victims existed only in Properties (live test
+ * D10).
+ */
+function renderBlocks(frontmatter: Record<string, unknown>): string {
+  const links = [...asLinks(frontmatter.blocked_by), ...asLinks(frontmatter.blocks)];
+  return [...new Set(links)]
+    .map((link) => `- ${link}`)
+    .join("\n");
+}
+
 function renderJournal(frontmatter: Record<string, unknown>): string {
   const rows = Array.isArray(frontmatter.journal) ? frontmatter.journal : [];
   const lines: string[] = [];
@@ -111,6 +131,23 @@ function renderJournal(frontmatter: Record<string, unknown>): string {
   return lines.join("\n");
 }
 
+/**
+ * The document's opening: `# <name>` and the description paragraph.
+ *
+ * A plan note without them opened in Obsidian as five empty sections — the name
+ * lived only in Properties, and a snapshot already wrote the title, so the live
+ * file was less readable than its own history (live test D4). The opening is
+ * derived from frontmatter like every other line, so it cannot drift.
+ */
+function renderOpening(frontmatter: Record<string, unknown>): string {
+  const name = typeof frontmatter.name === "string" ? frontmatter.name.trim() : "";
+  const description =
+    typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
+  return [name.length > 0 ? `# ${name}` : "", description]
+    .filter((part) => part.length > 0)
+    .join("\n\n");
+}
+
 /** The generated body for one frontmatter, with the kept `## Заметки` text. */
 export function renderPlanBody(
   frontmatter: Record<string, unknown>,
@@ -119,14 +156,26 @@ export function renderPlanBody(
   const notes = extractNotes(existingBody);
   const sections: Array<[string, string]> = [
     ["Влияния", renderInfluences(frontmatter)],
-    ["Блокировки", renderLinkList(frontmatter.blocked_by)],
+    ["Блокировки", renderBlocks(frontmatter)],
     ["Дети", renderLinkList(frontmatter.children)],
     [NOTES_HEADING, notes],
     ["Журнал", renderJournal(frontmatter)],
   ];
-  return sections
+  const rendered = sections
     .map(([heading, content]) => `## ${heading}\n\n${content.length > 0 ? content : EMPTY}`)
     .join("\n\n");
+  const opening = renderOpening(frontmatter);
+  return opening.length > 0 ? `${opening}\n\n${rendered}` : rendered;
+}
+
+/**
+ * The part of a body the renderer owns: everything from the first generated
+ * section on. A file written before the opening existed has no `# <name>`
+ * paragraph, and that is not a divergence to report.
+ */
+function generatedPart(body: string): string {
+  const match = /^##\s+(?:Влияния|Блокировки|Дети|Заметки|Журнал)\s*$/m.exec(body);
+  return match ? body.slice(match.index) : body;
 }
 
 /** Normalizes a body so formatting-only differences do not count as divergence. */
@@ -150,8 +199,8 @@ export function bodyMatchesFrontmatter(document: {
   body: string;
 }): boolean {
   return (
-    normalizedBody(document.body) ===
-    normalizedBody(renderPlanBody(document.frontmatter, document.body))
+    normalizedBody(generatedPart(document.body)) ===
+    normalizedBody(generatedPart(renderPlanBody(document.frontmatter, document.body)))
   );
 }
 
