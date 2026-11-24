@@ -84,7 +84,7 @@ interface SearchProvider {
 | Adapter | Endpoint | Auth | Notes |
 | --- | --- | --- | --- |
 | `duckduckjs` (default, 0.3.0) | `@overclockedsenku/duckduckjs` library (DuckDuckGo HTML, Brave/Google/Mojeek/Yahoo internal endpoints) | none | `duckduckjsEngine` = `auto` walks DuckDuckGo → Brave → Google → Mojeek → Yahoo and returns the first non-empty answer, collecting per-engine failures (an aggregate error only when every engine fails); a concrete engine id pins one engine. `language` maps to `region` (`ru` → `ru-ru`); `proxyUrl` sets an undici `ProxyAgent` as the global dispatcher (http(s) only) because the library fetches through undici. `check()` additionally treats "all engines answered but zero results" as a failure (rate-limit signature). |
-| `ddgs` (0.4.0) | `python3 -c <script>` subprocess running the user-installed PyPI `ddgs` library (`DDGS().text()`) | none (library is a user requirement) | Interpreter discovery in `server/ddgs-python.ts` (settings → `BUNNY_SEARCH_PYTHON` → `VIRTUAL_ENV` → `CONDA_PREFIX` → `PATH` → `~/.venv`/`~/venv`/`~/.virtualenvs`), first candidate that passes `import ddgs` wins, cached per process; `language` → `region` (same `ll-ll` mapping); `proxyUrl` passed as the library's `proxy` argument (http(s)/socks5); subprocess killed at `timeoutMs`; JSON array on stdout is normalized to `title`/`href`/`body`. `check()` runs the availability probe first so a missing library yields the "install it yourself" error, then a real search probe. |
+| `ddgs` (0.4.0) | `python3 -c <script>` subprocess running the user-installed PyPI `ddgs` library (`DDGS().text()`) | none (library is a user requirement) | Interpreter discovery in `server/ddgs-python.ts` (settings → `BUNNY_SEARCH_PYTHON` → `VIRTUAL_ENV` → `CONDA_PREFIX` → `PATH` → `~/.venv`/`~/venv`/`~/.virtualenvs`), first candidate that passes `import ddgs` wins, cached per process; `language` → `region` (same `ll-ll` mapping); `proxyUrl` passed as the library's `proxy` argument (http(s)/socks5); subprocess killed at `timeoutMs`; JSON array on stdout is normalized to `title`/`href`/`body`. `check()` runs the availability probe first so a missing library yields the "install it yourself" error, then a real search probe. Since 0.9.7 the script tries the library's `auto` mode first and, when it yields nothing, walks `ddgs.engines.ENGINES["text"]` one engine at a time in priority order and takes the first non-empty answer, because `auto` waits with `FIRST_EXCEPTION` and a single blocked engine aborts the search (§23). |
 | `searxng` | `{searxngBaseUrl}?q=…&format=json&categories=…&language=…` | none | Ported from the reference MCP: same UA (`bunny-search-mcp/1.0 (+searxng)`), clamped `max_results` 1–30, instant `answers`, `suggestion`/`suggestions`/`corrections`, per-result `engines` |
 | `duckduckgo` | `https://html.duckduckgo.com/html/?q=…` | none | Browser UA (HTML endpoint rejects tool UAs), regex-parses `result__a`/`result__snippet`, unwraps `uddg` redirect links, decodes HTML entities |
 | `brave` | `https://api.search.brave.com/res/v1/web/search?q=…&count=…` | `X-Subscription-Token` (settings `apiKey`) | 401/403 mapped to an actionable "check the key" error |
@@ -1471,3 +1471,52 @@ server-side field, not by the UI.
 | Extended `tests/agent-hooks.test.ts` | the hook appends exactly one instruction naming the contributed tool; appends to instructions the host already carries; names `bunny_web_search` in tool-only mode; still instructs a create-owned open whose server is already saved; adds nothing for an empty setting, a gated-off agent or a `history` open |
 | Host contract | allowed-field set, merge semantics and the 0.17.0 availability read from the 0.17.1 `app.asar` / packed declarations (§22.2, §22.3) |
 | Live daemon | **not run** — no daemon is up on this machine, so nothing here proves the instruction reaches a real agent turn or that the panel, slash command and dot render in a real 0.17.1 client. The hook path is covered by tests with the host's own result shape; the UI paths are unverified visually |
+
+## 23. Plugin 0.9.7 — DDGS engine fallback (2026-11-24)
+
+New functionality, so the version moves on the second digit with the third
+preserved (0.8.7 → 0.9.7). No settings, argument list, version floor or output
+shape changed.
+
+**Cause.** `ddgs` 9.16.1 runs engines in batches of
+`ceil(max_results / 10) + 1` workers and waits with
+`wait(..., FIRST_EXCEPTION)`, so one engine that answers with no results (the
+signature of anonymous rate-limiting) aborts the whole search even when another
+engine would have returned results. The adapter called `DDGS().text(query)`
+without a backend, i.e. exactly that flaky `auto` path.
+
+**Change.** The inline script (`SEARCH_SCRIPT` in `server/ddgs-python.ts`) now
+tries `auto` first and, when it yields nothing, walks
+`ddgs.engines.ENGINES["text"]` one engine at a time in priority order (highest
+priority first, then name) and takes the first non-empty answer inside a 90 %
+budget of the configured timeout. The walk runs up to twice, because a single
+engine can also answer `No results found.` transiently (observed with `yahoo`:
+1 failure in 3 runs for the same query). If nothing works, stderr lists the per-engine
+errors and the plugin reports them as
+`DDGS Python search failed: no engine returned results (…)`.
+
+**Why it was needed.** On 2026-11-24 the DuckDuckJS engines were all refusing
+anonymous scraping from this machine; `ddgs` showed the same pattern — `brave`,
+`duckduckgo`, `grokipedia`, `mojeek`, `startpage` and `wikipedia` answered in
+under 0.5 s with no results while `yahoo` returned real results, and `auto`
+succeeded in only two of three runs because of the batched shuffle. The library
+is installed in `~/venv` and is discovered through the `~/venv` fallback tier,
+because the `PATH` `python3` has no `ddgs`. Even the working engine is
+intermittent, which is why the walk repeats once before failing.
+
+**Verified.** `npm run typecheck` exit 0; `tests/ddgs-provider.test.ts` and
+`tests/providers.test.ts` — 59 tests pass; live
+`BUNNY_LIVE=1 npx vitest run tests/live-ddgs.test.ts` against `ddgs` 9.16.1:
+5 real results for `typescript` and `check { ok: true, latencyMs: 1045 }` at
+11:53, i.e. the fallback does reach a working engine when one is available.
+
+**Limit of the fix.** The fallback only helps while *some* free engine answers.
+Later on the same day `yahoo` started returning `No results found.` for every
+query as well (five consecutive runs from a fresh `DDGS` instance), so all engines
+used by both providers are refusing anonymous requests from this machine. In that
+state the plugin correctly reports `no engine returned results (…)` with the
+per-engine errors; restoring search needs a different egress IP (`Proxy URL`),
+a reachable SearXNG instance, or one of the keyed providers (Tavily, Exa, Kagi,
+Perplexity, Brave). **Not verified:** behaviour on a host where the engines are
+not blocked, and the two-pass walk against a permanently blocked engine set
+beyond the unit-level error mapping.

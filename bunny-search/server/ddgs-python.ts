@@ -281,10 +281,21 @@ export interface DdgsRawResult {
  * script arrive as sys.argv[1..]: query, max_results, region, proxy,
  * timeout(seconds). Prints a JSON array on stdout; errors go to stderr
  * with a non-zero exit code.
+ *
+ * The library's `auto` mode raises `DDGSException: No results found.`
+ * when the first engine batch fails, even if another engine would have
+ * answered (`wait(..., FIRST_EXCEPTION)` with two workers), so `auto`
+ * alone is unreliable when some engines block anonymous requests. The
+ * script therefore tries `auto` first and, if that yields nothing, walks
+ * the library's own text engines one by one in priority order and takes
+ * the first non-empty answer — the same resilience the DuckDuckJS
+ * adapter has for its engines. Failed and skipped engines are reported
+ * when nothing at all works.
  */
 const SEARCH_SCRIPT = [
-  "import json, sys",
+  "import json, sys, time",
   "from ddgs import DDGS",
+  "from ddgs.engines import ENGINES",
   "query, mx, region, proxy, timeout = (sys.argv[1], int(sys.argv[2]),",
   "                                    sys.argv[3], sys.argv[4], float(sys.argv[5]))",
   "kwargs = {}",
@@ -294,7 +305,30 @@ const SEARCH_SCRIPT = [
   "text_kwargs = {'max_results': mx}",
   "if region:",
   "    text_kwargs['region'] = region",
-  "print(json.dumps(client.text(query, **text_kwargs), ensure_ascii=False))",
+  "deadline = time.monotonic() + max(1.0, timeout * 0.9)",
+  "errors = []",
+  "def attempt(backend):",
+  "    if time.monotonic() >= deadline:",
+  "        return []",
+  "    try:",
+  "        rows = client.text(query, backend=backend, **text_kwargs) if backend else client.text(query, **text_kwargs)",
+  "        return [row for row in (rows or []) if isinstance(row, dict)]",
+  "    except Exception as exc:",
+  "        errors.append(f\"{backend or 'auto'}: {exc}\")",
+  "        return []",
+  "results = attempt(None)",
+  "for _pass in range(2 if not results else 0):",
+  "    for name, _cls in sorted(ENGINES['text'].items(), key=lambda item: (-getattr(item[1], 'priority', 0), item[0])):",
+  "        if time.monotonic() >= deadline:",
+  "            break",
+  "        results = attempt(name)",
+  "        if results:",
+  "            break",
+  "    if results:",
+  "        break",
+  "if not results and errors:",
+  "    raise SystemExit('no engine returned results (' + '; '.join(errors) + ')')",
+  "print(json.dumps(results, ensure_ascii=False))",
 ].join("\n");
 
 function lastMeaningfulLine(stderr: string): string {

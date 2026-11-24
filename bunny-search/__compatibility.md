@@ -1,6 +1,6 @@
 # Compatibility — bunny-search
 
-Current: plugin **0.8.7**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.9.7**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
 Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration
 needed and **no deprecated API in use**; see *Plugin 0.8.7 — the 0.17.x improvements*,
 *Plugin 0.7.7 — Paseo 0.17.1 pass*,
