@@ -2,11 +2,15 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
-## Plugin 0.26.24 — strict-first retrieval and a working semantic pass (2026-11-25)
+## Plugin 0.26.25 — strict-first retrieval, a working semantic pass, a sticky skills root (2026-11-25)
 
-Bugfix release (0.26.23 → 0.26.24). No tool is added or removed; `obsidian_search` gains one optional hit field and
+Bugfix release (0.26.23 → 0.26.25). No tool is added or removed; `obsidian_search` gains one optional hit field and
 two signal names, and a query that used to be answered by a single shared word is now answered by the note that
-contains every word.
+contains every word. 0.26.25 adds the third finding of the same live update run: the installer now records the
+skills root in `install.json` and reuses it on a plain update, so an installation made with `--skills-dir` no longer
+gets a second copy in the default root while the first stays behind (and out of `--uninstall`'s reach). An explicit
+`--skills-dir` still overrides the recorded value; installations written by 0.26.24 and earlier have no such field
+and keep the default.
 
 | Surface | Behaviour |
 | --- | --- |
@@ -14,6 +18,7 @@ contains every word.
 | `obsidian_search` recall | the `OR` pass runs only when the strict pass found fewer than three notes (and fewer than `limit`), and only for notes the strict pass did not return. It is reported as the `chunks-or` / `titles-or` signal |
 | `obsidian_search` hits | a hit that only the recall pass matched carries `weakMatch: true`, and is rendered as `[weak: not every word]`. When every hit on the page is weak, `note` says that no note contains every query word |
 | semantic query | `@huggingface/transformers` resolves to its CommonJS build (`transformers.node.cjs`); `import()` of that file exposes the API under `default` only, so `pipeline` was `undefined` and every query failed with "transformers.pipeline is not a function". The provider now unwraps `default` |
+| installer update | `install.json` gains `skillsDir`; an update without `--skills-dir` replaces the skills in the recorded root instead of installing them into `~/.agents/skills` again, and `--uninstall` removes them from there |
 
 Measured on the live Paseo installation (Linux, Node 24.20.0, plugin 0.26.24 after `paseo plugin update` + `reload`):
 `obsidian_status` reports `embedding.state: "done"`, `embedded 2931/2931`, `stale 0`; `obsidian_search` on
@@ -21,8 +26,15 @@ Measured on the live Paseo installation (Linux, Node 24.20.0, plugin 0.26.24 aft
 The defect query `"Kilo standalone 7734"` (no note carries those words) now answers only weak matches instead of
 ranking a journal that shares the word "kilo" first as a normal hit.
 
+Installer update, measured in a scratch home: 0.26.23 installed with `--skills-dir /tmp/ob-upd-skills`, then updated to the
+new tag without that flag — the version and `ref` moved to the tag, `vaultPath` and a hand-set `semanticSearch: true`
+survived, the opt-in planning skills stayed installed, and the skills were written to the recorded root. `--dry-run`
+printed the same planned root, `--version 0.26.99` exited 1 with the tag-not-found message, and `--uninstall` removed the
+installation and the four marked skill directories.
+
 Evidence: `npm run typecheck` exit 0; full `npm test` green (`tests/search.test.ts` covers the strict pass, the
-suppressed top-up and the all-weak page).
+suppressed top-up and the all-weak page; `tests/installer.test.ts` covers the recorded skills root on update and
+uninstall).
 
 ## Plugin 0.26.23 — planning readability and semantic availability (2026-11-24)
 

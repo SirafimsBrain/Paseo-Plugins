@@ -13,14 +13,14 @@ set -euo pipefail
 REPO="${OBSIDIAN_BRIDGE_REPO:-SirafimsBrain/Paseo-Plugins}"
 PLUGIN_SUBDIR="obsidian-bridge"
 
-# The release this script belongs to (0.26.24).
+# The release this script belongs to (0.26.25).
 #
 # `curl … | bash` from a tag URL fetches this file at that tag, so the version
 # here is the tag the caller asked for. The default source is therefore that
 # tag, not `main`: the build, `install.json`'s `version` and `ref` all describe
 # the release whose installer was run, however much `main` has moved since.
 # The release workflow refuses to publish a tag that disagrees with this value.
-SCRIPT_VERSION="0.26.24"
+SCRIPT_VERSION="0.26.25"
 
 DEFAULT_HOME="${HOME}/.agents/obsidian-bridge-mcp"
 SKILL_CORE="obsidian-bridge"
@@ -42,6 +42,7 @@ with_skills=1
 with_planning_skills=0
 planning_explicit=0
 skills_dir="${HOME}/.agents/skills"
+skills_dir_explicit=0
 source_arg=""
 uninstall=0
 dry_run=0
@@ -190,6 +191,7 @@ while [ "$#" -gt 0 ]; do
     --skills-dir)
       [ "$#" -ge 2 ] || die "--skills-dir needs a value"
       skills_dir="$2"
+      skills_dir_explicit=1
       shift 2
       ;;
     --source)
@@ -224,6 +226,22 @@ if [ -n "$source_arg" ] && [ "$ref_explicit" = 1 ]; then
 fi
 
 install_dir="$(absolute_path "${install_dir%/}")"
+
+# The skills root is part of the installation, not of the command line: a
+# caller who once passed --skills-dir and later runs the plain update command
+# would otherwise get a second copy in ~/.agents/skills while the first root
+# stayed behind — and --uninstall would only reach the second. An explicit
+# --skills-dir still wins, and an installation from before this field (0.26.24
+# and earlier) keeps the default.
+if [ "$skills_dir_explicit" = 0 ] && [ -f "$install_dir/install.json" ]; then
+  recorded_skills_dir="$(node -e '
+    try {
+      const doc = require(process.argv[1]);
+      if (typeof doc.skillsDir === "string") process.stdout.write(doc.skillsDir);
+    } catch {}
+  ' "$install_dir/install.json" 2>/dev/null || true)"
+  if [ -n "$recorded_skills_dir" ]; then skills_dir="$recorded_skills_dir"; fi
+fi
 skills_dir="$(absolute_path "${skills_dir%/}")"
 
 if [ "$install_dir" = "/" ] || [ -z "$install_dir" ] || contains_path "$install_dir" "$HOME"; then
@@ -540,10 +558,10 @@ install_skills() {
 # install.json is written last: it is both the version marker and the
 # standalone-home marker, so it must not describe a partial installation.
 write_install_json() {
-  node - "$install_dir/install.json" "$install_dir/installed-skills.txt" "$version" "${build_ref:-local}" <<'NODE'
+  node - "$install_dir/install.json" "$install_dir/installed-skills.txt" "$version" "${build_ref:-local}" "$skills_dir" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
-const [file, manifest, version, ref] = process.argv.slice(2);
+const [file, manifest, version, ref, skillsDir] = process.argv.slice(2);
 const skills = fs.existsSync(manifest)
   ? fs.readFileSync(manifest, "utf-8").split("\n").map((name) => name.trim()).filter(Boolean)
   : [];
@@ -552,6 +570,7 @@ const doc = {
   ref,
   installedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   semantic: false,
+  skillsDir,
   skills,
 };
 const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);

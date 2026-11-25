@@ -1,6 +1,6 @@
 # Status — obsidian-bridge
 
-Current: plugin **0.26.24**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
+Current: plugin **0.26.25**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
 verified against **Paseo 0.17.1 (SDK 0.17.3, 2026-11-23)** — **compatible**.
 
 This file carries the status notes that used to fill the *Status* column of the root
@@ -14,6 +14,10 @@ Compatible.
 
 ## Release notes
 
+- **0.26.25** — the standalone installer keeps the skills root it recorded in
+  `install.json`: a plain update after an install made with `--skills-dir` used to
+  copy the skills into `~/.agents/skills` afresh and leave the first root behind,
+  where `--uninstall` no longer reached it. An explicit `--skills-dir` still wins.
 - **0.26.24** — search asks for every word first: the FTS5 pass joins the query
   tokens with `AND` and the `OR` recall pass only tops the page up when fewer than
   three notes contain them all, marking those hits `weakMatch` in the structured

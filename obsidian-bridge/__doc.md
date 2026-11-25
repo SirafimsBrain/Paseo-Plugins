@@ -497,7 +497,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22, 0.26.23, 0.26.24)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22, 0.26.23, 0.26.25)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2402,7 +2402,7 @@ No MCP tool, input, setting or schema version changed (the settings schema stays
 directory both found, foreign entries preserved, the second call is a no-op, and an unparseable agent record is left
 alone; `tests/agent-skill.test.ts` keeps the switch-off path honest.
 
-### 0.26.24 — every word first, and a semantic pass that actually runs
+### 0.26.25 — every word first, a semantic pass that runs, an update that keeps its skills root
 
 Two defects, both found by installing the standalone MCP server into Cline and Kilo and reading what the live server
 answered rather than what the source said it would.
@@ -2435,6 +2435,17 @@ Live evidence (Linux, Node 24.20.0, Paseo plugin 0.26.24 after `paseo plugin upd
 re-run with `--source` and with a tag ref (see `AGENT-SETUP.md`): it replaces `dist/`, keeps `settings.json`'s
 `vaultPath`/`semanticSearch`, preserves a planning-skill choice, and rewrites `install.json` last.
 
+**An update moved the skills.** The update path was checked on a scratch home: 0.26.23 installed with
+`--skills-dir /tmp/ob-upd-skills`, then updated to the new tag with no other flag. The version, `ref`, `vaultPath` and
+`semanticSearch` were right, but the four skill directories landed in `~/.agents/skills` — the default — while the
+recorded root kept its copies, and `--uninstall` (which also assumed the default) removed only the new ones. The skills
+root is now part of the installation: `write_install_json` records `skillsDir`, an update without `--skills-dir` reads
+it back before the containment checks, and `--uninstall` therefore removes the same directories it installed. An
+explicit `--skills-dir` still wins, and an `install.json` from 0.26.24 or earlier (no field) keeps the default, which is
+what those installations actually used.
+
 Tests: `tests/search.test.ts` — the strict hit ranks first and the one-word note is weak, the top-up is absent when three
 strict notes exist, an all-weak page says so, and the empty query still lists recent notes. `tests/store.test.ts` closes
-`toFtsQuery(..., "AND")` and `searchChunks` operators directly.
+`toFtsQuery(..., "AND")` and `searchChunks` operators directly. `tests/installer.test.ts` — a recorded root survives an
+update without `--skills-dir`, an explicit one overrides it, and `--uninstall` removes the marked skills from the
+recorded root.

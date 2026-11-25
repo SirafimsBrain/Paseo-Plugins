@@ -79,6 +79,50 @@ describe("standalone installer", () => {
     expect(result.status).toBe(0);
   });
 
+  it("keeps the skills root recorded by the first install", () => {
+    const home = tempHome();
+    const dir = makeInstall(home);
+    const custom = path.join(home, "custom-skills");
+    fs.writeFileSync(
+      path.join(dir, "install.json"),
+      JSON.stringify({ version: "0.0.0", skillsDir: custom }) + "\n",
+      "utf-8",
+    );
+
+    // An update without --skills-dir must reuse the recorded root instead of
+    // installing a second copy into ~/.agents/skills.
+    const update = run(["--source", root, "--dry-run"], home);
+    expect(update.status).toBe(0);
+    expect(update.stdout).toContain(`install skills into ${custom}`);
+
+    // An explicit --skills-dir still wins.
+    const override = path.join(home, "other-skills");
+    const explicit = run(["--source", root, "--dry-run", "--skills-dir", override], home);
+    expect(explicit.stdout).toContain(`install skills into ${override}`);
+  });
+
+  it("uninstalls the skills of the recorded root", () => {
+    const home = tempHome();
+    const dir = makeInstall(home);
+    const custom = path.join(home, "custom-skills");
+    fs.mkdirSync(path.join(custom, "obsidian-bridge"), { recursive: true });
+    fs.writeFileSync(
+      path.join(custom, "obsidian-bridge", "SKILL.md"),
+      "---\ninstalled-by: obsidian-bridge\n---\n",
+      "utf-8",
+    );
+    fs.writeFileSync(path.join(dir, "installed-skills.txt"), "obsidian-bridge\n", "utf-8");
+    fs.writeFileSync(
+      path.join(dir, "install.json"),
+      JSON.stringify({ version: "0.0.0", skillsDir: custom }) + "\n",
+      "utf-8",
+    );
+
+    const result = run(["--uninstall"], home);
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(path.join(custom, "obsidian-bridge"))).toBe(false);
+  });
+
   it("uninstalls an installation and exits successfully", () => {
     const home = tempHome();
     const dir = makeInstall(home);

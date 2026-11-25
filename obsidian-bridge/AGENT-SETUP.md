@@ -183,7 +183,7 @@ curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/ob
 
 # Pin another release explicitly
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \
-  | bash -s -- --version 0.26.24
+  | bash -s -- --version 0.26.25
 
 # Remove the installation and the skills it recorded
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \
@@ -191,7 +191,9 @@ curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/ob
 ```
 
 An update keeps `vaultPath` and `semanticSearch`; it writes `settings.json` atomically and leaves an unreadable or
-foreign file as a timestamped backup. A planning-skill choice is sticky across updates. `--uninstall` refuses a
+foreign file as a timestamped backup. A planning-skill choice is sticky across updates, and so is the skills root
+recorded in `install.json`: run the plain update command and the skills are replaced where the installation created
+them (`--skills-dir` on a later update still overrides it, and `--uninstall` uses the recorded root). `--uninstall` refuses a
 directory without `install.json` unless `--force` is passed, and removes only the installation and the marked skills it
 recorded — never the vault.
 
