@@ -137,7 +137,17 @@ export async function createLocalProvider(options: LocalProviderOptions): Promis
   try {
     // An absolute file URL, so the package loads from where it was found — the
     // stable copy agents launch has no `node_modules` of its own.
-    transformers = (await import(pathToFileURL(resolution.entry).href)) as unknown as typeof transformers;
+    //
+    // `createRequire().resolve()` uses the package's `require` condition, so a
+    // dual package resolves to its CommonJS build (`transformers.node.cjs`).
+    // `import()` of a CJS file exposes that build only as `default` — Node's
+    // named-export detection does not see webpack's exports — so `pipeline`
+    // was `undefined` and every semantic query failed with "transformers.pipeline
+    // is not a function" (0.26.24, live test D1 follow-up).
+    const loaded = (await import(pathToFileURL(resolution.entry).href)) as unknown as
+      | (typeof transformers & { default?: typeof transformers })
+      | { default: typeof transformers };
+    transformers = (loaded as { default?: typeof transformers }).default ?? (loaded as typeof transformers);
   } catch (cause) {
     throw new Error(
       `Semantic search could not load '${resolution.entry}': ${

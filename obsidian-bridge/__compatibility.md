@@ -2,6 +2,28 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.26.24 — strict-first retrieval and a working semantic pass (2026-11-25)
+
+Bugfix release (0.26.23 → 0.26.24). No tool is added or removed; `obsidian_search` gains one optional hit field and
+two signal names, and a query that used to be answered by a single shared word is now answered by the note that
+contains every word.
+
+| Surface | Behaviour |
+| --- | --- |
+| `obsidian_search` ranking | the FTS5 pass joins the query tokens with `AND`; a long note that shares one word no longer outranks a short note that matches all of them |
+| `obsidian_search` recall | the `OR` pass runs only when the strict pass found fewer than three notes (and fewer than `limit`), and only for notes the strict pass did not return. It is reported as the `chunks-or` / `titles-or` signal |
+| `obsidian_search` hits | a hit that only the recall pass matched carries `weakMatch: true`, and is rendered as `[weak: not every word]`. When every hit on the page is weak, `note` says that no note contains every query word |
+| semantic query | `@huggingface/transformers` resolves to its CommonJS build (`transformers.node.cjs`); `import()` of that file exposes the API under `default` only, so `pipeline` was `undefined` and every query failed with "transformers.pipeline is not a function". The provider now unwraps `default` |
+
+Measured on the live Paseo installation (Linux, Node 24.20.0, plugin 0.26.24 after `paseo plugin update` + `reload`):
+`obsidian_status` reports `embedding.state: "done"`, `embedded 2931/2931`, `stale 0`; `obsidian_search` on
+`"how does the queue design handle retries"` reports `semantic.used: true` with signals `chunks`, `titles`, `semantic`.
+The defect query `"Kilo standalone 7734"` (no note carries those words) now answers only weak matches instead of
+ranking a journal that shares the word "kilo" first as a normal hit.
+
+Evidence: `npm run typecheck` exit 0; full `npm test` green (`tests/search.test.ts` covers the strict pass, the
+suppressed top-up and the all-weak page).
+
 ## Plugin 0.26.23 — planning readability and semantic availability (2026-11-24)
 
 Bugfix release (0.26.22 → 0.26.23). No tool is added or removed; four inputs gain a documented `null` form, four outputs

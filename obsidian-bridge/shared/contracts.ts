@@ -24,6 +24,12 @@ export const searchHitSchema = z.object({
   role: z.enum(["workspace", "inbox", "out", "raw"]),
   /** Callout type when the hit answered from a callout block (`warning`), else null. */
   callout: z.string().nullable(),
+  /**
+   * True when the note matched only some query words, through the `OR` top-up
+   * that runs when the `AND` pass found too little (0.26.24). Such a hit is
+   * evidence of a shared word, not of an answer to the whole query.
+   */
+  weakMatch: z.boolean().optional(),
 });
 
 export type SearchHit = z.infer<typeof searchHitSchema>;

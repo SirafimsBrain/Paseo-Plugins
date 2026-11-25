@@ -1,6 +1,6 @@
 # Status — obsidian-bridge
 
-Current: plugin **0.26.23**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
+Current: plugin **0.26.24**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
 verified against **Paseo 0.17.1 (SDK 0.17.3, 2026-11-23)** — **compatible**.
 
 This file carries the status notes that used to fill the *Status* column of the root
@@ -14,6 +14,16 @@ Compatible.
 
 ## Release notes
 
+- **0.26.24** — search asks for every word first: the FTS5 pass joins the query
+  tokens with `AND` and the `OR` recall pass only tops the page up when fewer than
+  three notes contain them all, marking those hits `weakMatch` in the structured
+  result and `[weak: not every word]` in the text block. The live defect this
+  closes: a query for a three-word note name answered with a long journal that
+  shared one word. Also completes 0.26.23's semantic fix — the resolved package is
+  a CommonJS build, and its `import()` namespace exposes `pipeline` only under
+  `default`, so every query still failed with "transformers.pipeline is not a
+  function"; the live install now reports `embedded 2931/2931` and
+  `semantic.used: true`.
 - **0.26.23** — fixes what the live planning test of 0.26.22 found: `null` reaches
   `brief`/`payload`/`plan` schemas, a filtered overview counts only its project,
   plan notes open with their name and description, incidents show the leaves they

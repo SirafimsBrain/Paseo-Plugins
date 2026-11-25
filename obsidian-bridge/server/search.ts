@@ -32,6 +32,16 @@ const WEIGHT_OBSIDIAN = 0.6;
 /** Semantic candidates considered before fusing; the tail rarely changes the top. */
 const SEMANTIC_CANDIDATES = 40;
 
+/**
+ * Strict `AND` note matches below this many trigger the `OR` top-up. Three is
+ * the point where a result list stops looking empty; asking for more would
+ * bring back the single-token noise the strict pass exists to remove.
+ */
+const MIN_STRICT_NOTES = 3;
+
+/** Weight of an `OR` top-up hit relative to a strict `AND` hit. */
+const WEAK_FACTOR = 0.35;
+
 export interface SearchOptions {
   query: string;
   limit?: number;
@@ -59,6 +69,8 @@ interface Candidate {
   snippet: string;
   /** Callout type when the chunk is a callout block (0.10.11). */
   callout?: string | null;
+  /** Only the `OR` top-up matched this note, not every query word (0.26.24). */
+  weak: boolean;
   score: number;
 }
 
@@ -81,6 +93,9 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     const existing = scores.get(key);
     if (existing) {
       existing.score += candidate.score;
+      // A note that the recall pass returned stays marked weak: semantic or
+      // graph evidence explains why it was kept, not that it has every word.
+      existing.weak = existing.weak || candidate.weak;
       if (candidate.snippet.length > existing.snippet.length) existing.snippet = candidate.snippet;
       if (!existing.callout && candidate.callout) existing.callout = candidate.callout;
       return;
@@ -97,6 +112,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         heading: chunk?.heading ?? "",
         snippet: (chunk?.text ?? "").slice(0, snippetChars),
         callout: chunk?.callout ?? null,
+        weak: false,
         score: WEIGHT_RECENT / (RRF_K + index + 1),
       });
     });
@@ -104,7 +120,11 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
     // One rank per note: a long headingless file (a converted export, a raw
     // JSON dump) otherwise fills the chunk list with dozens of rows that all
     // fuse into one entry and outrank the small note that matches every word.
-    const chunkRows = uniqueByPath(store.searchChunks(query, 60));
+    //
+    // The strict pass (AND) answers "the note that contains my words"; the
+    // recall pass (OR) only tops the list up when the strict one is thin, and
+    // its hits are marked weak so a shared word is not mistaken for an answer.
+    const chunkRows = uniqueByPath(store.searchChunks(query, 60, "AND"));
     if (chunkRows.length > 0) signals.push("chunks");
     chunkRows.forEach((row, index) => {
       add({
@@ -112,11 +132,12 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         heading: row.heading,
         snippet: row.text,
         callout: row.callout,
+        weak: false,
         score: WEIGHT_CHUNKS / (RRF_K + index + 1),
       });
     });
 
-    const titleRows = store.searchTitles(query, 20);
+    const titleRows = store.searchTitles(query, 20, "AND");
     if (titleRows.length > 0) signals.push("titles");
     titleRows.forEach((row, index) => {
       const chunk = store.firstChunk(row.path);
@@ -125,9 +146,45 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         heading: chunk?.heading ?? "",
         snippet: chunk?.text ?? "",
         callout: chunk?.callout ?? null,
+        weak: false,
         score: WEIGHT_TITLES / (RRF_K + index + 1),
       });
     });
+
+    const strictPaths = new Set([...chunkRows, ...titleRows].map((row) => row.path));
+    if (chunkRows.length < Math.min(limit, MIN_STRICT_NOTES)) {
+      const relaxed = uniqueByPath(store.searchChunks(query, 60, "OR")).filter(
+        (row) => !strictPaths.has(row.path),
+      );
+      if (relaxed.length > 0) signals.push("chunks-or");
+      relaxed.forEach((row, index) => {
+        add({
+          path: row.path,
+          heading: row.heading,
+          snippet: row.text,
+          callout: row.callout,
+          weak: true,
+          score: (WEIGHT_CHUNKS * WEAK_FACTOR) / (RRF_K + index + 1),
+        });
+      });
+    }
+    if (titleRows.length === 0) {
+      const relaxedTitles = store
+        .searchTitles(query, 20, "OR")
+        .filter((row) => !strictPaths.has(row.path));
+      if (relaxedTitles.length > 0) signals.push("titles-or");
+      relaxedTitles.forEach((row, index) => {
+        const chunk = store.firstChunk(row.path);
+        add({
+          path: row.path,
+          heading: chunk?.heading ?? "",
+          snippet: chunk?.text ?? "",
+          callout: chunk?.callout ?? null,
+          weak: true,
+          score: (WEIGHT_TITLES * WEAK_FACTOR) / (RRF_K + index + 1),
+        });
+      });
+    }
 
     const seeds = [...new Set(chunkRows.slice(0, 5).map((row) => row.path))];
     const neighbours = store.graphNeighbours(seeds, 10);
@@ -139,6 +196,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         heading: chunk?.heading ?? "",
         snippet: chunk?.text ?? "",
         callout: chunk?.callout ?? null,
+        weak: false,
         score: WEIGHT_GRAPH / (RRF_K + index + 1),
       });
     });
@@ -165,6 +223,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
           path: entry.row.path,
           heading: entry.row.heading,
           snippet: entry.row.text,
+          weak: false,
           score: WEIGHT_SEMANTIC / (RRF_K + index + 1),
         });
       });
@@ -183,6 +242,7 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
         heading: chunk?.heading ?? "",
         snippet: hit.snippet.length > 0 ? hit.snippet : (chunk?.text ?? ""),
         callout: chunk?.callout ?? null,
+        weak: false,
         score: WEIGHT_OBSIDIAN / (RRF_K + index + 1),
       });
       added = true;
@@ -221,15 +281,19 @@ export function searchIndex(store: BridgeStore, options: SearchOptions): SearchR
       backlinks: backlinks.get(candidate.path) ?? 0,
       role: roleOfPath(candidate.path, dirs),
       callout: candidate.callout ?? null,
+      ...(candidate.weak ? { weakMatch: true } : {}),
     };
   });
 
+  const allWeak = hits.length > 0 && hits.every((hit) => hit.weakMatch === true);
   const note =
     hits.length === 0
       ? query.length === 0
         ? `The index is empty. ${vaultPathHint()}`
         : "No notes matched. Try fewer words, or drop the folder/tag filters."
-      : null;
+      : allWeak
+        ? "No note contains every query word; these hits share at least one word (weak match)."
+        : null;
 
   const packed = packHitsDetailed(hits, budgetChars);
   return {
@@ -282,7 +346,8 @@ export function packHitsDetailed(hits: SearchHit[], budgetChars: number): Packed
   for (const [index, hit] of hits.entries()) {
     const location = hit.heading.length > 0 ? `${hit.path} § ${hit.heading}` : hit.path;
     const marker = hit.callout ? ` [!${hit.callout}]` : "";
-    const header = `[${index + 1}] ${location}${marker} (backlinks: ${hit.backlinks})`;
+    const weak = hit.weakMatch ? " [weak: not every word]" : "";
+    const header = `[${index + 1}] ${location}${marker}${weak} (backlinks: ${hit.backlinks})`;
     const body = hit.snippet;
     const block = `${header}\n${body}\n`;
     if (used + block.length > budgetChars && lines.length > 0) break;

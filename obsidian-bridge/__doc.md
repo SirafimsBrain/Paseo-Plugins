@@ -188,8 +188,11 @@ Filters (`folder`, `tags`) are applied to the candidate set before truncation. T
 `packHitsDetailed()` also reports how many hits were omitted; the tool turns that into a ready-made `continuation`
 (§5.1) instead of silently dropping the tail.
 
-`toFtsQuery` lowercases the query, keeps `\p{L}\p{N}_-` tokens, quotes each and joins with `OR`: recall first, ranking by
-BM25 afterwards. An empty query lists recent notes — the "show me what I was working on" path.
+`toFtsQuery` lowercases the query, keeps `\p{L}\p{N}_-` tokens and quotes each. Since 0.26.24 the operator is a
+parameter: retrieval asks for `AND` first (`chunks`/`titles` signals) and falls back to `OR` only when the strict pass
+found fewer than three notes, for notes it did not already return (`chunks-or`/`titles-or`, `weakMatch: true`). The
+earlier `OR`-only query ranked by BM25 over any shared word, so one token in a long journal outranked the note that
+contained all three. An empty query lists recent notes — the "show me what I was working on" path.
 
 ## 5. Tools
 
@@ -494,7 +497,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22, 0.26.23)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22, 0.26.23, 0.26.24)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2398,3 +2401,40 @@ No MCP tool, input, setting or schema version changed (the settings schema stays
 `tests/agent-integration-remove.test.ts` — removal from all three config files, a renamed server key and a renamed skill
 directory both found, foreign entries preserved, the second call is a no-op, and an unparseable agent record is left
 alone; `tests/agent-skill.test.ts` keeps the switch-off path honest.
+
+### 0.26.24 — every word first, and a semantic pass that actually runs
+
+Two defects, both found by installing the standalone MCP server into Cline and Kilo and reading what the live server
+answered rather than what the source said it would.
+
+**Recall was all the ranking there was.** `toFtsQuery` joined the query tokens with `OR`, so FTS5 returned every note
+that shared any word and BM25 decided the order. A query for a three-word note name answered with
+`Projects/…/session-manager/_journal.md`, which contains the word "kilo" and neither of the other two tokens, while the
+note that carried all three sat below it. Retrieval now has two passes: `searchChunks(query, n, "AND")` and
+`searchTitles(query, n, "AND")` answer first; only when fewer than `min(limit, 3)` notes matched every word does
+`searchIndex` ask for `OR`, keep the notes the strict pass did not already return, weight them at
+`WEAK_FACTOR = 0.35`, and mark them `weakMatch: true`. The text block renders `[weak: not every word]`, the signals
+name `chunks-or`/`titles-or`, and a page made entirely of weak hits carries a `note` saying so. Graph neighbours are
+seeded from the strict hits only, so a shared word cannot pull in a neighbourhood.
+
+**`resolveTransformers()` found the package but loaded the wrong build.** 0.26.23 fixed *where* the package is
+(`plugins.obsidian-bridge.path` from `$PASEO_HOME/config.json`) and loaded it by absolute path. `createRequire(...).resolve`
+honours the `require` condition, so it returned `dist/transformers.node.cjs`; `import()` of a CommonJS file exposes the
+build only as `default` (Node's named-export detection does not see webpack's exports), which made
+`transformers.pipeline` `undefined` and every semantic query fail with "transformers.pipeline is not a function" —
+while `obsidian_status` still reported a complete vector index, because the index *was* complete: the plugin host,
+which imports the ESM build, had built it. The provider now unwraps `default`, so the stable copy agents launch can
+embed a query. The availability probe is unchanged: it answers whether the package can be resolved, and the failure
+appears in `semantic.error` on the first query.
+
+Live evidence (Linux, Node 24.20.0, Paseo plugin 0.26.24 after `paseo plugin update obsidian-bridge` and
+`paseo plugin reload obsidian-bridge`): `obsidian_status` → `embedding.state: "done"`, `embedded: 2931`,
+`chunks: 2931`, `stale: 0`; `obsidian_search({"query": "how does the queue design handle retries"})` →
+`semantic.used: true`, `semantic.error: null`, signals `["chunks", "titles", "semantic"]`. The defect query
+`"Kilo standalone 7734"` returns weak markers instead of a normal top hit. The standalone installer's update path was
+re-run with `--source` and with a tag ref (see `AGENT-SETUP.md`): it replaces `dist/`, keeps `settings.json`'s
+`vaultPath`/`semanticSearch`, preserves a planning-skill choice, and rewrites `install.json` last.
+
+Tests: `tests/search.test.ts` — the strict hit ranks first and the one-word note is weak, the top-up is absent when three
+strict notes exist, an all-weak page says so, and the empty query still lists recent notes. `tests/store.test.ts` closes
+`toFtsQuery(..., "AND")` and `searchChunks` operators directly.

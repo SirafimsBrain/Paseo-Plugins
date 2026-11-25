@@ -282,7 +282,7 @@ The installer prints the ready-to-paste `mcpServers` block, copies only the `obs
 (or 23.4+). `--dry-run`, `--ref`, `--version`, `--dir`, `--force`, `--skills-dir` and `--uninstall` are listed in
 `--help`.
 
-**The script installs the release it belongs to (0.26.23).** A copy fetched from a tag URL carries that tag's version and
+**The script installs the release it belongs to (0.26.24).** A copy fetched from a tag URL carries that tag's version and
 builds it, so the bundle, `version` and `ref` in `install.json` all describe the installer that was read — not whatever
 `main` happens to be now. The `main` URL installs the latest release; `--version <x.y.z>` moves between releases, and
 `--ref <branch>` builds a branch. An explicit `--version`/`--ref` wins over checkout autodetection, and `--source`

@@ -79,16 +79,23 @@ export interface EmbeddingStats {
   stale: number;
 }
 
+/** How the tokens of a query are combined in an FTS5 MATCH expression. */
+export type FtsOperator = "AND" | "OR";
+
 /**
  * Builds a safe FTS5 MATCH expression from a user query: every word becomes a
- * quoted term, joined with OR for recall. Returns `""` when nothing usable is
+ * quoted term, joined with `AND` or `OR`. Returns `""` when nothing usable is
  * left, which callers treat as "no full-text signal".
+ *
+ * `OR` is the recall pass (0.26.24): a long note that shares one token used to
+ * outrank a short note that matched every word, so retrieval now asks for the
+ * `AND` pass first and keeps `OR` for the top-up when the strict pass is thin.
  */
-export function toFtsQuery(raw: string): string {
+export function toFtsQuery(raw: string, operator: FtsOperator = "OR"): string {
   const tokens = raw.toLowerCase().match(/[\p{L}\p{N}_-]{1,64}/gu) ?? [];
   const unique = [...new Set(tokens)];
   if (unique.length === 0) return "";
-  return unique.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
+  return unique.map((token) => `"${token.replace(/"/g, '""')}"`).join(` ${operator} `);
 }
 
 /** SHA-1 of a chunk's text: the identity a stored vector is reused by. */
@@ -469,8 +476,8 @@ export class BridgeStore {
   // search
   // -------------------------------------------------------------------------
 
-  searchChunks(query: string, limit: number): ChunkRow[] {
-    const match = toFtsQuery(query);
+  searchChunks(query: string, limit: number, operator: FtsOperator = "OR"): ChunkRow[] {
+    const match = toFtsQuery(query, operator);
     if (match.length === 0) return [];
     const rows = this.db
       .prepare(
@@ -499,8 +506,8 @@ export class BridgeStore {
     }));
   }
 
-  searchTitles(query: string, limit: number): TitleRow[] {
-    const match = toFtsQuery(query);
+  searchTitles(query: string, limit: number, operator: FtsOperator = "OR"): TitleRow[] {
+    const match = toFtsQuery(query, operator);
     if (match.length === 0) return [];
     const rows = this.db
       .prepare(

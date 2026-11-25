@@ -42,8 +42,12 @@ afterEach(() => {
 });
 
 describe("toFtsQuery", () => {
-  it("quotes terms and joins them with OR", () => {
+  it("quotes terms and joins them with OR by default", () => {
     expect(toFtsQuery("queue design")).toBe('"queue" OR "design"');
+  });
+
+  it("joins terms with AND for the strict pass", () => {
+    expect(toFtsQuery("queue design", "AND")).toBe('"queue" AND "design"');
   });
 
   it("returns an empty string when nothing usable remains", () => {
@@ -53,6 +57,23 @@ describe("toFtsQuery", () => {
 });
 
 describe("BridgeStore", () => {
+  it("matches every word with AND and any word with OR", () => {
+    const { store } = makeStore();
+    add(store, "Projects/both.md", "# Both\n\nquadratic smoothing explained\n");
+    add(store, "Projects/quadratic.md", "# Quadratic\n\ncomplex numbers\n");
+    add(store, "Projects/smoothing.md", "# Smoothing\n\nchart colours\n");
+
+    const strict = store.searchChunks("quadratic smoothing", 10, "AND");
+    expect(strict.map((row) => row.path)).toEqual(["Projects/both.md"]);
+
+    const relaxed = store.searchChunks("quadratic smoothing", 10, "OR");
+    expect(relaxed.map((row) => row.path).sort()).toEqual([
+      "Projects/both.md",
+      "Projects/quadratic.md",
+      "Projects/smoothing.md",
+    ]);
+  });
+
   it("counts only vectors whose chunk still exists", () => {
     const { store } = makeStore();
     add(store, "Projects/a.md", "# A\n\ntext\n");
