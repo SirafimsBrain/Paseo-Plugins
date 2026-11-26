@@ -1,6 +1,6 @@
 # Status — memory-flash-client
 
-Current: plugin **0.7.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
+Current: plugin **0.8.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
 verified against **Paseo 0.17.1 (2026-11-21)** — **compatible**.
 
 This file carries the status notes that used to fill the *Status* column of the root
@@ -14,6 +14,11 @@ Compatible.
 
 ## Release notes
 
+- **0.8.1** — Pi support: the `memory-flash-remote` skill installs into
+  `$PI_CODING_AGENT_DIR/skills` (`~/.pi/agent/skills` by default), and the body now
+  states that `memory_*` is a symbiont of every harness. Remote MCP registration into
+  Pi's own `mcp.json` is planned, not shipped (see
+  [`../memory-flash/MCP-STDIO-PLAN.md`](../memory-flash/MCP-STDIO-PLAN.md) phase 4).
 - **0.7.0** — appends one agent instruction per open via `appendSystemPrompt` (never
   saved, never contains a key), hence the raised floor: a 0.16.x daemon rejects the
   field.

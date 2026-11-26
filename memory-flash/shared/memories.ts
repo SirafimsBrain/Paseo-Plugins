@@ -509,9 +509,31 @@ export const unregisterKimiMcp = defineRpc({
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });
 
+// Pi reads user-level stdio MCP servers from `<agent-dir>/mcp.json`
+// (`~/.pi/agent/mcp.json`, or `$PI_CODING_AGENT_DIR/mcp.json`), flat
+// `{command, args}` entries under `mcpServers`. See server/pi-mcp.ts.
+
+export const piMcpStatus = defineRpc({
+  name: "memory-flash.pi-mcp-status",
+  input: z.object({}),
+  output: agentMcpStatusSchema,
+});
+
+export const registerPiMcp = defineRpc({
+  name: "memory-flash.pi-mcp-register",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
+export const unregisterPiMcp = defineRpc({
+  name: "memory-flash.pi-mcp-unregister",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
+});
+
 /** Result of registering memory-flash in one agent's MCP config. */
 export const agentMcpRegistrationResultSchema = z.object({
-  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI", "Kimi"). */
+  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI", "Kimi", "Pi"). */
   agent: z.string(),
   ok: z.boolean(),
   error: z.string().nullable(),

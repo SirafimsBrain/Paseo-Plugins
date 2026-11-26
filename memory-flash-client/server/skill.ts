@@ -85,7 +85,8 @@ yours.
 That cuts both ways. Memory you save can save another agent an hour of
 work, and memory you skip writing can force the next agent to rediscover what
 you already know. Treat search-before-work and write-while-working as part
-of the task, not as an optional extra.
+of the task, not as an optional extra: \`memory_*\` is a symbiont of whatever
+agent you are — use it in your work, not only when the user mentions memory.
 
 **Language rule:** write every memory in **English** — title, content and
 tags. The base is shared across machines and languages; one language keeps
@@ -273,6 +274,15 @@ function kimiCodeHome(): string {
   return configured.length > 0 ? configured : path.join(os.homedir(), ".kimi-code");
 }
 
+/**
+ * Pi's agent directory: `$PI_CODING_AGENT_DIR` when set, else `~/.pi/agent` —
+ * the same rule Pi itself applies. Its skills live in `<agent-dir>/skills`.
+ */
+function piAgentDir(): string {
+  const configured = (process.env.PI_CODING_AGENT_DIR ?? "").trim();
+  return configured.length > 0 ? configured : path.join(os.homedir(), ".pi", "agent");
+}
+
 /** The same destinations memory-flash installs into on this machine. */
 export function skillTargets(): SkillTarget[] {
   const home = os.homedir();
@@ -318,6 +328,12 @@ export function skillTargets(): SkillTarget[] {
       // shows the default path, the status row shows the resolved one.
       label: "Kimi Code CLI (~/.kimi-code/skills)",
       dir: () => path.join(kimiCodeHome(), "skills"),
+    },
+    {
+      id: "pi",
+      // Pi's agent directory moves with `PI_CODING_AGENT_DIR`.
+      label: "Pi (~/.pi/agent/skills)",
+      dir: () => path.join(piAgentDir(), "skills"),
     },
   ];
 }

@@ -828,10 +828,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path5) {
+  if (!path5)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path5.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1171,11 +1171,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path5, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path5);
     return iss;
   });
 }
@@ -1625,16 +1625,16 @@ function flattenError(error63, mapper = (issue2) => issue2.message) {
 }
 function formatError(error63, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error64, path4 = []) => {
+  const processError = (error64, path5 = []) => {
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1673,17 +1673,17 @@ function formatError(error63, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error63, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error64, path4 = []) => {
+  const processError = (error64, path5 = []) => {
     var _a3;
     for (const issue2 of error64.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1722,8 +1722,8 @@ function treeifyError(error63, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path4) {
+  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path5) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18825,13 +18825,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path4 = ref.slice(1).split("/").filter(Boolean);
-  if (path4.length === 0) {
+  const path5 = ref.slice(1).split("/").filter(Boolean);
+  if (path5.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path4[0] === defsKey) {
-    const key = path4[1] === void 0 ? void 0 : decodeJSONPointerSegment(path4[1]);
+  if (path5[0] === defsKey) {
+    const key = path5[1] === void 0 ? void 0 : decodeJSONPointerSegment(path5[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -20082,8 +20082,23 @@ var unregisterKimiMcp = defineRpc({
   input: external_exports.object({}),
   output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
 });
+var piMcpStatus = defineRpc({
+  name: "memory-flash.pi-mcp-status",
+  input: external_exports.object({}),
+  output: agentMcpStatusSchema
+});
+var registerPiMcp = defineRpc({
+  name: "memory-flash.pi-mcp-register",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
+var unregisterPiMcp = defineRpc({
+  name: "memory-flash.pi-mcp-unregister",
+  input: external_exports.object({}),
+  output: external_exports.object({ ok: external_exports.boolean(), error: external_exports.string().nullable() })
+});
 var agentMcpRegistrationResultSchema = external_exports.object({
-  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI", "Kimi"). */
+  /** Human-readable agent label ("Cline", "Cursor", "Codex CLI", "Kimi", "Pi"). */
   agent: external_exports.string(),
   ok: external_exports.boolean(),
   error: external_exports.string().nullable()
@@ -21355,10 +21370,10 @@ function readWorkspaceNameMap() {
     return {};
   }
 }
-function defaultProject(env = process.env, cwd = process.cwd()) {
-  const explicit = env.MEMORY_FLASH_PROJECT?.trim();
+function defaultProject(env2 = process.env, cwd = process.cwd()) {
+  const explicit = env2.MEMORY_FLASH_PROJECT?.trim();
   if (explicit) return explicit;
-  const workspaceId = env.PASEO_WORKSPACE_ID?.trim();
+  const workspaceId = env2.PASEO_WORKSPACE_ID?.trim();
   if (workspaceId) {
     const name = readWorkspaceNameMap()[workspaceId];
     if (name) return name;
@@ -21799,9 +21814,130 @@ function handleJsonRpcRequest(request, context, serverInfo, log = () => {
   }
 }
 
+// server/daemon-gate.ts
+import * as fs3 from "node:fs";
+import * as os3 from "node:os";
+import * as path4 from "node:path";
+import * as process2 from "node:process";
+var PASEO_DOWN_MESSAGE = "\u0414\u0435\u043C\u043E\u043D Paseo \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D, MCP \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D (Paseo daemon unavailable \u2014 MCP unavailable). Start Paseo \u2014 the daemon or the desktop app \u2014 and try again: the memory MCP server is only served while Paseo runs. Nothing on the MCP side is broken, so do not retry in a loop, do not diagnose the server, and do not read or edit the memory database directly.";
+var HEARTBEAT_FILE_NAME = "daemon-heartbeat.json";
+var HEARTBEAT_MAX_AGE_MS = 6e4;
+function paseoHomeDir(env2 = process2.env) {
+  const configured = env2.PASEO_HOME;
+  return configured && configured.trim().length > 0 ? configured.trim() : path4.join(os3.homedir(), ".paseo");
+}
+function heartbeatPath(home = paseoHomeDir()) {
+  return path4.join(home, "plugins", "memory-flash", HEARTBEAT_FILE_NAME);
+}
+function daemonPidPath(home = paseoHomeDir()) {
+  return path4.join(home, "paseo.pid");
+}
+function isGateDisabled(env2 = process2.env) {
+  const raw = (env2.MEMORY_FLASH_DAEMON_GATE ?? "").trim().toLowerCase();
+  return raw === "off" || raw === "0" || raw === "false" || raw === "no" || raw === "disabled";
+}
+function isProcessAlive(pid2) {
+  if (!Number.isInteger(pid2) || pid2 <= 0) return false;
+  try {
+    process2.kill(pid2, 0);
+    return true;
+  } catch (cause) {
+    return cause.code === "EPERM";
+  }
+}
+function parsePidFile(text2) {
+  const trimmed = text2.trim();
+  if (trimmed.length === 0) return null;
+  if (/^\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
+  try {
+    const parsed = JSON.parse(trimmed);
+    return typeof parsed.pid === "number" && Number.isInteger(parsed.pid) ? parsed.pid : null;
+  } catch {
+    return null;
+  }
+}
+function checkPaseoDaemon(options = {}) {
+  const env2 = options.env ?? process2.env;
+  if (isGateDisabled(env2)) {
+    return { available: true, source: "disabled", reason: "daemon gate disabled by MEMORY_FLASH_DAEMON_GATE" };
+  }
+  const home = options.home ?? paseoHomeDir(env2);
+  const now = options.now ?? Date.now();
+  const readFile = options.readFile ?? ((file2) => fs3.readFileSync(file2, "utf-8"));
+  const alive = options.isProcessAlive ?? isProcessAlive;
+  try {
+    const raw = JSON.parse(readFile(heartbeatPath(home)));
+    const updatedAt = typeof raw.updatedAt === "number" ? raw.updatedAt : typeof raw.updatedAt === "string" ? Date.parse(raw.updatedAt) : Number.NaN;
+    const pidOk = typeof raw.pid !== "number" || alive(raw.pid);
+    if (Number.isFinite(updatedAt) && now - updatedAt <= HEARTBEAT_MAX_AGE_MS && pidOk) {
+      return {
+        available: true,
+        source: "heartbeat",
+        reason: `plugin heartbeat is ${Math.max(0, Math.round((now - updatedAt) / 1e3))}s old`
+      };
+    }
+  } catch {
+  }
+  try {
+    const pid2 = parsePidFile(readFile(daemonPidPath(home)));
+    if (pid2 !== null && alive(pid2)) {
+      return { available: true, source: "pid", reason: `Paseo daemon pid ${pid2} is running` };
+    }
+  } catch {
+  }
+  return {
+    available: false,
+    source: "none",
+    reason: `no fresh heartbeat at ${heartbeatPath(home)} and no live daemon pid at ${daemonPidPath(home)}`
+  };
+}
+
+// server/mcp-unavailable.ts
+function handleUnavailableRequest(request, serverInfo, message = PASEO_DOWN_MESSAGE) {
+  const id = request.id ?? null;
+  switch (request.method) {
+    case "initialize":
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: { tools: { listChanged: false } },
+          serverInfo,
+          instructions: message
+        }
+      };
+    case "notifications/initialized":
+    case "initialized":
+      return null;
+    case "ping":
+      return { jsonrpc: "2.0", id, result: {} };
+    case "tools/list":
+      return { jsonrpc: "2.0", id, result: { tools: MCP_TOOLS } };
+    case "tools/call":
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: { content: [{ type: "text", text: message }], isError: true }
+      };
+    default:
+      if (request.method.startsWith("notifications/")) return null;
+      return {
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: `Method not found: ${request.method}` }
+      };
+  }
+}
+
 // server/mcp-server.ts
 function main() {
   const settings = parseSettingsFile();
+  const availability = checkPaseoDaemon();
+  if (!availability.available) {
+    serveUnavailable(settings, availability);
+    return;
+  }
   const store = new MemoryStore({ historyPerMemory: settings.historyPerMemory });
   const context = {
     store,
@@ -21858,5 +21994,39 @@ function main() {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+function serveUnavailable(settings, availability) {
+  const serverInfo = { name: settings.mcpServerName, version: SERVER_VERSION };
+  process.stderr.write(
+    `[memory-flash] ${PASEO_DOWN_MESSAGE} (gate: ${availability.reason})
+`
+  );
+  const writeMessage = (message) => {
+    process.stdout.write(`${JSON.stringify(message)}
+`);
+  };
+  let buffer = "";
+  process.stdin.setEncoding("utf-8");
+  process.stdin.on("data", (chunk) => {
+    buffer += chunk;
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.length === 0) continue;
+      let request;
+      try {
+        request = JSON.parse(line);
+      } catch {
+        writeMessage({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+        continue;
+      }
+      const response = handleUnavailableRequest(request, serverInfo);
+      if (response) writeMessage(response);
+    }
+  });
+  process.stdin.on("end", () => process.exit(0));
+  process.on("SIGINT", () => process.exit(0));
+  process.on("SIGTERM", () => process.exit(0));
 }
 main();

@@ -12,13 +12,16 @@ import * as path from "node:path";
 let tempHome: string;
 const previousHome = process.env.HOME;
 const previousKimiHome = process.env.KIMI_CODE_HOME;
+const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 beforeEach(() => {
   tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "mfc-skill-home-"));
   process.env.HOME = tempHome;
-  // Kimi Code CLI's own skills directory moves with `KIMI_CODE_HOME`; an
-  // inherited value would point the target at a real directory.
+  // Kimi Code CLI's own skills directory moves with `KIMI_CODE_HOME`, Pi's
+  // with `PI_CODING_AGENT_DIR`; an inherited value would point the target at a
+  // real directory.
   delete process.env.KIMI_CODE_HOME;
+  delete process.env.PI_CODING_AGENT_DIR;
 });
 
 afterEach(() => {
@@ -26,6 +29,8 @@ afterEach(() => {
   else process.env.HOME = previousHome;
   if (previousKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
   else process.env.KIMI_CODE_HOME = previousKimiHome;
+  if (previousPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
   fs.rmSync(tempHome, { recursive: true, force: true });
 });
 
@@ -135,6 +140,26 @@ describe("remote memory skill", () => {
     expect(fs.existsSync(path.join(moved, "skills", SKILL_NAME, "SKILL.md"))).toBe(true);
     expect(uninstallSkill("kimi").ok).toBe(true);
     delete process.env.KIMI_CODE_HOME;
+  });
+
+  it("offers Pi, following PI_CODING_AGENT_DIR", async () => {
+    const { SKILL_NAME, installSkill, skillStatuses, uninstallSkill } = await loadModule();
+
+    const pi = skillStatuses().find((row) => row.id === "pi");
+    expect(pi?.path).toBe(
+      path.join(tempHome, ".pi", "agent", "skills", SKILL_NAME, "SKILL.md"),
+    );
+
+    const moved = path.join(tempHome, "pi-root");
+    process.env.PI_CODING_AGENT_DIR = moved;
+    expect(skillStatuses().find((row) => row.id === "pi")?.path).toBe(
+      path.join(moved, "skills", SKILL_NAME, "SKILL.md"),
+    );
+
+    expect(installSkill("pi").ok).toBe(true);
+    expect(fs.existsSync(path.join(moved, "skills", SKILL_NAME, "SKILL.md"))).toBe(true);
+    expect(uninstallSkill("pi").ok).toBe(true);
+    delete process.env.PI_CODING_AGENT_DIR;
   });
 
   it("rejects an unknown target instead of writing somewhere unexpected", async () => {

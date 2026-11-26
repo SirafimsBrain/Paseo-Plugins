@@ -20,15 +20,18 @@ import {
   httpStatus,
   kiloMcpStatus,
   kimiMcpStatus,
+  piMcpStatus,
   listApiKeys,
   opencodeMcpStatus,
   registerCodexMcp,
   registerKiloMcp,
   registerKimiMcp,
+  registerPiMcp,
   registerOpencodeMcp,
   unregisterCodexMcp,
   unregisterKiloMcp,
   unregisterKimiMcp,
+  unregisterPiMcp,
   unregisterOpencodeMcp,
   cursorMcpStatus,
   registerCursorMcp,
@@ -131,6 +134,9 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
   const kimiStatusRpc = useRpc(kimiMcpStatus);
   const kimiRegisterRpc = useRpc(registerKimiMcp);
   const kimiUnregisterRpc = useRpc(unregisterKimiMcp);
+  const piStatusRpc = useRpc(piMcpStatus);
+  const piRegisterRpc = useRpc(registerPiMcp);
+  const piUnregisterRpc = useRpc(unregisterPiMcp);
   const registerAllRpc = useRpc(registerAllAgentMcp);
   const apiKeysRpc = useRpc(listApiKeys);
   const generateKeyRpc = useRpc(generateApiKey);
@@ -173,6 +179,12 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
       label: "Kimi Code CLI",
       register: kimiRegisterRpc,
       unregister: kimiUnregisterRpc,
+    },
+    {
+      id: "pi",
+      label: "Pi",
+      register: piRegisterRpc,
+      unregister: piUnregisterRpc,
     },
   ];
 
@@ -238,12 +250,13 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
       opencodeStatusRpc({}),
       kiloStatusRpc({}),
       kimiStatusRpc({}),
+      piStatusRpc({}),
     ])
-      .then(([cline, cursor, codex, opencode, kilo, kimi]) =>
-        setAgentMcps({ cline, cursor, codex, opencode, kilo, kimi }),
+      .then(([cline, cursor, codex, opencode, kilo, kimi, pi]) =>
+        setAgentMcps({ cline, cursor, codex, opencode, kilo, kimi, pi }),
       )
       .catch(() => undefined);
-  }, [clineStatusRpc, cursorStatusRpc, codexStatusRpc, opencodeStatusRpc, kiloStatusRpc, kimiStatusRpc]);
+  }, [clineStatusRpc, cursorStatusRpc, codexStatusRpc, opencodeStatusRpc, kiloStatusRpc, kimiStatusRpc, piStatusRpc]);
 
   const reloadRemoteAccess = useCallback(() => {
     void apiKeysRpc({}).then((result) => setApiKeys(result.keys)).catch(() => undefined);
@@ -511,7 +524,7 @@ export function MemoryFlashSettingsScreen({ theme }: PluginSurfaceProps) {
       <SettingsCard>
         <SettingsSection
           title="Agent MCP registration"
-          info="Register the server in an agent's own config file (other servers in each file are preserved). Cline, Cursor and Codex CLI ignore stdio MCP servers delivered through the agent session, so they need this; Kimi Code CLI reads its own mcp.json, so a registration there also covers the sessions started outside Paseo. OpenCode and Kilo drop a session-injected server whenever OpenCode evicts an idle directory — a config-file entry is re-created on every directory boot, so the memory tools no longer vanish mid-session.">
+          info="Register the server in an agent's own config file (other servers in each file are preserved). Cline, Cursor and Codex CLI ignore stdio MCP servers delivered through the agent session, so they need this; Kimi Code CLI and Pi read their own mcp.json, so a registration there also covers the sessions started outside Paseo. OpenCode and Kilo drop a session-injected server whenever OpenCode evicts an idle directory — a config-file entry is re-created on every directory boot, so the memory tools no longer vanish mid-session. A server registered here is only served while Paseo runs: with the daemon and desktop closed it answers that the MCP server is unavailable instead of serving memory.">
           <SettingsAction
             label="Register"
             actionLabel="Register for all local agent configs"

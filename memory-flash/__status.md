@@ -1,6 +1,6 @@
 # Status — memory-flash
 
-Current: plugin **0.14.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
+Current: plugin **0.15.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
 verified against **Paseo 0.17.1 (2026-11-21)** — **compatible**.
 
 This file carries the status notes that used to fill the *Status* column of the root
@@ -14,6 +14,12 @@ Compatible.
 
 ## Release notes
 
+- **0.15.1** — Pi support (stdio MCP registration in `$PI_CODING_AGENT_DIR/mcp.json`
+  and a skill target in `<agent-dir>/skills`) and the daemon gate: the bundled stdio
+  server serves only while Paseo runs and otherwise answers every tool call with
+  `Демон Paseo недоступен, MCP недоступен`. Skill body gained the *whole memory
+  unavailable* protocol and the symbiont rule. Plan for the remaining plugins:
+  [`MCP-STDIO-PLAN.md`](./MCP-STDIO-PLAN.md).
 - **0.14.0** — implements the 0.17.x recommendations: per-open agent instructions via
   `appendSystemPrompt` (only when the agent gets the full memory server) and an
   **Open agent** action on memory rows with `focusHost`. The floor rose to `>=0.17.0`

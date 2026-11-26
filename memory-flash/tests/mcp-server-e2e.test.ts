@@ -21,9 +21,18 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-function startServer(home: string) {
+function startServer(home: string, extraEnv: Record<string, string> = {}) {
   const child = spawn(process.execPath, [SERVER_BUNDLE], {
-    env: { ...process.env, PASEO_HOME: home, MEMORY_FLASH_AGENT_ID: "e2e-agent" },
+    env: {
+      ...process.env,
+      PASEO_HOME: home,
+      MEMORY_FLASH_AGENT_ID: "e2e-agent",
+      // The daemon gate is a separate contract (tests/daemon-gate.test.ts and
+      // the unavailable case below); the happy path disables it so a test run
+      // does not depend on a real Paseo being up.
+      MEMORY_FLASH_DAEMON_GATE: "off",
+      ...extraEnv,
+    },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let buffer = "";
@@ -112,6 +121,41 @@ describe("MCP server end-to-end (real process)", () => {
 
       // The database file really exists under $PASEO_HOME.
       expect(fs.existsSync(path.join(home, "plugins", "memory-flash", "memory.db"))).toBe(true);
+    } finally {
+      server.stop();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("refuses every tool call while the Paseo daemon is stopped", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "mf-e2e-gate-"));
+    // No heartbeat and no pid file in this home: Paseo is not running.
+    const server = startServer(home, { MEMORY_FLASH_DAEMON_GATE: "" });
+    try {
+      const init = await server.request("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "e2e", version: "0.0.1" },
+      });
+      expect(String(init.instructions)).toContain("Демон Paseo недоступен, MCP недоступен");
+
+      // The catalogue is still served, so a client does not enter a spawn loop…
+      const tools = await server.request("tools/list");
+      const toolNames = (tools.tools as Array<{ name: string }>).map((tool) => tool.name);
+      expect(toolNames).toContain("memory_search");
+
+      // …but the call itself carries the reason straight to the agent.
+      const save = await server.request("tools/call", {
+        name: "memory_save",
+        arguments: { title: "Should not be written", content: "Paseo is stopped." },
+      });
+      expect(save.isError).toBe(true);
+      const text = (save.content as Array<{ text: string }>)[0].text;
+      expect(text).toContain("Демон Paseo недоступен, MCP недоступен");
+      expect(text).toContain("do not retry in a loop");
+
+      // Nothing was opened, so no database was created behind the agent's back.
+      expect(fs.existsSync(path.join(home, "plugins", "memory-flash", "memory.db"))).toBe(false);
     } finally {
       server.stop();
       fs.rmSync(home, { recursive: true, force: true });

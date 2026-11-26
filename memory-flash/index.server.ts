@@ -47,6 +47,9 @@ import {
   registerKimiMcp,
   unregisterKimiMcp,
   kimiMcpStatus,
+  registerPiMcp,
+  unregisterPiMcp,
+  piMcpStatus,
   registerAllAgentMcp,
 } from "./shared/memories";
 import type { ApiKey } from "./shared/memories";
@@ -75,6 +78,12 @@ import {
   registerKimiMcp as registerKimiMcpOnDisk,
   unregisterKimiMcp as unregisterKimiMcpOnDisk,
 } from "./server/kimi-mcp";
+import {
+  piMcpStatus as readPiMcpStatus,
+  registerPiMcp as registerPiMcpOnDisk,
+  unregisterPiMcp as unregisterPiMcpOnDisk,
+} from "./server/pi-mcp";
+import { startDaemonHeartbeat } from "./server/daemon-gate";
 import {
   opencodeMcpStatus as readOpencodeMcpStatus,
   registerOpencodeMcp as registerOpencodeMcpOnDisk,
@@ -120,6 +129,19 @@ export default function contribute(server: PluginServerContext) {
 
   const store = new MemoryStore();
   let disposed = false;
+
+  // -------------------------------------------------------------------------
+  // Daemon heartbeat (0.15.1)
+  //
+  // The bundled stdio MCP server is spawned by agents outside Paseo too, and a
+  // plugin MCP server may only serve while Paseo runs. This file is what tells
+  // those servers that the daemon (and this plugin, with it) is alive; when the
+  // daemon stops, the heartbeat goes stale and every external spawn answers
+  // "Демон Paseo недоступен, MCP недоступен" instead of opening the database.
+  // See server/daemon-gate.ts.
+  // -------------------------------------------------------------------------
+
+  const stopDaemonHeartbeat = startDaemonHeartbeat();
 
   // -------------------------------------------------------------------------
   // HTTP MCP endpoint (remote access, 0.5.0). Started and stopped
@@ -697,6 +719,15 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(unregisterKimiMcp, () => unregisterKimiMcpOnDisk());
 
+  // Pi keeps its user-level stdio MCP servers in `$PI_CODING_AGENT_DIR/mcp.json`
+  // (`~/.pi/agent/mcp.json` by default), flat `{command, args}` entries under
+  // `mcpServers`. See server/pi-mcp.ts.
+  server.handle(piMcpStatus, () => readPiMcpStatus());
+
+  server.handle(registerPiMcp, () => registerPiMcpOnDisk());
+
+  server.handle(unregisterPiMcp, () => unregisterPiMcpOnDisk());
+
   server.handle(registerAllAgentMcp, () => ({
     results: [
       { agent: "Cline", ...registerClineMcpOnDisk() },
@@ -705,6 +736,7 @@ export default function contribute(server: PluginServerContext) {
       { agent: "OpenCode", ...registerOpencodeMcpOnDisk() },
       { agent: "Kilo", ...registerKiloMcpOnDisk() },
       { agent: "Kimi Code CLI", ...registerKimiMcpOnDisk() },
+      { agent: "Pi", ...registerPiMcpOnDisk() },
     ],
   }));
 
@@ -783,6 +815,7 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     disposed = true;
+    stopDaemonHeartbeat();
     removeCreateHook();
     removeSessionOpenHook();
     unsubscribeSettings();

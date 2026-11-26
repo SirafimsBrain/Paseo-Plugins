@@ -22,17 +22,21 @@ let home: string;
 let originalPaseoHome: string | undefined;
 let originalHome: string | undefined;
 let originalKimiHome: string | undefined;
+let originalPiAgentDir: string | undefined;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "mf-hosts-"));
   originalPaseoHome = process.env.PASEO_HOME;
   originalHome = process.env.HOME;
   originalKimiHome = process.env.KIMI_CODE_HOME;
+  originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PASEO_HOME = home;
   process.env.HOME = home;
-  // Kimi Code CLI's own root moves with `KIMI_CODE_HOME`; an inherited value
-  // would point the skill target (and the MCP config) at a real directory.
+  // Kimi Code CLI's own root moves with `KIMI_CODE_HOME`, Pi's with
+  // `PI_CODING_AGENT_DIR`; an inherited value would point the skill target
+  // (and the MCP config) at a real directory.
   delete process.env.KIMI_CODE_HOME;
+  delete process.env.PI_CODING_AGENT_DIR;
   return () => {
     if (originalPaseoHome === undefined) delete process.env.PASEO_HOME;
     else process.env.PASEO_HOME = originalPaseoHome;
@@ -40,6 +44,8 @@ beforeEach(() => {
     else process.env.HOME = originalHome;
     if (originalKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = originalKimiHome;
+    if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
     fs.rmSync(home, { recursive: true, force: true });
   };
 });
@@ -91,7 +97,7 @@ describe("remote hosts registry", () => {
 describe("skill installer", () => {
   it("reports targets with install state", () => {
     const statuses = skillStatuses();
-    expect(statuses.length).toBe(8);
+    expect(statuses.length).toBe(9);
     // All targets should have the skill file path containing "memory-flash/SKILL.md"
     for (const status of statuses) {
       expect(status.path).toContain("memory-flash/SKILL.md");
@@ -114,6 +120,7 @@ describe("skill installer", () => {
       "kilo",
       "kimi",
       "opencode",
+      "pi",
       "qwen",
     ]);
   });
@@ -150,5 +157,9 @@ describe("skill installer", () => {
     expect(markdown).toContain("memory_update");
     expect(markdown).toContain("memory_delete");
     expect(markdown).toContain("handoff");
+    // The daemon gate is part of the protocol the agent has to know: the exact
+    // sentence it will receive, and what to do (nothing) when it arrives.
+    expect(markdown).toContain("Демон Paseo недоступен, MCP недоступен");
+    expect(markdown).toContain("Do not retry in a loop");
   });
 });

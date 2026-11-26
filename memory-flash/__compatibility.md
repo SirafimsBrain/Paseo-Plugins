@@ -1,6 +1,34 @@
 # Compatibility — memory-flash
 
-Current: plugin **0.14.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.15.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+
+## Plugin 0.15.1 — Pi support and the Paseo daemon gate (2026-11-26)
+
+Feature release; no Paseo API changed and the floor stays `>=0.17.0`.
+
+- **Pi** (`server/pi-mcp.ts`): user-level stdio MCP registration in
+  `$PI_CODING_AGENT_DIR/mcp.json` (`~/.pi/agent/mcp.json` by default), flat
+  `{command, args}` entries, shared atomic JSON writer; the agent directory is
+  resolved per call. Skill target added at `<agent-dir>/skills`. Pi 1.6.1 detected on
+  this machine (`~/.pi/agent`).
+- **Daemon gate** (`server/daemon-gate.ts`, `server/mcp-unavailable.ts`): the bundled
+  stdio server serves only while Paseo runs. Heartbeat
+  `$PASEO_HOME/plugins/memory-flash/daemon-heartbeat.json` (15 s refresh, 60 s
+  freshness, pid must be alive) with `$PASEO_HOME/paseo.pid` as fallback;
+  `MEMORY_FLASH_DAEMON_GATE=off` disables it. With the gate closed no `MemoryStore`
+  is constructed and every `tools/call` returns an MCP `isError` carrying the fixed
+  sentence.
+- **Skill**: nine targets (Pi added), a *whole memory unavailable* protocol section
+  and the symbiont rule for `memory_*`.
+- **Settings screen**: Pi row in *Agent MCP registration*, gate note in the section
+  description, *Register for all* now runs seven registrations.
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `vitest` | exit 0 / **22 suites, 260 tests** pass |
+| Gate | unit matrix (fresh/stale heartbeat, dead/live pid, disabled) + real-process e2e where `initialize` carries the sentence, `tools/call` is `isError` and no `memory.db` is created |
+| Pi | default dir, `PI_CODING_AGENT_DIR`, foreign servers preserved, corrupted file refused, register/unregister round-trip |
+| Not covered | a live Pi handshake and a real desktop-stopped spawn on macOS/Windows — Linux target only |
 
 ## Plugin 0.14.1 — instruction tool names carry the MCP server prefix (2026-11-22)
 

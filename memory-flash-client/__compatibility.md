@@ -1,6 +1,25 @@
 # Compatibility — memory-flash-client
 
-Current: plugin **0.7.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.8.1**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`.
+
+## Plugin 0.8.1 — Pi skill target (2026-11-26)
+
+Feature release; no Paseo API changed and the floor stays `>=0.17.0`.
+
+- The `memory-flash-remote` skill installs into
+  `$PI_CODING_AGENT_DIR/skills` (`~/.pi/agent/skills` by default); the directory is
+  resolved per call, like Pi's own agent directory.
+- The body gained the symbiont sentence: `memory_*` belongs to every harness, not
+  only to Paseo agents.
+- Not shipped: a machine-level MCP registration into Pi's `mcp.json`. The remote
+  servers are HTTP entries owned by a remote memory host, and writing an API key
+  into another agent's config is a credential decision — planned in
+  [`../memory-flash/MCP-STDIO-PLAN.md`](../memory-flash/MCP-STDIO-PLAN.md) phase 4.
+
+| Check | Result |
+| --- | --- |
+| `typecheck` / `vitest` | exit 0 / **8 suites, 95 tests** pass |
+| Pi | default path, `PI_CODING_AGENT_DIR` override, install/uninstall round-trip |
 
 ## Plugin 0.7.1 — instruction tool names carry the MCP server prefix (2026-11-22)
 

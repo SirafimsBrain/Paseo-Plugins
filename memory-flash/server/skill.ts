@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
 import { MCP_TOOLS } from "./mcp-tools";
+import { piAgentDir } from "./pi-mcp";
 
 /**
  * Skill management (requirement 6).
@@ -61,8 +62,17 @@ description: >
 # Memory Flash — shared agent memory
 
 You have access to the team memory: a tagged, searchable database shared by
-**all** coding agents (Cline, OpenCode, Kilo, Qwen Code, Codex, …) across
-projects and machines. Another agent may have already solved your problem.
+**all** coding agents (Cline, OpenCode, Kilo, Qwen Code, Codex, Kimi, Pi, …)
+across projects and machines. Another agent may have already solved your
+problem. The \`memory_*\` tools are a symbiont of *your* workflow too, whichever
+harness you are: use them in your work, not only when the user mentions memory.
+
+These tools need **Paseo** (the daemon or the desktop app) to be running — the
+plugin serves its MCP server only while Paseo is up. If a call answers
+\`Демон Paseo недоступен, MCP недоступен\`, tell the user to start Paseo and carry
+on with the task without memory; do not retry in a loop, do not investigate the
+MCP server, and do not read or edit the memory database by hand. Everything
+else in this skill comes back as soon as Paseo is running again.
 
 A memory that is never written is lost, and a memory that is written twice
 creates two conflicting answers. The rules below exist to avoid both.
@@ -254,7 +264,19 @@ memory_handoff { "title": "<task> — state", "content": "Done: …. Failed atte
 
 ---
 
-## If a memory tool is briefly unavailable
+## If the whole memory is unavailable
+
+If every call — including \`memory_stats\` — answers \`Демон Paseo недоступен,
+MCP недоступен\`, Paseo itself is stopped: the memory MCP server is only served
+while Paseo runs. That is a deliberate, expected answer, not a malfunction.
+
+1. **Do not retry in a loop** and do not spend the session diagnosing it.
+2. **Tell the user** in one sentence: start Paseo (daemon or desktop app) and
+   the memory tools come back.
+3. **Continue the task without memory** — and say in your final answer which
+   searches, saves or handoff were skipped, so they can be repeated later.
+
+## If a single memory tool is briefly unavailable
 
 An OpenCode or Kilo session can lose its \`memory-flash_*\` tools for a
 while — typically after its workspace has idled out and been restarted. The
@@ -373,6 +395,13 @@ export function skillTargets(): SkillTarget[] {
       // shows the default path, the status row shows the resolved one.
       label: "Kimi Code CLI (~/.kimi-code/skills)",
       dir: () => path.join(kimiCodeHome(), "skills"),
+    },
+    {
+      id: "pi",
+      // Pi's agent directory moves with `PI_CODING_AGENT_DIR`; the label shows
+      // the default path, the status row shows the resolved one.
+      label: "Pi (~/.pi/agent/skills)",
+      dir: () => path.join(piAgentDir(), "skills"),
     },
   ];
 }

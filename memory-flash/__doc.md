@@ -36,6 +36,9 @@ memory-flash/
 │   ├── cline-mcp.ts           # register/unregister in Cline's own MCP settings
 │   ├── cursor-mcp.ts          # register/unregister in Cursor's ~/.cursor/mcp.json
 │   ├── codex-mcp.ts           # register/unregister in Codex's ~/.codex/config.toml (TOML)
+│   ├── pi-mcp.ts              # register/unregister in Pi's $PI_CODING_AGENT_DIR/mcp.json
+│   ├── daemon-gate.ts         # "is Paseo running?" gate + heartbeat for the stdio server
+│   ├── mcp-unavailable.ts     # protocol answers of a server whose gate is closed
 │   ├── opencode-service.ts    # shared OpenCode v2 service detection (0.15.0 #7435)
 │   └── remote-hosts.ts        # hosts.json registry, paseo-ssh probe, stubs
 ├── client/
@@ -47,7 +50,7 @@ memory-flash/
 │   ├── e2e-entry-resolution.mjs  # entry-path e2e across a simulated plugin update
 │   └── entry-probe.ts         # bundled by the e2e above to read the real launch config
 ├── skill/                     # (reserved for extra skill assets; SKILL.md is generated)
-└── tests/                     # vitest: 15 suites, 160 tests (incl. real-process stdio e2e)
+└── tests/                     # vitest: 22 suites, 260 tests (incl. real-process stdio e2e)
 ```
 
 ### Data flow
@@ -200,7 +203,7 @@ non-zero on regression.
 
 ## 5. Skill (requirement 6)
 
-`SKILL.md` follows the standard skills format (YAML frontmatter `name`/`description`, markdown body) observed on this machine across `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills`, `~/.kilo/skills` and `$KIMI_CODE_HOME/skills` (`~/.kimi-code/skills` by default) — the same layout Paseo itself uses for its bundled skills.
+`SKILL.md` follows the standard skills format (YAML frontmatter `name`/`description`, markdown body) observed on this machine across `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.config/opencode/skills`, `~/.qwen/skills`, `~/.cline/skills`, `~/.kilo/skills`, `$KIMI_CODE_HOME/skills` (`~/.kimi-code/skills` by default) and `$PI_CODING_AGENT_DIR/skills` (`~/.pi/agent/skills` by default) — the same layout Paseo itself uses for its bundled skills. Nine targets since 0.15.1; the Pi and Kimi locations follow their own environment variables, resolved per call.
 
 The body is written as a **protocol** rather than a description. Memory only pays off when every agent reads before it works and writes while it works; advice phrased as advice gets skipped, so the rules are numbered, mandatory and checkable.
 
@@ -216,6 +219,8 @@ The body is written as a **protocol** rather than a description. Memory only pay
 | 2. Write so the next agent can find it (0.7.0) | The symptom is written the way a human reports it (not only the way the code reads), the literal error string is pasted in, the file/symbol/command is named, and plain-language synonyms go into tags. Not a style rule: the measured dominant failure is a *vocabulary gap*, and no ranking system can bridge a query that shares no words with the record. |
 | 2. Measure the base when search looks wrong (0.7.0) | `memory_diagnose` with control queries + expected ids reports recall@k and, per miss, whether the answer was never retrieved or only ranked too low — which decides whether to fix retrieval or ordering. |
 | 3. Always leave a handoff | Every session that is not trivially complete, successful ones included, ends with a self-contained `memory_handoff`. |
+| Whole memory unavailable (0.15.1) | The exact gate sentence, and what to do when it arrives: do not retry in a loop, tell the user to start Paseo, continue without memory, and name the skipped searches/saves/handoff in the final answer. |
+| Symbiont rule (0.15.1) | `memory_*` belongs to *every* harness, not only to Paseo agents: use it in the work, not only when the user mentions memory. |
 | Housekeeping | Conservative deletes: prefer updating over deleting, list matches first, confirm scope. |
 
 The **English-language rule** (title, content and tags in English for cross-agent unification) applies to the whole body. Installer: per-target Install/Update (re-install when content drifts, `upToDate` flag)/Remove, plus *Install into all agents*. Targets whose directory does not exist are still installable (created on demand) so the button works before the first launch of e.g. Codex.
@@ -223,7 +228,7 @@ The **English-language rule** (title, content and tags in English for cross-agen
 The client side carries its own variant of this protocol — see [memory-flash-client/__doc.md](../memory-flash-client/__doc.md) §5 — because the agents there reach the same base over HTTP from another machine.
 
 
-## 6. Direct MCP registration for Cline, Cursor, Codex CLI, OpenCode, Kilo and Kimi Code CLI (requirement 9)
+## 6. Direct MCP registration for Cline, Cursor, Codex CLI, OpenCode, Kilo, Kimi Code CLI and Pi (requirement 9)
 
 These agents read stdio MCP servers from their own global config files. For Cline the
 session payload is ignored outright; for OpenCode/Kilo a session-injected server works
@@ -241,6 +246,7 @@ boots:
 | OpenCode | `~/.config/opencode/opencode.json` (or an existing `opencode.jsonc`) | `{ mcp: { <name>: { type: "local", command: [<node>, <entry>], enabled: true, timeout: 15000 } } }` |
 | Kilo | `~/.config/kilo/kilo.jsonc` (or `kilo.json` when none exists) | same `mcp` shape as OpenCode |
 | Kimi Code CLI | `$KIMI_CODE_HOME/mcp.json` (`~/.kimi-code/mcp.json` by default) | flat `{ mcpServers: { <name>: { command, args } } }` |
+| Pi | `$PI_CODING_AGENT_DIR/mcp.json` (`~/.pi/agent/mcp.json` by default) | flat `{ mcpServers: { <name>: { command, args } } }` |
 
 - **JSON agents (Cline, Cursor, Kimi Code CLI)** share `server/agent-mcp-json.ts`: load → merge the `memory-flash` entry → atomic write (temp file + rename, same pattern as `hosts.json`). Only the entry shape differs (Cline nests under `transport`); callers provide `isEntry`/`fromEntry`/`toEntry` adapters. A corrupted (unparseable) file is never overwritten — register/unregister fail with a clear error instead.
 - **Codex CLI** (`server/codex-mcp.ts`) edits the TOML as text: only the `[mcp_servers.memory-flash]` table (bare or quoted key) is replaced, everything else — other tables, keys, comments — is preserved byte-for-byte. Register appends the table when absent; unregister removes the table plus one separator blank line. This minimal parser covers flat `command`/`args` lines (single- or multi-line arrays); exotic TOML (inline tables, dotted keys inside the table) is not rewritten, only detected.
@@ -249,10 +255,40 @@ boots:
 - `unregister*Mcp()` — removes only the `memory-flash` entry; a no-op (still `ok`) when nothing is registered.
 - **Live spawn check** (`server/mcp-probe.ts`) — file status answers "is the entry present", not "does it work". The Cline status RPC additionally spawns the registered command exactly as the agent would, sends an MCP `initialize` request and waits for the JSON-RPC response (`withLiveSpawn`, 4 s budget). The Cline row in the settings screen shows a red warning when the registered command does not answer the handshake. Nothing is written to the database by the probe (the handshake alone calls no tool).
 - **OpenCode and Kilo** (`server/opencode-mcp.ts`) share one implementation because the format is the same: a top-level `mcp` object whose entries are `{type: "local", command: [<node>, <entry>], enabled: true}`. The command is a single array (not `command`+`args`), and the entry carries `timeout: 15000` — OpenCode's default tool-fetch timeout is 5 s, which a slow start can exceed, and a timeout there costs the agent all of its memory tools. Both agents accept `opencode.json`/`opencode.jsonc` and `kilo.json`/`kilo.jsonc`; the plugin registers into the first existing file that parses as plain JSON, and creates `opencode.json`/`kilo.jsonc` when neither exists. A file carrying `//` comments is skipped, never rewritten (a JSON writer cannot round-trip comments) and the error lists the exact path — the plugin has no other legitimate way to preserve it.
-- **Register for all local agent configs** — one RPC (`memory-flash.agent-mcp-register-all`) and one settings button run all six registrations and report per-agent results, mirroring *Install into all agents* for the skill.
+- **Register for all local agent configs** — one RPC (`memory-flash.agent-mcp-register-all`) and one settings button run all seven registrations and report per-agent results, mirroring *Install into all agents* for the skill.
 - **Kimi Code CLI** (`server/kimi-mcp.ts`) reads user-level MCP servers from `$KIMI_CODE_HOME/mcp.json` — `KIMI_CODE_HOME` moves the whole data root and defaults to `~/.kimi-code`. The file's stdio entries use the classic flat `{ command, args }` shape (the same one Cursor uses), so the shared JSON writer covers it; only the directory differs and is resolved per call. The project-local `.kimi-code/mcp.json` is gated by workspace trust and belongs to the repository, so the plugin never writes there.
+- **Pi** (`server/pi-mcp.ts`, 0.15.1) is a terminal agent with its own user-level registry: `<agent-dir>/mcp.json`, where the agent directory is `$PI_CODING_AGENT_DIR` or `~/.pi/agent`. The stdio entries use the classic flat `{ command, args }` shape, so the shared JSON writer covers it like Cursor and Kimi; the directory is resolved per call. The project-level `.pi/mcp.json` requires project trust and belongs to the repository, so it is never written.
 
-The settings screen shows one row per agent (path + state + live check) with Register/Re-register/Remove buttons next to the skill installers. The Cline write format was verified end-to-end against a live Cline agent: after registration Cline spawns the server as its own child process and `memory_stats` returns real JSON.
+The settings screen shows one row per agent (path + state + live check) with Register/Re-register/Remove buttons next to the skill installers. The Cline write format was verified end-to-end against a live Cline agent: after registration Cline spawns the server as its own child process and `memory_stats` returns real JSON. Pi 1.6.1 was detected on this machine at `~/.pi/agent` and reads the same `mcpServers` shape; the file format is verified by unit tests, a live Pi handshake is still future work (see `MCP-STDIO-PLAN.md`).
+
+### Availability gate for agents outside Paseo (0.15.1)
+
+A config-file registration is permanent: Pi, Cline, Cursor and the rest keep the
+server and spawn it on their own schedule, including while Paseo is closed. A
+plugin's MCP server is part of Paseo, so it must not serve memory in that state —
+and it must not send the agent hunting for a reason either. Two files implement the
+contract; the design rationale and the remaining per-plugin work live in
+[`MCP-STDIO-PLAN.md`](./MCP-STDIO-PLAN.md).
+
+- **`server/daemon-gate.ts`** — `checkPaseoDaemon()` reads
+  `$PASEO_HOME/plugins/memory-flash/daemon-heartbeat.json` (rewritten every 15 s by
+  the plugin server, fresh for 60 s, pid must be alive) and falls back to
+  `$PASEO_HOME/paseo.pid` (JSON `{pid}` or a bare pid) with `process.kill(pid, 0)`.
+  `startDaemonHeartbeat()` is started by the plugin server and removes the file on
+  dispose, so a clean shutdown closes the gate at once. `MEMORY_FLASH_DAEMON_GATE=off`
+  is the documented escape hatch for tests and a deliberately headless setup.
+- **`server/mcp-unavailable.ts`** — the protocol of a closed gate: `initialize`
+  succeeds with the sentence in `instructions`, `tools/list` still returns the real
+  catalogue (an empty list makes an agent skip memory silently; a refused call
+  carries the reason to the model), every `tools/call` returns an MCP `isError` with
+  the sentence, `ping` answers, notifications are ignored. No `MemoryStore` is
+  constructed on this path, so a stopped Paseo never leaves locks or creates a fresh
+  `memory.db` behind an external agent.
+- **The sentence** (`PASEO_DOWN_MESSAGE`) is fixed and covers both languages:
+  `Демон Paseo недоступен, MCP недоступен (Paseo daemon unavailable — MCP
+  unavailable). … do not retry in a loop …`. The skill's *whole memory unavailable*
+  section and the settings-screen hint quote its intent, and both e2e tests assert
+  the exact Russian phrase.
 
 
 ## 7. Remote hosts (requirement 8)
