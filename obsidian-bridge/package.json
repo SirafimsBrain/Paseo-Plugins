@@ -1,7 +1,7 @@
 {
   "name": "obsidian-bridge",
   "private": true,
-  "version": "0.26.25",
+  "version": "0.27.25",
   "scripts": {
     "bundle": "node scripts/bundle-mcp-server.mjs",
     "pretest": "node scripts/bundle-mcp-server.mjs",

@@ -13,11 +13,12 @@ import { configuredPluginPath } from "./mcp-launch";
  * `~/.agents`, Claude Code), so a root that does not exist is left alone — the
  * plugin never creates a skills directory for a runtime the user does not have.
  *
- * The plugin ships four skills rather than one because they answer four
+ * The plugin ships five skills rather than one because they answer five
  * different questions an agent asks: how to read and write the vault
- * (`obsidian-bridge`), how to grow a plan (`obsidian-planning-create`), how to carry a
- * plan through the work (`obsidian-planning-execute`) and how to review plan against
- * fact afterwards (`obsidian-planning-review`). All of them live in the repository
+ * (`obsidian-bridge`), how to draw a canvas (`obsidian-canvas`), how to grow a plan
+ * (`obsidian-planning-create`), how to carry a plan through the work
+ * (`obsidian-planning-execute`) and how to review plan against fact afterwards
+ * (`obsidian-planning-review`). All of them live in the repository
  * (`skills/<name>/SKILL.md`), are reviewed with the code, are rewritten only
  * when their content differs, and are removed when the switch is turned off —
  * the same contract the single skill had, applied to a list.
@@ -37,6 +38,7 @@ export interface SkillDefinition {
  */
 export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
   { name: "obsidian-bridge", purpose: "Read and write the vault" },
+  { name: "obsidian-canvas", purpose: "Draw a canvas (diagram, mind map, board)" },
   { name: "obsidian-planning-create", purpose: "Grow a plan tree" },
   { name: "obsidian-planning-execute", purpose: "Carry a plan through the work" },
   { name: "obsidian-planning-review", purpose: "Review plan against fact" },

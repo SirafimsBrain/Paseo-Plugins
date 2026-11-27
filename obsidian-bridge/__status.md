@@ -1,6 +1,6 @@
 # Status — obsidian-bridge
 
-Current: plugin **0.26.25**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
+Current: plugin **0.27.25**, `requirements.paseo >=0.17.0`, `@getpaseo/plugin ^0.17.1`,
 verified against **Paseo 0.17.1 (SDK 0.17.3, 2026-11-23)** — **compatible**.
 
 This file carries the status notes that used to fill the *Status* column of the root
@@ -14,6 +14,14 @@ Compatible.
 
 ## Release notes
 
+- **0.27.25** — **Obsidian Canvas.** Ten native `canvas_*` tools draw and edit `.canvas` files
+  (JSON Canvas 1.0): list, read, create, add a text/file/link/group node, connect two ids
+  with a labelled edge, update a node, remove nodes and edges, lay out as grid/roadmap/hub,
+  and convert between a Markdown outline and a board. Nothing is installed for the format —
+  the model, the validator, atomic writes and the three layouts are part of the bundle, and
+  unknown fields of a file written by a newer Obsidian survive an edit. A fifth skill,
+  `obsidian-canvas`, teaches the workflow. Writes use the same vault boundary and
+  `readOnly`/`maxWriteChars` gate as the document tools.
 - **0.26.25** — the standalone installer keeps the skills root it recorded in
   `install.json`: a plain update after an install made with `--skills-dir` used to
   copy the skills into `~/.agents/skills` afresh and leave the first root behind,

@@ -28,6 +28,7 @@ import { indexPathFor, isStandaloneBridge, readOnlyHint, resolveVaultRoot, vault
 import { planRootSummary } from "./plan/paths";
 import { PLAN_TOOLS, dispatchPlanTool } from "./plan/tools";
 import { scanVault } from "./scan";
+import { CANVAS_TOOLS, dispatchCanvasTool } from "./canvas/tools";
 import { searchIndex } from "./search";
 import { BridgeStore } from "./store";
 import { isPlanSystemPath, looksLikeVault, readVaultNote, splitList } from "./vault";
@@ -128,8 +129,14 @@ export function mcpInstructions(dirs: RoleDirs): string {
     "writer at a time; if a write answers that another agent is writing, it wrote nothing — wait " +
     "ten seconds, re-read the node and repeat it. `plan_history` is the change log of one node; " +
     "`<project>/_journal.md` is the change log of the project and is read like a note.\n\n" +
-    "Four skills document these workflows in more detail; load the one that matches the task: " +
-    "`obsidian-bridge` (read → cite → write), `obsidian-planning-create` (grow a tree), " +
+    "Canvases are plain JSON Canvas 1.0 files: `canvas_list` finds one, `canvas_read` returns nodes " +
+    "and edges with their ids, `canvas_create`/`canvas_add_node`/`canvas_add_edge` draw, " +
+    "`canvas_update_node`/`canvas_remove` correct, `canvas_layout` arranges, and " +
+    "`canvas_from_markdown`/`canvas_to_markdown` move between an outline and a board. Call them only " +
+    "when the user asks for a canvas, diagram, mind map or board.\n\n" +
+    "Five skills document these workflows in more detail; load the one that matches the task: " +
+    "`obsidian-bridge` (read → cite → write), `obsidian-canvas` (draw a board), " +
+    "`obsidian-planning-create` (grow a tree), " +
     "`obsidian-planning-execute` (carry a plan through the work), `obsidian-planning-review` (plan against fact, " +
     "history and growth)."
   );
@@ -449,6 +456,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   // Planning tools (0.11.11) share this server and settings; their boundary is
   // the `planRoot` directory inside the vault, not the whole vault.
   ...PLAN_TOOLS,
+  ...CANVAS_TOOLS,
 ];
 
 export interface ToolOutcome {
@@ -796,6 +804,13 @@ export async function dispatchTool(
       );
     }
     return dispatchTool(target, parsed.data.call.arguments, settings);
+  }
+
+  // Canvas tools own the `.canvas` format and need no full-text index: they
+  // answer before the database is opened.
+  if (name.startsWith("canvas_")) {
+    const canvasOutcome = await dispatchCanvasTool(name, input, settings);
+    if (canvasOutcome) return canvasOutcome;
   }
 
   // Pure configuration query: answered without opening (and creating) an index.

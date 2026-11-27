@@ -13,17 +13,17 @@ set -euo pipefail
 REPO="${OBSIDIAN_BRIDGE_REPO:-SirafimsBrain/Paseo-Plugins}"
 PLUGIN_SUBDIR="obsidian-bridge"
 
-# The release this script belongs to (0.26.25).
+# The release this script belongs to (0.27.25).
 #
 # `curl … | bash` from a tag URL fetches this file at that tag, so the version
 # here is the tag the caller asked for. The default source is therefore that
 # tag, not `main`: the build, `install.json`'s `version` and `ref` all describe
 # the release whose installer was run, however much `main` has moved since.
 # The release workflow refuses to publish a tag that disagrees with this value.
-SCRIPT_VERSION="0.26.25"
+SCRIPT_VERSION="0.27.25"
 
 DEFAULT_HOME="${HOME}/.agents/obsidian-bridge-mcp"
-SKILL_CORE="obsidian-bridge"
+SKILL_CORE="obsidian-bridge obsidian-canvas"
 SKILL_PLANNING="obsidian-planning-create obsidian-planning-execute obsidian-planning-review"
 SKILL_MARKER="installed-by: obsidian-bridge"
 # These were installed by 0.23.x–0.24.x. They are not deleted by a normal
@@ -521,8 +521,9 @@ NODE
   info "Settings: $install_dir/settings.json (0600)"
 }
 
-# Records what this installer actually put into the user's skills root. Only
-# `obsidian-bridge` is installed by default; the planning skills are opt-in and
+# Records what this installer actually put into the user's skills root. The two
+# core skills (`obsidian-bridge`, `obsidian-canvas`) are installed by default; the
+# planning skills are opt-in and
 # carry an `obsidian-` prefix, so they cannot collide with another plugin.
 install_skills() {
   [ "$with_skills" = 1 ] || return 0

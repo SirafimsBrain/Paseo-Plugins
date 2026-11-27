@@ -42,7 +42,7 @@ Claude Code (`~/.claude.json` or project `.mcp.json`), Codex (`~/.codex/config.t
 OpenCode, Cline and Kimi Code all accept this stdio shape; only the file that holds it differs. A client that only
 supports remote servers needs a stdio-to-HTTP bridge, which this project does not ship.
 
-Verify the connection: `initialize` must answer `serverInfo.name = "obsidian-bridge"`, and `tools/list` must return 31
+Verify the connection: `initialize` must answer `serverInfo.name = "obsidian-bridge"`, and `tools/list` must return 41
 tools, the first being `obsidian_directories`. A `tool obsidian_directories failed` answer that says the directory is not
 configured means the client is connected and the vault is missing — see below.
 
@@ -106,7 +106,7 @@ Every runtime key has an `OBSIDIAN_*` environment variable and the environment w
 
 ## What the agent gets
 
-31 tools, all described in `tools/list`. The ones an agent needs first:
+41 tools, all described in `tools/list`. The ones an agent needs first:
 
 | Tool | Purpose |
 | --- | --- |
@@ -117,6 +117,7 @@ Every runtime key has an `OBSIDIAN_*` environment variable and the environment w
 | `obsidian_index` | Rebuilds the index now. |
 | `obsidian_status` | Counts, freshness, write state, vector coverage, memory. |
 | `plan_*` | Planning tree under `planRoot`, with revisions, snapshots and one writer at a time. |
+| `canvas_*` | JSON Canvas boards: `canvas_list`, `canvas_read`, `canvas_create`, `canvas_add_node`, `canvas_add_edge`, `canvas_update_node`, `canvas_remove`, `canvas_layout`, `canvas_from_markdown`, `canvas_to_markdown`. No package is installed for them. |
 
 The contract is stated in the `initialize` instructions and repeated in every description: this is a reference library
 for the user's notes, not an agent's memory, and writes are append-only inside the configured roles.
@@ -183,7 +184,7 @@ curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/ob
 
 # Pin another release explicitly
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \
-  | bash -s -- --version 0.26.25
+  | bash -s -- --version 0.27.25
 
 # Remove the installation and the skills it recorded
 curl -fsSL https://raw.githubusercontent.com/SirafimsBrain/Paseo-Plugins/main/obsidian-bridge/obsidian-bridge-install.sh \

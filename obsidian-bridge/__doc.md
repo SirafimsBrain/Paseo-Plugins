@@ -497,7 +497,7 @@ Tests build their own temporary vault and `PASEO_HOME`; nothing touches a real v
   a second agent waits 10 seconds and then repeats, and a lock left by a crashed process is recovered by pid or age. The
   lock never lives in the vault and reads never take it (§18).
 
-## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22, 0.26.23, 0.26.25)
+## 11. Review passes (0.2.1, 0.3.1, 0.3.2, 0.4.1, 0.4.3, 0.4.4, 0.5.4, 0.5.5, 0.5.6, 0.5.7, 0.6.7, 0.7.7, 0.8.7, 0.8.8, 0.8.9, 0.8.10, 0.8.11, 0.9.11, 0.10.11, 0.11.11, 0.11.12, 0.12.11, 0.13.11, 0.14.11, 0.15.11, 0.16.11, 0.17.11, 0.17.12, 0.18.12, 0.19.12, 0.19.13, 0.20.13, 0.21.13, 0.21.14, 0.21.15, 0.21.16, 0.21.17, 0.21.18, 0.22.18, 0.23.18, 0.23.19, 0.23.20, 0.23.21, 0.24.21, 0.24.22, 0.25.22, 0.26.22, 0.26.23, 0.26.25, 0.27.25)
 
 ### 0.22.18 — instructions per open, tab state, file panel, badge, slash command
 
@@ -2449,3 +2449,71 @@ strict notes exist, an all-weak page says so, and the empty query still lists re
 `toFtsQuery(..., "AND")` and `searchChunks` operators directly. `tests/installer.test.ts` — a recorded root survives an
 update without `--skills-dir`, an explicit one overrides it, and `--uninstall` removes the marked skills from the
 recorded root.
+
+### 0.27.25 — native Obsidian Canvas
+
+The plugin could read a vault and never draw in it. Obsidian's Canvas is the one visual surface the
+knowledge base has, and it is a file format, not a plugin API: a `.canvas` file is a JSON document with
+`nodes` and `edges` (JSON Canvas 1.0, `jsoncanvas.org/spec/1.0`). This release adds ten `canvas_*` tools and
+a fifth skill.
+
+**Why it is written here instead of installed.** The obvious shortcut is another MCP server
+(`@lifeng688/obsidian-canvas-mcp`) or a JSON Canvas package. Both would make a plugin that is installed
+with `bash` and run by an agent's own Node process depend on something outside the repository: a second
+stdio server the user has to register, or a dependency that must be present in a bundle copied to
+`$PASEO_HOME/plugins/obsidian-bridge/mcp-server.js`, which has no `node_modules` (the same failure mode
+0.26.23–0.26.24 spent two releases on). The format is a small JSON schema, so the model, the validator, the
+three layouts and the Markdown conversion are 700 lines of TypeScript in `server/canvas/`, reviewed with the
+rest of the code. The tool surface follows what those projects settled on — read/create/add-node/
+add-edge/update/remove/layout/import/export — because an agent that has used one of them should not have to
+learn a second vocabulary.
+
+**`server/canvas/model.ts`.** Types for the four node kinds and the edge, `validateCanvas` (ids unique,
+numeric `x`/`y`/`width`/`height`, positive size, per-type required fields, sides/ends from the spec's
+enumerations, both edge endpoints present), `parseCanvasText` (a JSON syntax error is reported, not thrown),
+`serializeCanvas` (tab indentation and a trailing newline, so an edit is a one-line diff), path
+normalisation (`…` → `….canvas`, `..`, dot segments, `__history`/`_archive` refused), atomic
+`writeCanvasAt` (temp file + rename), `placeNode` (first free slot on a coarse grid), `layoutCanvas`
+(`grid`/`roadmap`/`hub`) and the Markdown pair (`canvasFromMarkdown`, `canvasToMarkdown`).
+
+Two decisions inside the model matter more than they look:
+
+- **Unknown fields survive.** Every node and edge keeps the object it came from (`[key: string]: unknown`),
+  and unknown top-level keys are carried in `extra`. Obsidian adds fields over time; an edit made here must
+  not flatten a file another version wrote. The same permissiveness is why `buildNode` returns
+  `{ node }` — an index signature defeats `"error" in value` narrowing, and the compiler said so.
+- **`id`s and z-order are never regenerated.** Ids are 16 hex characters like Obsidian's, created only for
+  new nodes and edges; the array order is z-order, so layout moves `x`/`y` and nothing else.
+
+**`server/canvas/tools.ts`.** The catalogue and the dispatch, wired into `mcp-tools.ts` next to the plan
+tools: `MCP_TOOLS` spreads `CANVAS_TOOLS` (41 tools now), and `dispatchTool` answers any `canvas_*` name
+before it opens the index — a canvas write has no reason to create a SQLite file. Both write gates are
+reused, not re-implemented: `resolveInsideVault` (symlink escapes included, via the same helper as the
+document tools) and `writeRefusal(settings, serializeCanvas(canvas).length)` for `readOnly` and
+`maxWriteChars`.
+
+Behaviour worth stating because an agent will hit it:
+
+- adding a node without coordinates places it beside the existing ones (`placeNode` scans a 320×220 grid),
+  so a board never gets two cards on one spot;
+- `canvas_add_edge` refuses an identical `from`/`to`/`label` and returns the existing edge id — a retried
+  call cannot double a line;
+- `canvas_remove` cascades a node's edges and lists the ids it removed;
+- `canvas_read` windows its text summary with `offset`/`limit` and says which slice it showed, since a board
+  with a thousand cards must not flood a context window.
+
+**The skill.** `skills/obsidian-canvas/SKILL.md` is installed with `obsidian-bridge` by default
+(`SKILL_CORE` in the installer, `SKILL_DEFINITIONS` in `agent-skill.ts`), so standalone installations get it
+too; the planning skills stay opt-in. It covers the five-call workflow, the node kinds and their default
+sizes, the three layouts, the Markdown round trip and the boundary.
+
+**Not in this release.** `.canvas` files are not indexed: `obsidian_search` still returns notes only, and
+the roadmap now names indexing them as the next step. The attached `obsidian_bridge_*` tools (for providers
+without MCP) keep their nine read/write tools; canvas is an MCP surface.
+
+Tests: `tests/canvas.test.ts` — the spec shape and its refusals, JSON error reporting, path normalisation
+(`..`, dot directories, `_archive`), unknown-field preservation, roadmap/hub geometry, the Markdown round
+trip, and through `dispatchTool`: create → add two nodes (automatic placement) → connect (duplicate refused)
+→ read → update → remove (edge cascaded), listing and export, overwrite/outside-vault/readOnly refusals, and
+a malformed file reported instead of rewritten. `tests/mcp-tools.test.ts` pins the ten new names in the
+catalogue.

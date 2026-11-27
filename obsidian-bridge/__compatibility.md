@@ -2,6 +2,37 @@
 
 Detailed compatibility notes. The main README keeps only the summary table row and links here.
 
+## Plugin 0.27.25 — native Obsidian Canvas (2026-11-25)
+
+Feature release (0.26.25 → 0.27.25). Ten `canvas_*` tools are added and the fifth Agent Skill
+(`obsidian-canvas`) ships with them; no existing tool, input or setting changes. The format is implemented
+in the plugin — no npm package and no external MCP server is installed for it — following JSON Canvas 1.0
+(`jsoncanvas.org/spec/1.0`) and the tool surface the ecosystem converged on
+(`@lifeng688/obsidian-canvas-mcp`, `obsidian-cli-mcp`, the `json-canvas` skills).
+
+| Surface | Behaviour |
+| --- | --- |
+| `canvas_list` | `.canvas` files with node and edge counts; a file that does not parse is listed with its error, not skipped |
+| `canvas_read` | `nodes`, `edges` and a text summary (`id`, type, first line, position, size); the summary is windowed by `offset`/`limit` and says so |
+| `canvas_create` | creates a `.canvas` with optional `nodes`/`edges`; ids are generated; an existing file needs `overwrite: true` |
+| `canvas_add_node` | `text`/`file`/`link`/`group` node with Obsidian's default sizes; without `x`/`y` it is placed beside the existing nodes |
+| `canvas_add_edge` | `from` → `to` by id, optional `label`, sides and ends; an identical edge answers with its id instead of duplicating (`allow_duplicate` overrides) |
+| `canvas_update_node` | partial update of text, label, colour, position and size |
+| `canvas_remove` | removes nodes/edges atomically; a node takes its incident edges, and the result lists them |
+| `canvas_layout` | `grid`, `roadmap` (edge order) or `hub`; only `x`/`y` change, so z-order and ids stay |
+| `canvas_from_markdown` | headings and list items become cards connected to their parent; `source` reads a vault note |
+| `canvas_to_markdown` | a canvas as a bullet outline; read-only |
+| safety | the same vault boundary (symlinked escapes included), `readOnly` and `maxWriteChars`; dot paths, `..`, `__history` and `_archive` are refused |
+| fidelity | tab indentation and a trailing newline like Obsidian; fields the model does not know are preserved on write; a malformed file names the offending node or edge |
+
+Not included, stated as a limit: `.canvas` files are not indexed, so `obsidian_search` does not return a board
+(it is the roadmap item). The tools are MCP tools; the attached `obsidian_bridge_*` set for providers without
+MCP support is unchanged.
+
+Evidence: `npm run typecheck` exit 0; full `npm test` green (`tests/canvas.test.ts` covers the format, the
+boundary, the full create → add → connect → update → remove flow, layouts, Markdown both ways, `readOnly` and
+field preservation).
+
 ## Plugin 0.26.25 — strict-first retrieval, a working semantic pass, a sticky skills root (2026-11-25)
 
 Bugfix release (0.26.23 → 0.26.25). No tool is added or removed; `obsidian_search` gains one optional hit field and

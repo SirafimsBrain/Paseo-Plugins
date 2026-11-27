@@ -282,7 +282,7 @@ The installer prints the ready-to-paste `mcpServers` block, copies only the `obs
 (or 23.4+). `--dry-run`, `--ref`, `--version`, `--dir`, `--force`, `--skills-dir` and `--uninstall` are listed in
 `--help`.
 
-**The script installs the release it belongs to (0.26.25).** A copy fetched from a tag URL carries that tag's version and
+**The script installs the release it belongs to (0.27.25).** A copy fetched from a tag URL carries that tag's version and
 builds it, so the bundle, `version` and `ref` in `install.json` all describe the installer that was read — not whatever
 `main` happens to be now. The `main` URL installs the latest release; `--version <x.y.z>` moves between releases, and
 `--ref <branch>` builds a branch. An explicit `--version`/`--ref` wins over checkout autodetection, and `--source`
@@ -351,6 +351,16 @@ If the path is not configured, nothing is indexed and every tool answers with an
 | `obsidian_diagnose` | recall@k of lexical vs hybrid retrieval over cases you supply. |
 | `obsidian_status` | Directory, role map, counts, freshness, write state, vector coverage, memory. |
 | `obsidian_continue` | Re-runs the tool named in a `[TRUNCATED]` result with the exact `continuation` object. |
+| `canvas_list` | The `.canvas` files in the vault, with node and edge counts. |
+| `canvas_read` | Nodes, edges and a text summary of one canvas — ids included, which every edit needs. |
+| `canvas_create` | A new `.canvas`, optionally with nodes and edges; refuses an existing file without `overwrite`. |
+| `canvas_add_node` | A `text`, `file`, `link` or `group` card; without `x`/`y` it is placed beside the others. |
+| `canvas_add_edge` | Connects two node ids, with an optional label, sides and arrow ends; a duplicate is refused with its id. |
+| `canvas_update_node` | Changes one node's text, label, colour, position or size. |
+| `canvas_remove` | Removes nodes and/or edges; a node takes its edges with it and the result lists them. |
+| `canvas_layout` | Repositions every node as `grid`, `roadmap` or `hub`. |
+| `canvas_from_markdown` | Turns a Markdown outline (or a vault note) into a canvas. |
+| `canvas_to_markdown` | Returns a canvas as a Markdown outline; read-only. |
 
 The MCP server is registered under the name `obsidian-bridge`. When a provider cannot take an MCP server, the plugin
 attaches the equivalent `obsidian_bridge_*` tools instead. Planning tools resolve their root to
@@ -368,18 +378,19 @@ tools share is stated last, so it no longer hides the sentence that tells the to
 
 ## Agent skill
 
-The plugin ships four [Agent Skills](https://agentskills.io/specification) and installs all of them on load into the
+The plugin ships five [Agent Skills](https://agentskills.io/specification) and installs all of them on load into the
 skills directories that exist: `~/.agents/skills` first, then OpenCode, Cline, Kilo, Kimi, Qwen, Codex and Claude Code.
 
 | Skill | For |
 | --- | --- |
 | [`obsidian-bridge`](./skills/obsidian-bridge/SKILL.md) | reading the vault, citing a heading, writing in the right role, the exact-fragment edit |
+| [`obsidian-canvas`](./skills/obsidian-canvas/SKILL.md) | drawing a board: JSON Canvas nodes and groups, labeled edges, layouts, Markdown conversion |
 | [`obsidian-planning-create`](./skills/obsidian-planning-create/SKILL.md) | growing a plan tree: project, trunks, branches, first leaves, goals, import |
 | [`obsidian-planning-execute`](./skills/obsidian-planning-execute/SKILL.md) | carrying a plan through the work: status, briefs, growth, links, incidents, moves |
 | [`obsidian-planning-review`](./skills/obsidian-planning-review/SKILL.md) | plan against fact: snapshots, revisions, growth, integrity, restore |
 
 Each lands as `<root>/<skill>/SKILL.md`. Unchanged copies are not rewritten; the switch in the settings screen removes
-all four directories, and *Remove agent integration* removes them together with the MCP registrations. A runtime that
+all five directories, and *Remove agent integration* removes them together with the MCP registrations. A runtime that
 only scans skills at startup needs a restart to pick them up.
 
 The official Obsidian skills are a separate upstream project, kept as the reference for the formats this plugin does not
@@ -390,9 +401,9 @@ cover — [github.com/obsidianmd/obsidian-skills](https://github.com/obsidianmd/
 
 | Stage | Work |
 | --- | --- |
-| Next | **Obsidian Canvas.** Index `.canvas` files (node text, note/file nodes, edges between them) so an agent can read
-  and — once the writing side exists — draw a canvas instead of only reading Markdown. Design and requirements land in
-  `__doc.md` §14 before any code; the parser, the read path and the watcher all have to learn the format. |
+| Next | **Index canvases for search.** Drawing lands in 0.27.25 (`canvas_*`); the remaining step is letting
+  `obsidian_search` return a board by its node text, so a diagram is found like a note. The indexer, the watcher and the
+  search result schema all have to learn the format. |
 | Later | **Windows and macOS.** Path handling is already platform-neutral; the audit that remains is file locking on
   Windows (`rename` over a note held by Obsidian, retried and explained since 0.10.11), `node.exe` discovery (also
   0.10.11) and a verification pass on each platform. ONNX runs on CPU there; Metal/CoreML acceleration is not claimed. |

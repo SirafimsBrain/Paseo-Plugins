@@ -55,10 +55,22 @@ describe("tool catalogue", () => {
       "plan_restore",
       "plan_validate",
       "plan_import",
+      "canvas_list",
+      "canvas_read",
+      "canvas_create",
+      "canvas_add_node",
+      "canvas_add_edge",
+      "canvas_update_node",
+      "canvas_remove",
+      "canvas_layout",
+      "canvas_from_markdown",
+      "canvas_to_markdown",
     ]);
     for (const tool of MCP_TOOLS) {
       expect(
-        tool.name.startsWith("obsidian_") || tool.name.startsWith("plan_"),
+        tool.name.startsWith("obsidian_") ||
+          tool.name.startsWith("plan_") ||
+          tool.name.startsWith("canvas_"),
       ).toBe(true);
     }
   });
