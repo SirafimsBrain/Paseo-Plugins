@@ -1,6 +1,6 @@
 # Status — session-manager
 
-Current: plugin **0.7.1**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`,
+Current: plugin **0.8.1**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`,
 verified against **Paseo 0.17.1 (2026-11-21)** — **compatible**.
 
 This file carries the status notes that used to fill the *Status* column of the root
@@ -14,6 +14,9 @@ Compatible; additive-only SDK diff and no deprecated API in use.
 
 ## Release notes
 
+- **0.8.1** — adds **Pi** (`@earendil-works/pi-coding-agent`, `~/.pi/agent`) as the
+  seventh provider: NDJSON transcripts under `sessions/<--sanitized-cwd-->/`,
+  listed and deleted from disk, exported through `pi --export` (HTML).
 - **0.7.1** — adds a per-agent sessions panel, `/sessions` filters and `focusHost` on the
   agent link, on top of the 0.6.1 verification.
 

@@ -123,6 +123,7 @@ extended to the real stores. The verified layout on a Linux host:
 | Kilo CLI (`@kilocode/cli@7.7.x`) | SQLite `~/.local/share/kilo/kilo.db` (same schema family as OpenCode), plus `storage/session_diff/`, `snapshot/` | Kilo is an OpenCode fork and keeps the same `session` commands |
 | Qwen Code (`@qwen-code/qwen-code@0.20.x`) | `~/.qwen/projects/<sanitized-cwd>/chats/<sessionId>.jsonl`, sidecars `~/.qwen/plans/<sessionId>.md`, `~/.qwen/todos/<sessionId>.json`, runtime registry `~/.qwen/sessions/<pid>.json` | `qwen sessions list` exists, `qwen sessions` has no delete command |
 | Kimi Code CLI (`@moonshot-ai/kimi-code`) | `~/.kimi-code/sessions/<workDirKey>/<sessionId>/` with `state.json`, plus master index `~/.kimi-code/session_index.jsonl` (NDJSON) and occupancy locks under `~/.kimi-code/locks/sessions/` | No `session list`/`delete` CLI: sessions are listed and deleted from disk directly; export via `kimi export <id> -o <path>` (ZIP) |
+| Pi (`@earendil-works/pi-coding-agent@1.6.x`) | `$PI_CODING_AGENT_DIR/sessions/<--sanitized-cwd-->/<timestamp>_<sessionId>.jsonl` (default `~/.pi/agent`), one JSONL transcript per session whose first line is the `session` header | No `session list`/`delete` command: sessions are listed and deleted from disk directly; export via `pi --export <file> <output>` (HTML), §25 |
 | acpx CLI (`acpx@0.13.x`) | `~/.acpx/sessions/index.json` (`schema`, `files`, `entries`), `<id>.json`, `<id>.stream.ndjson` | Unrelated to Paseo, kept for parity |
 
 Paseo agent records reference the native session through
@@ -157,6 +158,7 @@ session-manager/
 │       ├── kilo.ts
 │       ├── qwen.ts
 │       ├── kimi.ts              # Kimi Code CLI (0.4.0)
+│       ├── pi.ts                # Pi (0.8.1)
 │       └── acpx.ts
 ├── client/
 │   ├── session-manager-panel.tsx
@@ -196,14 +198,16 @@ Storage strategy per adapter:
   Cline falls back to scanning `~/.cline/data/sessions` for listing when its CLI
   is missing, but then reports `deletable: false` instead of editing the SQLite
   history by hand.
-- **File-backed** (`qwen-code`, `kimi`, `acpx`): transcripts and records are
+- **File-backed** (`qwen-code`, `kimi`, `pi`, `acpx`): transcripts and records are
   removed directly, because none of these agents offers a delete command.
 - **Exports**: every adapter implements `exportSession`. The CLI factory uses
   the vendor command when one exists (`opencode export` / `kilo export` print
   JSON on stdout, `cline history export --output` writes an HTML transcript);
   the file adapters copy the raw transcript (`*.jsonl` for Qwen, record + stream
-  `.ndjson` for acpx) and Kimi shells out to `kimi export <id> -o <path>` for a
-  ZIP (`exportExtension: "zip"`, §20). Verified 2026-09-21 against the
+  `.ndjson` for acpx), Kimi shells out to `kimi export <id> -o <path>` for a
+  ZIP (`exportExtension: "zip"`, §20) and Pi shells out to
+  `pi --export <transcript> <output>` for an HTML transcript
+  (`exportExtension: "html"`, §25). Verified 2026-09-21 against the
   installed CLIs (`cline@3.x`, `opencode-ai@1.18.x`, `@kilocode/cli@7.7.x`).
 - **Qwen sidecars**: deleting a session removes the transcript, `plans/<id>.md`,
   `todos/<id>.json`, and `file-history/<id>/`. The `file-history` directories
@@ -526,6 +530,11 @@ recorded in §23.4.
   directories, not from the index: an index line without a directory is not
   listed, and pruning the index on delete is best effort. Listing and deletion
   need no `kimi` binary; only export does.
+- Pi keeps no per-session occupancy marker, so its rows always report
+  `running: false` and an open Pi session can be deleted unless a non-archived
+  Paseo agent references it. Listing and deletion need no `pi` binary; only
+  export does. A transcript without a `session` header is not listed, because Pi
+  cannot open it either (§25).
 - The sidebar status row shows counts from a full scan when its popover opens
   and cannot open the workspace panel (the host gives sidebar items no
   `openPanel`); the panel remains the only surface for delete and export.
@@ -1175,3 +1184,83 @@ copy, so the user's own `opencode.db`/`kilo.db` are untouched.
    share held by free pages. A cheap `PRAGMA freelist_count` (read-only) would
    let the panel mark a store as “N% free pages” and suggest compaction only
    when it is worth the rewrite.
+
+## 25. Version 0.8.1 — Pi provider (2026-11-27)
+
+New functionality → second digit (0.7.1 → 0.8.1). No Paseo API is adopted, so
+`requirements.paseo` stays `>=0.15.0` and the SDK pin stays `^0.17.1`: this is one
+adapter file plus one registry line, which is exactly the extension path the plugin
+documents. Annotated tag `session-manager@0.8.1`.
+
+### 25.1 The store, as Pi itself resolves it
+
+Pi (`@earendil-works/pi-coding-agent`, the `pi` CLI) is a terminal coding agent whose
+data root is the **agent directory**:
+
+- `$PI_CODING_AGENT_DIR` when set, else `~/.pi/agent` (Pi's own `getAgentDir()`).
+- Next to `sessions/` that directory holds `auth.json`, `settings.json`,
+  `models-store.json`, `mcp.json`, `skills/` and `bin/` (`rg`, `fd`). None of that is
+  session state, so the adapter reports `storeBytes` as the size of `sessions/` only —
+  counting `bin/` would report the helper binaries as transcript bloat.
+
+Sessions live one transcript per file:
+
+```
+<agent dir>/sessions/<--sanitized-cwd-->/<timestamp>_<sessionId>.jsonl
+```
+
+`--sanitized-cwd--` is the session's working directory with the leading separator
+removed and `/` and `:` replaced by `-` (`/home/ana` → `--home-ana--`). Pi drops the
+per-cwd directory entirely when a session directory is passed explicitly with
+`--session-dir` or `$PI_CODING_AGENT_SESSION_DIR`, writing
+`<session dir>/<timestamp>_<id>.jsonl` instead; the adapter scans **both** layouts, so
+it lists sessions whatever way `pi` was started.
+
+Each file is NDJSON. The first entry is the header:
+
+```json
+{"type":"session","version":3,"id":"01935f0a-…","timestamp":"2026-11-26T18:09:00.000Z","cwd":"/home/ana/project","parentSession":"…"}
+```
+
+followed by `message`, `session_info`, `model_change`, `thinking_level_change`,
+`compaction`, `custom` and `context_edit` entries (version 3 since Pi 1.5; older files
+are migrated by Pi on open, and the adapter only needs the header). **The session id is
+in the header, not in the file name** — the file name carries it too, but forks and
+resumed sessions are the reason the adapter trusts the header, and Pi's own
+`SessionManager.findById` does the same.
+
+### 25.2 Adapter behaviour (`server/providers/pi.ts`)
+
+| Aspect | Implementation |
+| --- | --- |
+| Discovery | every `*.jsonl` directly under the session root (custom session dir) plus every `*.jsonl` one level down (`sessions/<--cwd-->/`). A file without a `session` header is skipped, exactly as Pi's own session discovery skips it |
+| `id` | `header.id` |
+| `title` | the last `session_info.name` in the file's last 64 KiB (Pi appends it, so `--name` / `/name` may have been changed late), else the first user message's text blocks, truncated to 90 chars — the same two candidates Pi's session picker shows |
+| `cwd` | `header.cwd` |
+| `createdAt` | `header.timestamp` |
+| `updatedAt` | file mtime, which advances on every appended entry |
+| `sizeBytes` | exactly the transcript file: Pi keeps no sidecars, so the row size is what a delete frees |
+| `running` | always `false` — Pi takes no per-session lock or pid file, so a live session cannot be proven from disk. The guard that still applies is the Paseo agent reference (a non-archived agent is refused without force), and the panel's force step remains the user's explicit override |
+| Delete | removes the transcript file. Pi has no `session delete`; the file is the session, and `--continue` / `--resume` read exactly that file, so removing it removes the session from Pi's history. Forks copy their entries at creation time, so deleting a `parentSession` does not damage its children |
+| Export | `pi --export <transcript> <outPath>` renders the JSONL as a standalone HTML transcript (`exportExtension: "html"`), the same renderer behind Pi's share/export flow. Needs the `pi` binary; listing and deletion do not |
+| SQLite | none; Pi keeps every session as a file, so the adapter declares no `sqliteStores` and the panel shows no compaction button |
+
+### 25.3 What was verified (2026-11-27)
+
+| Check | Result |
+| --- | --- |
+| Real `pi` binary | `pi --version` → **1.6.1** on this machine; agent directory detected at `~/.pi/agent` (`sessions/--home-sirafim--/`, `skills/memory-flash/SKILL.md`, `mcp.json`) |
+| Session format source | read out of Pi's own bundled code (`getAgentDir`, `getDefaultSessionDirPath`, `_SessionManager.getSessionFile`, `buildSessionInfo`), not guessed: header shape, `session_info` name entries, per-cwd directory sanitising, the custom-session-dir layout and the `*.jsonl` discovery rule all come from there |
+| Export end to end | a synthetic v3 transcript (header + user message + `session_info`) handed to the installed CLI: `PI_CODING_AGENT_DIR=<tmp> pi --export <file> <out.html>` → exit 0, `Exported to: …`, 285 500-byte HTML — the format this adapter parses and the command it runs are both the real thing |
+| `npm run typecheck` (`tsc --noEmit`) | **exit 0** |
+| `npm test` | **16 suites / 125 tests pass** (9 new in `tests/pi.test.ts`) |
+| `tests/pi.test.ts` | header id/cwd/timestamp, `session_info` title, first-message fallback, custom session dir at the top level, non-transcript files skipped, missing store, delete removes only the target, missing session, CLI export and the no-CLI export error |
+| Live daemon | **not run** — no Paseo daemon was up, so the Pi rows were not rendered in a real panel and no live Pi session was created or deleted. The store on this machine had no transcripts yet (`sessions/--home-sirafim--/` was empty), which is why the format evidence above is the CLI export plus Pi's own code |
+
+### 25.4 Verified layout note
+
+`~/.pi/agent/sessions/--home-sirafim--/` exists but was empty at audit time: Pi only
+creates a transcript once a session has a conversation, and a run started with
+`--no-session` never writes one. The adapter therefore reports `detected: true` with
+zero rows for such a store (the directory exists), and `detected: false` only when the
+session root is missing.

@@ -20,7 +20,7 @@ connected to Paseo, so old transcripts stop filling the disk.
   sessions due for cleanup and the number that need a forced delete. The scan
   runs when the popover opens (never at app start) and reuses the server-side
   listing cache, so the panel opens on the same data.
-- **One list per agent** — Cline, OpenCode, Kilo, Qwen Code, Kimi Code, and the standalone
+- **One list per agent** — Cline, OpenCode, Kilo, Qwen Code, Kimi Code, Pi and the standalone
   `acpx` ACP store are scanned in one pass and labelled per provider.
 - **Filtering** — by provider and by age (`> 1 day`, `> 7 days`, `> 30 days`),
   with an "Archived Paseo agents" view and an oldest-first default order. A session that an
@@ -64,6 +64,7 @@ way (see [`__doc.md`](./__doc.md) for the verified paths):
 | `kilo`      | `~/.local/share/kilo/kilo.db`                                    | `kilo session delete <id>`          |
 | `qwen-code` | `~/.qwen/projects/<project>/chats/<id>.jsonl`                    | transcript (+ `plans`, `todos`, `file-history`) removed from disk |
 | `kimi`      | `~/.kimi-code/sessions/<workDirKey>/<id>/` + `session_index.jsonl` | session directory + index entry removed from disk; export via `kimi export` (ZIP) |
+| `pi`        | `$PI_CODING_AGENT_DIR/sessions/<--sanitized-cwd-->/<timestamp>_<id>.jsonl` (`~/.pi/agent` by default) | transcript file removed from disk; export via `pi --export` (HTML) |
 | `acpx`      | `~/.acpx/sessions/index.json` + `*.json` + `*.stream.ndjson`     | record, stream and index entry removed |
 
 Agents that expose their own session commands are driven through their CLI, so the
@@ -113,9 +114,9 @@ installation. Updates: `paseo plugin update session-manager`.
   SDK 0.12.0 (2026-10-21), Paseo `0.10.3` / SDK 0.10.1. See
   [__compatibility.md](./__compatibility.md).
 - At least one of the agent CLIs on the daemon host for the CLI-backed providers:
-  `cline`, `opencode`, `kilo`. Qwen Code, Kimi Code and `acpx` are read and
-  written as files and need no CLI for listing or deletion (Kimi only needs its
-  CLI for `kimi export`).
+  `cline`, `opencode`, `kilo`. Qwen Code, Kimi Code, Pi and `acpx` are read and
+  written as files and need no CLI for listing or deletion (Kimi needs its CLI
+  for `kimi export`, Pi for `pi --export`).
 - `npm test` (vitest) and `npm run typecheck` run the server-side test suites;
   the tests build throwaway stores under the OS temp directory and stub every
   provider adapter, so a run never touches the real home stores and never spawns
@@ -123,6 +124,6 @@ installation. Updates: `paseo plugin update session-manager`.
 
 ## Compatibility
 
-Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**: the 0.16.0 → 0.17.1 SDK diff is additive only, and `agent.turn.after.timeline` (removed in 0.16.0) was never used here. The floor stays `>=0.15.0`: the per-agent panel (`addAgentPanel`) and `/sessions` (`addSlashCommand`) exist from 0.15.0, and the only 0.17-only field (`focusHost`) is gated at runtime on `navigation.supportsFocusHost`. Current plugin version: **0.7.1** (0.7.1: per-agent panel, `/sessions`, agent link via `focusHost`; 0.6.1: Paseo 0.17.1 verification; SQLite compaction since 0.6.0; sidebar status row since 0.5.0; Kimi Code provider since 0.4.0).
+Paseo **0.17.1 (2026-11-21)** verified, `requirements.paseo >=0.15.0`, SDK `@getpaseo/plugin ^0.17.1` — compatible with no API migration and **no deprecated API in use**: the 0.16.0 → 0.17.1 SDK diff is additive only, and `agent.turn.after.timeline` (removed in 0.16.0) was never used here. The floor stays `>=0.15.0`: the per-agent panel (`addAgentPanel`) and `/sessions` (`addSlashCommand`) exist from 0.15.0, and the only 0.17-only field (`focusHost`) is gated at runtime on `navigation.supportsFocusHost`. Current plugin version: **0.8.1** (0.8.1: Pi provider; 0.7.1: per-agent panel, `/sessions`, agent link via `focusHost`; 0.6.1: Paseo 0.17.1 verification; SQLite compaction since 0.6.0; sidebar status row since 0.5.0; Kimi Code provider since 0.4.0).
 
 Full detail: [__compatibility.md](./__compatibility.md); technical evidence: [`__doc.md`](./__doc.md) (Compatibility sections).

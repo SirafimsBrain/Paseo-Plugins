@@ -4,8 +4,8 @@ import { z } from "zod";
 /**
  * A single persisted agent session discovered on the daemon machine.
  *
- * `provider` is the stable store id (cline, opencode, kilo, qwen-code, acpx),
- * not the Paseo provider label, so the UI can group and filter reliably.
+ * `provider` is the stable store id (cline, opencode, kilo, qwen-code, kimi, pi,
+ * acpx), not the Paseo provider label, so the UI can group and filter reliably.
  */
 export const agentSessionSchema = z.object({
   provider: z.string(),

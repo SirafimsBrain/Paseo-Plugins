@@ -1,10 +1,34 @@
 # Compatibility — session-manager
 
-Current: plugin **0.7.1**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
+Current: plugin **0.8.1**, `requirements.paseo >=0.15.0`, `@getpaseo/plugin ^0.17.1`.
 Verified against **Paseo 0.17.1 (2026-11-21)** — compatible, no API migration,
 **no deprecated API in use**; see *Plugin 0.6.1 — Paseo 0.17.1 pass* below.
 
 This file holds the extended compatibility information that no longer lives in the root `README.md` (which keeps only the main verdict) or in this plugin's `README.md`. Technical evidence stays in [`__doc.md`](./__doc.md).
+
+## Plugin 0.8.1 — Pi provider (2026-11-27)
+
+Feature release (0.7.1 → 0.8.1, second digit +1): **Pi**
+(`@earendil-works/pi-coding-agent`) becomes the seventh provider. Full design and
+format evidence: [`__doc.md`](./__doc.md) §25.
+
+| Aspect | Value |
+| --- | --- |
+| Store | `$PI_CODING_AGENT_DIR/sessions/<--sanitized-cwd-->/<timestamp>_<id>.jsonl` (`~/.pi/agent` by default); a custom `$PI_CODING_AGENT_SESSION_DIR` drops transcripts at the top level and is scanned too |
+| List / delete | read and removed from disk — Pi has no `session list` / `session delete` command |
+| Export | `pi --export <transcript> <outPath>` → HTML; the only operation that needs the `pi` binary |
+| Running flag | always `false`: Pi writes no per-session lock or pid file. A non-archived Paseo agent reference still blocks deletion |
+
+**No host API is adopted**, so the floor stays `requirements.paseo >=0.15.0` and the
+SDK pin `^0.17.1`; the change is one adapter file plus one registry line, which is the
+extension path the plugin documents. Annotated tag `session-manager@0.8.1`.
+
+**Verified:** `npm run typecheck` exit 0, `npm test` **16 suites / 125 tests** pass
+(9 new in `tests/pi.test.ts`), and the session format plus the export command were
+checked against the installed **Pi 1.6.1** (`pi --export` on a synthetic v3 transcript
+produced a 285 KB HTML file). **Not verified:** no daemon was running and the local Pi
+store held no transcripts yet, so no Pi row was rendered in a live panel and no live
+Pi session was deleted.
 
 ## Plugin 0.7.1 — agent panel, `/sessions`, `focusHost` (2026-11-22)
 
